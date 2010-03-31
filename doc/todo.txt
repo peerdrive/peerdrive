@@ -1,0 +1,131 @@
+
+- Additional file types
+	- contacts
+	- audio
+	- video
+
+- Server
+	- replace MD5 hashes by SHA1
+	- File store improvements
+		- Implement reference counting from 'HPSD' part
+		- garbage collection
+		- automatically delete old revisions when disk full
+	- add search engine
+		- lucene
+		- add query API (virtual collections)
+	- network stores
+		- network interface (remote interface)
+		- network store stub
+		- rev cache
+	- automatically detect/mount stores
+		- local stores when removable drive connected (inotify/WM_DEVICECHANGE)
+		- network stores (bonjour)
+	- API cleanup
+		- Identifier naming
+			- All identifiers are UUID's (as defined in ISO/IEC 9834-8:2005)
+			- Doc's are v4 UUIDs
+			- Rev's are v5 UUIDs
+			- Any other UUIDs are not accepted
+		- consistent opcodes
+		- consistent error handling
+			- internally
+			- on protocol level
+		- stat: flags for requested information
+	- support for staging changes / shared read/write access
+
+- user interface
+	- facility to store user meta data (window position, ...)
+	- possibility to cancel ongoing replication/synchronzation
+
+- Libs
+	- API cleanups
+	- client side caching
+		- revs
+		- static stat info (dynamic infos on request)
+	- command line interface
+
+- Security
+	- merging and synchronization
+		- default
+			- always ask when opening on merge condition (explicit merge)
+			- no automatic synchronization
+		- per store pair setting
+			- system automatic sync
+				- fast-forward (one-/two-way)
+				- automatic 
+			- user:
+				- default conflict resolution strategy (ask/prefer/ff-only/auto merge)
+	- access control
+		- principle
+			- attached to each uuid/rev
+			- easy for file_store (reuse OS file permissions)
+			- implementation specific because access control is context dependent
+		- systems
+			- unix permissions UID/GID/mask
+			- ACL's
+	- crpyto
+		- revision signing
+			- 'SIGN' part, signature of hashes, uti, mtime
+		- encryption
+			- 'ENCR' part
+				- proxy links of encrypted parts
+				- crypto method info
+			- decryption cache in client for performance
+
+- Collections
+	- support email thread view
+	- indicators
+		- added (but not saved yet)
+		- needs merge
+		- may need replication
+	- drag operations: copy as new document
+
+
+================================ brainstorming ================================
+
+- simplified API
+	- Operations
+		- open(Uuid, Mode, StartRev, Stores, Uti)
+			- Uuid
+				- Doc or Rev
+				- ignored in case of creating
+			- Mode
+				- main/staging head
+				- read/write/readwrite/create
+					- create implies readwrite
+					- Uuid must be a doc if writing is requested
+				- fail on any/last store
+			- StartRev:
+				- starting Rev when writing, ignored when just reading
+				- special Rev when creating empty document
+			- Stores
+				- set of stores where the operation should be performed
+				- optional, if not given then done on all mounted stores
+			- Uti:
+				- set Uti of new version
+				- optional, if not given keep previous value
+		- read(Handle, Part, Offset, Length)
+			- Handle: as returned by open
+			- Part: FourCC
+			- Offset, Length: guess what ;)
+		- write(Handle, Part, Offset, Data)
+			- Handle: as returned by open
+			- Part: FourCC
+			- Offset
+			- Data
+		- commit(Handle, OtherRevs)
+			- Handle: as returned by open
+			- OtherRevs: Additional parent revisions in case of a merge, empty otherwise
+		- suspend(Handle)
+			- only valid if opened staging head
+		- abort(Handle)
+			- discard handle
+
+- staging head semantics
+	- purpose
+		- serves as a temporary scratchpad area to stage changes
+		- support shared access by multiple processes
+		- permanent store 
+	- the staging head is neither replicated nor synchronized
+	- 
+

@@ -1,0 +1,186 @@
+
+{
+	"public.item" : {
+		"icon" : "uti/unknown.png",
+		"display" : "Generic item",
+		"meta" : [
+			{
+				"key"     : ["org.hotchpotch.annotation", "title"],
+				"type"    : "string",
+				"display" : "Title"
+			},
+			{
+				"key"     : ["org.hotchpotch.annotation", "description"],
+				"type"    : "string",
+				"display" : "Description"
+			},
+			{
+				"key"     : ["org.hotchpotch.annotation", "comment"],
+				"type"    : "string",
+				"display" : "Comment"
+			},
+			{
+				"key"     : ["org.hotchpotch.annotation", "tags"],
+				"type"    : "list of string",
+				"display" : "Tags"
+			},
+			{
+				"key"     : ["org.hotchpotch.annotation", "origin"],
+				"type"    : "string",
+				"display" : "Document origin"
+			},
+			{
+				"key"     : ["org.hotchpotch.sync", "sticky"],
+				"type"    : "bool",
+				"display" : "Sticky"
+			},
+			{
+				"key"     : ["org.hotchpotch.sync", "history"],
+				"type"    : "bool",
+				"display" : "Replicate history"
+			}
+		]
+	},
+
+	"public.content" : { },
+	"public.data" : {
+		"conforming" : ["public.item"],
+		"exec" : "public.data.py"
+	},
+
+	"public.text" : {
+		"conforming" : ["public.content", "public.data"],
+		"icon" : "uti/document.png",
+		"exec" : "public.text.py"
+	},
+	"public.plain-text" : {
+		"conforming" : ["public.text"],
+		"extensions" : ["txt", "asc", "text", "pot", "brf"],
+		"mimetypes"  : ["text/plain"]
+	},
+
+	"org.hotchpotch.container" : {
+		"conforming" : ["public.item"],
+		"display" : "Collection",
+		"exec" : "org.hotchpotch.container.py",
+		"meta" : [
+			{
+				"key"     : ["org.hotchpotch.container", "autoclean"],
+				"type"    : "bool",
+				"display" : "Auto clean"
+			}
+		]
+	},
+	"org.hotchpotch.set" : {
+		"conforming" : ["org.hotchpotch.container"],
+		"display" : "Set (collection)",
+		"icon" : "uti/collection.png"
+	},
+	"org.hotchpotch.dict" : {
+		"conforming" : ["org.hotchpotch.container"],
+		"display" : "Dictionary (collection)",
+		"icon" : "uti/folder.png"
+	},
+	"org.hotchpotch.volume" : {
+		"conforming" : ["org.hotchpotch.dict"],
+		"display" : "Hotchpotch store",
+		"icon" : "uti/store.png"
+	},
+
+	"org.hotchpotch.registry" : {
+		"conforming" : ["public.content", "public.data"]
+	},
+
+	"public.message" : {
+		"conforming" : ["public.content"],
+		"icon" : "uti/message.png",
+		"meta" : [
+			{
+				"key"     : ["public.message", "from"],
+				"type"    : "string",
+				"display" : "Sender"
+			},
+			{
+				"key"     : ["public.message", "to"],
+				"type"    : "list of string",
+				"display" : "Receiver"
+			},
+			{
+				"key"     : ["public.message", "date"],
+				"type"    : "datetime",
+				"display" : "Date"
+			}
+		]
+	},
+	"mime.message.rfc822" : {
+		"conforming" : [ "public.message", "public.text" ],
+		"extensions" : ["eml"],
+		"mimetypes"  : ["message/rfc822", "text/x-mail"],
+		"display" : "Internet Mail",
+		"exec" : "mime.message.rfc822.py",
+		"extractor" : "extract-rfc822.py",
+		"meta" : [
+			{
+				"key"     : ["public.message", "rfc822", "priority"],
+				"type"    : "set",
+				"values"  : ["low", "normal", "high" ],
+				"display" : "Priority"
+			},
+			{
+				"key"     : ["public.message", "rfc822", "attachments"],
+				"type"    : "list of string",
+				"display" : "Attachments"
+			}
+		]
+	},
+
+	"public.image" : {
+		"conforming" : ["public.data", "public.content"],
+		"icon" : "uti/image.png",
+		"exec" : "public.image.py",
+		"extractor" : "extract-public.image.py",
+		"display" : "Image",
+		"meta" : [
+			{
+				"key"     : ["public.image", "width"],
+				"type"    : "integer",
+				"display" : "Image width"
+			},
+			{
+				"key"     : ["public.image", "height"],
+				"type"    : "integer",
+				"display" : "Image height"
+			}
+		]
+	},
+	"public.jpeg" : {
+		"conforming" : ["public.image"],
+		"extensions" : ["jpg", "jpeg"],
+		"mimetypes"  : ["image/jpeg"],
+		"display"    : "JPEG image"
+	},
+	"public.tiff" : {
+		"conforming" : ["public.image"],
+		"extensions" : ["tif", "tiff"],
+		"mimetypes"  : ["image/tiff"],
+		"display"    : "TIFF image"
+	},
+	"public.png" : {
+		"conforming" : ["public.image"],
+		"extensions" : ["png"],
+		"mimetypes"  : ["image/png"],
+		"display"    : "PNG image"
+	},
+	"com.compuserve.gif" : {
+		"conforming" : ["public.image"],
+		"extensions" : ["gif"],
+		"mimetypes"  : ["image/gif"],
+		"display"    : "GIF image"
+	},
+	"com.microsoft.bmp" : {
+		"conforming" : ["public.image"],
+		"extensions" : ["bmp"],
+		"display"    : "Windows bitmap image"
+	}
+}
+

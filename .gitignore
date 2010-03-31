@@ -1,0 +1,4 @@
+*.beam
+*.pyc
+server/priv/stores/
+server/priv/snapshots/

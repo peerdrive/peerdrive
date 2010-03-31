@@ -1,0 +1,133 @@
+
+In Hotchpotch the documents are stored in so called "stores". Each document is
+uniquely identified by a (random) UUID, where the document/UUID can
+simultaniously live in more than one store. Each store maintains a mapping of
+UUIDs to the latest revision of the document. The actual content is stored in
+revisions and each revision is identified by the hash of its content.
+
+At the basic level each revision consists of the following:
+	- a UTI (Uniform Type Identifier) specifying the type of the document,
+	- the modification time (mtime),
+	- a list of it's preceeding revision(s) (parents),
+	- one or more "parts", each identified by a FourCC and containing a blob.
+
+This basic level is sufficient to store and retrieve arbitrary data, preserve
+the history of changes to a document and also replicate and synchronize
+documents between multiple stores.
+
+== Binary object representation ==
+
+To compute the hash of a revision a common binary representation is needed.
+All values as little endian...
+
+B       .. PartsCount
+{
+	4s  .. FourCC
+	16s .. MD5 hash of part content
+}
+B       .. ParentsCount
+{
+	16s .. Parent object
+}
+Q       .. Mtime (unix time)
+L       .. UTI string length
+{s}     .. UTI
+
+
+== Well known part FourCCs ==
+
+In Hotchpotch the following part FourCCs have a special meaning:
+	- 'META': standardized, extensible meta data
+	- 'FILE': byte stream (POSIX file content)
+	- 'HPSD': structured content (HotchPotch Structured Data)
+
+The data in 'META' and 'HPSD' is semantically similar to JSON. See below for
+its definition and binary representation.
+
+
+== Document linking ==
+
+Each document is treated completely independent of any other document. For
+navigational access of the documents there can be directed links between them.
+As entry point to the link chain there is a root document in each store, just
+like the root directory in file systems.
+
+There are two types of links in Hotchpotch:
+	- Document link: points to a UUID (document)
+	- Revision link: points to a special revision
+
+A document link additionally contains a list of all known revisions of the
+document which it refers to. This is used when navigating in the history, that
+is when examining an old revision of a document.
+
+In essence Hotchpotch links are like symbolic links in the meaning that they
+symbolically refer to another document/revision. But they are also like hard links
+in the sense that they are independent of the target's location.
+
+== Garbage collection ==
+
+Even though documents and revisions can be deleted explicitly they can also be
+garbage collected implicitly. When there is no path from the root document of a
+store to the document then it is eligible for garbage collection. The path is
+formed by links in the 'HPSD' part and by the parent pointers of each revision.
+
+
+== Hotchpotch Structured Data ==
+
+The data in the 'HPSD' and 'META' parts of a revision has a defined semantics
+and binary representation.
+
+=== Semantics ===
+
+Hotchpotch can represent the following data types:
+	- Number
+		- Integer: 8..64 bits, signed/unsigned
+		- Floating point: float/double
+	- String: Unicode, Utf-8
+	- Boolean
+	- Link
+		- Document link
+		- Revision link
+	- List: ordered sequence of values (any Hotchpotch data type)
+	- Dictionary: unordered sequence of key value pairs where
+		- the key is a string,
+		- and the value is of any Hotchpotch data type
+
+=== Binary representation ===
+
+All data stored as little endian. The following is no strict EBNF but you
+should get the idea...
+
+HPSD = value
+
+value = dict | list | string | bool | link | real | int
+
+link = doc_link | rev_link
+
+real = float | double
+
+int = uint8, sint8, unit16, sint16, uint32, sint32, uint64, sint64
+
+dict = 0x00, NoOfElements:32/little, { string, value }
+
+list = 0x10, NoOfElements:32/little, { value }
+
+string = 0x20, StringLength:32/little, ?UTF-8 encoded string?
+
+bool = 0x30, (0x00 | 0x01)
+
+rev_link = 0x40, Rev:128
+doc_link = 0x41, Uuid:128, RevCount:8, { Rev:128 }
+
+float  = 0x50, ?32 bit IEEE float?
+double = 0x51, ?64 bit IEEE double?
+
+uint8  = 0x60, ?unsigned char?
+sint8  = 0x61, ?signed char?
+uint16 = 0x62, ?unsigned short?
+sint16 = 0x63, ?signed short?
+uint32 = 0x64, ?unsigned long?
+sint32 = 0x65, ?signed long?
+uint64 = 0x66, ?unsigned long long?
+sint64 = 0x67, ?signed long long?
+

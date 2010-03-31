@@ -1,0 +1,52 @@
+
+Hotchpotch is a document oriented mix of revision control, file system and
+database concepts. It is intended to store, organize and retrieve your data in
+novel ways.
+
+Currently it is only a prototype to try out several ideas, refine semantics and
+the API and to figure out the impact to the user interface. Check the doc
+directory for some infos and ideas.
+
+== Requirements ==
+
+Python 2.5/2.6
+	+ PyQt >=4.4.x
+	+ simplejson
+	+ magic (optional)
+Erlang >= R12
+
+== Try it out ==
+
+Currently there is no installation possible. Do the follwing steps to try it
+out:
+
+1. Open two terminals
+
+2. Type in the 1st terminal:
+	> cd server
+	> ./hotchpotch.sh
+
+	This will start the Hotchpotch server in the forground. To stop the server
+	type "CTRL+g q".
+
+3. In the 2nd terminal type:
+	> cd client
+	> ./boot.py
+	> ./launchbox.py
+
+The stores place their files under "server/priv/stores/". Initially all stores start
+empty. When executing "boot.py" some necessary documents are created in the system
+store. This has to be done only once after the system store was created.
+
+There are some convenient options then starting the server:
+
+	> hotchpotch.sh clear
+	This will clear out all stores. Call boot.py before any other client then.
+
+	> hotchpotch.sh save <name>
+	This will save the state of all stores to a tar+gzip archive under
+	"server/priv/snapshots/<name>.tgz".
+
+	> hotchpotch.sh restore <name>
+	Restore the state of all stores from the given checkpoint.
+
