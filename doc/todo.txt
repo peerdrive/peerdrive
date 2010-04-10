@@ -1,11 +1,16 @@
-
-- Additional file types
-	- contacts
-	- audio
-	- video
+- General
+	- clean up guid/uuid/rev clash
+		- we have DOC's which point to REV's
+		- Doc's and Rev's are identified by UUID's (as defined in ISO/IEC 9834-8:2005)
+		- generate valid uuids
+			- v4 -> doc's
+			- v5 -> rev's
+		- stores are identified by their root doc UUID
+	- rename volumes -> stores
+	- rename open/show commands
 
 - Server
-	- replace MD5 hashes by SHA1
+	- replace MD5 hashes by SHA1-UUID's
 	- File store improvements
 		- Implement reference counting from 'HPSD' part
 		- garbage collection
@@ -13,6 +18,10 @@
 	- add search engine
 		- lucene
 		- add query API (virtual collections)
+	- add FUSE binding
+		- read docs and revs like normal files
+		- interpret collections and show as directories
+		- direct access by UUID
 	- network stores
 		- network interface (remote interface)
 		- network store stub
@@ -22,7 +31,7 @@
 		- network stores (bonjour)
 	- API cleanup
 		- Identifier naming
-			- All identifiers are UUID's (as defined in ISO/IEC 9834-8:2005)
+			- All identifiers are UUID's
 			- Doc's are v4 UUIDs
 			- Rev's are v5 UUIDs
 			- Any other UUIDs are not accepted
@@ -31,9 +40,22 @@
 			- internally
 			- on protocol level
 		- stat: flags for requested information
-	- support for staging changes / shared read/write access
+	- support preliminary versions
+	- support shared read/write access
 
 - user interface
+	- Use preliminary versions to save changes periodically
+	- Additional file types
+		- contacts
+		- audio
+		- video
+	- improve collections
+		- support email thread view
+		- indicators
+			- added (but not saved yet)
+			- needs merge
+			- may need replication
+		- drag operations: copy as new document
 	- facility to store user meta data (window position, ...)
 	- possibility to cancel ongoing replication/synchronzation
 
@@ -72,16 +94,32 @@
 				- crypto method info
 			- decryption cache in client for performance
 
-- Collections
-	- support email thread view
-	- indicators
-		- added (but not saved yet)
-		- needs merge
-		- may need replication
-	- drag operations: copy as new document
-
 
 ================================ brainstorming ================================
+
+- extend semantics
+	- preliminary versions
+		- support overwriting versions
+			- just like "git commit --amend"
+			- updating overwrites previous version
+			- throw away temporary versions to keep history clean
+			- will result in fake merge conditions
+		- indicator for preliminary versions
+			- will not be replicated/synced automatically
+			- hint when merging manually
+			- mitigate fake merge conditions
+		- basis for autosave applications
+			- periodically saves changes as preliminary versions
+			- overwrite previous preliminary version
+			- usefull to save intermediate merge result before checkpointing
+			- finally save as non-preliminary checkpoint
+		- accumulate multiple changes
+			- could be used by command line / scripts
+			- final commit after all changes are done
+	- shared updates
+		- allow dirty reads
+		- only one writer per store and doc
+		- usable to emulate old file model (simultanious read/write)
 
 - simplified API
 	- Operations
@@ -90,7 +128,7 @@
 				- Doc or Rev
 				- ignored in case of creating
 			- Mode
-				- main/staging head
+				- overwrite?
 				- read/write/readwrite/create
 					- create implies readwrite
 					- Uuid must be a doc if writing is requested
@@ -116,16 +154,7 @@
 		- commit(Handle, OtherRevs)
 			- Handle: as returned by open
 			- OtherRevs: Additional parent revisions in case of a merge, empty otherwise
-		- suspend(Handle)
-			- only valid if opened staging head
+			- may fail on some stores
 		- abort(Handle)
 			- discard handle
-
-- staging head semantics
-	- purpose
-		- serves as a temporary scratchpad area to stage changes
-		- support shared access by multiple processes
-		- permanent store 
-	- the staging head is neither replicated nor synchronized
-	- 
 
