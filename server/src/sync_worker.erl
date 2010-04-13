@@ -195,7 +195,7 @@ sync_uuid_ff(Uuid, _FromIfc, FromRev, ToIfc, ToRev) ->
 
 is_ff_head(FromRev, ToRev) ->
 	case broker:stat(ToRev) of
-		{ok, _Parts, _Parents, Mtime, _Uti, _Volumes} ->
+		{ok, _Flags, _Parts, _Parents, Mtime, _Uti, _Volumes} ->
 			is_ff_head_search([FromRev], ToRev, Mtime - 60*60*24);
 		error ->
 			false
@@ -207,7 +207,7 @@ is_ff_head_search([], _ToRev, _MinMtime) ->
 
 is_ff_head_search([FromRev|OtherRevs], ToRev, MinMtime) ->
 	case broker:stat(FromRev) of
-		{ok, _Parts, Parents, Mtime, _Uti, _Volumes} ->
+		{ok, _Flags, _Parts, Parents, Mtime, _Uti, _Volumes} ->
 			if
 				FromRev == ToRev ->
 					true;
@@ -269,7 +269,7 @@ get_utis(Revs) ->
 	lists:foldl(
 		fun(Rev, Acc) ->
 			case broker:stat(Rev) of
-				{ok, _Parts, _Parents, _Mtime, Uti, _Volumes} ->
+				{ok, _Flags, _Parts, _Parents, _Mtime, Uti, _Volumes} ->
 					sets:add_element(Uti, Acc);
 				error ->
 					Acc
@@ -332,7 +332,7 @@ traverse(Heads, Path) ->
 	lists:foldl(
 		fun(Head, {AccHeads, AccPath}) ->
 			case broker:stat(Head) of
-				{ok, _Parts, Parents, _Mtime, _Uti, _Volumes} ->
+				{ok, _Flags, _Parts, Parents, _Mtime, _Uti, _Volumes} ->
 					NewHeads = Parents ++ AccHeads,
 					NewPath = sets:add_element(Head, AccPath),
 					{NewHeads, NewPath};
@@ -374,7 +374,7 @@ merge_hpsd(Stores, Uuid, BaseRev, FromRev, ToRev, UtiSet, Force) ->
 
 merge_hpsd_read(Revs) ->
 	case broker:stat(hd(Revs)) of
-		{ok, Parts, _Parents, _Mtime, _Uti, _Volumes} ->
+		{ok, _Flags, Parts, _Parents, _Mtime, _Uti, _Volumes} ->
 			FCCs = lists:map(fun({FourCC, _Size, _Hash}) -> FourCC end, Parts),
 			merge_hpsd_read_loop(Revs, FCCs, []);
 

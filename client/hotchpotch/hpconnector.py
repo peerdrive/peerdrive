@@ -516,12 +516,14 @@ class HpLookup(object):
 class HpStat(object):
 	def __init__(self, packet):
 		# Packet format:
+		#   Flags:32
 		#   PartsCount:8,  [FourCC:32, Size:64, Hash:128],
 		#   ParentCount:8, [Parent:128],
 		#   VolumeCount:8, [Volume:128],
 		#   Mtime:64, Uti...
-		count = unpack_from('B', packet, 0)[0]
-		pos = 1
+		(flags, count) = unpack_from('<LB', packet, 0)
+		pos = 5
+		self.__flags = flags
 		self.__parts = {}
 		for i in range(count):
 			(fourcc, size, hash) = unpack_from('<4sQ16s', packet, pos)
@@ -566,6 +568,9 @@ class HpStat(object):
 
 	def uti(self):
 		return self.__uti
+
+	def preliminary(self):
+		return (self.__flags & 0x10) != 0
 
 
 

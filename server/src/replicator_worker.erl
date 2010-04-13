@@ -181,7 +181,7 @@ do_replicate_uuid(Backlog, Uuid, ToStores, History, Important) ->
 
 do_replicate_rev(Backlog, Rev, ToStores, History, Important, Latest) ->
 	case broker:stat(Rev) of
-		{ok, _Parts, Parents, _Mtime, _Uti, Volumes} ->
+		{ok, _Flags, _Parts, Parents, _Mtime, _Uti, Volumes} ->
 			% do actual replication to destination stores
 			RepStores1 = lists:subtract(ToStores, Volumes),
 			RepStores2 = lists:filter(

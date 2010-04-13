@@ -345,7 +345,7 @@ do_loopup(Uuid, RetPath) ->
 
 do_stat(Rev, RetPath) ->
 	case broker:stat(Rev) of
-		{ok, Parts, Parents, Mtime, Uti, Volumes} ->
+		{ok, Flags, Parts, Parents, Mtime, Uti, Volumes} ->
 			ReplyParts = lists:foldl(
 				fun ({FourCC, Size, Hash}, AccIn) ->
 					<<AccIn/binary, FourCC/binary, Size:64/little, Hash/binary>>
@@ -365,6 +365,7 @@ do_stat(Rev, RetPath) ->
 				<<(length(Volumes)):8>>,
 				Volumes),
 			Reply = <<
+				Flags:32/little,
 				ReplyParts/binary,
 				ReplyParents/binary,
 				ReplyVolumes/binary,

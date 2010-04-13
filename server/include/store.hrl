@@ -19,7 +19,7 @@
 % parents: [Revision]
 % mitme:   Secs (unix date)
 % uti:     Binary
--record(object, {parts, parents, mtime, uti}).
+-record(object, {flags=0, parts, parents, mtime, uti}).
 
 -record(store,
 	{

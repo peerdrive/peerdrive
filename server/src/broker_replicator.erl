@@ -45,8 +45,9 @@ get_source_loop(Rev, [{_Guid, Ifc} | Remaining]) ->
 
 replicate(Rev, SourceStore, DestStore) ->
 	case store:stat(SourceStore, Rev) of
-		{ok, Parts, Parents, Mtime, Uti} ->
+		{ok, Flags, Parts, Parents, Mtime, Uti} ->
 			Object = #object{
+				flags = Flags,
 				parts = lists:sort(
 					lists:map(fun({FCC, _Size, Hash}) -> {FCC, Hash} end, Parts)
 					),

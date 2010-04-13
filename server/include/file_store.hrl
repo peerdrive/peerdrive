@@ -17,10 +17,11 @@
 
 %% path,     base directory of server
 %% server,   server process pid
+%% flags,    flags of object
 %% uuid,     uuid of object
 %% revs,     base revisions of object when writing started
 %% uti,      UTI of object
 %% orig,     dict: FourCC --> Hash
 %% new       dict: FourCC --> {FileName, IODevice}
--record(ws, {path, server, uuid, revs, uti, orig, new}).
+-record(ws, {path, server, flags, uuid, revs, uti, orig, new}).
 

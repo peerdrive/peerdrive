@@ -44,7 +44,7 @@ lookup(Uuid) ->
 
 
 %% @doc Get status information about a revision.
-%% @spec stat(Rev) -> {ok, Parts, Parents, Mtime, Uti, Volumes} | error
+%% @spec stat(Rev) -> {ok, Flags, Parts, Parents, Mtime, Uti, Volumes} | error
 %%       Parts = [{FourCC, Size, Hash}]
 %%       FourCC, Hash, Uti = binary()
 %%       Size, Mtime = integer()
@@ -53,18 +53,18 @@ stat(Rev) ->
 	lists:foldl(
 		fun({Guid, Ifc}, Result) ->
 			case Result of
-				{ok, Parts, Parents, Mtime, Uti, Volumes} ->
+				{ok, Flags, Parts, Parents, Mtime, Uti, Volumes} ->
 					case store:contains(Ifc, Rev) of
 						true ->
-							{ok, Parts, Parents, Mtime, Uti, [Guid|Volumes]};
+							{ok, Flags, Parts, Parents, Mtime, Uti, [Guid|Volumes]};
 						false ->
 							Result
 					end;
 
 				error ->
 					case store:stat(Ifc, Rev) of
-						{ok, Parts, Parents, Mtime, Uti} ->
-							{ok, Parts, Parents, Mtime, Uti, [Guid]};
+						{ok, Flags, Parts, Parents, Mtime, Uti} ->
+							{ok, Flags, Parts, Parents, Mtime, Uti, [Guid]};
 						error ->
 							error
 					end

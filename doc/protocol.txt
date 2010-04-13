@@ -71,11 +71,11 @@ Opcode =
 
 Body =
 	ENUM_REQ
-	ENUM_CNF            Count:8, [Guid:128, Flags:32, NameLen:18, NameStr]
+	ENUM_CNF            Count:8, [Guid:128, StoreFlags:32, NameLen:16, NameStr]
 	LOOKUP_REQ          Uuid:128
 	LOOKUP_CNF          RevCount:8, [Rev:128, StoreCount:8, [Guid:128]]
 	STAT_REQ            Rev:128
-	STAT_CNF            PartsCount:8, [FourCC:32, Size:64, Hash:128], ParentCount:8, [Parent:128], VolCount:8, [Volume:128], Mtime:64, UTI...
+	STAT_CNF            RevFlags:32, PartsCount:8, [FourCC:32, Size:64, Hash:128], ParentCount:8, [Parent:128], VolCount:8, [Volume:128], Mtime:64, UTI...
 	STAT_REJ
 
 	READ_START_REQ      Rev:128
@@ -141,11 +141,15 @@ Cause =
 	3	Diminished (UUID/Rev)
 	4	Disappeared (UUID/Rev)
 
-Flags:
+StoreFlags:
 	1	Mounted
 	2	Removable
 	4	System Store
 
+RevFlags =
+	0..7  = Type (only 0 defined ATM)
+	8     = Preliminary
+	9..31 = undefined (0)
 
 ============================ Network Store API ================================
 

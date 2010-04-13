@@ -451,7 +451,8 @@ do_stat(Rev, #state{objects=Objects, path=Path}) ->
 				end,
 				[],
 				Object#object.parts),
-			{ok, Parts, Object#object.parents, Object#object.mtime, Object#object.uti};
+			{ok, Object#object.flags, Parts, Object#object.parents,
+				Object#object.mtime, Object#object.uti};
 
 		% completely unknown...
 		error ->
@@ -557,6 +558,7 @@ do_dump(S) ->
 
 
 % #object{
+%   flags:   integer()
 %   parts:   [{PartFourCC, Hash}]*
 %   parents: [Revision]*
 %   mitme:   {MegaSecs, Secs, MicroSecs}
@@ -567,6 +569,7 @@ do_dump_object(Object) ->
 		Object == stub ->
 			ok;
 		true ->
+			io:format("        Flags:~w~n", [Object#object.flags]),
 			io:format("        Parts:~n"),
 			lists:foreach(
 				fun ({FourCC, Hash}) ->
@@ -593,6 +596,7 @@ do_write_start_fork(S, StartRev, Uti, User) ->
 			State = #ws{
 				path   = S#state.path,
 				server = self(),
+				flags  = 0,
 				uuid   = Uuid,
 				revs   = [],
 				uti    = Uti,
@@ -616,6 +620,7 @@ do_write_start_fork(S, StartRev, Uti, User) ->
 					State = #ws{
 						path   = S#state.path,
 						server = self(),
+						flags  = Object#object.flags,
 						uuid   = Uuid,
 						revs   = [Rev],
 						uti    = Uti,
@@ -640,6 +645,7 @@ do_write_start_update(S, Uuid, StartRev, User) ->
 					State = #ws{
 						path   = S#state.path,
 						server = self(),
+						flags  = Object#object.flags,
 						uuid   = Uuid,
 						revs   = [StartRev],
 						uti    = Object#object.uti,
@@ -668,6 +674,7 @@ do_write_start_merge(S, Uuid, StartRevs, Uti, User) ->
 					State = #ws{
 						path   = S#state.path,
 						server = self(),
+						flags  = 0,
 						uuid   = Uuid,
 						revs   = StartRevs,
 						uti    = Uti,

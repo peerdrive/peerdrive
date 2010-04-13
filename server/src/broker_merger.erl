@@ -127,10 +127,11 @@ cleanup(TmpUuid, Stores) ->
 create_merge_rev(Store, StartRev, OtherRevs) ->
 	case store:stat(Store, StartRev) of
 		% create new object and uuid
-		{ok, OldParts, _Parents, _Mtime, Uti} ->
+		{ok, Flags, OldParts, _Parents, _Mtime, Uti} ->
 			Parts = lists:map(fun({FCC, _Size, Hash}) -> {FCC, Hash} end, OldParts),
 			Parents = [StartRev|OtherRevs],
 			NewObject = #object{
+				flags   = Flags,
 				parts   = lists:sort(Parts),
 				parents = lists:sort(Parents),
 				mtime   = util:get_time(),

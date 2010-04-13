@@ -56,7 +56,7 @@ contains(#store{this=Store, contains=Contains}, Rev) ->
 %% Returns information about a revision if it is found on the store, or `error'
 %% if no such UUID exists.
 %%
-%% @spec stat(Store, Rev) -> {ok, Parts, Parents, Mtime, Uti} | error
+%% @spec stat(Store, Rev) -> {ok, Flags, Parts, Parents, Mtime, Uti} | error
 %%       Store = pid()
 %%       Rev = guid()
 %%       Parts = [{FourCC::binary(), Size::interger(), Hash::guid()}]
@@ -238,7 +238,7 @@ sync_set_anchor(#store{this=Store, sync_set_anchor=SyncSetAnchor}, PeerGuid, Seq
 	SyncSetAnchor(Store, PeerGuid, SeqNum).
 
 
-hash_object(#object{parts=Parts, parents=Parents, mtime=Mtime, uti=Uti}) ->
+hash_object(#object{flags=Flags, parts=Parts, parents=Parents, mtime=Mtime, uti=Uti}) ->
 	BinParts = lists:foldl(
 		fun ({FourCC, Hash}, AccIn) ->
 			<<AccIn/binary, FourCC/binary, Hash/binary>>
@@ -252,5 +252,6 @@ hash_object(#object{parts=Parts, parents=Parents, mtime=Mtime, uti=Uti}) ->
 		<<(length(Parents)):8>>,
 		Parents),
 	BinUti = <<(size(Uti)):32/little, Uti/binary>>,
-	erlang:md5(<<BinParts/binary, BinParents/binary, Mtime:64/little, BinUti/binary>>).
+	erlang:md5(<<Flags:32/little, BinParts/binary, BinParents/binary,
+		Mtime:64/little, BinUti/binary>>).
 

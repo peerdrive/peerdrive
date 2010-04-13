@@ -6,6 +6,10 @@ UUIDs to the latest revision of the document. The actual content is stored in
 revisions and each revision is identified by the hash of its content.
 
 At the basic level each revision consists of the following:
+	- a set of flags
+		- the version of the revision data model (currently only version 0)
+		- final/preliminary revision
+		- possibly other flags in the future
 	- a UTI (Uniform Type Identifier) specifying the type of the document,
 	- the modification time (mtime),
 	- a list of it's preceeding revision(s) (parents),
@@ -20,6 +24,7 @@ documents between multiple stores.
 To compute the hash of a revision a common binary representation is needed.
 All values as little endian...
 
+L       .. Flags (0..7: Version, 8:Preliminary)
 B       .. PartsCount
 {
 	4s  .. FourCC

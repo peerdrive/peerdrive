@@ -179,6 +179,7 @@ do_commit(S, Mtime) ->
 		[],
 		S#ws.new) ++ dict:to_list(S#ws.orig),
 	Object = #object{
+		flags   = S#ws.flags,
 		parts   = lists:sort(Parts),
 		parents = lists:sort(S#ws.revs),
 		mtime   = Mtime,
