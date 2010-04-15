@@ -134,9 +134,10 @@ writer_get_file(S, Part) ->
 					case file:copy(util:build_path(S#ws.path, Hash), FileName) of
 						{ok, _} ->
 							% release original part, we have our own copy now
-							gen_server:cast(S#ws.server, {part_ref_dec, Hash}),
-							{S#ws{orig=dict:erase(Part, S#ws.orig)},
-							file:open(FileName, [write, read, binary])};
+							{
+								S#ws{orig=dict:erase(Part, S#ws.orig)},
+								file:open(FileName, [write, read, binary])
+							};
 						Error ->
 							{S, Error}
 					end;
@@ -165,7 +166,6 @@ do_commit(S, Mtime) ->
 		fun (Part, {TmpName, IODevice}, Acc) ->
 			{ok, Hash} = hash_file(IODevice),
 			file:close(IODevice),
-			gen_server:call(S#ws.server, {parts_ref_inc, [Hash]}),
 			NewName = util:build_path(S#ws.path, Hash),
 			case filelib:is_file(NewName) of
 				true ->
@@ -188,19 +188,6 @@ do_commit(S, Mtime) ->
 
 
 do_abort(S) ->
-	% release parent revs
-	lists:foreach(
-		fun (Rev) ->
-			gen_server:cast(S#ws.server, {object_ref_dec, Rev})
-		end,
-		S#ws.revs),
-	% release original parts
-	dict:fold(
-		fun (_, Hash, _) ->
-			gen_server:cast(S#ws.server, {part_ref_dec, Hash})
-		end,
-		ok,
-		S#ws.orig),
 	% delete temporary files
 	dict:fold(
 		fun (_, {FileName, IODevice}, _) ->

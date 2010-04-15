@@ -158,7 +158,6 @@ do_commit(S) ->
 				fun (_Part, {Hash, TmpName, IODevice, _Md5Ctx}, _Acc) ->
 					file:close(IODevice),
 					NewName = util:build_path(S#state.path, Hash),
-					gen_server:call(S#state.storepid, {parts_ref_inc, [Hash]}),
 					case filelib:is_file(NewName) of
 						true ->
 							file:delete(TmpName);
@@ -177,20 +176,7 @@ do_commit(S) ->
 	end.
 
 
-do_abort(#state{storepid=StorePid, object=Object, done=Done, needed=Needed}) ->
-	% release parent revs
-	lists:foreach(
-		fun (Rev) ->
-			gen_server:cast(StorePid, {object_ref_dec, Rev})
-		end,
-		Object#object.parents),
-	% release already present parts
-	dict:fold(
-		fun (Hash) ->
-			gen_server:cast(StorePid, {part_ref_dec, Hash})
-		end,
-		ok,
-		Done),
+do_abort(#state{needed=Needed}) ->
 	% delete temporary files
 	dict:fold(
 		fun (_, {_Hash, FileName, IODevice, _Md5Ctx}, _) ->

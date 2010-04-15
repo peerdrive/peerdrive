@@ -13,6 +13,9 @@
 %%
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
+%%
+%%
+%% FIXME: prevent parts from being deleted too early
 
 -module(file_store).
 -behaviour(gen_server).
@@ -319,7 +322,7 @@ handle_cast_internal({object_ref_dec, Rev}, S) ->
 	{RefCount, Object} = dict:fetch(Rev, S#state.objects),
 	Objects = if
 		RefCount == 1 ->
-			dispose_object(Object),
+			dispose_object(Object, S#state.path),
 			case Object of
 				stub  -> ok;
 				_Else -> vol_monitor:trigger_rm_rev(S#state.guid, Rev)
@@ -461,14 +464,14 @@ do_stat(Rev, #state{objects=Objects, path=Path}) ->
 
 %%% Delete %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_delete_rev(#state{guid=Guid, objects=Objects} = S, Rev) ->
+do_delete_rev(#state{guid=Guid, objects=Objects, path=Path} = S, Rev) ->
 	case dict:find(Rev, Objects) of
 		{ok, {_, stub}} ->
 			{S, {error, enoent}};
 
 		{ok, {RefCount, Object}} ->
 			vol_monitor:trigger_rm_rev(Guid, Rev),
-			dispose_object(Object),
+			dispose_object(Object, Path),
 			{
 				S#state{
 					objects=dict:store(Rev, {RefCount, stub}, Objects),
@@ -500,21 +503,6 @@ do_delete_uuid(#state{guid=Guid, uuids=Uuids} = S, Uuid) ->
 	end.
 
 
-dispose_object(Object) ->
-	case Object of
-		stub ->
-			ok;
-
-		#object{parts=Parts, parents=Parents} ->
-			lists:foreach(
-				fun({_, Hash}) -> gen_server:cast(self(), {part_ref_dec, Hash}) end,
-				Parts),
-			lists:foreach(
-				fun (Rev) -> gen_server:cast(self(), {object_ref_dec, Rev}) end,
-				Parents)
-	end.
-
-
 %%% Dump %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % #state{
@@ -526,7 +514,7 @@ dispose_object(Object) ->
 %   peers:   dict: GUID --> Generation
 %   changed: Bool
 % }
-do_dump(S) ->
+do_dump(#state{path=Path} = S) ->
 	io:format("Guid: ~s~n", [util:bin_to_hexstr(S#state.guid)]),
 	io:format("Gen:  ~p~n", [S#state.gen]),
 	io:format("Path: ~s~n", [S#state.path]),
@@ -540,7 +528,7 @@ do_dump(S) ->
 	dict:fold(
 		fun (Rev, {RefCount, Object}, _) ->
 			io:format("    ~s #~w~n", [util:bin_to_hexstr(Rev), RefCount]),
-			do_dump_object(Object)
+			do_dump_object(Object, Path)
 		end,
 		ok, S#state.objects),
 	io:format("Parts:~n"),
@@ -564,7 +552,7 @@ do_dump(S) ->
 %   mitme:   {MegaSecs, Secs, MicroSecs}
 %   uti:     Binary
 % }
-do_dump_object(Object) ->
+do_dump_object(Object, Path) ->
 	if
 		Object == stub ->
 			ok;
@@ -573,7 +561,7 @@ do_dump_object(Object) ->
 			io:format("        Parts:~n"),
 			lists:foreach(
 				fun ({FourCC, Hash}) ->
-					io:format("            ~w -> ~s~n", [FourCC, util:bin_to_hexstr(Hash)])
+					io:format("            ~s -> ~s~n", [FourCC, util:bin_to_hexstr(Hash)])
 				end,
 				Object#object.parts),
 			io:format("        Parents:~n"),
@@ -581,7 +569,13 @@ do_dump_object(Object) ->
 				fun (Rev) ->
 					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
 				end,
-				Object#object.parents)
+				Object#object.parents),
+			io:format("        References:~n"),
+			lists:foreach(
+				fun (Rev) ->
+					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
+				end,
+				get_references(Object, Path))
 	end.
 
 
@@ -692,12 +686,9 @@ do_write_start_merge(S, Uuid, StartRevs, Uti, User) ->
 
 
 % adjust reference count, then start writer process
-start_writer(S1, State, User) ->
-	S2 = do_objects_ref_inc(S1, State#ws.revs),
-	OrigParts = dict:fold(fun(_,H,Acc) -> [H|Acc] end, [], State#ws.orig),
-	S3 = do_parts_ref_inc(S2, OrigParts),
+start_writer(S, State, User) ->
 	{ok, Writer} = file_store_writer:start(State, User),
-	{S3, Writer}.
+	{S, Writer}.
 
 
 % ok | {error, Reason}
@@ -759,39 +750,19 @@ do_put_rev(S, Rev, Object, User) ->
 				end,
 				{[], []},
 				Object#object.parts),
-			S2 = do_parts_ref_inc(S, PartsDone),
-			S3 = do_objects_ref_inc(S2, Object#object.parents),
 			case PartsNeeded of
 				[] ->
-					do_put_rev_commit(S3, Rev, Object);
+					do_put_rev_commit(S, Rev, Object);
 
 				_ ->
 					{ok, Importer} = file_store_importer:start(self(),
 						S#state.path, Rev, Object, PartsDone, PartsNeeded,
 						User),
 					NeededFourCCs = lists:map(fun({FCC, _Hash}) -> FCC end, PartsNeeded),
-					{S3, {ok, NeededFourCCs, Importer}}
+					{S, {ok, NeededFourCCs, Importer}}
 			end;
 
 		{ok, _} ->
-			{S, ok}
-	end.
-
-do_put_rev_commit(#state{objects=Objects} = S, Rev, Object) ->
-	case dict:find(Rev, Objects) of
-		error ->
-			dispose_object(Object),
-			{S, {error, enotref}};
-
-		{ok, {RefCount, stub}} ->
-			S2 = S#state{
-				objects=dict:store(Rev, {RefCount, Object}, Objects),
-				changed=true},
-			vol_monitor:trigger_add_rev(S#state.guid, Rev),
-			{S2, ok};
-
-		{ok, _} ->
-			dispose_object(Object),
 			{S, ok}
 	end.
 
@@ -815,19 +786,31 @@ do_commit(S, Uuid, Object) ->
 		{ok, _} ->
 			vol_monitor:trigger_mod_uuid(S#state.guid, Uuid),
 			Gen = S#state.gen,
-			S#state{
+			NewState = S#state{
 				gen     = Gen+1,
-				uuids   = dict:store(Uuid, {NewRev, Gen}, S#state.uuids),
-				objects = dict:store(NewRev, {1, Object}, S#state.objects),
-				changed = true
-			};
+				uuids   = dict:store(Uuid, {NewRev, Gen}, S#state.uuids)
+			},
+			add_object(NewState, NewRev, 1, Object);
 
 		_ ->
-			dispose_object(Object),
 			S
 	end,
 	{S2, Reply}.
 
+
+do_put_rev_commit(#state{objects=Objects} = S, Rev, Object) ->
+	case dict:find(Rev, Objects) of
+		error ->
+			{S, {error, enotref}};
+
+		{ok, {RefCount, stub}} ->
+			S2 = add_object(S, Rev, RefCount, Object),
+			vol_monitor:trigger_add_rev(S#state.guid, Rev),
+			{S2, ok};
+
+		{ok, _} ->
+			{S, ok}
+	end.
 
 %%% Reference counting %%%%%%%%%%%%%%%%
 
@@ -862,7 +845,76 @@ do_parts_ref_inc(#state{parts=Parts1} = S, Hashes) ->
 	S#state{parts=Parts2, changed=true}.
 
 
-%%% Reference counting %%%%%%%%%%%%%%%%
+add_object(S, Rev, RefCount, Object) ->
+	Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Object#object.parts),
+	S2 = do_objects_ref_inc(S, get_references(Object, S#state.path)),
+	S3 = do_parts_ref_inc(S2, Parts),
+	S3#state{
+		objects=dict:store(Rev, {RefCount, Object}, S3#state.objects),
+		changed=true}.
+
+
+dispose_object(Object, Path) ->
+	case Object of
+		stub ->
+			ok;
+
+		#object{parts=Parts} ->
+			lists:foreach(
+				fun (Rev) -> gen_server:cast(self(), {object_ref_dec, Rev}) end,
+				get_references(Object, Path)),
+			lists:foreach(
+				fun({_, Hash}) -> gen_server:cast(self(), {part_ref_dec, Hash}) end,
+				Parts)
+	end.
+
+
+get_references(#object{parts=Parts, parents=Parents}, Path) ->
+	CheckParts = lists:filter(
+		fun ({FourCC, _Hash}) ->
+			case FourCC of
+				<<"HPSD">> -> true;
+				<<"META">> -> true;
+				_          -> false
+			end
+		end,
+		Parts),
+	lists:foldl(
+		fun ({_FourCC, Hash}, Acc) ->
+			case read_hpsd_part(Hash, Path) of
+				{ok, Value} -> Acc ++ extract_refs(Value);
+				error       -> Acc % FIXME: really a good idea?
+			end
+		end,
+		Parents,
+		CheckParts).
+
+read_hpsd_part(Hash, Path) ->
+	{ok, Binary} = file:read_file(util:build_path(Path, Hash)),
+	case catch struct:decode(Binary) of
+		{'EXIT', _Reason} ->
+			error;
+		Struct ->
+			{ok, Struct}
+	end.
+
+extract_refs(Data) when is_record(Data, dict, 9) ->
+	dict:fold(fun(_Key, Value, Acc) -> extract_refs(Value)++Acc end, [], Data);
+
+extract_refs(Data) when is_list(Data) ->
+	lists:foldl(fun(Value, Acc) -> extract_refs(Value)++Acc end, [], Data);
+
+extract_refs({dlink, _Uuid, Revs}) ->
+	Revs;
+
+extract_refs({rlink, Rev}) ->
+	[Rev];
+
+extract_refs(_) ->
+	[].
+
+
+%%% Synching %%%%%%%%%%%%%%%%
 
 % returns [{Uuid, SeqNum}]
 do_sync_get_changes(#state{uuids=Uuids, peers=Peers}, PeerGuid) ->

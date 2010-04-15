@@ -12,7 +12,6 @@
 - Server
 	- replace MD5 hashes by SHA1-UUID's
 	- File store improvements
-		- Implement reference counting from 'HPSD' part
 		- garbage collection
 		- automatically delete old revisions when disk full
 	- add search engine
