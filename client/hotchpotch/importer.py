@@ -178,17 +178,34 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 		return False
 
 
-def importFileByPath(impPath, impFile, overwrite=False):
+def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=None):
 	# resolve the path
 	(store, container, name) = walkPath(impPath, True)
-	if (name in container) and (not overwrite):
-		return ImporterError("Duplicate item name")
 
 	# create the object and add to dict
-	link = importFile(store, impFile, name)
-	if link:
-		container[name] = link
+	if isinstance(impFile, list):
+		counter = 0
+		nn = "%s%d" % (name, counter)
+		for f in impFile:
+			while nn in container:
+				counter += 1
+				nn = "%s%d" % (name, counter)
+			if progress:
+				progress(f, nn)
+			link = importFile(store, f)
+			if link:
+				container[nn] = link
+			elif error:
+				error(f, nn)
 		container.save()
 	else:
-		raise ImporterError("Invalid file")
+		if (name in container) and (not overwrite):
+			raise ImporterError("Duplicate item name")
+
+		link = importFile(store, impFile, name)
+		if link:
+			container[name] = link
+			container.save()
+		else:
+			raise ImporterError("Invalid file")
 

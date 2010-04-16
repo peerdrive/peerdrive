@@ -25,22 +25,28 @@ from hotchpotch.importer import importFileByPath
 
 
 def usage():
-	print """Usage: hp-import-file.py <hp-path-spec> file
-
-       <hp-path-spec>   = tag | 7bf187e7... (unique UUID prefix)
+	print """Usage: hp-import-file.py <hp-path-spec> file [file...]
 """
 	sys.exit(1)
 
 
+def progress(fileName, newName):
+	print "Import '%s'..." % fileName
+
+def error(fileName, newName):
+	print "  FAILED!"
+
 # === main
 
-if len(sys.argv) != 3:
+if len(sys.argv) < 3:
 	usage()
 
 # parse command line
 importPath = sys.argv[1]
-importFile = sys.argv[2]
 
 # let's do it
-importFileByPath(importPath, importFile)
+if len(sys.argv) > 3:
+	importFileByPath(importPath, sys.argv[2:], progress=progress, error=error)
+else:
+	importFileByPath(importPath, sys.argv[2])
 
