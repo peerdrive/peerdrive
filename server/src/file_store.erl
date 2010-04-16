@@ -20,7 +20,7 @@
 -module(file_store).
 -behaviour(gen_server).
 
--export([start_link/2, stop/1, dump/1]).
+-export([start_link/2, stop/1, dump/1, fsck/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -export([guid/1, contains/2, stat/2, lookup/2, put_uuid/4, put_rev_start/3,
@@ -86,6 +86,9 @@ stop(Store) ->
 
 dump(Store) ->
 	gen_server:cast(Store, dump).
+
+fsck(Store) ->
+	gen_server:cast(Store, fsck).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Operations on object store...
@@ -335,6 +338,10 @@ handle_cast_internal({object_ref_dec, Rev}, S) ->
 
 handle_cast_internal(dump, S) ->
 	do_dump(S),
+	{noreply, S};
+
+handle_cast_internal(fsck, S) ->
+	do_fsck(S),
 	{noreply, S};
 
 handle_cast_internal(stop, S) ->
@@ -940,6 +947,141 @@ do_sync_set_anchor(#state{peers=Peers} = S, PeerGuid, SeqNum) ->
 	NewPeers = dict:store(PeerGuid, SeqNum, Peers),
 	S#state{peers=NewPeers, changed=true}.
 
+%%% Fsck %%%%%%%%%%%%%%%%
+
+do_fsck(#state{uuids=Uuids, objects=Objects, parts=Parts, path=Path}) ->
+	% check if all parts exist and hashes are correct
+	io:format("Checking parts...~n"),
+	fsck_check_parts(Parts, Path),
+	% calculate Hash refcounts and check excessive/missing Parts and if
+	% refcounts correct
+	io:format("Check part refcounts...~n"),
+	PartRefCounts = fsck_calc_part_refcounts(Objects),
+	fsc_check_part_refcounts(Parts, PartRefCounts),
+	% calculate Rev refcounts and check if correct
+	io:format("Check rev refcounts...~n"),
+	RevRefCounts = fsck_calc_rev_refcounts(Uuids, Objects, Path),
+	fsck_check_rev_refcounts(Objects, RevRefCounts),
+	io:format("Done.~n").
+
+
+fsck_check_parts(Parts, Path) ->
+	dict:fold(
+		fun(Hash, _RefCount, Acc) -> fsck_check_hash(Hash, Path), Acc end,
+		ok,
+		Parts).
+
+fsck_check_hash(Hash, Path) ->
+	case file:open(util:build_path(Path, Hash), [read, binary]) of
+		{ok, IoDevice} ->
+			case util:hash_file(IoDevice) of
+				{ok, Hash} ->
+					ok;
+				{ok, OtherHash} ->
+					io:format("  Wrong part contents. Expected ~s, got ~s~n",
+						[util:bin_to_hexstr(Hash), util:bin_to_hexstr(OtherHash)]),
+					error;
+				{error, Reason} ->
+					io:format("  Could not hash ~s: ~p~n",
+						[util:bin_to_hexstr(Hash), Reason]),
+					error
+			end,
+			file:close(IoDevice);
+
+		{error, Reason} ->
+			io:format("  Missing part ~s: ~p~n", [util:bin_to_hexstr(Hash), Reason])
+	end.
+
+fsck_calc_part_refcounts(Objects) ->
+	dict:fold(
+		fun
+			(_Rev, {_RefCount, stub}, Acc) -> Acc ;
+			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_obj_refs(Obj, Acc)
+		end,
+		dict:new(),
+		Objects).
+
+fsck_add_obj_refs(Object, Acc) ->
+	lists:foldl(
+		fun({_FCC, Hash}, HashDict) ->
+			dict:update_counter(Hash, 1, HashDict)
+		end,
+		Acc,
+		Object#object.parts).
+
+fsc_check_part_refcounts(Parts, PartRefCounts) ->
+	Remaining = dict:fold(
+		fun(Hash, RefCount, Acc) ->
+			case dict:find(Hash, Acc) of
+				{ok, RefCount} ->
+					dict:erase(Hash, Acc);
+				{ok, Wrong} ->
+					io:format("  Wrong part refcount ~s: ~p <> ~p~n",
+						[util:bin_to_hexstr(Hash), RefCount, Wrong]),
+					dict:erase(Hash, Acc);
+				error ->
+					io:format("  Missing part ~s # ~p~n", [
+						util:bin_to_hexstr(Hash), RefCount]),
+					Acc
+			end
+		end,
+		Parts,
+		PartRefCounts),
+	dict:fold(
+		fun(Hash, RefCount, Acc) ->
+			io:format("  Excessive part ~s # ~p~n", [util:bin_to_hexstr(Hash),
+				RefCount]),
+			Acc
+		end,
+		ok,
+		Remaining).
+
+fsck_calc_rev_refcounts(Uuids, Objects, Path) ->
+	UCount = dict:fold(
+		fun(_Uuid, {Rev, _Gen}, Acc) -> dict:update_counter(Rev, 1, Acc) end,
+		dict:new(),
+		Uuids),
+	dict:fold(
+		fun
+			(_Rev, {_RefCount, stub}, Acc) -> Acc;
+			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_rev_refs(Obj, Acc, Path)
+		end,
+		UCount,
+		Objects).
+
+fsck_add_rev_refs(Obj, RevDict, Path) ->
+	Refs = get_references(Obj, Path),
+	lists:foldl(
+		fun(Rev, Acc) -> dict:update_counter(Rev, 1, Acc) end,
+		RevDict,
+		Refs).
+
+fsck_check_rev_refcounts(Objects, RevRefCounts) ->
+	Remaining = dict:fold(
+		fun(Rev, RefCount, Acc) ->
+			case dict:find(Rev, Acc) of
+				{ok, {RefCount, _}} ->
+					dict:erase(Rev, Acc);
+				{ok, {Wrong, _}} ->
+					io:format("  Wrong object refcount ~s: ~p <> ~p~n",
+						[util:bin_to_hexstr(Rev), RefCount, Wrong]),
+					dict:erase(Rev, Acc);
+				error ->
+					io:format("  Missing object ~s # ~p~n", [
+						util:bin_to_hexstr(Rev), RefCount]),
+					Acc
+			end
+		end,
+		Objects,
+		RevRefCounts),
+	dict:fold(
+		fun(Rev, {RefCount, _}, Acc) ->
+			io:format("  Excessive object ~s # ~p~n", [util:bin_to_hexstr(Rev),
+				RefCount]),
+			Acc
+		end,
+		ok,
+		Remaining).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Low level file management...

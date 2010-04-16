@@ -16,7 +16,7 @@
 
 -module(util).
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
--export([read_rev/2, read_rev_struct/2]).
+-export([read_rev/2, read_rev_struct/2, hash_file/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Hex conversions
@@ -120,4 +120,21 @@ read_rev_struct(Rev, Part) ->
 get_time() ->
 	{MegaSecs, Secs, _} = now(),
 	(MegaSecs*1000000+Secs).
+
+
+% returns {ok, Md5} | {error, Reason}
+hash_file(File) ->
+	file:position(File, 0),
+	hash_file_loop(File, crypto:md5_init()).
+
+hash_file_loop(File, Ctx1) ->
+	case file:read(File, 16#100000) of
+		{ok, Data} ->
+			Ctx2 = crypto:md5_update(Ctx1, Data),
+			hash_file_loop(File, Ctx2);
+		eof ->
+			{ok, crypto:md5_final(Ctx1)};
+		Else ->
+			Else
+	end.
 

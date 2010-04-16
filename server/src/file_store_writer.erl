@@ -164,7 +164,7 @@ do_commit(S, Mtime) ->
 	Parts = dict:fold(
 		% FIXME: this definitely lacks error handling :(
 		fun (Part, {TmpName, IODevice}, Acc) ->
-			{ok, Hash} = hash_file(IODevice),
+			{ok, Hash} = util:hash_file(IODevice),
 			file:close(IODevice),
 			NewName = util:build_path(S#ws.path, Hash),
 			case filelib:is_file(NewName) of
@@ -197,20 +197,4 @@ do_abort(S) ->
 		ok,
 		S#ws.new).
 
-
-% returns {ok, Md5} | {error, Reason}
-hash_file(File) ->
-	file:position(File, 0),
-	hash_file_loop(File, crypto:md5_init()).
-
-hash_file_loop(File, Ctx1) ->
-	case file:read(File, 16#100000) of
-		{ok, Data} ->
-			Ctx2 = crypto:md5_update(Ctx1, Data),
-			hash_file_loop(File, Ctx2);
-		eof ->
-			{ok, crypto:md5_final(Ctx1)};
-		Else ->
-			Else
-	end.
 
