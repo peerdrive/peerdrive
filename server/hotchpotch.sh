@@ -8,6 +8,7 @@ then
 	CUR=`cygpath -wa .`
 	ERL="werl -pa $CUR\\ebin -config windows"
 else
+	export ERL_LIBS=/usr/local/lib/erlang/lib
 	ERL="erl -pa $PWD/ebin -config linux"
 fi
 

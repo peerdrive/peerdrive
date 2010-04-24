@@ -17,8 +17,19 @@
 -module(server_sup).
 -behaviour(supervisor).
 
--export([start_link/3]).
+-export([get_supervisor_spec/2, start_link/3]).
 -export([init/1]).
+
+
+get_supervisor_spec(Id, Options) ->
+	{
+		Id,
+		{server_sup, start_link, [Id] ++ Options},
+		permanent,
+		infinity,
+		supervisor,
+		[server_sup]
+	}.
 
 
 start_link(Id, Module, Port) ->

@@ -30,21 +30,14 @@ init([]) ->
 	case application:get_env(hotchpotch, interfaces) of
 		{ok, Interfaces} ->
 			ChildSpecs = lists:map(
-				fun({Id, Module, Port}) ->
-					{
-						list_to_atom(Id ++ "_server_sup"),
-						{server_sup, start_link, [Id, Module, Port]},
-						permanent,
-						infinity,
-						supervisor,
-						[server_sup]
-					}
+				fun({Id, Module, Options}) ->
+					Module:get_supervisor_spec(Id, Options)
 				end,
 				Interfaces),
 			{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}};
 
 		undefined ->
-			error_logger:error_msg("Network interfaces section missing in configuration!~n"),
+			error_logger:error_msg("Interfaces section missing in configuration!~n"),
 			{error, nointerfaces}
 	end.
 

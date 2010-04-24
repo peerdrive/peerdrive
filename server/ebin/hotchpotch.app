@@ -16,6 +16,7 @@
 			file_store_importer,
 			file_store_reader,
 			file_store_writer,
+			fuse,
 			gen_servlet,
 			hotchpotch,
 			hotchpotch_app,
@@ -74,7 +75,8 @@
 				}
 			]},
 			{interfaces, [
-				{"client", client_servlet, 4567}
+				{"client", server_sup, [client_servlet, 4567]},
+				{"fuse", fuse, [false, "/tmp/hotchpotch", "default_permissions"]}
 			]}
 		]}
 	]
