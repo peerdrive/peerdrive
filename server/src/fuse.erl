@@ -394,6 +394,8 @@ doc_make_node({doc, Store, Uuid} = Oid) ->
 							doc_make_node_dict(Oid);
 						<<"org.hotchpotch.dict">> ->
 							doc_make_node_dict(Oid);
+						<<"org.hotchpotch.set">> ->
+							doc_make_node_set(Oid);
 						_ ->
 							doc_make_node_file(Oid)
 					end;
@@ -406,6 +408,10 @@ doc_make_node({doc, Store, Uuid} = Oid) ->
 			error
 	end.
 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Directory documents
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 doc_make_node_dict(Oid) ->
 	{ok, #inode{
@@ -509,6 +515,152 @@ dict_read_entries(Store, Uuid) ->
 	end.
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Set documents
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+doc_make_node_set(Oid) ->
+	{ok, #inode{
+		timeout = 5,
+		oid     = Oid,
+		ifc     = #ifc{
+			getattr = fun set_getattr/2,
+			lookup  = fun set_lookup/2,
+			getnode = fun set_getnode/1,
+			opendir = fun set_opendir/1
+		}
+	}}.
+
+
+set_getattr({doc, Store, Uuid}, Ino) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case store:stat(Store, Rev) of
+				{ok, _Flags, _Parts, _Parents, Mtime, _Uti} ->
+					{ok, #stat{
+						st_ino   = Ino,
+						st_mode  = ?S_IFDIR bor 8#0555,
+						st_nlink = 1,
+						st_atime = Mtime,
+						st_mtime = Mtime,
+						st_ctime = Mtime
+					}};
+				error ->
+					error
+			end;
+		error ->
+			error
+	end.
+
+
+set_lookup({doc, Store, Uuid}, Name) ->
+	case set_read_entries(Store, Uuid) of
+		{ok, Entries} ->
+			case find_entry(fun(E) -> set_lookup_cmp(Store, Name, E) end, Entries) of
+				{value, Oid} -> {entry, Oid};
+				none         -> error
+			end;
+
+		_ ->
+			error
+	end.
+
+
+set_lookup_cmp(Store, Name, {dlink, Child, _Revs}) ->
+	case list_to_binary(set_read_title(Store, Child)) of
+		Name -> {ok, {doc, Store, Child}};
+		_    -> error
+	end;
+
+set_lookup_cmp(_, _, _) ->
+	error.
+
+
+set_getnode({doc, _Store, _Uuid} = Oid) ->
+	doc_make_node(Oid);
+set_getnode(_) ->
+	error.
+
+
+set_opendir({doc, Store, Uuid}) ->
+	case set_read_entries(Store, Uuid) of
+		{ok, Entries} ->
+			Content = map_filter(
+				fun(E) -> set_opendir_filter(Store, E) end,
+				Entries),
+			{ok, Content};
+
+		error ->
+			error
+	end.
+
+
+set_opendir_filter(Store, {dlink, Child, _Revs}) ->
+	Oid = {doc, Store, Child},
+	case doc_make_node(Oid) of
+		{ok, #inode{ifc=#ifc{getattr=GetAttr}}} ->
+			case GetAttr(Oid, 0) of
+				{ok, Attr} ->
+					Name = set_read_title(Store, Child),
+					{ok, #direntry{name=Name, stat=Attr}};
+				error ->
+					skip
+			end;
+		error ->
+			skip
+	end;
+set_opendir_filter(_, _) ->
+	skip.
+
+
+set_read_title(Store, Uuid) ->
+	case set_read_title_meta(Store, Uuid) of
+		{ok, Title} -> binary_to_list(Title);
+		error       -> "." ++ util:bin_to_hexstr(Uuid)
+	end.
+
+set_read_title_meta(Store, Uuid) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case util:read_rev_struct(Rev, <<"META">>) of
+				{ok, Meta} ->
+					case meta_read_entry(Meta, [<<"org.hotchpotch.annotation">>, <<"title">>]) of
+						{ok, Title} when is_binary(Title) ->
+							{ok, Title};
+						{ok, _} ->
+							error;
+						error ->
+							error
+					end;
+				{error, _} ->
+					error
+			end;
+		error ->
+			error
+	end.
+
+
+set_read_entries(Store, Uuid) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case util:read_rev_struct(Rev, <<"HPSD">>) of
+				{ok, Entries}=Result when is_list(Entries) ->
+					Result;
+				{ok, _} ->
+					error;
+				{error, _} ->
+					error
+			end;
+		error ->
+			error
+	end.
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% All other documents
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 doc_make_node_file(Oid) ->
 	{ok, #inode{
 		timeout = 5,
@@ -570,4 +722,15 @@ find_entry(F, [H|T]) ->
 		{ok, Result} -> {value, Result};
 		error        -> find_entry(F, T)
 	end.
+
+
+meta_read_entry(Meta, []) ->
+	{ok, Meta};
+meta_read_entry(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
+	case dict:find(Step, Meta) of
+		{ok, Value} -> meta_read_entry(Value, Path);
+		error       -> error
+	end;
+meta_read_entry(_Meta, _Path) ->
+	error.
 
