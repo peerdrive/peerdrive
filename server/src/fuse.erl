@@ -24,12 +24,12 @@
 % dirs:   dict: id -> [#direntry]
 -record(state, { inodes, cache, dirs, count }).
 
--record(inode, {refcnt, parent, timeout, oid, attr, ifc}).
--record(ifc, {lookup, getnode, opendir}).
+-record(inode, {refcnt, parent, timeout, oid, ifc}).
+-record(ifc, {getattr, lookup, getnode, opendir}).
 
 -define(UNKNOWN_INO, 16#ffffffff).
--define (DIRATTR (X), #stat{ st_ino = (X), 
-                             st_mode = ?S_IFDIR bor 8#0555, 
+-define (DIRATTR (X), #stat{ st_ino = (X),
+                             st_mode = ?S_IFDIR bor 8#0555,
                              st_nlink = 1 }).
 -define (LINKATTR, #stat{ st_mode = ?S_IFLNK bor 8#0555, st_nlink = 1 }).
 
@@ -87,8 +87,13 @@ terminate (_Reason, _State) -> ok.
 
 getattr(_, Ino, _Cont, #state{inodes=Inodes} = S) ->
 	case gb_trees:lookup(Ino, Inodes) of
-		{value, #inode{attr=Attr}} ->
-			{#fuse_reply_attr{attr=Attr, attr_timeout_ms=1000}, S};
+		{value, #inode{oid=Oid, timeout=Timeout, ifc=#ifc{getattr=GetAttr}}} ->
+			case GetAttr(Oid, Ino) of
+				{ok, Attr} ->
+					{#fuse_reply_attr{attr=Attr, attr_timeout_ms=Timeout}, S};
+				error ->
+					{#fuse_reply_err{err=enoent}, S}
+			end;
 		none ->
 			{#fuse_reply_err{ err = enoent }, S}
 	end.
@@ -102,43 +107,59 @@ lookup(_, Parent, Name, _Cont, #state{inodes=Inodes, cache=Cache, count=Count} =
 					case gb_trees:lookup({Parent, ChildOid}, Cache) of
 						{value, ChildIno} ->
 							ChildNode = gb_trees:get(ChildIno, Inodes),
-							{#fuse_reply_entry{fuse_entry_param=
-								#fuse_entry_param{
-									ino              = ChildIno,
-									generation       = 1,
-									attr_timeout_ms  = ChildNode#inode.timeout,
-									entry_timeout_ms = Timeout,
-									attr             = ChildNode#inode.attr
-								}},
-								S#state{
-									inodes = gb_trees:update(ChildIno,
-										ChildNode#inode{refcnt=ChildNode#inode.refcnt+1},
-										Inodes)
-								}
-							};
+							case ((ChildNode#inode.ifc)#ifc.getattr)(ChildOid, ChildIno) of
+								{ok, Attr} ->
+									{#fuse_reply_entry{fuse_entry_param=
+										#fuse_entry_param{
+											ino              = ChildIno,
+											generation       = 1,
+											attr_timeout_ms  = ChildNode#inode.timeout,
+											entry_timeout_ms = Timeout,
+											attr             = Attr
+										}},
+										S#state{
+											inodes = gb_trees:update(ChildIno,
+												ChildNode#inode{refcnt=ChildNode#inode.refcnt+1},
+												Inodes)
+										}
+									};
+
+								error ->
+									{#fuse_reply_err{ err = enoent }, S}
+							end;
 
 						none ->
 							NewCount = Count+1,
-							ChildNode = GetNode(ChildOid, NewCount),
-							{#fuse_reply_entry{fuse_entry_param=
-								#fuse_entry_param{
-									ino              = NewCount,
-									generation       = 1,
-									attr_timeout_ms  = ChildNode#inode.timeout,
-									entry_timeout_ms = Timeout,
-									attr             = ChildNode#inode.attr
-								}},
-								S#state{
-									inodes = gb_trees:insert(NewCount,
-										ChildNode#inode{refcnt=1, parent=Parent},
-										Inodes),
-									cache = gb_trees:insert({Parent, ChildOid},
-										NewCount, Cache),
-									count = NewCount
-								}
-							}
+							case GetNode(ChildOid) of
+								{ok, #inode{ifc=#ifc{getattr=GetAttr}}=ChildNode} ->
+									case GetAttr(ChildOid, NewCount) of
+										{ok, Attr} ->
+											{#fuse_reply_entry{fuse_entry_param=
+												#fuse_entry_param{
+													ino              = NewCount,
+													generation       = 1,
+													attr_timeout_ms  = ChildNode#inode.timeout,
+													entry_timeout_ms = Timeout,
+													attr             = Attr
+												}},
+												S#state{
+													inodes = gb_trees:insert(NewCount,
+														ChildNode#inode{refcnt=1, parent=Parent},
+														Inodes),
+													cache = gb_trees:insert({Parent, ChildOid},
+														NewCount, Cache),
+													count = NewCount
+												}
+											};
+										error ->
+											{#fuse_reply_err{ err = enoent }, S}
+									end;
+
+								error ->
+									{#fuse_reply_err{ err = enoent }, S}
+							end
 					end;
-					
+
 				error ->
 					{#fuse_reply_err{ err = enoent }, S}
 			end;
@@ -217,9 +238,9 @@ readdir(_Ctx, _Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
 	Id = Fi#fuse_file_info.fh,
 	Entries = gb_trees:get(Id, Dirs),
 	DirEntryList = take_while(
-		fun (E, {Total, Max}) -> 
+		fun (E, {Total, Max}) ->
 			Cur = fuserlsrv:dirent_size (E),
-			if 
+			if
 				Total + Cur =< Max -> {continue, {Total + Cur, Max}};
 				true -> stop
 			end
@@ -233,26 +254,6 @@ releasedir(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{dirs=Dirs} = S) ->
 	{#fuse_reply_err{err=ok}, S#state{dirs=gb_trees:delete(Id, Dirs)}}.
 
 
-
-safe_nthtail (_, []) -> 
-	[];
-safe_nthtail (N, L) when N =< 0 ->
-	L;
-safe_nthtail (N, L) ->
-	safe_nthtail (N - 1, tl (L)).
-
-
-take_while (_, _, []) -> 
-	[];
-take_while (F, Acc, [ H | T ]) ->
-	case F (H, Acc) of
-		{ continue, NewAcc } ->
-			[ H | take_while (F, NewAcc, T) ];
-		stop ->
-			[]
-	end.
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Root directory
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -263,10 +264,10 @@ root_make_node() ->
 		parent  = 1,
 		timeout = 1000,
 		oid     = root,
-		attr    = ?DIRATTR(1),
 		ifc     = #ifc{
+			getattr = fun(_,_) -> {ok, ?DIRATTR(1)} end,
 			lookup  = fun root_lookup/2,
-			getnode = fun root_getnode/2,
+			getnode = fun root_getnode/1,
 			opendir = fun root_opendir/1
 		}
 	}.
@@ -280,12 +281,12 @@ root_lookup(root, <<"stores">>) ->
 root_lookup(_, _) ->
 	error.
 
-root_getnode(docs, Ino) ->
-	docs_make_node(Ino);
-root_getnode(revs, Ino) ->
-	revs_make_node(Ino);
-root_getnode(stores, Ino) ->
-	stores_make_node(Ino).
+root_getnode(docs) ->
+	docs_make_node();
+root_getnode(revs) ->
+	revs_make_node();
+root_getnode(stores) ->
+	stores_make_node().
 
 root_opendir(root) ->
 	{ok, [
@@ -298,59 +299,275 @@ root_opendir(root) ->
 %% Generic empty directory
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-emptydir_make_node(Oid, Ino) ->
-	#inode{
+emptydir_make_node(Oid) ->
+	{ok, #inode{
 		timeout = 1000,
 		oid     = Oid,
-		attr    = ?DIRATTR(Ino),
 		ifc     = #ifc{
+			getattr = fun(_, Ino) -> {ok, ?DIRATTR(Ino)} end,
 			lookup  = fun(_, _) -> error end,
-			getnode = fun(_, _) -> error end,
+			getnode = fun(_) -> error end,
 			opendir = fun(_) -> {ok, []} end
 		}
-	}.
+	}}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Docs directory
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-docs_make_node(Ino) ->
-	emptydir_make_node(docs, Ino).
+docs_make_node() ->
+	emptydir_make_node(docs).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Revs directory
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-revs_make_node(Ino) ->
-	emptydir_make_node(revs, Ino).
+revs_make_node() ->
+	emptydir_make_node(revs).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stores directory
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-stores_make_node(Ino) ->
-	#inode{
+stores_make_node() ->
+	{ok, #inode{
 		timeout = 5,
 		oid     = stores,
-		attr    = ?DIRATTR(Ino),
 		ifc     = #ifc{
+			getattr = fun(_,Ino) -> {ok, ?DIRATTR(Ino)} end,
 			lookup  = fun stores_lookup/2,
-			getnode = fun stores_getnode/2,
+			getnode = fun stores_getnode/1,
 			opendir = fun stores_opendir/1
 		}
-	}.
+	}}.
+
 
 stores_lookup(stores, Name) ->
-	{entry, list_to_atom("_store_" ++ binary_to_list(Name))}.
+	case find_entry(
+		fun({Id, _Descr, Guid, _Tags}) ->
+			BinId = list_to_binary(atom_to_list(Id)),
+			if
+				BinId == Name ->
+					case volman:store(Guid) of
+						{ok, Store} -> {ok, {doc, Store, Guid}};
+						error       -> error
+					end;
 
-stores_getnode(Oid, Ino) ->
-	emptydir_make_node(Oid, Ino).
+				true ->
+					error
+			end
+		end,
+		volman:enum())
+	of
+		{value, Oid} -> {entry, Oid};
+		none         -> error
+	end.
+
+
+stores_getnode(Oid) ->
+	doc_make_node(Oid).
+
 
 stores_opendir(stores) ->
 	Stores = lists:map(
 		fun({Id, _Descr, _Guid, _Tags}) ->
 			#direntry{ name = atom_to_list(Id), stat = ?DIRATTR(0) }
 		end,
-		volman:enum()),
+		lists:filter(
+			fun({_Id, _Descr, _Guid, Tags}) ->
+				proplists:is_defined(mounted, Tags)
+			end,
+			volman:enum())),
 	{ok, Stores}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Documents
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+doc_make_node({doc, Store, Uuid} = Oid) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case store:stat(Store, Rev) of
+				{ok, _Flags, _Parts, _Parents, _Mtime, Uti} ->
+					case Uti of
+						<<"org.hotchpotch.volume">> ->
+							doc_make_node_dict(Oid);
+						<<"org.hotchpotch.dict">> ->
+							doc_make_node_dict(Oid);
+						_ ->
+							doc_make_node_file(Oid)
+					end;
+
+				error ->
+					error
+			end;
+
+		error ->
+			error
+	end.
+
+
+doc_make_node_dict(Oid) ->
+	{ok, #inode{
+		timeout = 5,
+		oid     = Oid,
+		ifc     = #ifc{
+			getattr = fun dict_getattr/2,
+			lookup  = fun dict_lookup/2,
+			getnode = fun dict_getnode/1,
+			opendir = fun dict_opendir/1
+		}
+	}}.
+
+
+dict_getattr({doc, Store, Uuid}, Ino) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case store:stat(Store, Rev) of
+				{ok, _Flags, _Parts, _Parents, Mtime, _Uti} ->
+					{ok, #stat{
+						st_ino   = Ino,
+						st_mode  = ?S_IFDIR bor 8#0555,
+						st_nlink = 1,
+						st_atime = Mtime,
+						st_mtime = Mtime,
+						st_ctime = Mtime
+					}};
+				error ->
+					error
+			end;
+		error ->
+			error
+	end.
+
+
+dict_lookup({doc, Store, Uuid}, Name) ->
+	case dict_read_entries(Store, Uuid) of
+		{ok, Entries} ->
+			case dict:find(Name, Entries) of
+				{ok, {dlink, ChildUuid, _Revs}} ->
+					{entry, {doc, Store, ChildUuid}};
+
+				_ ->
+					error
+			end;
+
+		_ ->
+			error
+	end.
+
+
+dict_getnode({doc, _Store, _Uuid} = Oid) ->
+	doc_make_node(Oid);
+dict_getnode(_) ->
+	error.
+
+
+dict_opendir({doc, Store, Uuid}) ->
+	case dict_read_entries(Store, Uuid) of
+		{ok, Entries} ->
+			Content = map_filter(
+				fun(E) -> dict_opendir_filter(Store, E) end,
+				dict:to_list(Entries)),
+			{ok, Content};
+
+		error ->
+			error
+	end.
+
+
+dict_opendir_filter(Store, {Name, {dlink, Child, _Revs}}) ->
+	Oid = {doc, Store, Child},
+	case doc_make_node(Oid) of
+		{ok, #inode{ifc=#ifc{getattr=GetAttr}}} ->
+			case GetAttr(Oid, 0) of
+				{ok, Attr} ->
+					{ok, #direntry{name=binary_to_list(Name), stat=Attr}};
+				error ->
+					skip
+			end;
+		error ->
+			skip
+	end;
+dict_opendir_filter(_, _) ->
+	skip.
+
+
+dict_read_entries(Store, Uuid) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case util:read_rev_struct(Rev, <<"HPSD">>) of
+				{ok, Entries}=Result when is_record(Entries, dict, 9) ->
+					Result;
+				{ok, _} ->
+					error;
+				{error, _} ->
+					error
+			end;
+		error ->
+			error
+	end.
+
+
+doc_make_node_file(Oid) ->
+	{ok, #inode{
+		timeout = 5,
+		oid     = Oid,
+		ifc     = #ifc{
+			getattr = fun(_, Ino) ->
+				{ok, #stat{
+					st_ino   = Ino,
+					st_mode  = ?S_IFREG bor 8#0444,
+					st_nlink = 1
+				}}
+			end,
+			lookup  = fun(_, _) -> error end,
+			getnode = fun(_, _) -> error end,
+			opendir = fun(_) -> {errror, enotdir} end
+		}
+	}}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Utility functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+safe_nthtail (_, []) ->
+	[];
+safe_nthtail (N, L) when N =< 0 ->
+	L;
+safe_nthtail (N, L) ->
+	safe_nthtail (N - 1, tl (L)).
+
+
+take_while (_, _, []) ->
+	[];
+take_while (F, Acc, [ H | T ]) ->
+	case F (H, Acc) of
+		{ continue, NewAcc } ->
+			[ H | take_while (F, NewAcc, T) ];
+		stop ->
+			[]
+	end.
+
+
+map_filter(F, L) ->
+	map_filter_loop(F, L, []).
+
+map_filter_loop(_, [], Acc) ->
+	Acc;
+map_filter_loop(F, [H | T], Acc) ->
+	case F(H) of
+		{ok, Value} -> map_filter_loop(F, T, [Value | Acc]);
+		skip        -> map_filter_loop(F, T, Acc)
+	end.
+
+
+find_entry(_, []) ->
+	none;
+find_entry(F, [H|T]) ->
+	case F(H) of
+		{ok, Result} -> {value, Result};
+		error        -> find_entry(F, T)
+	end.
 
