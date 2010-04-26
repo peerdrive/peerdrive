@@ -24,7 +24,7 @@
 % dirs:   dict: id -> [#direntry]
 -record(state, { inodes, cache, dirs, count }).
 
--record(inode, {refcnt, parent, timeout, oid, ifc}).
+-record(inode, {refcnt, parent, timeout, oid, ifc, cache}).
 -record(ifc, {getattr, lookup, getnode, opendir}).
 
 -define(UNKNOWN_INO, 16#ffffffff).
@@ -99,72 +99,90 @@ getattr(_, Ino, _Cont, #state{inodes=Inodes} = S) ->
 	end.
 
 
-lookup(_, Parent, Name, _Cont, #state{inodes=Inodes, cache=Cache, count=Count} = S) ->
+lookup(_, Parent, Name, _Cont, #state{inodes=Inodes, cache=Cache} = S) ->
 	case gb_trees:lookup(Parent, Inodes) of
-		{value, #inode{oid=Oid, timeout=Timeout, ifc=#ifc{lookup=Lookup, getnode=GetNode}}} ->
-			case Lookup(Oid, Name) of
-				{entry, ChildOid} ->
+		{value, #inode{oid=Oid, timeout=Timeout, ifc=#ifc{lookup=Lookup,
+		getnode=GetNode}, cache=ParentCache} = ParentNode} ->
+			case Lookup(Oid, Name, ParentCache) of
+				{entry, ChildOid, NewParentCache} ->
+					S2 = S#state{inodes=gb_trees:update(Parent,
+						ParentNode#inode{cache=NewParentCache}, Inodes)},
 					case gb_trees:lookup({Parent, ChildOid}, Cache) of
 						{value, ChildIno} ->
-							ChildNode = gb_trees:get(ChildIno, Inodes),
-							case ((ChildNode#inode.ifc)#ifc.getattr)(ChildOid, ChildIno) of
-								{ok, Attr} ->
-									{#fuse_reply_entry{fuse_entry_param=
-										#fuse_entry_param{
-											ino              = ChildIno,
-											generation       = 1,
-											attr_timeout_ms  = ChildNode#inode.timeout,
-											entry_timeout_ms = Timeout,
-											attr             = Attr
-										}},
-										S#state{
-											inodes = gb_trees:update(ChildIno,
-												ChildNode#inode{refcnt=ChildNode#inode.refcnt+1},
-												Inodes)
-										}
-									};
-
-								error ->
-									{#fuse_reply_err{ err = enoent }, S}
-							end;
+							lookup_cached(ChildOid, ChildIno, Timeout, S2);
 
 						none ->
-							NewCount = Count+1,
-							case GetNode(ChildOid) of
-								{ok, #inode{ifc=#ifc{getattr=GetAttr}}=ChildNode} ->
-									case GetAttr(ChildOid, NewCount) of
-										{ok, Attr} ->
-											{#fuse_reply_entry{fuse_entry_param=
-												#fuse_entry_param{
-													ino              = NewCount,
-													generation       = 1,
-													attr_timeout_ms  = ChildNode#inode.timeout,
-													entry_timeout_ms = Timeout,
-													attr             = Attr
-												}},
-												S#state{
-													inodes = gb_trees:insert(NewCount,
-														ChildNode#inode{refcnt=1, parent=Parent},
-														Inodes),
-													cache = gb_trees:insert({Parent, ChildOid},
-														NewCount, Cache),
-													count = NewCount
-												}
-											};
-										error ->
-											{#fuse_reply_err{ err = enoent }, S}
-									end;
-
-								error ->
-									{#fuse_reply_err{ err = enoent }, S}
-							end
+							lookup_new(Parent, ChildOid, GetNode, Timeout, S2)
 					end;
+
+				{error, NewParentCache} ->
+					{
+						#fuse_reply_err{ err = enoent },
+						S#state{inodes=gb_trees:update(Parent,
+							ParentNode#inode{cache=NewParentCache}, Inodes)}
+					};
 
 				error ->
 					{#fuse_reply_err{ err = enoent }, S}
 			end;
 
 		none ->
+			{#fuse_reply_err{ err = enoent }, S}
+	end.
+
+
+lookup_cached(ChildOid, ChildIno, Timeout, #state{inodes=Inodes}=S) ->
+	ChildNode = gb_trees:get(ChildIno, Inodes),
+	case ((ChildNode#inode.ifc)#ifc.getattr)(ChildOid, ChildIno) of
+		{ok, Attr} ->
+			{#fuse_reply_entry{fuse_entry_param=
+				#fuse_entry_param{
+					ino              = ChildIno,
+					generation       = 1,
+					attr_timeout_ms  = ChildNode#inode.timeout,
+					entry_timeout_ms = Timeout,
+					attr             = Attr
+				}},
+				S#state{
+					inodes = gb_trees:update(ChildIno,
+						ChildNode#inode{refcnt=ChildNode#inode.refcnt+1},
+						Inodes)
+				}
+			};
+
+		error ->
+			{#fuse_reply_err{ err = enoent }, S}
+	end.
+
+
+lookup_new(Parent, ChildOid, GetNode, Timeout, #state{inodes=Inodes, cache=Cache, count=Count}=S) ->
+	NewCount = Count+1,
+	case GetNode(ChildOid) of
+		{ok, #inode{ifc=#ifc{getattr=GetAttr}}=ChildNode} ->
+			case GetAttr(ChildOid, NewCount) of
+				{ok, Attr} ->
+					{#fuse_reply_entry{fuse_entry_param=
+						#fuse_entry_param{
+							ino              = NewCount,
+							generation       = 1,
+							attr_timeout_ms  = ChildNode#inode.timeout,
+							entry_timeout_ms = Timeout,
+							attr             = Attr
+						}},
+						S#state{
+							inodes = gb_trees:insert(NewCount,
+								ChildNode#inode{refcnt=1, parent=Parent},
+								Inodes),
+							cache = gb_trees:insert({Parent, ChildOid},
+								NewCount, Cache),
+							count = NewCount
+						}
+					};
+				error ->
+					{#fuse_reply_err{ err = enoent }, S}
+			end;
+
+		error ->
 			{#fuse_reply_err{ err = enoent }, S}
 	end.
 
@@ -194,9 +212,9 @@ forget(_, Ino, N, _Cont, #state{inodes=Inodes, cache=Cache} = State) ->
 
 opendir(_, Ino, Fi, _Cont, #state{inodes=Inodes, dirs=Dirs} = S) ->
 	case gb_trees:lookup(Ino, Inodes) of
-		{value, #inode{oid=Oid, parent=Parent, ifc=#ifc{opendir=OpenDir}}} ->
-			case OpenDir(Oid) of
-				{ok, Entries} ->
+		{value, #inode{oid=Oid, parent=Parent, ifc=#ifc{opendir=OpenDir}, cache=Cache}=Node} ->
+			case OpenDir(Oid, Cache) of
+				{ok, Entries, NewCache} ->
 					Id = case gb_trees:is_empty(Dirs) of
 						true  -> 1;
 						false -> {Max, _} = gb_trees:largest(Dirs), Max+1
@@ -217,12 +235,22 @@ opendir(_, Ino, Fi, _Cont, #state{inodes=Inodes, dirs=Dirs} = S) ->
 						#direntry{ name = ".", offset = 1, stat = ?DIRATTR(Ino) },
 						#direntry{ name = "..", offset = 2, stat = ?DIRATTR(Parent) }
 					] ++ UpdatedEntries,
-					NewDirs = gb_trees:enter(Id, AllEntries, Dirs),
 					{
-						#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{
-							fh = Id
-						}},
-						S#state{dirs=NewDirs}
+						#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{fh = Id}},
+						S#state{
+							dirs   = gb_trees:enter(Id, AllEntries, Dirs),
+							inodes = gb_trees:update(Ino, Node#inode{cache=NewCache},
+								Inodes)
+						}
+					};
+
+				{error, Error, NewCache} ->
+					{
+						#fuse_reply_err{ err = Error },
+						S#state{
+							inodes = gb_trees:update(Ino, Node#inode{cache=NewCache},
+								Inodes)
+						}
 					};
 
 				{error, Error} ->
@@ -266,19 +294,19 @@ root_make_node() ->
 		oid     = root,
 		ifc     = #ifc{
 			getattr = fun(_,_) -> {ok, ?DIRATTR(1)} end,
-			lookup  = fun root_lookup/2,
+			lookup  = fun root_lookup/3,
 			getnode = fun root_getnode/1,
-			opendir = fun root_opendir/1
+			opendir = fun root_opendir/2
 		}
 	}.
 
-root_lookup(root, <<"docs">>) ->
-	{entry, docs};
-root_lookup(root, <<"revs">>) ->
-	{entry, revs};
-root_lookup(root, <<"stores">>) ->
-	{entry, stores};
-root_lookup(_, _) ->
+root_lookup(root, <<"docs">>, Cache) ->
+	{entry, docs, Cache};
+root_lookup(root, <<"revs">>, Cache) ->
+	{entry, revs, Cache};
+root_lookup(root, <<"stores">>, Cache) ->
+	{entry, stores, Cache};
+root_lookup(_, _, _) ->
 	error.
 
 root_getnode(docs) ->
@@ -288,12 +316,12 @@ root_getnode(revs) ->
 root_getnode(stores) ->
 	stores_make_node().
 
-root_opendir(root) ->
+root_opendir(root, Cache) ->
 	{ok, [
 		#direntry{ name = "docs",   stat = ?DIRATTR(0) },
 		#direntry{ name = "revs",   stat = ?DIRATTR(0) },
 		#direntry{ name = "stores", stat = ?DIRATTR(0) }
-	]}.
+	], Cache}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Generic empty directory
@@ -305,9 +333,9 @@ emptydir_make_node(Oid) ->
 		oid     = Oid,
 		ifc     = #ifc{
 			getattr = fun(_, Ino) -> {ok, ?DIRATTR(Ino)} end,
-			lookup  = fun(_, _) -> error end,
+			lookup  = fun(_, _, _) -> error end,
 			getnode = fun(_) -> error end,
-			opendir = fun(_) -> {ok, []} end
+			opendir = fun(_, Cache) -> {ok, [], Cache} end
 		}
 	}}.
 
@@ -335,14 +363,14 @@ stores_make_node() ->
 		oid     = stores,
 		ifc     = #ifc{
 			getattr = fun(_,Ino) -> {ok, ?DIRATTR(Ino)} end,
-			lookup  = fun stores_lookup/2,
+			lookup  = fun stores_lookup/3,
 			getnode = fun stores_getnode/1,
-			opendir = fun stores_opendir/1
+			opendir = fun stores_opendir/2
 		}
 	}}.
 
 
-stores_lookup(stores, Name) ->
+stores_lookup(stores, Name, Cache) ->
 	case find_entry(
 		fun({Id, _Descr, Guid, _Tags}) ->
 			BinId = list_to_binary(atom_to_list(Id)),
@@ -359,7 +387,7 @@ stores_lookup(stores, Name) ->
 		end,
 		volman:enum())
 	of
-		{value, Oid} -> {entry, Oid};
+		{value, Oid} -> {entry, Oid, Cache};
 		none         -> error
 	end.
 
@@ -368,7 +396,7 @@ stores_getnode(Oid) ->
 	doc_make_node(Oid).
 
 
-stores_opendir(stores) ->
+stores_opendir(stores, Cache) ->
 	Stores = lists:map(
 		fun({Id, _Descr, _Guid, _Tags}) ->
 			#direntry{ name = atom_to_list(Id), stat = ?DIRATTR(0) }
@@ -378,7 +406,7 @@ stores_opendir(stores) ->
 				proplists:is_defined(mounted, Tags)
 			end,
 			volman:enum())),
-	{ok, Stores}.
+	{ok, Stores, Cache}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Documents
@@ -419,10 +447,11 @@ doc_make_node_dict(Oid) ->
 		oid     = Oid,
 		ifc     = #ifc{
 			getattr = fun dict_getattr/2,
-			lookup  = fun dict_lookup/2,
+			lookup  = fun dict_lookup/3,
 			getnode = fun dict_getnode/1,
-			opendir = fun dict_opendir/1
-		}
+			opendir = fun dict_opendir/2
+		},
+		cache = {undefined, undefined}
 	}}.
 
 
@@ -447,15 +476,15 @@ dict_getattr({doc, Store, Uuid}, Ino) ->
 	end.
 
 
-dict_lookup({doc, Store, Uuid}, Name) ->
-	case dict_read_entries(Store, Uuid) of
-		{ok, Entries} ->
+dict_lookup({doc, Store, Uuid}, Name, Cache) ->
+	case dict_read_entries(Store, Uuid, Cache) of
+		{ok, Entries, NewCache} ->
 			case dict:find(Name, Entries) of
 				{ok, {dlink, ChildUuid, _Revs}} ->
-					{entry, {doc, Store, ChildUuid}};
+					{entry, {doc, Store, ChildUuid}, NewCache};
 
 				_ ->
-					error
+					{error, NewCache}
 			end;
 
 		_ ->
@@ -469,16 +498,16 @@ dict_getnode(_) ->
 	error.
 
 
-dict_opendir({doc, Store, Uuid}) ->
-	case dict_read_entries(Store, Uuid) of
-		{ok, Entries} ->
+dict_opendir({doc, Store, Uuid}, Cache) ->
+	case dict_read_entries(Store, Uuid, Cache) of
+		{ok, Entries, NewCache} ->
 			Content = map_filter(
 				fun(E) -> dict_opendir_filter(Store, E) end,
 				dict:to_list(Entries)),
-			{ok, Content};
+			{ok, Content, NewCache};
 
 		error ->
-			error
+			{error, enoent}
 	end.
 
 
@@ -499,12 +528,15 @@ dict_opendir_filter(_, _) ->
 	skip.
 
 
-dict_read_entries(Store, Uuid) ->
+dict_read_entries(Store, Uuid, {CacheRev, CacheEntries}=Cache) ->
 	case store:lookup(Store, Uuid) of
+		{ok, CacheRev} ->
+			{ok, CacheEntries, Cache};
+
 		{ok, Rev} ->
 			case util:read_rev_struct(Rev, <<"HPSD">>) of
-				{ok, Entries}=Result when is_record(Entries, dict, 9) ->
-					Result;
+				{ok, Entries} when is_record(Entries, dict, 9) ->
+					{ok, Entries, {Rev, Entries}};
 				{ok, _} ->
 					error;
 				{error, _} ->
@@ -525,10 +557,11 @@ doc_make_node_set(Oid) ->
 		oid     = Oid,
 		ifc     = #ifc{
 			getattr = fun set_getattr/2,
-			lookup  = fun set_lookup/2,
+			lookup  = fun set_lookup/3,
 			getnode = fun set_getnode/1,
-			opendir = fun set_opendir/1
-		}
+			opendir = fun set_opendir/2
+		},
+		cache = {undefined, undefined}
 	}}.
 
 
@@ -553,12 +586,12 @@ set_getattr({doc, Store, Uuid}, Ino) ->
 	end.
 
 
-set_lookup({doc, Store, Uuid}, Name) ->
-	case set_read_entries(Store, Uuid) of
-		{ok, Entries} ->
-			case find_entry(fun(E) -> set_lookup_cmp(Store, Name, E) end, Entries) of
-				{value, Oid} -> {entry, Oid};
-				none         -> error
+set_lookup({doc, Store, Uuid}, Name, Cache) ->
+	case set_read_entries(Store, Uuid, Cache) of
+		{ok, Entries, NewCache} ->
+			case find_entry(fun(E) -> set_lookup_cmp(Name, E) end, Entries) of
+				{value, Oid} -> {entry, Oid, NewCache};
+				none         -> {error, NewCache}
 			end;
 
 		_ ->
@@ -566,13 +599,13 @@ set_lookup({doc, Store, Uuid}, Name) ->
 	end.
 
 
-set_lookup_cmp(Store, Name, {dlink, Child, _Revs}) ->
-	case list_to_binary(set_read_title(Store, Child)) of
-		Name -> {ok, {doc, Store, Child}};
+set_lookup_cmp(Name, {Title, Oid}) ->
+	case list_to_binary(Title) of
+		Name -> {ok, Oid};
 		_    -> error
 	end;
 
-set_lookup_cmp(_, _, _) ->
+set_lookup_cmp(_, _) ->
 	error.
 
 
@@ -582,26 +615,22 @@ set_getnode(_) ->
 	error.
 
 
-set_opendir({doc, Store, Uuid}) ->
-	case set_read_entries(Store, Uuid) of
-		{ok, Entries} ->
-			Content = map_filter(
-				fun(E) -> set_opendir_filter(Store, E) end,
-				Entries),
-			{ok, Content};
+set_opendir({doc, Store, Uuid}, Cache) ->
+	case set_read_entries(Store, Uuid, Cache) of
+		{ok, Entries, NewCache} ->
+			Content = map_filter(fun set_opendir_filter/1, Entries),
+			{ok, Content, NewCache};
 
 		error ->
-			error
+			{error, enoent}
 	end.
 
 
-set_opendir_filter(Store, {dlink, Child, _Revs}) ->
-	Oid = {doc, Store, Child},
+set_opendir_filter({Name, {doc, _, _}=Oid}) ->
 	case doc_make_node(Oid) of
 		{ok, #inode{ifc=#ifc{getattr=GetAttr}}} ->
 			case GetAttr(Oid, 0) of
 				{ok, Attr} ->
-					Name = set_read_title(Store, Child),
 					{ok, #direntry{name=Name, stat=Attr}};
 				error ->
 					skip
@@ -609,14 +638,43 @@ set_opendir_filter(Store, {dlink, Child, _Revs}) ->
 		error ->
 			skip
 	end;
-set_opendir_filter(_, _) ->
+set_opendir_filter(_) ->
+	skip.
+
+
+set_read_entries(Store, Uuid, {CacheRev, CacheEntries}=Cache) ->
+	case store:lookup(Store, Uuid) of
+		{ok, CacheRev} ->
+			{ok, CacheEntries, Cache};
+
+		{ok, Rev} ->
+			case util:read_rev_struct(Rev, <<"HPSD">>) of
+				{ok, Entries} when is_list(Entries) ->
+					List = map_filter(
+						fun(E) -> set_read_entries_filter(Store, E) end,
+						Entries),
+					{ok, List, {Rev, List}};
+				{ok, _} ->
+					error;
+				{error, _} ->
+					error
+			end;
+		error ->
+			error
+	end.
+
+
+set_read_entries_filter(Store, {dlink, Child, _Revs}) ->
+	{ok, {set_read_title(Store, Child), {doc, Store, Child}}};
+set_read_entries_filter(_, _) ->
 	skip.
 
 
 set_read_title(Store, Uuid) ->
 	case set_read_title_meta(Store, Uuid) of
-		{ok, Title} -> binary_to_list(Title);
-		error       -> "." ++ util:bin_to_hexstr(Uuid)
+		{ok, <<"">>} -> "." ++ util:bin_to_hexstr(Uuid);
+		{ok, Title}  -> sanitize(binary_to_list(Title));
+		error        -> "." ++ util:bin_to_hexstr(Uuid)
 	end.
 
 set_read_title_meta(Store, Uuid) ->
@@ -640,23 +698,6 @@ set_read_title_meta(Store, Uuid) ->
 	end.
 
 
-set_read_entries(Store, Uuid) ->
-	case store:lookup(Store, Uuid) of
-		{ok, Rev} ->
-			case util:read_rev_struct(Rev, <<"HPSD">>) of
-				{ok, Entries}=Result when is_list(Entries) ->
-					Result;
-				{ok, _} ->
-					error;
-				{error, _} ->
-					error
-			end;
-		error ->
-			error
-	end.
-
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% All other documents
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -673,9 +714,9 @@ doc_make_node_file(Oid) ->
 					st_nlink = 1
 				}}
 			end,
-			lookup  = fun(_, _) -> error end,
+			lookup  = fun(_, _, _) -> error end,
 			getnode = fun(_, _) -> error end,
-			opendir = fun(_) -> {errror, enotdir} end
+			opendir = fun(_, _) -> {errror, enotdir} end
 		}
 	}}.
 
@@ -733,4 +774,8 @@ meta_read_entry(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
 	end;
 meta_read_entry(_Meta, _Path) ->
 	error.
+
+
+sanitize(S) ->
+	lists:filter(fun(C) -> (C /= $/) and (C >= 31) end, S).
 
