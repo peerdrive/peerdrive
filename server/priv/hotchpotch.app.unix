@@ -72,6 +72,13 @@
 					[removable],
 					file_store,
 					{"priv/stores/rem2", "2nd removable store"}
+				},
+				{
+					media,
+					"/media",
+					[removable],
+					file_store,
+					{"/media/POCKETDRIVE/.hotchpotch", "Removable store"}
 				}
 			]},
 			{interfaces, [

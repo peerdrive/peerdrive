@@ -6,10 +6,12 @@ set -e
 if [ "$OS" = "Windows_NT" ]
 then
 	CUR=`cygpath -wa .`
-	ERL="werl -pa $CUR\\ebin -config windows"
+	ERL="werl -pa $CUR\\ebin"
+	[ -f ebin/hotchpotch.app ] || cp priv/hotchpotch.app.windows ebin/hotchpotch.app
 else
 	export ERL_LIBS=/usr/local/lib/erlang/lib
-	ERL="erl -pa $PWD/ebin -config linux"
+	ERL="erl -pa $PWD/ebin"
+	[ -f ebin/hotchpotch.app ] || cp priv/hotchpotch.app.unix ebin/hotchpotch.app
 fi
 
 STORES="priv/stores/user/ priv/stores/rem1/ priv/stores/rem2/ priv/stores/sys/"
@@ -39,8 +41,9 @@ if [ $# -gt 0 ]; then
 	esac
 fi
 
-# comile everything
-erl -make
+# Compile everything. Unfortuately a simple "erl -make" doesn't work as it
+# always exits with 0 even if the build fails. :(
+erl -noshell -eval "case make:all() of up_to_date -> erlang:halt(); error -> erlang:halt(1) end"
 
 # make sure store directories exist
 mkdir -p $STORES

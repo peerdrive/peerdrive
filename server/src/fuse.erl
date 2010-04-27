@@ -1,4 +1,5 @@
 -module (fuse).
+-ifndef(windows).
 %-behaviour (fuserl).
 
 % Directory layout:
@@ -779,3 +780,4 @@ meta_read_entry(_Meta, _Path) ->
 sanitize(S) ->
 	lists:filter(fun(C) -> (C /= $/) and (C >= 31) end, S).
 
+-endif.
