@@ -32,6 +32,17 @@ def extractMetaData(metaData, path, default):
 	return item
 
 
+def setMetaData(metaData, field, value):
+	item = metaData
+	path = field[:]
+	while len(path) > 1:
+		if path[0] not in item:
+			item[path[0]] = { }
+		item = item[path[0]]
+		path = path[1:]
+	item[path[0]] = value
+
+
 buttons = []
 
 def genStoreButton(store):
@@ -54,33 +65,62 @@ class PropertiesDialog(QtGui.QDialog):
 		mainLayout.setSizeConstraint(QtGui.QLayout.SetFixedSize)
 
 		if isUuid:
+			self.uuid = guid
 			info = HpConnector().lookup(guid)
 			mainLayout.addWidget(DocumentTab(info.stores(), "document"))
-			revs = info.revs()
+			self.revs = info.revs()
 		else:
+			self.uuid = None
 			info = HpConnector().stat(guid)
 			mainLayout.addWidget(DocumentTab(info.volumes(), "revision"))
-			revs = [guid]
+			self.revs = [guid]
 
-		if len(revs) == 0:
+		if len(self.revs) == 0:
 			QtGui.QMessageBox.warning(self, 'Missing document', 'The requested document was not found on any store.')
 			sys.exit(1)
 
 		tabWidget = QtGui.QTabWidget()
-		annoTab = AnnotationTab(revs)
-		tabWidget.addTab(annoTab, "Annotation")
-		tabWidget.addTab(HistoryTab(revs), "History")
+		self.annoTab = AnnotationTab(self.revs, isUuid and (len(self.revs) == 1))
+		QtCore.QObject.connect(self.annoTab, QtCore.SIGNAL("changed()"), self.__changed)
+		tabWidget.addTab(self.annoTab, "Annotation")
+		tabWidget.addTab(HistoryTab(self.revs), "History")
 		if isUuid:
-			tabWidget.addTab(RevisionTab(revs), "Revisions")
+			tabWidget.addTab(RevisionTab(self.revs), "Revisions")
 		else:
-			tabWidget.addTab(RevisionTab(revs), "Revision")
+			tabWidget.addTab(RevisionTab(self.revs), "Revision")
 		mainLayout.addWidget(tabWidget)
 
-		buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok)
-		QtCore.QObject.connect(buttonBox, QtCore.SIGNAL("accepted()"), self.accept)
-		mainLayout.addWidget(buttonBox)
+		if isUuid and (len(self.revs) == 1):
+			self.buttonBox = QtGui.QDialogButtonBox(
+				QtGui.QDialogButtonBox.Save |
+				QtGui.QDialogButtonBox.Close)
+			self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
+		else:
+			self.buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok)
+		QtCore.QObject.connect(self.buttonBox, QtCore.SIGNAL("accepted()"), self.__save)
+		QtCore.QObject.connect(self.buttonBox, QtCore.SIGNAL("rejected()"), self.reject)
+		mainLayout.addWidget(self.buttonBox)
 		self.setLayout(mainLayout)
-		self.setWindowTitle("Properties of %s" % (annoTab.getTitle()))
+		self.setWindowTitle("Properties of %s" % (self.annoTab.getTitle()))
+
+	def __changed(self):
+		self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(True)
+
+	def __save(self):
+		rev = self.revs[0]
+		self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
+		with HpConnector().read(rev) as r:
+			metaData = hpstruct.loads(r.readAll('META'))
+		setMetaData(metaData, ["org.hotchpotch.annotation", "title"], str(self.annoTab.titleEdit.text()))
+		setMetaData(metaData, ["org.hotchpotch.annotation", "description"], str(self.annoTab.descEdit.text()))
+		if self.annoTab.tagsEdit.hasAcceptableInput():
+			tagString = self.annoTab.tagsEdit.text()
+			tagSet = set([ tag.strip() for tag in str(tagString).split(',')])
+			tagList = list(tagSet)
+			setMetaData(metaData, ["org.hotchpotch.annotation", "tags"], tagList)
+		with HpConnector().update(self.uuid, rev) as writer:
+			writer.writeAll('META', hpstruct.dumps(metaData))
+			self.revs[0] = writer.commit()
 
 
 class DocumentTab(QtGui.QWidget):
@@ -189,15 +229,13 @@ class HistoryTab(QtGui.QWidget):
 
 
 class AnnotationTab(QtGui.QWidget):
-	def __init__(self, revs, parent=None):
+	def __init__(self, revs, edit, parent=None):
 		super(AnnotationTab, self).__init__(parent)
 
 		titles = set()
 		self.__title = ""
 		descriptions = set()
 		description = ""
-		comments = set()
-		comment = ""
 		tagSets = set()
 		tags = []
 		for rev in revs:
@@ -214,11 +252,6 @@ class AnnotationTab(QtGui.QWidget):
 						["org.hotchpotch.annotation", "description"],
 						"")
 					descriptions.add(description)
-					comment = extractMetaData(
-						metaData,
-						["org.hotchpotch.annotation", "comment"],
-						"")
-					comments.add(comment)
 					tags = extractMetaData(
 						metaData,
 						["org.hotchpotch.annotation", "tags"],
@@ -233,40 +266,55 @@ class AnnotationTab(QtGui.QWidget):
 		if len(titles) > 1:
 			layout.addWidget(QtGui.QLabel("<ambiguous>"), 0, 1)
 		else:
-			layout.addWidget(QtGui.QLabel(self.__title), 0, 1)
+			if edit:
+				self.titleEdit = QtGui.QLineEdit()
+				self.titleEdit.setText(self.__title)
+				QtCore.QObject.connect(self.titleEdit, QtCore.SIGNAL("textEdited(const QString&)"), self.__changed)
+				layout.addWidget(self.titleEdit, 0, 1)
+			else:
+				layout.addWidget(QtGui.QLabel(self.__title), 0, 1)
 
 		layout.addWidget(QtGui.QLabel("Description:"), 1, 0)
 		if len(descriptions) > 1:
 			layout.addWidget(QtGui.QLabel("<ambiguous>"), 1, 1)
 		else:
-			descLabel = QtGui.QLabel(description)
-			descLabel.setWordWrap(True)
-			descLabel.setScaledContents(True)
-			layout.addWidget(descLabel, 1, 1)
+			if edit:
+				self.descEdit = QtGui.QLineEdit()
+				self.descEdit.setText(description)
+				QtCore.QObject.connect(self.descEdit, QtCore.SIGNAL("textEdited(const QString&)"), self.__changed)
+				layout.addWidget(self.descEdit, 1, 1)
+			else:
+				descLabel = QtGui.QLabel(description)
+				descLabel.setWordWrap(True)
+				descLabel.setScaledContents(True)
+				layout.addWidget(descLabel, 1, 1)
 
-		layout.addWidget(QtGui.QLabel("Comment:"), 2, 0)
-		if len(comments) > 1:
-			layout.addWidget(QtGui.QLabel("<ambiguous>"), 2, 1)
-		else:
-			commentLabel = QtGui.QLabel(comment)
-			commentLabel.setWordWrap(True)
-			commentLabel.setScaledContents(True)
-			layout.addWidget(commentLabel, 2, 1)
-
-		layout.addWidget(QtGui.QLabel("Tags:"), 3, 0)
+		layout.addWidget(QtGui.QLabel("Tags:"), 2, 0)
 		if len(tagSets) > 1:
-			layout.addWidget(QtGui.QLabel("<ambiguous>"), 3, 1)
+			layout.addWidget(QtGui.QLabel("<ambiguous>"), 2, 1)
 		else:
 			tags.sort()
 			tagList = ""
 			for tag in tags:
 				tagList += ", " + tag
-			layout.addWidget(QtGui.QLabel(tagList[2:]), 3, 1)
+			if edit:
+				self.tagsEdit = QtGui.QLineEdit()
+				self.tagsEdit.setText(tagList[2:])
+				self.tagsEdit.setValidator(QtGui.QRegExpValidator(
+					QtCore.QRegExp("(\\s*\\w+\\s*(,\\s*\\w+\\s*)*)?"),
+					self))
+				QtCore.QObject.connect(self.tagsEdit, QtCore.SIGNAL("textEdited(const QString&)"), self.__changed)
+				layout.addWidget(self.tagsEdit, 2, 1)
+			else:
+				layout.addWidget(QtGui.QLabel(tagList[2:]), 2, 1)
 
 		self.setLayout(layout)
 
 	def getTitle(self):
 		return self.__title
+
+	def __changed(self):
+		self.emit(QtCore.SIGNAL("changed()"))
 
 
 if __name__ == '__main__':
