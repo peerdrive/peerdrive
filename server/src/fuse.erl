@@ -12,10 +12,8 @@
 -export ([ get_supervisor_spec/2, start_link/2, start_link/3 ]).
 -export ([ code_change/3, handle_info/2, init/1, terminate/2 ]).
 -export ([ getattr/4, lookup/5, forget/5,
-		   opendir/5, readdir/7, releasedir/5
-           %open/5,
-           %read/7,
-           %readlink/4
+           opendir/5, readdir/7, releasedir/5,
+           open/5, read/7, release/5
 		 ]).
 
 -include_lib ("fuserl/include/fuserl.hrl").
@@ -23,10 +21,11 @@
 % inodes: dict: inode -> #inode
 % cache:  dict: {ParentInode, OID} -> inode
 % dirs:   dict: id -> [#direntry]
--record(state, { inodes, cache, dirs, count }).
+-record(state, { inodes, cache, dirs, files, count }).
 
 -record(inode, {refcnt, parent, timeout, oid, ifc, cache}).
--record(ifc, {getattr, lookup, getnode, opendir}).
+-record(ifc, {getattr, lookup, getnode, opendir, open}).
+-record(handler, {read, release}).
 
 -define(UNKNOWN_INO, 16#ffffffff).
 -define (DIRATTR (X), #stat{ st_ino = (X),
@@ -74,7 +73,8 @@ init([]) ->
 		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
 		cache  = gb_trees:empty(),
 		dirs   = gb_trees:empty(),
-		count  = 2
+		files  = gb_trees:empty(),
+		count  = 2 % 1 is the root inode
 	},
 	{ok, State}.
 
@@ -283,6 +283,44 @@ releasedir(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{dirs=Dirs} = S) ->
 	{#fuse_reply_err{err=ok}, S#state{dirs=gb_trees:delete(Id, Dirs)}}.
 
 
+open(_, Ino, Fi, _Cont, #state{inodes=Inodes, files=Files} = S) ->
+	case gb_trees:lookup(Ino, Inodes) of
+		{value, #inode{oid=Oid, ifc=#ifc{open=Open}}} ->
+			case Open(Oid) of
+				{ok, Handler} ->
+					Id = case gb_trees:is_empty(Files) of
+						true  -> 1;
+						false -> {Max, _} = gb_trees:largest(Files), Max+1
+					end,
+					{
+						#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{fh = Id}},
+						S#state{ files = gb_trees:enter(Id, Handler, Files) }
+					};
+
+				{error, Error} ->
+					{#fuse_reply_err{ err = Error }, S}
+			end;
+
+		none ->
+			{#fuse_reply_err{ err = enoent }, S}
+	end.
+
+
+read(_, _Ino, Size, Offset, Fi, _Cont, #state{files=Files} = S) ->
+	Id = Fi#fuse_file_info.fh,
+	#handler{read=Read} = gb_trees:get(Id, Files),
+	case Read(Size, Offset) of
+		{ok, Data} -> {#fuse_reply_buf{buf=Data, size=erlang:size(Data)}, S};
+		{error, Error} -> {#fuse_reply_err{ err = Error }, S}
+	end.
+
+
+release(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{files=Files} = S) ->
+	#handler{release=Release} = gb_trees:get(Id, Files),
+	Release(),
+	{#fuse_reply_err{err=ok}, S#state{files=gb_trees:delete(Id, Files)}}.
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Root directory
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -297,7 +335,8 @@ root_make_node() ->
 			getattr = fun(_,_) -> {ok, ?DIRATTR(1)} end,
 			lookup  = fun root_lookup/3,
 			getnode = fun root_getnode/1,
-			opendir = fun root_opendir/2
+			opendir = fun root_opendir/2,
+			open    = fun(_) -> {error, eacces} end
 		}
 	}.
 
@@ -336,7 +375,8 @@ emptydir_make_node(Oid) ->
 			getattr = fun(_, Ino) -> {ok, ?DIRATTR(Ino)} end,
 			lookup  = fun(_, _, _) -> error end,
 			getnode = fun(_) -> error end,
-			opendir = fun(_, Cache) -> {ok, [], Cache} end
+			opendir = fun(_, Cache) -> {ok, [], Cache} end,
+			open    = fun(_) -> {error, eacces} end
 		}
 	}}.
 
@@ -366,7 +406,8 @@ stores_make_node() ->
 			getattr = fun(_,Ino) -> {ok, ?DIRATTR(Ino)} end,
 			lookup  = fun stores_lookup/3,
 			getnode = fun stores_getnode/1,
-			opendir = fun stores_opendir/2
+			opendir = fun stores_opendir/2,
+			open    = fun(_) -> {error, eacces} end
 		}
 	}}.
 
@@ -450,7 +491,8 @@ doc_make_node_dict(Oid) ->
 			getattr = fun dict_getattr/2,
 			lookup  = fun dict_lookup/3,
 			getnode = fun dict_getnode/1,
-			opendir = fun dict_opendir/2
+			opendir = fun dict_opendir/2,
+			open    = fun(_) -> {error, eacces} end
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -560,7 +602,8 @@ doc_make_node_set(Oid) ->
 			getattr = fun set_getattr/2,
 			lookup  = fun set_lookup/3,
 			getnode = fun set_getnode/1,
-			opendir = fun set_opendir/2
+			opendir = fun set_opendir/2,
+			open    = fun(_) -> {error, eacces} end
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -708,18 +751,79 @@ doc_make_node_file(Oid) ->
 		timeout = 5,
 		oid     = Oid,
 		ifc     = #ifc{
-			getattr = fun(_, Ino) ->
-				{ok, #stat{
-					st_ino   = Ino,
-					st_mode  = ?S_IFREG bor 8#0444,
-					st_nlink = 1
-				}}
-			end,
+			getattr = fun file_getattr/2,
 			lookup  = fun(_, _, _) -> error end,
 			getnode = fun(_, _) -> error end,
-			opendir = fun(_, _) -> {errror, enotdir} end
+			opendir = fun(_, _) -> {errror, enotdir} end,
+			open    = fun file_open/1
 		}
 	}}.
+
+
+file_getattr({doc, Store, Uuid}, Ino) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case store:stat(Store, Rev) of
+				{ok, _Flags, Parts, _Parents, Mtime, _Uti} ->
+					Size = case find_entry(
+						fun({FCC, Size, _Hash}) ->
+							case FCC of
+								<<"FILE">> -> {ok, Size};
+								_          -> error
+							end
+						end,
+						Parts)
+					of
+						{value, FileSize} -> FileSize;
+						none              -> 0
+					end,
+					{ok, #stat{
+						st_ino   = Ino,
+						st_mode  = ?S_IFREG bor 8#0444,
+						st_nlink = 1,
+						st_atime = Mtime,
+						st_mtime = Mtime,
+						st_ctime = Mtime,
+						st_size  = Size
+					}};
+
+				error ->
+					error
+			end;
+
+		error ->
+			error
+	end.
+
+
+file_open({doc, Store, Uuid}) ->
+	case store:lookup(Store, Uuid) of
+		{ok, Rev} ->
+			case store:read_start(Store, Rev, self()) of
+				{ok, Reader} ->
+					{ok, #handler{
+						read = fun(Size, Offset) ->
+							file_read(Reader, Size, Offset)
+						end,
+						release = fun() -> store:read_done(Reader) end
+					}};
+
+				{error, _} ->
+					{error, enoent}
+			end;
+
+		error ->
+			{error, enoent}
+	end.
+
+
+file_read(Reader, Size, Offset) ->
+	case store:read_part(Reader, <<"FILE">>, Offset, Size) of
+		{ok, _Data} = R  -> R;
+		eof              -> {ok, <<>>};
+		{error, enoent}  -> {ok, <<>>};
+		{error, _}       -> {error, eio}
+	end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
