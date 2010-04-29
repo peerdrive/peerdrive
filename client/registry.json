@@ -48,6 +48,11 @@
 		"exec" : "public.data.py"
 	},
 
+	"public.composite-content" : {
+		"conforming" : ["public.content"],
+		"display" : "Base type for mixed content"
+	},
+
 	"public.text" : {
 		"conforming" : ["public.content", "public.data"],
 		"icon" : "uti/document.png",
@@ -57,6 +62,77 @@
 		"conforming" : ["public.text"],
 		"extensions" : ["txt", "asc", "text", "pot", "brf"],
 		"mimetypes"  : ["text/plain"]
+	},
+	"public.html" : {
+		"conforming" : ["public.text"],
+		"extensions" : ["html", "htm"],
+		"mimetypes"  : ["text/html"],
+		"icon" : "uti/html.png",
+		"exec" : "public.data.py"
+	},
+
+	"com.adobe.pdf" : {
+		"conforming" : ["public.data", "public.composite-content"],
+		"extensions" : ["pdf"],
+		"mimetypes"  : ["application/pdf"],
+		"icon"       : "uti/pdf.png",
+		"display"    : "PDF-Document"
+	},
+
+	"com.microsoft.word.doc" : {
+		"conforming" : ["public.data"],
+		"extensions" : ["doc"],
+		"mimetypes"  : ["application/msword"],
+		"icon"       : "uti/word.png",
+		"display"    : "Microsoft Word document"
+	},
+	"com.microsoft.excel.xls" : {
+		"conforming" : ["public.data"],
+		"extensions" : ["xls"],
+		"mimetypes"  : ["application/vnd.ms-excel"],
+		"icon"       : "uti/excel.png",
+		"display"    : "Microsoft Excel document"
+	},
+	"com.microsoft.powerpoint.ppt" : {
+		"conforming" : ["public.data"],
+		"extensions" : ["ppt"],
+		"mimetypes"  : ["application/mspowerpoint"],
+		"icon"       : "uti/powerpoint.png",
+		"display"    : "Microsoft PowerPoint presentation"
+	},
+
+	"public.archive" : {
+		"display" : "Generic archive",
+		"icon" : "uti/zip.png"
+	},
+	"org.gnu.gnu-tar-archive" : {
+		"conforming" : ["public.archive", "public.data"],
+		"extensions" : ["gtar"],
+		"mimetypes"  : ["application/x-gtar"],
+		"display"    :  "GNU archive"
+	},
+	"public.tar-archive" : {
+		"conforming" : ["org.gnu.gnu-tar-archive"],
+		"extensions" : ["tar"],
+		"mimetypes"  : ["application/x-tar", "application/tar"],
+		"display"    :  "Tar archive"
+	},
+	"org.gnu.gnu-zip-archive" : {
+		"conforming" : ["public.archive", "public.data"],
+		"extensions" : ["gz", "gzip"],
+		"mimetypes"  : ["application/x-gzip", "application/gzip"],
+		"display"    :  "Gzip archive"
+	},
+	"org.gnu.gnu-zip-tar-archive" : {
+		"conforming" : ["org.gnu.gnu-zip-archve"],
+		"extensions" : ["tgz"],
+		"display"    :  "Gzip tar archive"
+	},
+	"com.pkware.zip-archive" : {
+		"conforming" : ["public.archive", "public.data"],
+		"extensions" : [".zip"],
+		"mimetypes"  : ["application/zip"],
+		"display"    :  "Zip archive"
 	},
 
 	"org.hotchpotch.container" : {
