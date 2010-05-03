@@ -3,7 +3,7 @@
 IF DEFINED ERL GOTO KnowErl
 
 REM Trying to find the erlang executable...
-FOR /D %%D IN (%ProgramFiles%\erl*) DO IF EXIST "%%D\bin\erl.exe" SET ERL="%%D\bin"
+FOR /D %%D IN ("%ProgramFiles%\erl*") DO IF EXIST "%%D\bin\erl.exe" SET ERL="%%D\bin"
 IF DEFINED ERL GOTO KnowErl
 
 ECHO Could not find your erlang installation. Please set the ERL environment
