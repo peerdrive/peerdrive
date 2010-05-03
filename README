@@ -1,7 +1,10 @@
 
 Hotchpotch is a document oriented mix of revision control, file system and
 database concepts. It is intended to store, organize and retrieve your data in
-novel ways.
+novel ways. For an introduction into Hotchpotch's features see
+doc/introduction.txt.
+
+== Current status ==
 
 Currently it is only a prototype to try out several ideas, refine semantics and
 the API and to figure out the impact to the user interface. Check the doc
@@ -17,7 +20,7 @@ Erlang >= R12
 
 == Try it out ==
 
-Currently there is no installation possible. Do the follwing steps to try it
+Currently there is no installation needed. Do the following steps to try it
 out:
 
 1. Open two terminals
@@ -26,7 +29,7 @@ out:
 	> cd server
 	> ./hotchpotch.sh
 
-	This will start the Hotchpotch server in the forground. To stop the server
+	This will start the Hotchpotch server in the foreground. To stop the server
 	type "CTRL+g q".
 
 3. In the 2nd terminal type:
