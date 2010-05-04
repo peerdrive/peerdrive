@@ -9,7 +9,7 @@ systems. In particular these are:
   - Seamless backup integration
   - File versioning
   - Arbitrary, non-hierarchical file organization
-  - Rich meta data
+  - Annotation (e.g. tags) and rich meta data
 
 These problems are tackled by three main concepts in Hotchpotch...
 
@@ -52,10 +52,11 @@ each store maintains a mapping of UUIDs to the latest revision of the document
 where each revision is identified by the hash of its content. This is the same
 scheme as git is using to track changes to the repository.
 
-As a document can exist is more than one volume simultaneously it's history
-may not be linear and can contain forks. See the following "picture" for an
-illustration on what happens when a document is replicated and changed
-independently on the different volumes.
+As a document can exist is more than one volume simultaneously it's history may
+not be linear and can contain forks. See the following "picture" for an
+illustration of what happens when a document is replicated and changed
+independently on the different volumes. The numbers in parenthesis show on
+which volumes the revision exists.
 
                           D(1)---F(1)   <-- UUID (Volume 1)
                          /
@@ -64,7 +65,7 @@ independently on the different volumes.
                           E(2)---G(2)   <-- UUID (Volume 2)
 
 If the user chooses to synchronize the two versions of the same document
-Hotchpotch is able to find the common ancestor and merge the independent
+Hotchpotch is able to find the common ancestor (C) and merge the independent
 changes into one version automatically. After the merge the document exists on
 both stores with the same revision and the same history.
 
@@ -80,15 +81,51 @@ does not need to care about overwriting the document and loosing important
 data.
 
 Additionally this allows for a seamless integration of backups. Old revisions
-which are not needed anymore may be moved to a backup volume. If such a old
-revision is needed again only the backup volume needs to be mounted. Therefore
+which are not needed anymore may be moved to a backup volume. If such an old
+revision is needed again only the backup volume needs to be mounted because
+Hotchpotch does not care on which volume a revision is located. Therefore
 normal document handling and backup are seamlessly integrated in Hotchpotch.
 
 === Rich meta data ===
 
+In traditional file systems a file is just a stream of bytes with some meta
+data (file name, size, c-/m-/atime, access rights). Later extended attributes
+were added which are user definable key/value pairs, where keys are usually
+strings and values again streams of bytes. BeOS added indexing of these
+extended attributes and used them extensively for file management.
+
+Hotchpotch takes the concept even further and allows arbitrarily complex meta
+data. This includes key/value pairs but also lists, links to other documents,
+booleans, integers, floats and strings. Semantically this is close to JSON or
+other structured data representations. This allows for unrestricted, extensible
+annotation of documents by the user or applications. Together with indexing of
+this meta data the user is able to quickly find documents based on this meta
+data.
 
 == Additional concepts ==
 
-- sticky documents
-- preliminary revisions
+=== Uniform type identifier ===
+
+The type of a document is indicated by a Uniform Type Identifier (UTI) in
+Hotchpotch.
+
+http://en.wikipedia.org/wiki/Uniform_Type_Identifier
+
+TODO
+
+=== Multi part documents ===
+
+Hotchpotch documents consist of one or more parts, each identified by a FourCC.
+TODO
+
+=== Standardized structured data ===
+
+Data in the 'HPSD' part of a document has the same structure and encoding as in
+the 'META' part. TODO
+
+=== Sticky documents ===
+
+=== Preliminary revisions ===
+
+=== Indexing ===
 
