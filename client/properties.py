@@ -323,14 +323,14 @@ if __name__ == '__main__':
 
 	app = QtGui.QApplication(sys.argv)
 
-	if (len(sys.argv) == 3) and (sys.argv[1] == 'uuid'):
-		guid = sys.argv[2].decode('hex')
+	if (len(sys.argv) == 2) and sys.argv[1].startswith('doc:'):
+		guid = sys.argv[1][4:].decode('hex')
 		dialog = PropertiesDialog(guid, True)
-	elif (len(sys.argv) == 3) and (sys.argv[1] == 'rev'):
-		guid = sys.argv[2].decode('hex')
+	elif (len(sys.argv) == 2) and sys.argv[1].startswith('rev:'):
+		guid = sys.argv[1][4:].decode('hex')
 		dialog = PropertiesDialog(guid, False)
 	else:
-		print "Usage: properties.py [uuid|rev] GUID"
+		print "Usage: properties.py [uuid:|rev:]GUID"
 		sys.exit(1)
 
 	sys.exit(dialog.exec_())

@@ -7,7 +7,6 @@
 			- v5 -> rev's
 		- stores are identified by their root doc UUID
 	- rename volumes -> stores
-	- rename open/show commands
 
 - Server
 	- replace MD5 hashes by SHA1-UUID's

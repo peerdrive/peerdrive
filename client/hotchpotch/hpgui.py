@@ -28,10 +28,10 @@ import hpstruct
 
 def showDocument(link):
 	if isinstance(link, hpstruct.DocLink):
-		args = ['open', link.uuid().encode('hex')]
+		args = ['doc:'+link.uuid().encode('hex')]
 		rev = HpConnector().lookup(link.uuid()).revs()[0]
 	else:
-		args = ['show', link.rev().encode('hex')]
+		args = ['rev:'+link.rev().encode('hex')]
 		rev = link.rev()
 	uti = HpConnector().stat(rev).uti()
 	executable = HpRegistry().getExecutable(uti)
@@ -45,9 +45,9 @@ def showDocument(link):
 
 def showProperties(link):
 	if isinstance(link, hpstruct.DocLink):
-		args = ['uuid', link.uuid().encode('hex')]
+		args = ['doc:'+link.uuid().encode('hex')]
 	else:
-		args = ['rev', link.rev().encode('hex')]
+		args = ['rev:'+link.rev().encode('hex')]
 	if sys.platform == "win32":
 		subprocess.Popen(['properties.py'] + args, shell=True)
 	else:
@@ -72,18 +72,18 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.__storeButtons = { }
 
 		# parse command line
-		if len(argv) == 3 and argv[1] == 'open':
-			self.__uuid = argv[2].decode("hex")
+		if len(argv) == 2 and argv[1].startswith('doc:'):
+			self.__uuid = argv[1][4:].decode("hex")
 			self.__rev = None
-		elif len(argv) == 3 and argv[1] == 'show':
+		elif len(argv) == 2 and argv[1].startswith('rev:'):
 			self.__uuid = None
-			self.__rev = argv[2].decode("hex")
+			self.__rev = argv[1][4:].decode("hex")
 		else:
-			print "Usage: %s <Operation> ..." % (self.__uti)
+			print "Usage: %s <Document>" % (self.__uti)
 			print
-			print "Operation:"
-			print "    open <UUID>      ...open the latest version of the given document"
-			print "    show <revision>  ...display the given revision"
+			print "Document:"
+			print "    doc:<UUID>      ...open the latest version of the given document"
+			print "    rev:<revision>  ...display the given revision"
 			sys.exit(1)
 
 		# create standard actions
