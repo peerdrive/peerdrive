@@ -78,12 +78,21 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		elif len(argv) == 2 and argv[1].startswith('rev:'):
 			self.__uuid = None
 			self.__rev = argv[1][4:].decode("hex")
+		elif len(argv) == 2:
+			link = hpstruct.resolvePath(argv[1])
+			if isinstance(link, hpstruct.DocLink):
+				self.__uuid = link.uuid()
+				self.__rev = None
+			else:
+				self.__uuid = None
+				self.__rev = link.rev()
 		else:
 			print "Usage: %s <Document>" % (self.__uti)
 			print
 			print "Document:"
 			print "    doc:<UUID>      ...open the latest version of the given document"
 			print "    rev:<revision>  ...display the given revision"
+			print "    <hp-path-spec>  ...open by path spec"
 			sys.exit(1)
 
 		# create standard actions

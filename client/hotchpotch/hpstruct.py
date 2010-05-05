@@ -693,3 +693,60 @@ def _loadTitle(link):
 
 	return None
 
+
+###############################################################################
+# Path resolving
+###############################################################################
+
+# return (store:guid, container:HpContainer, docName:str)
+def walkPath(path, create=False):
+	steps = path.split('/')
+	storeName = steps[0]
+	docName  = steps[-1]
+	for i in xrange(1, len(steps)-1):
+		steps[i] = (steps[i], steps[i+1])
+	steps = steps[1:-1]
+
+	# search for store
+	enum = hpconnector.HpConnector().enum()
+	storeGuid = None
+	for mount in enum.allStores():
+		if not enum.isMounted(mount):
+			continue
+		mountGuid = enum.guid(mount)
+		if (mount == storeName) or (mountGuid.encode("hex").startswith(storeName)):
+			storeGuid = mountGuid
+			break
+	if not storeGuid:
+		raise StructError("Store not found")
+
+	# walk the path
+	curContainer = HpDict(DocLink(storeGuid, False))
+	for (step, nextStep) in steps:
+		next = curContainer.get(step)
+		if next:
+			curContainer = HpContainer(next)
+		elif create:
+			name = step.split(':')[-1]
+			if ':' in nextStep:
+				next = HpDict().create(name, storeGuid)
+			else:
+				next = HpSet().create(name, storeGuid)
+			curContainer[step] = next
+			curContainer.save()
+			curContainer = HpContainer(next)
+		else:
+			raise StructError("Invalid path")
+
+	# return result
+	return (storeGuid, curContainer, docName)
+
+
+def resolvePath(path):
+	if '/' in path:
+		(storeGuid, container, docName) = walkPath(path)
+		return container[docName]
+	else:
+		storeGuid = hpconnector.HpConnector().enum().guid(path)
+		return DocLink(storeGuid, False)
+

@@ -118,54 +118,10 @@ def importObject(store, uti, spec):
 	return link
 
 
-# return (store:guid, container:HpContainer, docName:str)
-def walkPath(path, create=False):
-	steps = path.split('/')
-	storeName = steps[0]
-	docName  = steps[-1]
-	for i in xrange(1, len(steps)-1):
-		steps[i] = (steps[i], steps[i+1])
-	steps = steps[1:-1]
-
-	# search for store
-	enum = HpConnector().enum()
-	storeGuid = None
-	for mount in enum.allStores():
-		if not enum.isMounted(mount):
-			continue
-		mountGuid = enum.guid(mount)
-		if (mount == storeName) or (mountGuid.encode("hex").startswith(storeName)):
-			storeGuid = mountGuid
-			break
-	if not storeGuid:
-		raise ImporterError("Store not found")
-
-	# walk the path
-	curContainer = hpstruct.HpDict(hpstruct.DocLink(storeGuid, False))
-	for (step, nextStep) in steps:
-		next = curContainer.get(step)
-		if next:
-			curContainer = hpstruct.HpContainer(next)
-		elif create:
-			name = step.split(':')[-1]
-			if ':' in nextStep:
-				next = hpstruct.HpDict().create(name, storeGuid)
-			else:
-				next = hpstruct.HpSet().create(name, storeGuid)
-			curContainer[step] = next
-			curContainer.save()
-			curContainer = hpstruct.HpContainer(next)
-		else:
-			raise ImporterError("Invalid path")
-
-	# return result
-	return (storeGuid, curContainer, docName)
-
-
 def importObjectByPath(path, uti, spec, overwrite=False):
 	try:
 		# resolve the path
-		(store, container, name) = walkPath(path, True)
+		(store, container, name) = hpstruct.walkPath(path, True)
 		if (name in container) and (not overwrite):
 			return False
 
@@ -180,7 +136,7 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 
 def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=None):
 	# resolve the path
-	(store, container, name) = walkPath(impPath, True)
+	(store, container, name) = hpstruct.walkPath(impPath, True)
 
 	# create the object and add to dict
 	if isinstance(impFile, list):

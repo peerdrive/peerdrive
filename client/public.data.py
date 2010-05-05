@@ -24,17 +24,17 @@ from hotchpotch import hpstruct, HpConnector, HpRegistry
 
 
 # parse command line
-if len(sys.argv) == 3 and sys.argv[1] == 'open':
-	uuid = sys.argv[2].decode("hex")
+if len(sys.argv) == 2 and sys.argv[1].startswith('doc:'):
+	uuid = sys.argv[1][4:].decode("hex")
 	rev = HpConnector().lookup(uuid).revs()[0]
-elif len(sys.argv) == 3 and sys.argv[1] == 'show':
-	rev = sys.argv[2].decode("hex")
+elif len(sys.argv) == 2 and sys.argv[1].startswith('rev:'):
+	rev = sys.argv[1][4:].decode("hex")
 else:
-	print "Usage: public.data.py <Operation> ..."
+	print "Usage: public.data.py <Document> ..."
 	print
-	print "Operation:"
-	print "    open <UUID>      ...open the latest version of the given document"
-	print "    show <revision>  ...display the given revision"
+	print "Document:"
+	print "    doc:<UUID>      ...open the latest version of the given document"
+	print "    rev:<revision>  ...display the given revision"
 	sys.exit(1)
 
 
