@@ -4,6 +4,10 @@ database concepts. It is intended to store, organize and retrieve your data in
 novel ways. For an introduction into Hotchpotch's features see
 doc/introduction.txt.
 
+Project home: http://github.com/jkloetzke/hotchpotch
+Mailing list: hotchpotch@freelists.org
+              http://www.freelists.org/list/hotchpotch
+
 == Current status ==
 
 Currently it is only a prototype to try out several ideas, refine semantics and
@@ -16,7 +20,9 @@ Python 2.5/2.6
 	+ PyQt >=4.4.x
 	+ simplejson
 	+ magic (optional)
+
 Erlang >= R12
+	+ fuserl (http://code.google.com/p/fuserl/)
 
 == Try it out ==
 
