@@ -19,7 +19,7 @@
 from __future__ import with_statement
 
 from PyQt4 import QtCore, QtGui
-import sys, os, subprocess
+import sys, os, subprocess, pickle
 
 from hpconnector import HpWatch, HpConnector
 from hpregistry import HpRegistry
@@ -171,6 +171,9 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		# disable for now
 		self.delAct.setEnabled(True)
 
+		# load settings
+		self.__loadSettings()
+
 	# === public methods
 
 	def mainWindowInit(self):
@@ -273,12 +276,23 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		if self.__isEditor:
 			self.__saveAct.setEnabled(True)
 
+	def saveSettings(self, settings):
+		settings["resx"] = self.size().width()
+		settings["resy"] = self.size().height()
+		settings["posx"] = self.pos().x()
+		settings["posy"] = self.pos().y()
+
+	def loadSettings(self, settings):
+		self.resize(settings["resx"], settings["resy"])
+		self.move(settings["posx"], settings["posy"])
+
 	# === re-implemented inherited methods
 
 	def closeEvent(self, event):
 		event.accept()
 		self.saveFile("<<Automatically saved>>")
 		self.__connection.unwatch(self)
+		self.__saveSettings()
 
 	def triggered(self, cause):
 		#print >>sys.stderr, "watch %d for %s" % (cause, self.getHash().encode('hex'))
@@ -668,6 +682,32 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			link = hpstruct.RevLink(self.__rev)
 		showProperties(link)
 
+	def __saveSettings(self):
+		if self.__uuid:
+			hash = self.__uuid.encode('hex')
+		else:
+			hash = self.__rev.encode('hex')
+		path = ".settings/" + hash[0:2]
+		if not os.path.exists(path):
+			os.makedirs(path)
+		with open(path + "/" + hash[2:], 'w') as f:
+			settings = { }
+			self.saveSettings(settings)
+			pickle.dump(settings, f)
+
+	def __loadSettings(self):
+		if self.__uuid:
+			hash = self.__uuid.encode('hex')
+		else:
+			hash = self.__rev.encode('hex')
+		path = ".settings/" + hash[0:2] + "/" + hash[2:]
+		try:
+			if os.path.isfile(path):
+				with open(path, 'r') as f:
+					settings = pickle.load(f)
+				self.loadSettings(settings)
+		except:
+			print "Failed to load settings!"
 
 class CommentPopup(object):
 	def __init__(self, parent):

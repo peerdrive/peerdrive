@@ -54,7 +54,6 @@
 			- needs merge
 			- may need replication
 		- drag operations: copy as new document
-	- facility to store user meta data (window position, ...)
 	- possibility to cancel ongoing replication/synchronzation
 
 - Libs

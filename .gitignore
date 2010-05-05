@@ -1,3 +1,4 @@
 *.pyc
+client/.settings/
 server/priv/stores/
 server/priv/snapshots/

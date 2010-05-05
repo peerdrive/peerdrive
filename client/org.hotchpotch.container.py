@@ -29,6 +29,7 @@ from hotchpotch.hpconnector import HpWatch
 
 class CollectionWindow(hpgui.HpMainWindow):
 	def __init__(self, argv):
+		self.__settings = None
 		super(CollectionWindow, self).__init__(argv, "org.hotchpotch.container", True)
 
 		self.__knownColumns = set()
@@ -88,6 +89,11 @@ class CollectionWindow(hpgui.HpMainWindow):
 		autoClean = self.metaDataGetField(CollectionModel.AUTOCLEAN, False)
 		self.cleanAct.setChecked(autoClean)
 		self.cleanAct.setEnabled(readWrite)
+		if self.__settings:
+			availCols  = self.__settings.get("availcol")
+			activeCols = self.__settings.get("activecol")
+			if availCols and activeCols:
+				model.setColumns(availCols, activeCols)
 		model.doLoad(r, readWrite, autoClean)
 		self.__setEditable(readWrite)
 		self.__checkMetaData()
@@ -108,6 +114,12 @@ class CollectionWindow(hpgui.HpMainWindow):
 				self.syncMenu,
 				QtCore.SIGNAL("aboutToShow()"),
 				self.__showStoreSyncMenu)
+		if self.__settings:
+			widths = self.__settings.get("colwidths", [])[:model.columnCount(None)]
+			i = 0
+			for w in widths:
+				self.listView.setColumnWidth(i, w)
+				i += 1
 
 	def docMergeCheck(self, heads, utis, changedParts):
 		(uti, handled) = super(CollectionWindow, self).docMergeCheck(heads, utis, changedParts)
@@ -135,6 +147,24 @@ class CollectionWindow(hpgui.HpMainWindow):
 	def needSave(self):
 		default = super(CollectionWindow, self).needSave()
 		return self.listView.model().hasChanged() or default
+
+	def saveSettings(self, settings):
+		super(CollectionWindow, self).saveSettings(settings)
+		model = self.listView.model()
+		settings["availcol"] = model.availColumns()
+		active = []
+		for a in model.activeColumns():
+			for (key, col) in model.availColumns().items():
+				if a is col:
+					active.append(key)
+					break
+		settings["activecol"] = active
+		settings["colwidths"] = [self.listView.columnWidth(i)
+			for i in xrange(model.columnCount(None))]
+
+	def loadSettings(self, settings):
+		super(CollectionWindow, self).loadSettings(settings)
+		self.__settings = settings
 
 	# private methods
 
@@ -529,6 +559,9 @@ class NameColumnInfo(ColumnInfo):
 	def name(self):
 		return "Name"
 
+	def key(self):
+		return "::name"
+
 
 def convertNone(item):
 	return unicode(item)
@@ -667,6 +700,12 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def activeColumns(self):
 		return self.__activeColumns
+
+	def setColumns(self, avail, active):
+		self.__availColumns = avail.copy()
+		self.__activeColumns = []
+		for key in active:
+			self.__activeColumns.append(avail[key])
 
 	def addColumn(self, column):
 		index = len(self.__activeColumns)
