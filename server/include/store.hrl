@@ -34,7 +34,7 @@
 		fork,
 		update,
 		delete_rev,
-		delete_uuid,
+		delete_doc,
 		sync_get_changes,
 		sync_set_anchor
 	}).

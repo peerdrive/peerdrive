@@ -19,7 +19,7 @@
 -export([guid/1, contains/2, lookup/2, stat/2]).
 -export([put_uuid/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
--export([abort/1, commit/3, fork/3, peek/2, read/4, truncate/3, update/4, write/4]).
+-export([abort/1, commit/3, fork/4, peek/2, read/4, truncate/3, update/4, write/4]).
 -export([delete_rev/2, delete_doc/2]).
 -export([sync_get_changes/2, sync_set_anchor/3]).
 -export([hash_object/1]).
@@ -40,7 +40,7 @@ guid(#store{this=Store, guid=Guid}) ->
 %%       Store = #store
 %%       Doc = Rev = guid()
 lookup(#store{this=Store, lookup=Lookup}, Doc) ->
-	Lookup(Store, doc).
+	Lookup(Store, Doc).
 
 %% @doc Check if a revision exists in the store
 %% @spec contains(Store, Rev) -> bool()

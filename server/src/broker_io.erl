@@ -263,7 +263,7 @@ do_commit(MergeRevs, S) ->
 			% internal error: handles did not came to the same revision! WTF?
 			do_abort(ConflictHandles),
 			{stop, normal, {error, einternal}, S#state{handles=[]}}
-	end;
+	end.
 
 
 do_abort(Handles) ->
@@ -279,7 +279,7 @@ distribute(Fun, S) ->
 					{AccErrors, [Handle|AccHandles]};
 				{error, Error} ->
 					store:abort(Handle),
-					{[Error|AccErrors], AccHandles};
+					{[Error|AccErrors], AccHandles}
 			end
 		end,
 		{[], []},
@@ -288,13 +288,13 @@ distribute(Fun, S) ->
 		[] -> ok;
 		_  -> {error, consolidate_errors(Errors)}
 	end,
-	{reply, Reply, S#state{handles=Handles}};
+	{reply, Reply, S#state{handles=Handles}}.
 
 
 consolidate_errors(Errors) ->
 	case lists:filter(fun(E) -> E =/= enoent end, lists:usort(Errors)) of
 		[]      -> enoent;
 		[Error] -> Error;
-		_       -> emultiple;
+		_       -> emultiple
 	end.
 

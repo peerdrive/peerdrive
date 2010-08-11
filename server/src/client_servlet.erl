@@ -291,7 +291,7 @@ send_generic_reply(RetPath, Reply) ->
 				_         -> 16#ffffffff
 			end;
 		{ok, _} -> 0
-	end
+	end,
 	send_reply(RetPath, ?GENERIC_CNF, <<BinCode:32/little>>).
 
 
@@ -437,7 +437,7 @@ io_loop(Handle) ->
 			{MergeRevs, <<>>} = parse_revisions(ReqData),
 			case broker:commit(Handle, MergeRevs) of
 				{ok, Rev} ->
-					send_reply(RetPath, ?WRITE_COMMIT_CNF, Rev);
+					send_reply(RetPath, ?COMMIT_CNF, Rev);
 
 				conflict ->
 					send_generic_reply(RetPath, conflict),

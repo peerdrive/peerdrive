@@ -31,7 +31,7 @@
 start(State, User) ->
 	case gen_server:start(?MODULE, {State, User}, []) of
 		{ok, Pid} ->
-			{ok, #writer{
+			{ok, #handle{
 				this     = Pid,
 				read     = fun read/4,
 				write    = fun write/4,
@@ -77,9 +77,9 @@ handle_call({read, Part, Offset, Length}, _From, S) ->
 		{error, Reason} ->
 			{error, Reason};
 		IoDevice ->
-			file:pread(IoDevice, Offset, Length);
+			file:pread(IoDevice, Offset, Length)
 	end,
-	{reply, Reply, Handles};
+	{reply, Reply, S2};
 
 % returns `ok | {error, Reason}'
 handle_call({write, Part, Offset, Data}, _From, S) ->
@@ -166,7 +166,7 @@ open_file_read(S, Part) ->
 
 		error ->
 			{S, {error, enoent}}
-	end,
+	end.
 
 
 % returns {S, {error, Reason}} | {S2, IoDevice}
@@ -211,11 +211,13 @@ get_file_write(S, Part) ->
 	end.
 
 
-close_reader(Part, Readers) ->
+close_reader(ClosePart, Readers) ->
 	dict:filter(
-		fun
-			(Part, IoDevice) -> file:close(IoDevice), false;
-			(_, _) -> true
+		fun (OpenPart, IoDevice) ->
+			case OpenPart of
+				ClosePart -> file:close(IoDevice), false;
+				_         -> true
+			end
 		end,
 		Readers).
 
@@ -251,8 +253,8 @@ do_commit(S, Mtime, MergeRevs) ->
 		parents = lists:usort(S#ws.baserevs ++ NewMergeRevs),
 		mtime   = Mtime,
 		uti     = S#ws.uti},
-	NewOrig = lists:map(
-		fun({Part, Hash}) -> dict:store(Part, Hash, Acc) end,
+	NewOrig = lists:foldl(
+		fun({Part, Hash}, Acc) -> dict:store(Part, Hash, Acc) end,
 		S#ws.orig,
 		NewParts),
 	NewLocks = lists:map(fun({_Part, Hash}) -> Hash end, NewParts) ++ S#ws.locks,
@@ -265,7 +267,7 @@ do_commit(S, Mtime, MergeRevs) ->
 		conflict ->
 			{reply, conflict, S2};
 		Reply ->
-			{stop, normal, Reply, cleanup(S2)};
+			{stop, normal, Reply, cleanup(S2)}
 	end.
 
 

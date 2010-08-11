@@ -358,7 +358,7 @@ handle_cast_internal({unlock, Hash}, #state{locks=Locks, parts=Parts}=S) ->
 		_ ->
 			orddict:store(Hash, Depth, Locks)
 	end,
-	{noreply, S2#state{locks=NewLocks}};
+	{noreply, S#state{locks=NewLocks}};
 
 % internal: decrease refcount of a object
 handle_cast_internal({object_ref_dec, Rev}, S) ->
@@ -431,9 +431,9 @@ make_interface(Pid) ->
 		stat               = fun stat/2,
 		put_uuid           = fun put_uuid/4,
 		put_rev_start      = fun put_rev_start/3,
-		peek               = fun peek/3,
-		fork               = fun fork/3,
-		update             = fun update/3,
+		peek               = fun peek/2,
+		fork               = fun fork/4,
+		update             = fun update/4,
 		delete_rev         = fun delete_rev/2,
 		delete_doc         = fun delete_doc/2,
 		sync_get_changes   = fun sync_get_changes/2,
@@ -654,7 +654,7 @@ do_write_start_fork(S, Doc, StartRev, Uti, User) ->
 				flags     = 0,
 				doc       = Doc,
 				baserevs  = [],
-				mergerevs = []
+				mergerevs = [],
 				uti       = RealUti,
 				orig      = dict:new(),
 				new       = dict:new(),
@@ -685,7 +685,7 @@ do_write_start_fork(S, Doc, StartRev, Uti, User) ->
 						flags     = Object#object.flags,
 						doc       = Doc,
 						baserevs  = [Rev],
-						mergerevs = []
+						mergerevs = [],
 						uti       = RealUti,
 						orig      = Parts,
 						new       = dict:new(),
@@ -717,7 +717,7 @@ do_write_start_update(S, Uuid, StartRev, Uti, User) ->
 						flags     = Object#object.flags,
 						doc       = Uuid,
 						baserevs  = [StartRev],
-						mergerevs = []
+						mergerevs = [],
 						uti       = RealUti,
 						orig      = Parts,
 						new       = dict:new(),

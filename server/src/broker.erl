@@ -19,7 +19,7 @@
 -export([
 	delete_rev/2, delete_doc/2, fork/3, lookup/1,
 	read/4, peek/2, replicate_rev/2, replicate_uuid/2,
-	stat/1, update/2, abort/1, commit/2, write/4,
+	stat/1, update/4, abort/1, commit/2, write/4,
 	truncate/3]).
 
 
@@ -148,7 +148,7 @@ truncate(Handle, Part, Offset) ->
 
 % {ok, Rev} | conflict | {error, Reason}
 commit(Handle, MergeRevs) ->
-	broker_io:commit(Handle).
+	broker_io:commit(Handle, MergeRevs).
 
 % ok
 abort(Handle) ->
