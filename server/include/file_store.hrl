@@ -15,13 +15,17 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-%% path,     base directory of server
-%% server,   server process pid
-%% flags,    flags of object
-%% uuid,     uuid of object
-%% revs,     base revisions of object when writing started
-%% uti,      UTI of object
-%% orig,     dict: FourCC --> Hash
-%% new       dict: FourCC --> {FileName, IODevice}
--record(ws, {path, server, flags, uuid, revs, uti, orig, new}).
+-record(ws, {
+	path,       % base directory of server
+	server,     % server process pid
+	flags,      % flags of object
+	doc,        % document uuid
+	baserevs,   % base revision of object when writing started
+	mergerevs,  % additional merge revisions
+	uti,        % UTI of object
+	orig,       % dict: FourCC --> Hash
+	new,        % dict: FourCC --> {FileName, IODevice}
+	readers,    % dict: FourcC --> IODevice
+	locks       % list of locked part hashes
+	}).
 

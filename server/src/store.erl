@@ -19,10 +19,8 @@
 -export([guid/1, contains/2, lookup/2, stat/2]).
 -export([put_uuid/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
--export([read_start/3, read_part/4, read_done/1]).
--export([write_start_fork/3, write_start_update/3, write_start_merge/4,
-	write_part/4, write_trunc/3, write_abort/1, write_commit/2]).
--export([delete_rev/2, delete_uuid/2]).
+-export([abort/1, commit/3, fork/3, peek/2, read/4, truncate/3, update/4, write/4]).
+-export([delete_rev/2, delete_doc/2]).
 -export([sync_get_changes/2, sync_set_anchor/3]).
 -export([hash_object/1]).
 
@@ -33,28 +31,28 @@
 guid(#store{this=Store, guid=Guid}) ->
 	Guid(Store).
 
-%% @doc Lookup a UUID.
+%% @doc Lookup a document.
 %%
-%% Returns `{ok, Rev}' if the UUID is found on the store, or `error' if no such
+%% Returns `{ok, Rev}' if the document is found on the store, or `error' if no such
 %% UUID exists.
 %%
-%% @spec lookup(Store, Uuid) -> {ok, Rev} | error
+%% @spec lookup(Store, Doc) -> {ok, Rev} | error
 %%       Store = #store
-%%       Uuid = Rev = guid()
-lookup(#store{this=Store, lookup=Lookup}, Uuid) ->
-	Lookup(Store, Uuid).
+%%       Doc = Rev = guid()
+lookup(#store{this=Store, lookup=Lookup}, Doc) ->
+	Lookup(Store, doc).
 
 %% @doc Check if a revision exists in the store
 %% @spec contains(Store, Rev) -> bool()
 %%       Store = #store
-%%       Pid = guid()
+%%       Rev = guid()
 contains(#store{this=Store, contains=Contains}, Rev) ->
 	Contains(Store, Rev).
 
 %% @doc Stat a revision.
 %%
 %% Returns information about a revision if it is found on the store, or `error'
-%% if no such UUID exists.
+%% if no such revision exists.
 %%
 %% @spec stat(Store, Rev) -> {ok, Flags, Parts, Parents, Mtime, Uti} | error
 %%       Store = pid()
@@ -68,101 +66,76 @@ stat(#store{this=Store, stat=Stat}, Rev) ->
 
 %% @doc Start reading a document revision.
 %%
-%% Returns the pid of the reader when ready, or an error code. The User argument
-%% is the pid of the originally requesting process. The reader process will link
-%% to that process.
+%% Returns the handle when ready, or an error code.
 %%
-%% @spec read_start(Store, Rev, User) -> {ok, Reader} | {error, Reason}
+%% @spec peek(Store, Rev) -> {ok, Handle} | {error, Reason}
 %%       Store = #store
-%%       User = pid()
-%%       Reader = #reader
+%%       Handle = #handle
 %%       Rev = guid()
 %%       Reason = ecode()
-read_start(#store{this=Store, read_start=ReadStart}, Rev, User) ->
-	ReadStart(Store, Rev, User).
-
-%% @doc Read a part of a document
-%%
-%% @spec read_part(Reader, Part, Offset, Length) -> {ok, Data} | eof | {error, Reason}
-%%       Reader = #reader
-%%       Part = Data = binary()
-%%       Offset = Length = integer()
-%%       Reason = ecode()
-read_part(#reader{this=Reader, read_part=ReadPart}, Part, Offset, Length) ->
-	ReadPart(Reader, Part, Offset, Length).
-
-%% @doc Dispose a reader.
-%%
-%% @spec read_done(Reader::#reader) -> none()
-read_done(#reader{this=Reader, done=ReadDone}) ->
-	ReadDone(Reader).
+peek(#store{this=Store, peek=Peek}, Rev) ->
+	Peek(Store, Rev).
 
 %% @doc Create a new document
 %%
-%% Returns `{ok, Uuid, Writer}' which represents the created UUID and a handle
-%% for the following write_* functions to fill the object. The initial revision
-%% identifier will be returned by write_done/1 which will always succeed for
-%% newly created documents.
+%% Returns `{ok, Handle}' which represents the created document and a handle
+%% for the following read/write functions to fill it. The initial
+%% revision identifier will be returned by commit/3 which should always succeed
+%% for newly created documents.
 %%
-%% @spec write_start_fork(Store, StartRev, Uti) -> {ok, Uuid, Writer} | {error, Reason}
+%% @spec fork(Store, Doc, StartRev, Uti) -> {ok, Handle} | {error, Reason}
 %%         Store = #store
-%%         Writer = #writer
-%%         StartRev, Uuid = guid()
-%%         Uti = binary()
+%%         Handle = #handle
+%%         StartRev, Doc = guid()
+%%         Uti = keep | binary()
 %%         Reason = ecode()
-write_start_fork(#store{this=Store, write_start_fork=WriteStartFork}, StartRev, Uti) ->
-	WriteStartFork(Store, StartRev, Uti).
+fork(#store{this=Store, fork=Fork}, Doc, StartRev, Uti) ->
+	Fork(Store, Doc, StartRev, Uti).
 
 %% @doc Write to an existing document
 %%
 %% The new revision will start with the content of the StartRev revision. If
-%% Uuid points already to another revision then the call will fail.
+%% Doc points already to another revision then the call will fail.
 %%
-%% @spec write_start_update(Store, Uuid, StartRev) -> {ok, Writer} | {error, Reason}
+%% @spec update(Store, Doc, StartRev) -> {ok, Handle} | {error, Reason}
 %%        Store = #store
-%%        Writer = #writer
-%%        Uuid = guid()
+%%        Handle = #handle
+%%        Doc = guid()
 %%        StartRevs = guid()
+%%        Uti = keep | binary()
 %%        Reason = ecode()
-write_start_update(#store{this=Store, write_start_update=WriteStartUpdate}, Uuid, StartRev) ->
-	WriteStartUpdate(Store, Uuid, StartRev).
+update(#store{this=Store, update=Update}, Doc, StartRev, Uti) ->
+	Update(Store, Doc, StartRev, Uti).
 
-%% @doc Merge a document
+%% @doc Read a part of a document
 %%
-%% The new revision of the document will start from scratch and the Uti of the
-%% new revision is set according to the Uti parameter. If the Uuid does not
-%% point to a revision contained in StartRevs then the call will fail.
-%%
-%% @spec write_start_merge(Store, Uuid, StartRevs, Uti) -> {ok, Writer} | {error, Reason}
-%%        Store = #store
-%%        Writer = #writer
-%%        Uuid = guid()
-%%        StartRevs = [guid()]
-%%        Reason = ecode()
-%%        Uti = binary()
-%%
-write_start_merge(#store{this=Store, write_start_merge=WriteStartMerge}, Uuid, StartRevs, Uti) ->
-	WriteStartMerge(Store, Uuid, StartRevs, Uti).
+%% @spec read(Reader, Part, Offset, Length) -> {ok, Data} | eof | {error, Reason}
+%%       Reader = #reader
+%%       Part = Data = binary()
+%%       Offset = Length = integer()
+%%       Reason = ecode()
+read(#handle{this=Handle, read=Read}, Part, Offset, Length) ->
+	Read(Handle, Part, Offset, Length).
 
 % ok | {error, Reason}
-write_part(#writer{this=Writer, write_part=WritePart}, Part, Offset, Data) ->
-	WritePart(Writer, Part, Offset, Data).
+write(#handle{this=Handle, write=Write}, Part, Offset, Data) ->
+	Write(Handle, Part, Offset, Data).
 
 % ok | {error, Reason}
-write_trunc(#writer{this=Writer, write_trunc=WriteTrunc}, Part, Offset) ->
-	WriteTrunc(Writer, Part, Offset).
+truncate(#handle{this=Handle, truncate=Truncate}, Part, Offset) ->
+	Truncate(Handle, Part, Offset).
 
-% {ok, Rev} | {error, Reason}
-write_commit(#writer{this=Writer, commit=Commit}, Mtime) ->
-	Commit(Writer, Mtime).
+% {ok, Rev} | conflict | {error, Reason}
+commit(#handle{this=Handle, commit=Commit}, Mtime, MergeRevs) ->
+	Commit(Handle, Mtime, MergeRevs).
 
 % ok
-write_abort(#writer{this=Writer, abort=Abort}) ->
-	Abort(Writer).
+abort(#handle{this=Handle, abort=Abort}) ->
+	Abort(Handle).
 
 % ok | {error, Reason}
-delete_uuid(#store{this=Store, delete_uuid=DeleteUuid}, Uuid) ->
-	DeleteUuid(Store, Uuid).
+delete_doc(#store{this=Store, delete_doc=DeleteDoc}, Doc) ->
+	DeleteDoc(Store, Doc).
 
 % ok | {error, Reason}
 delete_rev(#store{this=Store, delete_rev=DeleteRev}, Rev) ->

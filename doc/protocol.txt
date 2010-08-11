@@ -4,142 +4,104 @@
 Packet = Length:16, Opcode:16, Reference:32, Body
 
 Opcode =
-	ENUM_REQ            0x0000
-	ENUM_CNF            0x0001
-	LOOKUP_REQ          0x0010
-	LOOKUP_CNF          0x0011
-	STAT_REQ            0x0020
-	STAT_CNF            0x0021
-	STAT_REJ            0x0022
+	GENERIC_CNF         0x0001
 
-	READ_START_REQ      0x0030
-	READ_START_CNF      0x0031
-	READ_START_REJ      0x0032
-	READ_PART_REQ       0x0040
-	READ_PART_CNF       0x0041
-	READ_PART_REJ       0x0042
-	READ_DONE_IND       0x0053
+	ENUM_REQ            0x0010
+	ENUM_CNF            0x0011
+	LOOKUP_REQ          0x0020
+	LOOKUP_CNF          0x0021
+	STAT_REQ            0x0030
+	STAT_CNF            0x0031
 
-	FORK_REQ            0x0060
-	FORK_CNF            0x0061
-	FORK_REJ            0x0062
-	MERGE_REQ           0x0070
-	MERGE_CNF           0x0071
-	MERGE_REJ           0x0072
-	UPDATE_REQ          0x0080
-	UPDATE_CNF          0x0081
-	UPDATE_REJ          0x0082
-	MERGE_TRIVIAL_REQ   0x0120
-	MERGE_TRIVIAL_CNF   0x0121
-	MERGE_TRIVIAL_REJ   0x0122
+	PEEK_REQ            0x0040
+	PEEK_CNF            0x0041
+	FORK_REQ            0x0050
+	FORK_CNF            0x0051
+	UPDATE_REQ          0x0060
+	UPDATE_CNF          0x0061
 
-	WRITE_TRUNC_REQ     0x0090
-	WRITE_TRUNC_CNF     0x0091
-	WRITE_TRUNC_REJ     0x0092
-	WRITE_PART_REQ      0x00A0
-	WRITE_PART_CNF      0x00A1
-	WRITE_PART_REJ      0x00A2
-	WRITE_COMMIT_REQ    0x00B0
-	WRITE_COMMIT_CNF    0x00B1
-	WRITE_COMMIT_REJ    0x00B2
-	WRITE_ABORT_IND     0x00C3
+	READ_REQ            0x0070
+	READ_CNF            0x0071
+	WRITE_REQ           0x0080
+	TRUNC_REQ           0x0090
 
-	WATCH_ADD_REQ       0x00D0
-	WATCH_ADD_CNF       0x00D1
-	WATCH_ADD_REJ       0x00D2
-	WATCH_REM_REQ       0x00D3
-	WATCH_REM_CNF       0x00D4
-	WATCH_REM_REJ       0x00D5
-	WATCH_IND           0x00D6
+	COMMIT_REQ          0x00A0
+	COMMIT_CNF          0x00A1
+	ABORT_REQ           0x00B0
 
-	DELETE_UUID_REQ     0x00E0
-	DELETE_REV_REQ      0x00E1
-	DELETE_CNF          0x00E2
-	DELETE_REJ          0x00E3
+	WATCH_ADD_REQ       0x00C0
+	WATCH_REM_REQ       0x00D0
+	WATCH_IND           0x00E2
 
-	REPLICATE_UUID_IND  0x00F0
-	REPLICATE_REV_IND   0x00F1
+	DELETE_DOC_REQ      0x00F0
+	DELETE_REV_REQ      0x0100
+
+	REPLICATE_DOC_REQ   0x0110
+	REPLICATE_REV_REQ   0x0120
 
 	MOUNT_REQ           0x0130
-	MOUNT_CNF           0x0131
-	MOUNT_REJ           0x0132
-	UNMOUNT_IND         0x0123
+	UNMOUNT_REQ         0x0140
 
-	PROGRESS_IND        0x0146
-
-	INVALID_REQ         0xffff
+	PROGRESS_IND        0x0152
 
 Body =
+	GENERIC_CNF         ECode:32
+
 	ENUM_REQ
 	ENUM_CNF            Count:8, [Guid:128, StoreFlags:32, NameLen:16, NameStr]
-	LOOKUP_REQ          Uuid:128
-	LOOKUP_CNF          RevCount:8, [Rev:128, StoreCount:8, [Guid:128]]
+	LOOKUP_REQ          Doc:128
+	LOOKUP_CNF          RevCount:8, [Rev:128, StoreCount:8, [Store:128]]
 	STAT_REQ            Rev:128
 	STAT_CNF            RevFlags:32, PartsCount:8, [FourCC:32, Size:64, Hash:128], ParentCount:8, [Parent:128], VolCount:8, [Volume:128], Mtime:64, UTI...
-	STAT_REJ
 
-	READ_START_REQ      Rev:128
-	READ_START_CNF      Cookie:32
-	READ_START_REJ
-	READ_PART_REQ       Cookie:32, Part:32, Offset:64, Length:32
-	READ_PART_CNF       Data...
-	READ_PART_REJ
-	READ_DONE_IND       Cookie:32
-
-	FORK_REQ            Store:128, StartRev:128, UTI...
-	FORK_CNF            Uuid:128, Cookie:32
-	FORK_REJ
-	MERGE_REQ           Uuid:128, RevCount:8, [StartRevs:128], UTI...
-	MERGE_CNF           Cookie:32
-	MERGE_REJ           Reason:8 {0=conflict, 1=fatal}
-	UPDATE_REQ          Uuid:128, Rev:128
+	PEEK_REQ            Rev:128, StoreCount:8, [Store:128]
+	PEEK_CNF            Cookie:32
+	FORK_REQ            Rev:128, StoreCount:8, [Store:128], UTI...
+	FORK_CNF            Cookie:32, Doc:128
+	UPDATE_REQ          Doc:128, Rev:128, StoreCount:8, [Store:128], UTI...
 	UPDATE_CNF          Cookie:32
-	UPDATE_REJ          Reason:8 {0=conflict, 1=fatal}
 
-	MERGE_TRIVIAL_REQ   Uuid:128, DestRev:128, OtherRevCount:8, [OtherRevs:128]
-	MERGE_TRIVIAL_CNF   Rev:128
-	MERGE_TRIVIAL_REJ
+	READ_REQ            Cookie:32, Part:32, Offset:64, Length:32
+	READ_CNF            Data...
+	TRUNC_REQ           Cookie:32, Part:32, Offset:64
+	WRITE_REQ           Cookie:32, Part:32, Offset:64, Data...
 
-	WRITE_TRUNC_REQ     Cookie:32, Part:32, Offset:64
-	WRITE_TRUNC_CNF
-	WRITE_TRUNC_REJ	
-	WRITE_PART_REQ      Cookie:32, Part:32, Offset:64, Data...
-	WRITE_PART_CNF
-	WRITE_PART_REJ
-	WRITE_COMMIT_REQ    Cookie:32
-	WRITE_COMMIT_CNF    Rev:128
-	WRITE_COMMIT_REJ    0/1:8 {0=conflict, 1=fatal}
-	WRITE_ABORT_IND     Cookie:32
+	COMMIT_REQ          Cookie:32, MergeRevsCount:8, [MergeRev:128]
+	COMMIT_CNF          Rev:128
+	ABORT_REQ           Cookie:32
 
-	WATCH_ADD_REQ       Type:8 {0=Uuid, 1=Rev}, Hash:128
-	WATCH_ADD_CNF
-	WATCH_ADD_REJ
-	WATCH_REM_REQ       Type:8 {0=Uuid, 1=Rev}, Hash:128
-	WATCH_REM_CNF
-	WATCH_REM_REJ
-	WATCH_IND           Cause:8, Type:8 {0=Uuid, 1=Rev}, Hash:128
+	WATCH_ADD_REQ       Type:8 {0=Doc, 1=Rev}, Uuid:128
+	WATCH_REM_REQ       Type:8 {0=Doc, 1=Rev}, Uuid:128
+	WATCH_IND           Cause:8, Type:8 {0=Doc, 1=Rev}, Uuid:128
 
-	DELETE_UUID_REQ     Store:128, Uuid:128
+	DELETE_DOC_REQ      Store:128, Doc:128
 	DELETE_REV_REQ      Store:128, Rev:128
-	DELETE_CNF
-	DELETE_REJ
 
-	REPLICATE_UUID_IND  Uuid:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
-	REPLICATE_REV_IND   Rev:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
+	REPLICATE_DOC_REQ   Doc:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
+	REPLICATE_REV_REQ   Rev:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
 
 	MOUNT_REQ           Id...
-	MOUNT_CNF
-	MOUNT_REJ
-	UNMOUNT_IND         Id...
+	UNMOUNT_REQ         Id...
 
-	PROGRESS_IND        Type:8 {0=sync, 1=replication}, Progress:16 {0..256, 0=start, 0xffff=end}, Data...
+	PROGRESS_IND        Type:8 {0=sync, 1=docrep, 2=revrep}, Progress:16 {0..256, 0=start, 0xffff=end}, Data...
+
+
+ECode =
+	0	Success
+	1	Recoverable conflict (Handle still valid)
+	2	ENOENT
+	3	EINVAL
+	4	EMULTIPLE
+	5	EBADF
+
+	0xffffffff	Unknown error
 
 Cause =
-	0	Modified (UUID)
-	1	Appeared (UUID/Rev)
-	2	Replicated (UUID/Rev)
-	3	Diminished (UUID/Rev)
-	4	Disappeared (UUID/Rev)
+	0	Modified (Doc)
+	1	Appeared (Doc/Rev)
+	2	Replicated (Doc/Rev)
+	3	Diminished (Doc/Rev)
+	4	Disappeared (Doc/Rev)
 
 StoreFlags:
 	1	Mounted

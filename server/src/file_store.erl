@@ -13,9 +13,6 @@
 %%
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
-%%
-%%
-%% FIXME: prevent parts from being deleted too early
 
 -module(file_store).
 -behaviour(gen_server).
@@ -23,9 +20,13 @@
 -export([start_link/2, stop/1, dump/1, fsck/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
+% Store interface
 -export([guid/1, contains/2, stat/2, lookup/2, put_uuid/4, put_rev_start/3,
-	read_start/3, write_start_fork/3, write_start_update/3, write_start_merge/4,
-	delete_rev/2, delete_uuid/2, sync_get_changes/2, sync_set_anchor/3]).
+	peek/2, fork/4, update/4,
+	delete_rev/2, delete_doc/2, sync_get_changes/2, sync_set_anchor/3]).
+
+% Functions used by helper processes (reader/writer/...)
+-export([commit/3, lock/2, unlock/2]).
 
 -include("store.hrl").
 -include("file_store.hrl").
@@ -39,7 +40,7 @@
 % parts:   dict: PartHash --> refcount
 % peers:   dict: GUID --> Generation
 % changed: Bool
--record(state, {path, guid, gen, uuids, objects, parts, peers, changed=false}).
+-record(state, {path, guid, gen, uuids, objects, parts, peers, locks, changed=false}).
 
 -define(SYNC_INTERVAL, 5000).
 
@@ -71,7 +72,8 @@ init({Id, Path, Name}) ->
 				uuids   = Uuids,
 				objects = Objects,
 				parts   = Parts,
-				peers   = Peers
+				peers   = Peers,
+				locks   = orddict:new()
 			},
 			volman:reg_store(Id, Guid, make_interface(self())),
 			process_flag(trap_exit, true),
@@ -115,29 +117,24 @@ stat(Store, Rev) ->
 	gen_server:call(Store, {stat, Rev}).
 
 %% @doc Start reading a document revision.
-%% @see store:read_start/3
-read_start(Store, Rev, User) ->
-	gen_server:call(Store, {read, Rev, User}).
+%% @see store:peek/2
+peek(Store, Rev) ->
+	gen_server:call(Store, {peek, Rev}).
 
 %% @doc Create a new document
-%% @see store:write_start_fork/3
-write_start_fork(Store, StartRev, Uti) ->
-	gen_server:call(Store, {fork, StartRev, Uti}).
+%% @see store:fork/4
+fork(Store, Doc, StartRev, Uti) ->
+	gen_server:call(Store, {fork, Doc, StartRev, Uti}).
 
 %% @doc Write to an existing document
-%% @see store:write_start_update/3
-write_start_update(Store, Uuid, StartRev) ->
-	gen_server:call(Store, {update, Uuid, StartRev}).
-
-%% @doc Merge a document
-%% @see store:write_start_merge/4
-write_start_merge(Store, Uuid, StartRevs, Uti) ->
-	gen_server:call(Store, {merge, Uuid, StartRevs, Uti}).
+%% @see store:update/4
+update(Store, Doc, StartRev, Uti) ->
+	gen_server:call(Store, {update, Doc, StartRev, Uti}).
 
 %% @doc Delete a UUID
-%% @see store:delete_uuid/2
-delete_uuid(Store, Uuid) ->
-	gen_server:call(Store, {delete_uuid, Uuid}).
+%% @see store:delete_doc/2
+delete_doc(Store, Doc) ->
+	gen_server:call(Store, {delete_doc, Doc}).
 
 %% @doc Delete a revision
 %% @see store:delete_rev/2
@@ -163,6 +160,33 @@ sync_get_changes(Store, PeerGuid) ->
 %% @see store:sync_set_anchor/3
 sync_set_anchor(Store, PeerGuid, SeqNum) ->
 	gen_server:call(Store, {sync_set_anchor, PeerGuid, SeqNum}).
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Functions used by helper processes...
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% @doc Insert a new revision into the store and update Uuid to point to that
+%%      revision instead.
+%%
+%% @spec commit(Store, Uuid, Object) -> Result
+%%       Store = pid()
+%%       Uuid = guid()
+%%       Object = #object
+%%       Result = {ok, Rev::guid()} | conflict | {error, Error::ecode()}
+commit(Store, Uuid, Object) ->
+	gen_server:call(Store, {commit, Uuid, Object}).
+
+%% @doc Lock a part to prevent it from being evicted when getting
+%%      unreferenced.
+lock(Store, Hash) ->
+	gen_server:call(Store, {lock, Hash}).
+
+%% @doc Unlock a previously locked part. If the part is not referenced by any
+%%      revision it will be deleted.
+unlock(Store, Hash) ->
+	gen_server:cast(Store, {unlock, Hash}).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Gen_server callbacks...
@@ -234,45 +258,28 @@ handle_call_internal({stat, Rev}, _From, S) ->
 	Reply = do_stat(Rev, S),
 	{reply, Reply, S};
 
-% returns `{ok, Reader} | {error, Reason}'
-handle_call_internal({read, Rev, User}, From, S) ->
-	case dict:find(Rev, S#state.objects) of
-		{ok, {_, stub}} ->
-			{reply, {error, enoent}, S};
-
-		{ok, {_, Object}} ->
-			Pid = self(),
-			spawn_link(fun() ->
-				Reply = file_store_reader:start(Pid, S#state.path, Object#object.parts, User),
-				gen_server:reply(From, Reply)
-			end),
-			{noreply, S};
-
-		error ->
-			{reply, {error, enoent}, S}
-	end;
-
-handle_call_internal({fork, StartRev, Uti}, From, S) ->
+% returns `{ok, Handle} | {error, Reason}'
+handle_call_internal({peek, Rev}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_fork(S, StartRev, Uti, User),
+	Reply = do_peek(S, Rev, User),
+	{reply, Reply, S};
+
+handle_call_internal({fork, Doc, StartRev, Uti}, From, S) ->
+	{User, _} = From,
+	{S2, Reply} = do_write_start_fork(S, Doc, StartRev, Uti, User),
 	{reply, Reply, S2};
 
-handle_call_internal({update, Uuid, StartRev}, From, S) ->
+handle_call_internal({update, Uuid, StartRev, Uti}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_update(S, Uuid, StartRev, User),
-	{reply, Reply, S2};
-
-handle_call_internal({merge, Uuid, StartRevs, Uti}, From, S) ->
-	{User, _} = From,
-	{S2, Reply} = do_write_start_merge(S, Uuid, StartRevs, Uti, User),
+	{S2, Reply} = do_write_start_update(S, Uuid, StartRev, Uti, User),
 	{reply, Reply, S2};
 
 handle_call_internal({delete_rev, Rev}, _From, S) ->
 	{S2, Reply} = do_delete_rev(S, Rev),
 	{reply, Reply, S2};
 
-handle_call_internal({delete_uuid, Uuid}, _From, S) ->
-	{S2, Reply} = do_delete_uuid(S, Uuid),
+handle_call_internal({delete_doc, Doc}, _From, S) ->
+	{S2, Reply} = do_delete_doc(S, Doc),
 	{reply, Reply, S2};
 
 handle_call_internal({put_uuid, Uuid, OldRev, NewRev}, _From, S) ->
@@ -290,6 +297,11 @@ handle_call_internal({sync_get_changes, PeerGuid}, _From, S) ->
 
 handle_call_internal({sync_set_anchor, PeerGuid, SeqNum}, _From, S) ->
 	S2 = do_sync_set_anchor(S, PeerGuid, SeqNum),
+	{reply, ok, S2};
+
+% internal
+handle_call_internal({lock, Hash}, _From, S) ->
+	S2 = S#state{locks = orddict:update_counter(Hash, 1, S#state.locks)},
 	{reply, ok, S2};
 
 % internal: ok | {error, Reason}
@@ -313,12 +325,40 @@ handle_cast_internal({part_ref_dec, PartHash}, S) ->
 	RefCount = dict:fetch(PartHash, S#state.parts)-1,
 	Parts = if
 		RefCount == 0 ->
-			file:delete(util:build_path(S#state.path, PartHash)),
+			% defer deletion if currently locked
+			case orddict:find(PartHash, S#state.locks) of
+				{ok, Value} when Value > 0 ->
+					ok;
+				_ ->
+					file:delete(util:build_path(S#state.path, PartHash))
+			end,
 			dict:erase(PartHash, S#state.parts);
 		true ->
 			dict:store(PartHash, RefCount, S#state.parts)
 	end,
 	{noreply, S#state{parts=Parts, changed=true}};
+
+% internal: unlock a part
+handle_cast_internal({unlock, Hash}, #state{locks=Locks, parts=Parts}=S) ->
+	Depth = orddict:fetch(Hash, Locks)-1,
+	Refs = case dict:find(Hash, Parts) of
+		{ok, Value} -> Value;
+		error       -> 0
+	end,
+	NewLocks = case Depth of
+		0 ->
+			if
+				Refs == 0 ->
+					file:delete(util:build_path(S#state.path, Hash));
+				true ->
+					ok
+			end,
+			orddict:erase(Hash, Locks);
+
+		_ ->
+			orddict:store(Hash, Depth, Locks)
+	end,
+	{noreply, S2#state{locks=NewLocks}};
 
 % internal: decrease refcount of a object
 handle_cast_internal({object_ref_dec, Rev}, S) ->
@@ -391,12 +431,11 @@ make_interface(Pid) ->
 		stat               = fun stat/2,
 		put_uuid           = fun put_uuid/4,
 		put_rev_start      = fun put_rev_start/3,
-		read_start         = fun read_start/3,
-		write_start_fork   = fun write_start_fork/3,
-		write_start_update = fun write_start_update/3,
-		write_start_merge  = fun write_start_merge/4,
+		peek               = fun peek/3,
+		fork               = fun fork/3,
+		update             = fun update/3,
 		delete_rev         = fun delete_rev/2,
-		delete_uuid        = fun delete_uuid/2,
+		delete_doc         = fun delete_doc/2,
 		sync_get_changes   = fun sync_get_changes/2,
 		sync_set_anchor    = fun sync_set_anchor/3
 	}.
@@ -469,6 +508,18 @@ do_stat(Rev, #state{objects=Objects, path=Path}) ->
 			error
 	end.
 
+do_peek(#state{objects=Objects, path=Path}, Rev, User) ->
+	case dict:find(Rev, Objects) of
+		{ok, {_, stub}} ->
+			{error, enoent};
+
+		{ok, {_, Object}} ->
+			file_store_reader:start_link(Path, Object#object.parts, User);
+
+		error ->
+			{error, enoent}
+	end.
+
 %%% Delete %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 do_delete_rev(#state{guid=Guid, objects=Objects, path=Path} = S, Rev) ->
@@ -492,17 +543,17 @@ do_delete_rev(#state{guid=Guid, objects=Objects, path=Path} = S, Rev) ->
 	end.
 
 
-do_delete_uuid(#state{guid=Guid, uuids=Uuids} = S, Uuid) ->
-	case Uuid of
+do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc) ->
+	case Doc of
 		Guid ->
 			{S, {error, eaccess}};
 
 		_ ->
-			case dict:find(Uuid, Uuids) of
+			case dict:find(Doc, Uuids) of
 				{ok, {Rev, _Gen}} ->
-					vol_monitor:trigger_rm_uuid(Guid, Uuid),
+					vol_monitor:trigger_rm_doc(Guid, Doc),
 					gen_server:cast(self(), {object_ref_dec, Rev}),
-					{S#state{ uuids=dict:erase(Uuid, Uuids), changed=true}, ok};
+					{S#state{ uuids=dict:erase(Doc, Uuids), changed=true}, ok};
 
 				error ->
 					{S, {error, enoent}}
@@ -588,23 +639,29 @@ do_dump_object(Object, Path) ->
 
 %%% Creating & Writing %%%%%%%%%%%%%%%%
 
-% returns `{S2, {ok, Uuid, Writer} | {error, Reason}}'
-do_write_start_fork(S, StartRev, Uti, User) ->
-	Uuid = crypto:rand_bytes(16),
+% returns `{S2, {ok, Writer} | {error, Reason}}'
+do_write_start_fork(S, Doc, StartRev, Uti, User) ->
 	case StartRev of
 		% create new document
 		<<0:128>> ->
+			RealUti = case Uti of
+				keep -> <<"public.item">>;
+				_    -> Uti
+			end,
 			State = #ws{
-				path   = S#state.path,
-				server = self(),
-				flags  = 0,
-				uuid   = Uuid,
-				revs   = [],
-				uti    = Uti,
-				orig   = dict:new(),
-				new    = dict:new()},
+				path      = S#state.path,
+				server    = self(),
+				flags     = 0,
+				doc       = Doc,
+				baserevs  = [],
+				mergerevs = []
+				uti       = RealUti,
+				orig      = dict:new(),
+				new       = dict:new(),
+				readers   = dict:new(),
+				locks     = []},
 			{S2, Writer} = start_writer(S, State, User),
-			{S2, {ok, Uuid, Writer}};
+			{S2, {ok, Writer}};
 
 		% start from existing document
 		Rev ->
@@ -617,24 +674,31 @@ do_write_start_fork(S, StartRev, Uti, User) ->
 
 				% load old values and start writer process
 				{ok, {_, Object}} ->
+					RealUti = case Uti of
+						keep -> Object#object.uti;
+						_    -> Uti
+					end,
 					Parts = dict:from_list(Object#object.parts),
 					State = #ws{
-						path   = S#state.path,
-						server = self(),
-						flags  = Object#object.flags,
-						uuid   = Uuid,
-						revs   = [Rev],
-						uti    = Uti,
-						orig   = Parts,
-						new    = dict:new()},
+						path      = S#state.path,
+						server    = self(),
+						flags     = Object#object.flags,
+						doc       = Doc,
+						baserevs  = [Rev],
+						mergerevs = []
+						uti       = RealUti,
+						orig      = Parts,
+						new       = dict:new(),
+						readers   = dict:new(),
+						locks     = []},
 					{S2, Writer} = start_writer(S, State, User),
-					{S2, {ok, Uuid, Writer}}
+					{S2, {ok, Writer}}
 			end
 	end.
 
 
 % returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
-do_write_start_update(S, Uuid, StartRev, User) ->
+do_write_start_update(S, Uuid, StartRev, Uti, User) ->
 	case dict:find(Uuid, S#state.uuids) of
 		{ok, {StartRev, _Gen}} ->
 			case dict:fetch(StartRev, S#state.objects) of
@@ -642,16 +706,23 @@ do_write_start_update(S, Uuid, StartRev, User) ->
 					{S, {error, orphaned}};
 
 				{_, Object} ->
+					RealUti = case Uti of
+						keep -> Object#object.uti;
+						_    -> Uti
+					end,
 					Parts = dict:from_list(Object#object.parts),
 					State = #ws{
-						path   = S#state.path,
-						server = self(),
-						flags  = Object#object.flags,
-						uuid   = Uuid,
-						revs   = [StartRev],
-						uti    = Object#object.uti,
-						orig   = Parts,
-						new    = dict:new()},
+						path      = S#state.path,
+						server    = self(),
+						flags     = Object#object.flags,
+						doc       = Uuid,
+						baserevs  = [StartRev],
+						mergerevs = []
+						uti       = RealUti,
+						orig      = Parts,
+						new       = dict:new(),
+						readers   = dict:new(),
+						locks     = []},
 					{S2, Writer} = start_writer(S, State, User),
 					{S2, {ok, Writer}}
 			end;
@@ -666,36 +737,16 @@ do_write_start_update(S, Uuid, StartRev, User) ->
 	end.
 
 
-% returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
-do_write_start_merge(S, Uuid, StartRevs, Uti, User) ->
-	case dict:find(Uuid, S#state.uuids) of
-		{ok, {CurrentRev, _Gen}} ->
-			case lists:member(CurrentRev, StartRevs) of
-				true ->
-					State = #ws{
-						path   = S#state.path,
-						server = self(),
-						flags  = 0,
-						uuid   = Uuid,
-						revs   = StartRevs,
-						uti    = Uti,
-						orig   = dict:new(),
-						new    = dict:new()},
-					{S2, Writer} = start_writer(S, State, User),
-					{S2, {ok, Writer}};
-				false ->
-					{S, {error, conflict}}
-			end;
-		error ->
-			% unknown UUID
-			{S, {error, enoent}}
-	end.
-
-
-% adjust reference count, then start writer process
+% lock part hashes, then start writer process
 start_writer(S, State, User) ->
-	{ok, Writer} = file_store_writer:start(State, User),
-	{S, Writer}.
+	WriterLocks = dict:fold(
+		fun(_Part, Hash, Acc) -> [Hash | Acc] end,
+		State#ws.orig),
+	ServerLocks = lists:foldl(
+		fun(Hash, Acc) -> orddict:update_counter(Hash, 1, Acc) end,
+		S#state.locks),
+	{ok, Writer} = file_store_writer:start(State#ws{locks=WriterLocks}, User),
+	{S#state{locks=ServerLocks}, Writer}.
 
 
 % ok | {error, Reason}
@@ -726,7 +777,7 @@ do_put_uuid(#state{uuids=Uuids} = S, Uuid, OldRev, NewRev) ->
 
 		% Uuid does not exist (yet)...
 		error ->
-			vol_monitor:trigger_add_uuid(S#state.guid, Uuid),
+			vol_monitor:trigger_add_doc(S#state.guid, Uuid),
 			S21 = do_objects_ref_inc(S, [NewRev]),
 			Gen = S21#state.gen,
 			{
@@ -784,7 +835,7 @@ do_commit(S, Uuid, Object) ->
 					gen_server:cast(self(), {object_ref_dec, CurrentRev}),
 					{ok, NewRev};
 				false ->
-					{error, conflict}
+					conflict
 			end;
 		error ->
 			{ok, NewRev}

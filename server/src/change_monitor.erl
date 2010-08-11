@@ -21,7 +21,7 @@
 -export([start_link/0]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
-% watches:  dict: {Type, Guid} --> {set(Store), set(pid())}
+% watches:  dict: {Type, Uuid} --> {set(Store), set(pid())}
 -record(state, {watches}).
 
 
@@ -32,26 +32,26 @@
 start_link() ->
 	gen_server:start_link({local, change_monitor}, ?MODULE, [], []).
 
-%% @doc Start watching a GUID's (UUID or Rev). If a match occurs the
-%%      calling process will receive the following message:
+%% @doc Start watching a UUID (Doc or Rev). If a match occurs the calling
+%%      process will receive the following message:
 %%
-%%      {watch, Cause, Type, Guid} where
+%%      {watch, Cause, Type, Uuid} where
 %%          Cause = modified | appeared | replicated | diminished | disappeared
-%%          Type  = uuid | rev
-%%          Guid  = guid()
+%%          Type  = doc | rev
+%%          Uuid  = uuid()
 %%
-%% @spec watch(Type, Guid) -> ok
-%%       Type = uuid | rev
-%%       Guid = guid()
-watch(Type, Guid) ->
-	gen_server:call(change_monitor, {watch, Type, Guid}).
+%% @spec watch(Type, Uuid) -> ok
+%%       Type = doc | rev
+%%       Uuid = uuid()
+watch(Type, Uuid) ->
+	gen_server:call(change_monitor, {watch, Type, Uuid}).
 
-%% @doc Stop watching a GUID (UUID or Rev).
-%% @spec unwatch(Type, Guid) -> ok
-%%       Type = uuid | rev
-%%       Guid = guid()
-unwatch(Type, Guid) ->
-	gen_server:call(change_monitor, {unwatch, Type, Guid}).
+%% @doc Stop watching a UUID (Doc or Rev).
+%% @spec unwatch(Type, Uuid) -> ok
+%%       Type = doc | rev
+%%       Uuid = uuid()
+unwatch(Type, Uuid) ->
+	gen_server:call(change_monitor, {unwatch, Type, Uuid}).
 
 %% @doc Remove all watch hooks of the calling process.
 remove() ->
@@ -69,15 +69,15 @@ init([]) ->
 	{ok, #state{watches=dict:new()}}.
 
 
-handle_info({trigger_mod_uuid, Store, Uuid}, #state{watches=Watches} = State) ->
+handle_info({trigger_mod_doc, Store, Doc}, #state{watches=Watches} = State) ->
 	% This is a special trigger. Only forward special locally generated events.
 	% This prevents useless flooding of change notifications if the UUID exists
 	% on several stores.
 	case Store of
 		local ->
-			case dict:find({uuid, Uuid}, Watches) of
+			case dict:find({doc, Doc}, Watches) of
 				{ok, {_StoreSet, PidSet}} ->
-					fire_trigger(modified, uuid, Uuid, PidSet);
+					fire_trigger(modified, doc, Doc, PidSet);
 				error ->
 					ok
 			end,
@@ -95,12 +95,12 @@ handle_info({trigger_rm_rev, Store, Rev}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_dec(rev, Store, Rev, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
-handle_info({trigger_add_uuid, Store, Uuid}, #state{watches=Watches} = State) ->
-	NewWatches = trigger_inc(uuid, Store, Uuid, Watches),
+handle_info({trigger_add_doc, Store, Doc}, #state{watches=Watches} = State) ->
+	NewWatches = trigger_inc(doc, Store, Doc, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
-handle_info({trigger_rm_uuid, Store, Uuid}, #state{watches=Watches} = State) ->
-	NewWatches = trigger_dec(uuid, Store, Uuid, Watches),
+handle_info({trigger_rm_doc, Store, Doc}, #state{watches=Watches} = State) ->
+	NewWatches = trigger_dec(doc, Store, Doc, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
 handle_info({trigger_add_store, Store}, #state{watches=Watches} = State) ->
@@ -133,8 +133,8 @@ handle_call({watch, Type, Guid}, From, #state{watches=Watches} = S) ->
 		error ->
 			NewPidSet = sets:add_element(Client, sets:new()),
 			NewStoreSet =  case Type of
-				uuid -> uuid_population(Guid);
-				rev  -> rev_population(Guid)
+				doc -> doc_population(Guid);
+				rev -> rev_population(Guid)
 			end,
 			dict:store(Key, {NewStoreSet, NewPidSet}, Watches)
 	end,
@@ -181,12 +181,12 @@ terminate(_, _)          -> ok.
 %% Synchronous helpers...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% check all stores if they contain a certain UUID
-uuid_population(Uuid) ->
+% check all stores if they contain a certain document
+doc_population(Doc) ->
 	Stores = volman:stores(),
 	lists:foldl(
 		fun({StoreGuid, StoreIfc}, Acc) ->
-			case store:lookup(StoreIfc, Uuid) of
+			case store:lookup(StoreIfc, Doc) of
 				{ok, _Rev} -> sets:add_element(StoreGuid, Acc);
 				error      -> Acc
 			end
@@ -209,14 +209,14 @@ rev_population(Rev) ->
 		Stores).
 
 
-trigger_inc(Type, Store, Hash, Watches) ->
-	Key = {Type, Hash},
+trigger_inc(Type, Store, Uuid, Watches) ->
+	Key = {Type, Uuid},
 	case dict:find(Key, Watches) of
 		{ok, {StoreSet, PidSet}} ->
 			NewStoreSet = sets:add_element(Store, StoreSet),
 			case sets:size(NewStoreSet) of
-				1 -> fire_trigger(appeared, Type, Hash, PidSet);
-				_ -> fire_trigger(replicated, Type, Hash, PidSet)
+				1 -> fire_trigger(appeared, Type, Uuid, PidSet);
+				_ -> fire_trigger(replicated, Type, Uuid, PidSet)
 			end,
 			dict:store(Key, {NewStoreSet, PidSet}, Watches);
 
@@ -225,14 +225,14 @@ trigger_inc(Type, Store, Hash, Watches) ->
 	end.
 
 
-trigger_dec(Type, Store, Hash, Watches) ->
-	Key = {Type, Hash},
+trigger_dec(Type, Store, Uuid, Watches) ->
+	Key = {Type, Uuid},
 	case dict:find(Key, Watches) of
 		{ok, {StoreSet, PidSet}} ->
 			NewStoreSet = sets:del_element(Store, StoreSet),
 			case sets:size(NewStoreSet) of
-				0 -> fire_trigger(disappeared, Type, Hash, PidSet);
-				_ -> fire_trigger(diminished, Type, Hash, PidSet)
+				0 -> fire_trigger(disappeared, Type, Uuid, PidSet);
+				_ -> fire_trigger(diminished, Type, Uuid, PidSet)
 			end,
 			dict:store(Key, {NewStoreSet, PidSet}, Watches);
 
@@ -247,12 +247,12 @@ trigger_add_store(StoreGuid, Watches) ->
 			dict:map(
 				fun({Type, Hash}, {StoreSet, PidSet}) ->
 					case Type of
-						uuid ->
+						doc ->
 							case store:lookup(StoreIfc, Hash) of
 								{ok, _Rev} ->
 									case sets:size(StoreSet) of
-										0 -> fire_trigger(appeared, uuid, Hash, PidSet);
-										_ -> fire_trigger(replicated, uuid, Hash, PidSet)
+										0 -> fire_trigger(appeared, doc, Hash, PidSet);
+										_ -> fire_trigger(replicated, doc, Hash, PidSet)
 									end,
 									{sets:add_element(StoreGuid, StoreSet), PidSet};
 

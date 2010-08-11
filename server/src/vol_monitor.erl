@@ -19,7 +19,7 @@
 
 -export([register_proc/1, deregister_proc/1, trigger_add_store/1,
 		 trigger_rem_store/1, trigger_add_rev/2, trigger_rm_rev/2,
-		 trigger_add_uuid/2, trigger_rm_uuid/2, trigger_mod_uuid/2]).
+		 trigger_add_doc/2, trigger_rm_doc/2, trigger_mod_doc/2]).
 -export([start_link/0]).
 -export([init/1, handle_event/2, handle_call/2, handle_info/2, terminate/2, code_change/3]).
 
@@ -39,14 +39,14 @@ trigger_add_rev(StoreGuid, Rev) ->
 trigger_rm_rev(StoreGuid, Rev) ->
 	gen_event:notify(vol_monitor, {trigger_rm_rev, StoreGuid, Rev}).
 
-trigger_add_uuid(StoreGuid, Uuid) ->
-	gen_event:notify(vol_monitor, {trigger_add_uuid, StoreGuid, Uuid}).
+trigger_add_doc(StoreGuid, Doc) ->
+	gen_event:notify(vol_monitor, {trigger_add_doc, StoreGuid, Doc}).
 
-trigger_rm_uuid(StoreGuid, Uuid) ->
-	gen_event:notify(vol_monitor, {trigger_rm_uuid, StoreGuid, Uuid}).
+trigger_rm_doc(StoreGuid, Doc) ->
+	gen_event:notify(vol_monitor, {trigger_rm_doc, StoreGuid, Doc}).
 
-trigger_mod_uuid(StoreGuid, Uuid) ->
-	gen_event:notify(vol_monitor, {trigger_mod_uuid, StoreGuid, Uuid}).
+trigger_mod_doc(StoreGuid, Doc) ->
+	gen_event:notify(vol_monitor, {trigger_mod_doc, StoreGuid, Doc}).
 
 
 register_proc(Id) ->

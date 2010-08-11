@@ -30,28 +30,21 @@
 		stat,
 		put_uuid,
 		put_rev_start,
-		read_start,
-		write_start_fork,
-		write_start_update,
-		write_start_merge,
+		peek,
+		fork,
+		update,
 		delete_rev,
 		delete_uuid,
 		sync_get_changes,
 		sync_set_anchor
 	}).
 
--record(reader,
+-record(handle,
 	{
 		this,
-		read_part,
-		done
-	}).
-
--record(writer,
-	{
-		this,
-		write_part,
-		write_trunc,
+		read,
+		write,
+		truncate,
 		abort,
 		commit
 	}).

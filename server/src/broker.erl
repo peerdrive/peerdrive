@@ -17,10 +17,10 @@
 -module(broker).
 
 -export([
-	delete_rev/2, delete_uuid/2, fork/3, lookup/1, merge/4, merge_trivial/3,
-	read_done/1, read_part/4, read_start/1, replicate_rev/2, replicate_uuid/2,
-	stat/1, update/2, write_abort/1, write_commit/1, write_part/4,
-	write_trunc/3]).
+	delete_rev/2, delete_doc/2, fork/3, lookup/1,
+	read/4, peek/2, replicate_rev/2, replicate_uuid/2,
+	stat/1, update/2, abort/1, commit/2, write/4,
+	truncate/3]).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -74,202 +74,92 @@ stat(Rev) ->
 		volman:stores()).
 
 
-%% @doc Start reading a document identified by Rev.
-%% @spec read_start(Rev) -> {ok, Reader} | {error, Reason}
+%% @doc Start reading a specific revision.
+%% @spec peek(Rev, Stores) -> {ok, Handle} | {error, Reason}
 %%       Rev = guid()
-%%       Reader = reader()
-%%       Reason = term()
-read_start(Rev) ->
+%%       Stores = [guid()]
+%%       Handle = handle()
+%%       Reason = ecode()
+peek(Rev, Stores) ->
 	User = self(),
-	read_start_loop(Rev, User, volman:stores()).
-
-read_start_loop(_Rev, _User, []) ->
-	{error, enoent};
-read_start_loop(Rev, User, [{_Guid, StoreIfc} | Stores]) ->
-	case store:read_start(StoreIfc, Rev, User) of
-		{ok, Reader} ->
-			{ok, Reader};
-		_Else ->
-			read_start_loop(Rev, User, Stores)
-	end.
-
-
-%% @doc Read a part of a document
-%% @spec read_part(Reader, Part, Offset, Length) ->  {ok, Data} | eof | {error, Reason}
-%%       Reader = reader()
-%%       Part, Offset, Length = int()
-%%       Data = binary()
-%%       Reason = term()
-read_part(Reader, Part, Offset, Length) ->
-	store:read_part(Reader, Part, Offset, Length).
-
-
-%% @doc Finish the read process.
-%% @spec read_done(Reader)
-%%       Reader = reader()
-read_done(Reader) ->
-	store:read_done(Reader).
+	broker_io:start({peek, Rev, Stores, User}).
 
 
 %% @doc Fork a new document from an existing revision.
 %%
-%% Returns `{ok, Uuid, Writer}' which represents the created UUID and a handle
+%% Returns `{ok, Doc, Writer}' which represents the created document and a handle
 %% for the following write_* functions to fill the object. The initial revision
 %% identifier will be returned by write_done/1 which will always succeed for
 %% newly created documents (despite IO errors).
 %%
 %% To create a empty new document set StartRev to <<0:128>>. To derive a document
-%% from an existing one set StartRev to a revision which is available on Store.
+%% from an existing one set StartRev to a revision which is available on the Stores.
 %%
-%% @spec fork(Store, StartRev, Uti) -> {ok, Uuid, Writer} | {error, Reason}
-%%       Store, StartRev, Uuid = guid()
+%% @spec fork(StartRev, Stores, Uti) -> {ok, Doc, Handle} | {error, Reason}
+%%       Stores = [guid()]
+%%       StartRev, Doc = guid()
 %%       Uti = binary()
-%%       Writer = writer()
-%%       Reason = enoent | term()
-fork(Store, StartRev, Uti) ->
+%%       Handle = handle()
+%%       Reason = ecode()
+fork(StartRev, Stores, Uti) ->
 	User = self(),
-	case volman:store(Store) of
-		{ok, StoreIfc} ->
-			case broker_writer:start({fork, StoreIfc, StartRev, Uti, User}) of
-				{ok, Writer} ->
-					{ok, broker_writer:get_uuid(Writer), Writer};
-				{error, Reason} ->
-					{error, Reason}
-			end;
-		error ->
-			{error, enoent}
+	Doc = crypto:rand_bytes(16),
+	case broker_io:start({fork, Doc, StartRev, Stores, Uti, User}) of
+		{ok, Handle} ->
+			{ok, Doc, Handle};
+		{error, _} = Error ->
+			Error
 	end.
 
 
-%% @doc Merge different document revisions.
+%% @doc Update a document.
 %%
-%% Write to the document identified by Uuid. Revs must be a superset of all
-%% available revisions of the document. If Revs is a strict superset then the
-%% new revision will represent a merge of a previously cloned document.
-%% Revs should have at least two elements, otherwise update/2 should be
-%% used.
-%%
-%% The newly created document revision will start completely empty, just like
-%% as if fork/3 would have been called! The new revision will be stored on
-%% all stores where the Uuid exists.
-%%
-%% @spec merge(Stores, Uuid, Revs, Uti) -> {ok, Writer} | {error, Reason}
-%%       Stores = [#store]
-%%       Uuid = guid()
-%%       Revs = [guid()]
-%%       Uti = binary()
-%%       Writer = writer()
-%%       Reason = conflict | enoent | term()
-merge(Stores, Uuid, Revs, Uti) ->
-	User = self(),
-	% Lookup all stores&revisions where the Uuid exists
-	{StartStores, FoundRevs} = lists:foldl(
-		fun(StoreIfc, {AccStores, AccRevs}) ->
-			case store:lookup(StoreIfc, Uuid) of
-				{ok, Rev} -> {[StoreIfc|AccStores], [Rev|AccRevs]};
-				error     -> {AccStores, AccRevs}
-			end
-		end,
-		{[], []},
-		Stores),
-	% Check if Revs is a superset of all revisions
-	case FoundRevs of
-		[] ->
-			{error, enoent};
-
-		_ ->
-			AvailRevs = sets:from_list(FoundRevs),
-			StartRevs = sets:from_list(Revs),
-			case sets:is_subset(AvailRevs, StartRevs) of
-				true  -> broker_writer:start({merge, Uuid, StartStores, Revs, Uti, User});
-				false -> {error, conflict}
-			end
-	end.
-
-
-%% @doc Perform a trivial merge
-%%
-%% A trivial merge is a merge where the resulting content equals an existing
-%% revision. Threre are two possible scenarios (in "git"-terms):
-%%
-%%   - Fast-forward: If `OtherRevs' is `[]' then the Uuid is updated on all
-%%                   stores to point to `DestRev'. DestRev will be replicated
-%%                   to all affected stores.
-%%   - "ours"-merge: In this case `OtherRevs' points to other revisions. A new
-%%                   revision will be created with exactly the same content as
-%%                   `DestRev'.
-%%
-%%@spec merge_trivial(Uuid, DestRev, OtherRevs) -> {ok, Rev} | {error, Reason}
-%%      Uuid, DestRev, Rev = guid()
-%%      OtherRevs = [guid()]
-%%      Reason = term()
-merge_trivial(Uuid, DestRev, OtherRevs) ->
-	Stores = lists:foldl(
-		fun({_Guid, Store}, Acc) -> [Store|Acc] end,
-		[],
-		volman:stores()),
-	case broker_merger:merge(Uuid, DestRev, OtherRevs, Stores) of
-		{ok, Rev} ->
-			vol_monitor:trigger_mod_uuid(local, Uuid),
-			{ok, Rev};
-		Else ->
-			Else
-	end.
-
-
-%% @doc Write to a document.
-%%
-%% Write to the document identified by Uuid. If the document exists on more
+%% Write to the document identified by Doc. If the document exists on more
 %% than one store then only the stores pointing to Rev will be updated. All
 %% affected stores are updated simultaniously.
 %%
-%% @spec update(Uuid, Rev) -> {ok, Writer} | {error, Reason}
-%%       Uuid, Rev = guid()
-%%       Writer = writer()
+%% @spec update(Doc, Rev, Stores, Uti) -> {ok, Handle} | {error, Reason}
+%%       Doc, Rev = guid()
+%%       Stores = [guid()]
+%%       Uti = binary()
+%%       Handle = handle()
 %%       Reason = ecode()
-update(Uuid, Rev) ->
+update(Doc, Rev, Stores, Uti) ->
 	User = self(),
-	% Lookup all stores&revisions where the Uuid exists and points to Rev
-	StartStores = lists:foldl(
-		fun({_Guid, StoreIfc}, AccStores) ->
-			case store:lookup(StoreIfc, Uuid) of
-				{ok, Rev}       -> [StoreIfc|AccStores];
-				{ok, _OtherRev} -> AccStores;
-				error           -> AccStores
-			end
-		end,
-		[],
-		volman:stores()),
-	if
-		StartStores == [] ->
-			{error, enoent};
-		true ->
-			broker_writer:start({update, Uuid, StartStores, Rev, User})
-	end.
+	broker_io:start({update, Doc, Rev, Stores, Uti, User}).
 
+
+%% @doc Read a part of a document
+%% @spec read(Handle, Part, Offset, Length) ->  {ok, Data} | eof | {error, Reason}
+%%       Handle = handle()
+%%       Part, Offset, Length = int()
+%%       Data = binary()
+%%       Reason = ecode()
+read(Handle, Part, Offset, Length) ->
+	broker_io:read(Handle, Part, Offset, Length).
 
 % ok | {error, Reason}
-write_part(Writer, Part, Offset, Data) ->
-	broker_writer:write_part(Writer, Part, Offset, Data).
+write(Handle, Part, Offset, Data) ->
+	broker_io:write(Handle, Part, Offset, Data).
 
 % ok | {error, Reason}
-write_trunc(Writer, Part, Offset) ->
-	broker_writer:write_trunc(Writer, Part, Offset).
+truncate(Handle, Part, Offset) ->
+	broker_io:truncate(Handle, Part, Offset).
 
-% {ok, Rev} | {error, conflict} | {error, Reason}
-write_commit(Writer) ->
-	broker_writer:write_commit(Writer).
+% {ok, Rev} | conflict | {error, Reason}
+commit(Handle, MergeRevs) ->
+	broker_io:commit(Handle).
 
 % ok
-write_abort(Writer) ->
-	broker_writer:write_abort(Writer).
+abort(Handle) ->
+	broker_io:abort(Handle).
 
 
 % ok | {error, Reason}
-delete_uuid(Store, Uuid) ->
+delete_doc(Store, Doc) ->
 	case volman:store(Store) of
 		{ok, StoreIfc} ->
-			store:delete_uuid(StoreIfc, Uuid);
+			store:delete_doc(StoreIfc, Doc);
 		error ->
 			{error, enoent}
 	end.

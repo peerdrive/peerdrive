@@ -120,38 +120,52 @@
 
 - simplified API
 	- Operations
-		- open(Uuid, Mode, StartRev, Stores, Uti)
-			- Uuid
-				- Doc or Rev
-				- ignored in case of creating
-			- Mode
-				- overwrite?
-				- read/write/readwrite/create
-					- create implies readwrite
-					- Uuid must be a doc if writing is requested
-				- fail on any/last store
-			- StartRev:
-				- starting Rev when writing, ignored when just reading
-				- special Rev when creating empty document
-			- Stores
-				- set of stores where the operation should be performed
-				- optional, if not given then done on all mounted stores
-			- Uti:
-				- set Uti of new version
-				- optional, if not given keep previous value
+		- peek(Rev, Stores) -- Open a rev for read only access
+			- Rev: Rev to open
+			- Stores: Optional set of stores where to search the rev. If empty
+			          search on all mounted stores.
+		- fork(Rev, Stores, Uti) -- Create a new document
+			- Rev: Starting Rev of the new document (parent and initial
+			       content). Use special Rev <<0:128>> when creating empty
+				   document.
+			- Stores: Optional set of stores where to search the Rev. If empty
+			          try on all mounted stores where Rev exists.
+			- Uti: Uti of the new document. If not given keep value of starting
+			       revision.
+		- update(Doc, Rev, Stores, Uti, Preliminary) -- Udate a document
+			- Doc: Document to be updated
+			- Rev: Current revision of the document which will be updated. At
+			       least one store must point to this revision or the operation
+				   will fail immediately. Any store which points to another
+				   revision will not be updated.
+			- Stores: Optional set of stores where to search the rev. If empty
+			          search on all mounted stores.
+			- Uti: Uti of the updated document. If not given keep the previous
+			       value.
+			- Preliminary: Make the new revision preliminary. Preliminary
+			               predecessors are always overwritten, regardless of
+						   this flag.
 		- read(Handle, Part, Offset, Length)
-			- Handle: as returned by open
+			- Handle: as returned by open/fork/update
 			- Part: FourCC
 			- Offset, Length: guess what ;)
 		- write(Handle, Part, Offset, Data)
-			- Handle: as returned by open
+			- Handle: as returned by fork/update
 			- Part: FourCC
 			- Offset
 			- Data
-		- commit(Handle, OtherRevs)
-			- Handle: as returned by open
-			- OtherRevs: Additional parent revisions in case of a merge, empty otherwise
-			- may fail on some stores
+		- commit(Handle, MergeRevs)
+			- Handle: as returned by fork/update
+			- MergeRevs: Additional parent revisions in case of a merge, empty
+			             otherwise. If not given keep the previous value.
+			- tristate result
+				- success
+					- at least one store has commited
+				- retry
+					- no store has comitted
+					- at least one store has rejected due to conflicting revision
+				- fail
+					- all stores have rejected with hard errors
 		- abort(Handle)
 			- discard handle
 

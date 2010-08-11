@@ -22,69 +22,45 @@
 
 -define(TIMEOUT, 60000).
 
--define(ENUM_REQ,            16#0000).
--define(ENUM_CNF,            16#0001).
--define(LOOKUP_REQ,          16#0010).
--define(LOOKUP_CNF,          16#0011).
--define(STAT_REQ,            16#0020).
--define(STAT_CNF,            16#0021).
--define(STAT_REJ,            16#0022).
--define(READ_START_REQ,      16#0030).
--define(READ_START_CNF,      16#0031).
--define(READ_START_REJ,      16#0032).
--define(READ_PART_REQ,       16#0040).
--define(READ_PART_CNF,       16#0041).
--define(READ_PART_REJ,       16#0042).
--define(READ_DONE_IND,       16#0053).
--define(FORK_REQ,            16#0060).
--define(FORK_CNF,            16#0061).
--define(FORK_REJ,            16#0062).
--define(MERGE_REQ,           16#0070).
--define(MERGE_CNF,           16#0071).
--define(MERGE_REJ,           16#0072).
--define(UPDATE_REQ,          16#0080).
--define(UPDATE_CNF,          16#0081).
--define(UPDATE_REJ,          16#0082).
--define(MERGE_TRIVIAL_REQ,   16#0120).
--define(MERGE_TRIVIAL_CNF,   16#0121).
--define(MERGE_TRIVIAL_REJ,   16#0122).
--define(WRITE_TRUNC_REQ,     16#0090).
--define(WRITE_TRUNC_CNF,     16#0091).
--define(WRITE_TRUNC_REJ,     16#0092).
--define(WRITE_PART_REQ,      16#00A0).
--define(WRITE_PART_CNF,      16#00A1).
--define(WRITE_PART_REJ,      16#00A2).
--define(WRITE_COMMIT_REQ,    16#00B0).
--define(WRITE_COMMIT_CNF,    16#00B1).
--define(WRITE_COMMIT_REJ,    16#00B2).
--define(WRITE_ABORT_IND,     16#00C3).
--define(WATCH_ADD_REQ,       16#00D0).
--define(WATCH_ADD_CNF,       16#00D1).
--define(WATCH_ADD_REJ,       16#00D2).
--define(WATCH_REM_REQ,       16#00D3).
--define(WATCH_REM_CNF,       16#00D4).
--define(WATCH_REM_REJ,       16#00D5).
--define(WATCH_IND,           16#00D6).
--define(DELETE_UUID_REQ,     16#00E0).
--define(DELETE_REV_REQ,      16#00E1).
--define(DELETE_CNF,          16#00E2).
--define(DELETE_REJ,          16#00E3).
--define(REPLICATE_UUID_IND,  16#00F0).
--define(REPLICATE_REV_IND,   16#00F1).
--define(MOUNT_REQ,           16#0130).
--define(MOUNT_CNF,           16#0131).
--define(MOUNT_REJ,           16#0132).
--define(UNMOUNT_IND,         16#0123).
--define(PROGRESS_IND,        16#0146).
+-define(GENERIC_CNF,        16#0001).
+-define(ENUM_REQ,           16#0010).
+-define(ENUM_CNF,           16#0011).
+-define(LOOKUP_REQ,         16#0020).
+-define(LOOKUP_CNF,         16#0021).
+-define(STAT_REQ,           16#0030).
+-define(STAT_CNF,           16#0031).
+-define(PEEK_REQ,           16#0040).
+-define(PEEK_CNF,           16#0041).
+-define(FORK_REQ,           16#0050).
+-define(FORK_CNF,           16#0051).
+-define(UPDATE_REQ,         16#0060).
+-define(UPDATE_CNF,         16#0061).
+-define(READ_REQ,           16#0070).
+-define(READ_CNF,           16#0071).
+-define(WRITE_REQ,          16#0080).
+-define(TRUNC_REQ,          16#0090).
+-define(COMMIT_REQ,         16#00A0).
+-define(COMMIT_CNF,         16#00A1).
+-define(ABORT_REQ,          16#00B0).
+-define(WATCH_ADD_REQ,      16#00C0).
+-define(WATCH_REM_REQ,      16#00D0).
+-define(WATCH_IND,          16#00E2).
+-define(DELETE_DOC_REQ,     16#00F0).
+-define(DELETE_REV_REQ,     16#0100).
+-define(REPLICATE_DOC_REQ,  16#0110).
+-define(REPLICATE_REV_REQ,  16#0120).
+-define(MOUNT_REQ,          16#0130).
+-define(UNMOUNT_REQ,        16#0140).
+-define(PROGRESS_IND,       16#0152).
 
--define(WATCH_CAUSE_MOD, 0). % UUID has been modified
--define(WATCH_CAUSE_ADD, 1). % GUID appeared
--define(WATCH_CAUSE_REP, 2). % GUID was spread to another store
--define(WATCH_CAUSE_DIM, 3). % GUID removed from a store
--define(WATCH_CAUSE_REM, 4). % GUID has disappeared
+-define(WATCH_CAUSE_MOD, 0). % Doc has been modified
+-define(WATCH_CAUSE_ADD, 1). % Doc/Rev appeared
+-define(WATCH_CAUSE_REP, 2). % Doc/Rev was spread to another store
+-define(WATCH_CAUSE_DIM, 3). % Doc/Rev removed from a store
+-define(WATCH_CAUSE_REM, 4). % Doc/Rev has disappeared
 
--define(PROGRESS_TYPE_SYNC, 0).
--define(PROGRESS_TYPE_REP_UUID, 1).
+-define(PROGRESS_TYPE_SYNC,    0).
+-define(PROGRESS_TYPE_REP_DOC, 1).
 -define(PROGRESS_TYPE_REP_REV, 2).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -111,12 +87,12 @@ handle_info({work_event, Tag, Progress}, S) ->
 		{sync, FromGuid, ToGuid} ->
 			<<?PROGRESS_TYPE_SYNC:8, Num:16/little, FromGuid/binary, ToGuid/binary>>;
 
-		{rep_uuid, Uuid, Stores} ->
+		{rep_doc, Doc, Stores} ->
 			BinStores = lists:foldl(
 				fun(Store, Acc) -> <<Acc/binary, Store/binary>> end,
 				<<>>,
 				Stores),
-			<<?PROGRESS_TYPE_REP_UUID:8, Num:16/little, Uuid/binary, BinStores/binary>>;
+			<<?PROGRESS_TYPE_REP_DOC:8, Num:16/little, Doc/binary, BinStores/binary>>;
 
 		{rep_rev, Rev, Stores} ->
 			BinStores = lists:foldl(
@@ -131,17 +107,17 @@ handle_info({work_event, Tag, Progress}, S) ->
 handle_info({done, Cookie}, S) ->
 	S#state{cookies=dict:erase(Cookie, S#state.cookies)};
 
-handle_info({watch, Cause, Type, Hash}, S) ->
+handle_info({watch, Cause, Type, Uuid}, S) ->
 	EncType = case Type of
-		uuid -> 0;
+		doc -> 0;
 		rev  -> 1
 	end,
 	Data = case Cause of
-		modified    -> <<?WATCH_CAUSE_MOD:8, EncType:8, Hash/binary>>;
-		appeared    -> <<?WATCH_CAUSE_ADD:8, EncType:8, Hash/binary>>;
-		replicated  -> <<?WATCH_CAUSE_REP:8, EncType:8, Hash/binary>>;
-		diminished  -> <<?WATCH_CAUSE_DIM:8, EncType:8, Hash/binary>>;
-		disappeared -> <<?WATCH_CAUSE_REM:8, EncType:8, Hash/binary>>
+		modified    -> <<?WATCH_CAUSE_MOD:8, EncType:8, Uuid/binary>>;
+		appeared    -> <<?WATCH_CAUSE_ADD:8, EncType:8, Uuid/binary>>;
+		replicated  -> <<?WATCH_CAUSE_REP:8, EncType:8, Uuid/binary>>;
+		diminished  -> <<?WATCH_CAUSE_DIM:8, EncType:8, Uuid/binary>>;
+		disappeared -> <<?WATCH_CAUSE_REM:8, EncType:8, Uuid/binary>>
 	end,
 	send_indication(S#state.socket, ?WATCH_IND, <<Data/binary>>),
 	S.
@@ -157,8 +133,8 @@ handle_packet(Packet, S) ->
 			S;
 
 		?LOOKUP_REQ ->
-			<<Uuid:16/binary>> = Body,
-			spawn_link(fun () -> do_loopup(Uuid, RetPath) end),
+			<<Doc:16/binary>> = Body,
+			spawn_link(fun () -> do_loopup(Doc, RetPath) end),
 			S;
 
 		?STAT_REQ ->
@@ -166,52 +142,53 @@ handle_packet(Packet, S) ->
 			spawn_link(fun () -> do_stat(Rev, RetPath) end),
 			S;
 
-		?READ_START_REQ ->
-			<<Rev:16/binary>> = Body,
-			start_worker(S, fun(Cookie) -> do_start_read(Cookie, RetPath, Rev) end);
+		?PEEK_REQ ->
+			<<Rev:16/binary, Body1/binary>> = Body,
+			{Stores, <<>>} = parse_revisions(Body1),
+			start_worker(S, fun(Cookie) -> do_peek(Cookie, RetPath, Rev, Stores) end);
 
 		?FORK_REQ ->
-			<<Store:16/binary, StartRev:16/binary, Uti/binary>> = Body,
-			start_worker(S, fun(Cookie) -> do_fork(Cookie, RetPath, Store, StartRev, Uti) end);
-
-		?MERGE_REQ ->
-			<<Uuid:16/binary, Body1/binary>> = Body,
-			{StartRevs, Uti} = parse_revisions(Body1),
-			start_worker(S, fun(Cookie) -> do_merge(Cookie, RetPath, Uuid, StartRevs, Uti) end);
-
-		?MERGE_TRIVIAL_REQ ->
-			<<Uuid:16/binary, DestRev:16/binary, Body1/binary>> = Body,
-			{OtherRevs, <<>>} = parse_revisions(Body1),
-			spawn_link(fun() -> do_merge_trivial(Uuid, DestRev, OtherRevs, RetPath) end),
-			S;
+			<<Rev:16/binary, Body1/binary>> = Body,
+			{Stores, EncUti} = parse_revisions(Body1),
+			Uti = case EncUti of
+				<<>> -> keep;
+				_    -> EncUti
+			end,
+			start_worker(S, fun(Cookie) -> do_fork(Cookie, RetPath, Rev, Stores, Uti) end);
 
 		?UPDATE_REQ ->
-			<<Uuid:16/binary, Rev:16/binary>> = Body,
-			start_worker(S, fun(Cookie) -> do_update(Cookie, RetPath, Uuid, Rev) end);
+			<<Doc:16/binary, Rev:16/binary, Body1/binary>> = Body,
+			{Stores, EncUti} = parse_revisions(Body1),
+			Uti = case EncUti of
+				<<>> -> keep;
+				_    -> EncUti
+			end,
+			start_worker(S, fun(Cookie) -> do_update(Cookie, RetPath, Doc, Rev,
+				Stores, Uti) end);
 
 		?WATCH_ADD_REQ ->
 			<<EncType:8, Hash:16/binary>> = Body,
 			Type = case EncType of
-				0 -> uuid;
+				0 -> doc;
 				1 -> rev
 			end,
 			change_monitor:watch(Type, Hash),
-			send_reply(RetPath, ?WATCH_ADD_CNF, <<>>),
+			send_generic_reply(RetPath, ok),
 			S;
 
 		?WATCH_REM_REQ ->
 			<<EncType:8, Hash:16/binary>> = Body,
 			Type = case EncType of
-				0 -> uuid;
+				0 -> doc;
 				1 -> rev
 			end,
 			change_monitor:unwatch(Type, Hash),
-			send_reply(RetPath, ?WATCH_REM_CNF, <<>>),
+			send_generic_reply(RetPath, ok),
 			S;
 
-		?DELETE_UUID_REQ ->
-			<<Store:16/binary, Uuid:16/binary>> = Body,
-			spawn_link(fun () -> do_delete_uuid(Store, Uuid, RetPath) end),
+		?DELETE_DOC_REQ ->
+			<<Store:16/binary, Doc:16/binary>> = Body,
+			spawn_link(fun () -> do_delete_doc(Store, Doc, RetPath) end),
 			S;
 
 		?DELETE_REV_REQ ->
@@ -219,29 +196,31 @@ handle_packet(Packet, S) ->
 			spawn_link(fun () -> do_delete_rev(Store, Rev, RetPath) end),
 			S;
 
-		?REPLICATE_UUID_IND ->
-			<<Uuid:16/binary, History:8, Body1/binary>> = Body,
+		?REPLICATE_DOC_REQ ->
+			<<Doc:16/binary, History:8, Body1/binary>> = Body,
 			{Stores, <<>>} = parse_revisions(Body1),
-			replicator:replicate_uuid(Uuid, Stores, as_boolean(History)),
+			replicator:replicate_uuid(Doc, Stores, as_boolean(History)),
+			send_generic_reply(RetPath, ok),
 			S;
 
-		?REPLICATE_REV_IND ->
+		?REPLICATE_REV_REQ ->
 			<<Rev:16/binary, History:8, Body1/binary>> = Body,
 			{Stores, <<>>} = parse_revisions(Body1),
 			replicator:replicate_rev(Rev, Stores, as_boolean(History)),
+			send_generic_reply(RetPath, ok),
 			S;
 
 		?MOUNT_REQ ->
 			spawn_link(fun () -> do_mount(Body, RetPath) end),
 			S;
 
-		?UNMOUNT_IND ->
-			do_unmount(Body),
+		?UNMOUNT_REQ ->
+			spawn_link(fun () -> do_unmount(Body, RetPath) end),
 			S;
 
 		_ ->
 			<<Cookie:32/little, Data/binary>> = Body,
-			[Worker] = dict:fetch(Cookie, S#state.cookies),
+			Worker = dict:fetch(Cookie, S#state.cookies),
 			Worker ! {Request, Data, RetPath},
 			S
 	end.
@@ -271,7 +250,7 @@ start_worker(S, Fun) ->
 	Server = self(),
 	Worker = spawn_link(fun() -> Fun(Cookie), Server ! {done, Cookie} end),
 	S#state{
-		cookies = dict:append(Cookie, Worker, S#state.cookies),
+		cookies = dict:store(Cookie, Worker, S#state.cookies),
 		next    = Cookie + 1}.
 
 
@@ -298,6 +277,22 @@ send_indication(Socket, Indication, Data) ->
 				"[~w] Failed to send indication: ~w~n",
 				[self(), Reason])
 	end.
+
+send_generic_reply(RetPath, Reply) ->
+	BinCode = case Reply of
+		ok             -> 0;
+		conflict       -> 1;
+		{error, Error} ->
+			case Error of
+				enoent    -> 2;
+				einval    -> 3;
+				emultiple -> 4;
+				ebadf     -> 5;
+				_         -> 16#ffffffff
+			end;
+		{ok, _} -> 0
+	end
+	send_reply(RetPath, ?GENERIC_CNF, <<BinCode:32/little>>).
 
 
 do_enum(RetPath) ->
@@ -328,8 +323,8 @@ do_enum(RetPath) ->
 	send_reply(RetPath, ?ENUM_CNF, Reply).
 
 
-do_loopup(Uuid, RetPath) ->
-	Revs = broker:lookup(Uuid),
+do_loopup(Doc, RetPath) ->
+	Revs = broker:lookup(Doc),
 	Reply = lists:foldl(
 		fun({Rev, Stores}, RevAcc) ->
 			StoreBin = lists:foldl(
@@ -374,191 +369,129 @@ do_stat(Rev, RetPath) ->
 			send_reply(RetPath, ?STAT_CNF, Reply);
 
 		error ->
-			send_reply(RetPath, ?STAT_REJ, <<>>)
+			send_generic_reply(RetPath, {error, enoent})
 	end.
 
 
-do_merge_trivial(Uuid, DestRev, OtherRevs, RetPath) ->
-	case broker:merge_trivial(Uuid, DestRev, OtherRevs) of
-		{ok, NewRev}     -> send_reply(RetPath, ?MERGE_TRIVIAL_CNF, NewRev);
-		{error, _Reason} -> send_reply(RetPath, ?MERGE_TRIVIAL_REJ, <<>>)
+do_peek(Cookie, RetPath, Rev, Stores) ->
+	case broker:peek(Rev, Stores) of
+		{ok, Handle} ->
+			send_reply(RetPath, ?PEEK_CNF, <<Cookie:32/little>>),
+			io_loop(Handle);
+
+		{error, _} = Error ->
+			send_generic_reply(RetPath, Error)
 	end.
 
 
-do_start_read(Cookie, RetPath, Rev) ->
-	case broker:read_start(Rev) of
-		{ok, Reader} ->
-			send_reply(RetPath, ?READ_START_CNF, <<Cookie:32/little>>),
-			reader_loop(Cookie, Reader);
+do_fork(Cookie, RetPath, Rev, Stores, Uti) ->
+	case broker:fork(Rev, Stores, Uti) of
+		{ok, Doc, Handle} ->
+			send_reply(RetPath, ?FORK_CNF, <<Cookie:32/little, Doc/binary>>),
+			io_loop(Handle);
 
-		{error, _} ->
-			send_reply(RetPath, ?READ_START_REJ, <<>>)
+		{error, _} = Error ->
+			send_generic_reply(RetPath, Error)
 	end.
 
 
-reader_loop(Cookie, Reader) ->
-	receive
-		{?READ_PART_REQ, ReqData, RetPath} ->
-			<<Part:4/binary, Offset:64/little, Length:32/little>> = ReqData,
-			case broker:read_part(Reader, Part, Offset, Length) of
-				{ok, Data} ->
-					send_reply(RetPath, ?READ_PART_CNF, Data);
-				eof ->
-					send_reply(RetPath, ?READ_PART_CNF, <<>>);
-				{error, _} ->
-					send_reply(RetPath, ?READ_PART_REJ, <<>>)
-			end,
-			reader_loop(Cookie, Reader);
-
-		{?READ_DONE_IND, _, _} ->
-			broker:read_done(Reader);
-
-		Else ->
-			io:format("reader_loop: Invalid request: ~w~n", [Else]),
-			reader_loop(Cookie, Reader)
-	after
-		?TIMEOUT ->
-			io:format("reader_loop: timeout~n")
-	end.
-
-
-do_fork(Cookie, RetPath, Store, StartRev, Uti) ->
-	case broker:fork(Store, StartRev, Uti) of
-		{ok, Uuid, Writer} ->
-			send_reply(RetPath, ?FORK_CNF, <<Uuid/bitstring, Cookie:32/little>>),
-			writer_loop(Cookie, Writer);
-
-		{error, _} ->
-			send_reply(RetPath, ?FORK_REJ, <<>>)
-	end.
-
-
-do_merge(Cookie, RetPath, Uuid, StartRevs, Uti) ->
-	Stores = lists:map(fun({_Guid, Ifc}) -> Ifc end, volman:stores()),
-	case broker:merge(Stores, Uuid, StartRevs, Uti) of
-		{ok, Writer} ->
-			send_reply(RetPath, ?MERGE_CNF, <<Cookie:32/little>>),
-			writer_loop(Cookie, Writer);
-
-		{error, conflict} ->
-			send_reply(RetPath, ?MERGE_REJ, <<0:8>>);
-
-		{error, _} ->
-			send_reply(RetPath, ?MERGE_REJ, <<1:8>>)
-	end.
-
-
-do_update(Cookie, RetPath, Uuid, Rev) ->
-	case broker:update(Uuid, Rev) of
-		{ok, Writer} ->
+do_update(Cookie, RetPath, Doc, Rev, Stores, Uti) ->
+	case broker:update(Doc, Rev, Stores, Uti) of
+		{ok, Handle} ->
 			send_reply(RetPath, ?UPDATE_CNF, <<Cookie:32/little>>),
-			writer_loop(Cookie, Writer);
+			io_loop(Handle);
 
-		{error, conflict} ->
-			send_reply(RetPath, ?UPDATE_REJ, <<0:8>>);
-
-		{error, _} ->
-			send_reply(RetPath, ?UPDATE_REJ, <<1:8>>)
+		{error, _} = Error ->
+			send_generic_reply(RetPath, Error)
 	end.
 
 
-writer_loop(Cookie, Writer) ->
+io_loop(Handle) ->
 	receive
-		{?WRITE_PART_REQ, ReqData, RetPath} ->
+		{?READ_REQ, ReqData, RetPath} ->
+			<<Part:4/binary, Offset:64/little, Length:32/little>> = ReqData,
+			case broker:read(Handle, Part, Offset, Length) of
+				{ok, Data}         -> send_reply(RetPath, ?READ_CNF, Data);
+				eof                -> send_reply(RetPath, ?READ_CNF, <<>>);
+				{error, _} = Error -> send_generic_reply(RetPath, Error)
+			end,
+			io_loop(Handle);
+
+		{?WRITE_REQ, ReqData, RetPath} ->
 			<<Part:4/binary, Offset:64/little, Data/binary>> = ReqData,
-			%io:format("WritePart: Part:~w Offset:~w Data:~w~n", [Part, Offset, Data]),
-			Reply = case broker:write_part(Writer, Part, Offset, Data) of
-				ok         -> ?WRITE_PART_CNF;
-				{error, _} -> ?WRITE_PART_REJ
-			end,
-			send_reply(RetPath, Reply, <<>>),
-			writer_loop(Cookie, Writer);
+			Reply = broker:write(Handle, Part, Offset, Data),
+			send_generic_reply(RetPath, Reply),
+			io_loop(Handle);
 
-		{?WRITE_TRUNC_REQ, ReqData, RetPath} ->
+		{?TRUNC_REQ, ReqData, RetPath} ->
 			<<Part:4/binary, Offset:64/little>> = ReqData,
-			%io:format("WriteTrunc: ~w Offset:~w~n", [Part, Offset]),
-			Reply = case broker:write_trunc(Writer, Part, Offset) of
-				ok         -> ?WRITE_TRUNC_CNF;
-				{error, _} -> ?WRITE_TRUNC_REJ
-			end,
-			send_reply(RetPath, Reply, <<>>),
-			writer_loop(Cookie, Writer);
+			Reply = broker:truncate(Handle, Part, Offset),
+			send_generic_reply(RetPath, Reply),
+			io_loop(Handle);
 
-		{?WRITE_COMMIT_REQ, _, RetPath} ->
-			%io:format("WriteCommit: "),
-			case broker:write_commit(Writer) of
+		{?ABORT_REQ, <<>>, RetPath} ->
+			Reply = broker:abort(Handle),
+			send_generic_reply(RetPath, Reply);
+
+		{?COMMIT_REQ, ReqData, RetPath} ->
+			{MergeRevs, <<>>} = parse_revisions(ReqData),
+			case broker:commit(Handle, MergeRevs) of
 				{ok, Rev} ->
-					%io:format("~s~n", [util:bin_to_hexstr(Rev)]),
 					send_reply(RetPath, ?WRITE_COMMIT_CNF, Rev);
-				{error, conflict} ->
-					%io:format("conflict~n"),
-					send_reply(RetPath, ?WRITE_COMMIT_REJ, <<0:8>>);
-				{error, _} ->
-					%io:format("error~n"),
-					send_reply(RetPath, ?WRITE_COMMIT_REJ, <<1:8>>)
+
+				conflict ->
+					send_generic_reply(RetPath, conflict),
+					io_loop(Handle);
+
+				{error, _} = Error ->
+					send_generic_reply(RetPath, Error)
 			end;
 
-		{?WRITE_ABORT_IND, _, _} ->
-			broker:write_abort(Writer);
-
 		Else ->
-			io:format("writer_loop: Invalid request: ~w~n", [Else]),
-			writer_loop(Cookie, Writer)
+			io:format("io_loop: Invalid request: ~w~n", [Else]),
+			io_loop(Handle)
 	after
 		?TIMEOUT ->
-			io:format("writer_loop: timeout~n")
+			io:format("io_loop: timeout~n")
 	end.
 
 
-do_delete_uuid(Store, Uuid, RetPath) ->
-	case broker:delete_uuid(Store, Uuid) of
-		ok ->
-			send_reply(RetPath, ?DELETE_CNF, <<>>);
-		{error, _} ->
-			send_reply(RetPath, ?DELETE_REJ, <<>>)
-	end.
+do_delete_doc(Store, Doc, RetPath) ->
+	Reply = broker:delete_doc(Store, Doc),
+	send_generic_reply(RetPath, Reply).
 
 
 do_delete_rev(Store, Rev, RetPath) ->
-	case broker:delete_rev(Store, Rev) of
-		ok ->
-			send_reply(RetPath, ?DELETE_CNF, <<>>);
-		{error, _} ->
-			send_reply(RetPath, ?DELETE_REJ, <<>>)
-	end.
+	Reply = broker:delete_rev(Store, Rev),
+	send_generic_reply(RetPath, Reply).
 
 
 do_mount(Store, RetPath) ->
-	Id = list_to_atom(binary_to_list(Store)),
+	Id = list_to_atom(binary_to_list(Store)), % FIXME: might overflow atom table
 	Reply = case lists:keysearch(Id, 1, volman:enum()) of
 		{value, {Id, _Descr, _Guid, Tags}} ->
 			case proplists:is_defined(removable, Tags) of
-				true ->
-					case volman:mount(Id) of
-						{ok, _}    -> ?MOUNT_CNF;
-						{error, _} -> ?MOUNT_REJ
-					end;
-
-				false ->
-					?MOUNT_REJ
+				true  -> volman:mount(Id);
+				false -> {error, einval}
 			end;
 
 		false ->
-			?MOUNT_REJ
+			{error, einval}
 	end,
-	send_reply(RetPath, Reply, <<>>).
+	send_generic_reply(RetPath, Reply).
 
 
-do_unmount(Store) ->
-	Id = list_to_atom(binary_to_list(Store)),
-	case lists:keysearch(Id, 1, volman:enum()) of
+do_unmount(Store, RetPath) ->
+	Id = list_to_atom(binary_to_list(Store)), % FIXME: might overflow atom table
+	Reply = case lists:keysearch(Id, 1, volman:enum()) of
 		{value, {Id, _Descr, _Guid, Tags}} ->
 			case proplists:is_defined(removable, Tags) of
 				true  -> volman:unmount(Id);
-				false -> error
+				false -> {error, einval}
 			end;
 
 		false ->
-			error
-	end.
+			{error, einval}
+	end,
+	send_generic_reply(RetPath, Reply).
 

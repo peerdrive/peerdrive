@@ -1,0 +1,31 @@
+== POSIX file system interface to Hotchpotch ==
+
+FUSE, single mount point
+
+/docs -- virtual directory for all documents (rw)
+/revs -- virtual directory to access all revisions (read only)
+/stores -- directory with all stores (rw)
+
+examples:
+/.revs/00112233445566778899aabbccddeeff/MyFileTitle
+/usr/...
+
+Problem cases
+	- /docs/UUID doc on multiple stores
+		- single revision
+			- open the first rev when opened ro
+			- update everywhere when opened rw
+		- multiple revisions
+			- priority list
+			- fail
+	- write on close when changed in between
+		- can only happen if changed in hotchpotch _and_ FUSE simultaniously
+		- application expects that all data has been written
+		- cannot commit because of wrong revision
+		- retry commit as merge ('FILE' part only)
+
+== POSIX store from Hotchpotch ==
+
+- file:
+- dir:
+

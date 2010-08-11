@@ -50,10 +50,10 @@ cancel(Worker) ->
 init({Request, From}) ->
 	Tag = case Request of
 		{modified, Uuid, StoreGuid} ->
-			{rep_uuid, Uuid, [StoreGuid]};
+			{rep_doc, Uuid, [StoreGuid]};
 
 		{replicate_uuid, Uuid, Stores, _History, _Important} ->
-			{rep_uuid, Uuid, Stores};
+			{rep_doc, Uuid, Stores};
 
 		{replicate_rev, Rev, Stores, _History, _Important} ->
 			{rep_rev, Rev, Stores}

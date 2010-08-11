@@ -17,7 +17,7 @@
 -module(file_store_reader).
 -behaviour(gen_server).
 
--export([start/4]).
+-export([start_link/3]).
 -export([read/4, done/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
@@ -27,13 +27,16 @@
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start(StorePid, Path, Parts, User) ->
-	case gen_server:start(?MODULE, {StorePid, Path, Parts, User}, []) of
+start_link(Path, Parts, User) ->
+	case gen_server:start_link(?MODULE, {Path, Parts, User}, []) of
 		{ok, Pid} ->
-			{ok, #reader{
-				this      = Pid,
-				read_part = fun read/4,
-				done      = fun done/1
+			{ok, #handle{
+				this     = Pid,
+				read     = fun read/4,
+				write    = fun(_, _, _, _) -> {error, ebadf} end,
+				truncate = fun(_, _, _) -> {error, ebadf} end,
+				abort    = fun done/1,
+				commit   = fun(_, _, _) -> {error, ebadf} end
 			}};
 		Else ->
 			Else
@@ -51,13 +54,12 @@ done(Reader) ->
 %% Callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({StorePid, Path, Parts, User}) ->
+init({Path, Parts, User}) ->
 	case open_part_list(Path, Parts) of
 		{error, Reason} ->
 			{stop, Reason};
 		Handles ->
 			process_flag(trap_exit, true),
-			link(StorePid),
 			link(User),
 			{ok, Handles}
 	end.
@@ -90,6 +92,7 @@ code_change(_, State, _) -> {ok, State}.
 %
 % `Parts' is a list of `{FourCC, Hash}' pairs. The function either returns a dict
 % which maps FourCC's to open IODevice's or `{error, Reason}' when a error happens.
+% TODO: defer opening the parts until they are accessed
 open_part_list(Path, Parts) ->
 	open_part_list_loop(Path, Parts, dict:new()).
 open_part_list_loop(_, [], Handles) ->
