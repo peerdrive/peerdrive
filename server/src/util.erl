@@ -77,12 +77,12 @@ gen_tmp_name(RootPath) ->
 
 % returns {ok, Data} | {error, Reason}
 read_rev(Rev, Part) ->
-	case broker:read_start(Rev) of
+	case broker:peek(Rev, []) of
 		{ok, Reader} ->
 			try
 				read_rev_loop(Reader, Part, 0, <<>>)
 			after
-				broker:read_done(Reader)
+				broker:abort(Reader)
 			end;
 
 		{error, Reason} ->
@@ -92,7 +92,7 @@ read_rev(Rev, Part) ->
 
 read_rev_loop(Reader, Part, Offset, Acc) ->
 	Length = 16#10000,
-	case broker:read_part(Reader, Part, Offset, Length) of
+	case broker:read(Reader, Part, Offset, Length) of
 		{ok, Data} ->
 			read_rev_loop(Reader, Part, Offset+Length, <<Acc/binary, Data/binary>>);
 		eof ->

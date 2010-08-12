@@ -72,15 +72,15 @@ replicate(Rev, SourceStore, DestStore) ->
 
 
 copy_parts(Rev, SourceStore, Importer, Parts) ->
-	case store:read_start(SourceStore, Rev, self()) of
+	case store:peek(SourceStore, Rev) of
 		{ok, Reader} ->
 			case copy_parts_loop(Parts, Reader, Importer) of
 				ok ->
-					store:read_done(Reader),
+					store:abort(Reader),
 					store:put_rev_commit(Importer);
 
 				{error, Reason} ->
-					store:read_done(Reader),
+					store:abort(Reader),
 					store:put_rev_abort(Importer),
 					{error, Reason}
 			end;
@@ -102,7 +102,7 @@ copy(Part, Reader, Importer) ->
 	copy_loop(Part, Reader, Importer, 0).
 
 copy_loop(Part, Reader, Importer, Pos) ->
-	case store:read_part(Reader, Part, Pos, 16#100000) of
+	case store:read(Reader, Part, Pos, 16#100000) of
 		{ok, Data} ->
 			case store:put_rev_part(Importer, Part, Data) of
 				ok ->

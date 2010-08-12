@@ -181,7 +181,7 @@ do_peek(_Rev, []) ->
 	{error, enoent};
 
 do_peek(Rev, [StoreIfc | Stores]) ->
-	case store:read_start(StoreIfc, Rev) of
+	case store:peek(StoreIfc, Rev) of
 		{ok, Handle} -> {ok, Handle};
 		_Else        -> do_peek(Rev, Stores)
 	end.

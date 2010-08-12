@@ -799,13 +799,13 @@ file_getattr({doc, Store, Uuid}, Ino) ->
 file_open({doc, Store, Uuid}) ->
 	case store:lookup(Store, Uuid) of
 		{ok, Rev} ->
-			case store:read_start(Store, Rev, self()) of
+			case store:peek(Store, Rev) of
 				{ok, Reader} ->
 					{ok, #handler{
 						read = fun(Size, Offset) ->
 							file_read(Reader, Size, Offset)
 						end,
-						release = fun() -> store:read_done(Reader) end
+						release = fun() -> store:abort(Reader) end
 					}};
 
 				{error, _} ->
@@ -818,7 +818,7 @@ file_open({doc, Store, Uuid}) ->
 
 
 file_read(Reader, Size, Offset) ->
-	case store:read_part(Reader, <<"FILE">>, Offset, Size) of
+	case store:read(Reader, <<"FILE">>, Offset, Size) of
 		{ok, _Data} = R  -> R;
 		eof              -> {ok, <<>>};
 		{error, enoent}  -> {ok, <<>>};

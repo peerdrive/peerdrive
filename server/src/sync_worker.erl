@@ -387,15 +387,15 @@ merge_hpsd_read_loop([], _FCCs, Acc) ->
 	{ok, lists:reverse(Acc)};
 
 merge_hpsd_read_loop([Rev|Revs], FCCs, Acc) ->
-	case broker:read_start(Rev) of
+	case broker:peek(Rev, []) of
 		{ok, Reader} ->
 			case merge_hpsd_read_loop_part_loop(Reader, FCCs, []) of
 				{ok, Data} ->
-					broker:read_done(Reader),
+					broker:abort(Reader),
 					merge_hpsd_read_loop(Revs, FCCs, [Data | Acc]);
 
 				{error, _} = Error ->
-					broker:read_done(Reader),
+					broker:abort(Reader),
 					Error
 			end;
 
@@ -429,7 +429,7 @@ merge_hpsd_read_loop_part_loop(Reader, [Part | Remaining], Acc) ->
 
 read_loop(Reader, Part, Offset, Acc) ->
 	Length = 16#10000,
-	case broker:read_part(Reader, Part, Offset, Length) of
+	case broker:read(Reader, Part, Offset, Length) of
 		{ok, Data} ->
 			read_loop(Reader, Part, Offset+Length, <<Acc/binary, Data/binary>>);
 		eof ->
