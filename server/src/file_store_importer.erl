@@ -168,7 +168,7 @@ do_commit(S) ->
 				end,
 				ok,
 				S#state.needed),
-			gen_server:call(S#state.storepid, {insert_rev, S#state.rev, S#state.object});
+			file_store:insert_rev(S#state.storepid, S#state.rev, S#state.object);
 
 		error ->
 			do_abort(S),

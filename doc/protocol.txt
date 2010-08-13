@@ -36,13 +36,14 @@ Opcode =
 	DELETE_DOC_REQ      0x00F0
 	DELETE_REV_REQ      0x0100
 
-	REPLICATE_DOC_REQ   0x0110
-	REPLICATE_REV_REQ   0x0120
+	SYNC_DOC_REQ        0x0110
+	REPLICATE_DOC_REQ   0x0120
+	REPLICATE_REV_REQ   0x0130
 
-	MOUNT_REQ           0x0130
-	UNMOUNT_REQ         0x0140
+	MOUNT_REQ           0x0140
+	UNMOUNT_REQ         0x0150
 
-	PROGRESS_IND        0x0152
+	PROGRESS_IND        0x0162
 
 Body =
 	GENERIC_CNF         ECode:32
@@ -74,9 +75,10 @@ Body =
 	WATCH_REM_REQ       Type:8 {0=Doc, 1=Rev}, Uuid:128
 	WATCH_IND           Cause:8, Type:8 {0=Doc, 1=Rev}, Uuid:128
 
-	DELETE_DOC_REQ      Store:128, Doc:128
-	DELETE_REV_REQ      Store:128, Rev:128
+	DELETE_DOC_REQ      Doc:128, StoreCount:8, [Store:128]
+	DELETE_REV_REQ      Rev:128, StoreCount:8, [Store:128]
 
+	SYNC_DOC_REQ        Doc:128, StoreCount:8, [Store:128]
 	REPLICATE_DOC_REQ   Doc:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
 	REPLICATE_REV_REQ   Rev:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
 

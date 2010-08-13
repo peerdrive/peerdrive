@@ -114,9 +114,9 @@ loop(#state{fromifc=FromIfc, toguid=ToGuid, monitor=Monitor, numdone=OldDone, nu
 
 loop_check_msg(#state{fromguid=FromGuid, toguid=ToGuid} = State, Backlog, Timeout) ->
 	receive
-		{trigger_mod_uuid, FromGuid, _Uuid} -> loop_check_msg(State, Backlog, 0);
-		{trigger_rem_store, FromGuid}       -> ok;
-		{trigger_rem_store, ToGuid}         -> ok;
+		{trigger_mod_doc, FromGuid, _Uuid} -> loop_check_msg(State, Backlog, 0);
+		{trigger_rem_store, FromGuid}      -> ok;
+		{trigger_rem_store, ToGuid}        -> ok;
 
 		% deliberately ignore all other messages
 		_ -> loop_check_msg(State, Backlog, Timeout)
@@ -144,7 +144,7 @@ sync_uuid(Uuid, FromIfc, ToIfc, SyncFun) ->
 					% need to do something
 					case SyncFun(Uuid, FromIfc, FromRev, ToIfc, ToRev) of
 						ok ->
-							vol_monitor:trigger_mod_uuid(local, Uuid);
+							vol_monitor:trigger_mod_doc(local, Uuid);
 						ignore ->
 							ok;
 						{error, _Reason} ->
@@ -179,6 +179,7 @@ sync_uuid_ff(Uuid, _FromIfc, FromRev, ToIfc, ToRev) ->
 						ok ->
 							% We're done. The replicator will kick in
 							% automatically at this stage...
+							% FIXME: Really? The Rev is not yet on the destination store!
 							ok;
 
 						{error, _Reason} = Error ->
@@ -251,10 +252,11 @@ sync_uuid_merge(Uuid, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 					case get_sync_fun(UtiSet) of
 						none ->
 							% fall back to fast-forward
+							% FIXME: don't we already known it's no FF?
 							sync_uuid_ff(Uuid, FromIfc, FromRev, ToIfc, ToRev);
 
 						SyncFun ->
-							SyncFun([FromIfc, ToIfc], Uuid, BaseRev, FromRev,
+							SyncFun(FromIfc, Uuid, BaseRev, FromRev,
 								ToRev, UtiSet, Force)
 					end
 			end;
@@ -351,17 +353,19 @@ traverse(Heads, Path) ->
 
 
 
-%%%
-%%% Merge algo for HPSD only documents
-%%%
+%%
+%% Merge algo for HPSD only documents. Just creates the merged document in
+%% `Store'. The sync_worker will pick it up again and can simply forward it to
+%% the other store via fast-forward.
+%%
 
-merge_hpsd(Stores, Uuid, BaseRev, FromRev, ToRev, UtiSet, Force) ->
+merge_hpsd(Store, Uuid, BaseRev, FromRev, ToRev, UtiSet, Force) ->
 	case merge_hpsd_read([FromRev, ToRev, BaseRev]) of
 		{ok, [FromData, ToData, BaseData]} ->
 			case merge_hpsd_parts(BaseData, FromData, ToData, [], Force) of
 				{ok, NewData} ->
 					[Uti] = sets:to_list(UtiSet),
-					merge_hpsd_write(Stores, Uuid, [FromRev, ToRev], Uti, NewData);
+					merge_hpsd_write(Store, Uuid, FromRev, ToRev, Uti, NewData);
 
 				{error, _} = Error ->
 					Error
@@ -467,8 +471,8 @@ merge_hpsd_parts(
 	end.
 
 
-merge_hpsd_write(Stores, Uuid, StartRevs, Uti, NewData) ->
-	case broker:merge(Stores, Uuid, StartRevs, Uti) of
+merge_hpsd_write(Store, Uuid, FromRev, ToRev, Uti, NewData) ->
+	case store:update(Store, Uuid, FromRev, Uti) of
 		{ok, Writer} ->
 			Written = lists:foldl(
 				fun({Part, Data}, Result) ->
@@ -476,7 +480,8 @@ merge_hpsd_write(Stores, Uuid, StartRevs, Uti, NewData) ->
 						Part == <<"META">> -> merge_hpsd_update_meta(Data);
 						true               -> merge_hpsd_update_dlinks(Data)
 					end,
-					case broker:write_part(Writer, Part, 0, struct:encode(FinalData)) of
+					store:truncate(Writer, Part, 0),
+					case store:write(Writer, Part, 0, struct:encode(FinalData)) of
 						ok                 -> Result;
 						{error, _} = Error -> Error
 					end
@@ -485,13 +490,13 @@ merge_hpsd_write(Stores, Uuid, StartRevs, Uti, NewData) ->
 				NewData),
 			case Written of
 				ok ->
-					case broker:write_commit(Writer) of
+					case store:commit(Writer, util:get_time(), [ToRev]) of
 						{ok, _Rev} -> ok;
 						{error, _} = Error -> Error
 					end;
 
 				{error, _} = Error ->
-					broker:write_abort(Writer),
+					store:abort(Writer),
 					Error
 			end;
 

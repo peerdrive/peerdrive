@@ -87,10 +87,10 @@ peek(Rev, Stores) ->
 
 %% @doc Fork a new document from an existing revision.
 %%
-%% Returns `{ok, Doc, Writer}' which represents the created document and a handle
-%% for the following write_* functions to fill the object. The initial revision
-%% identifier will be returned by write_done/1 which will always succeed for
-%% newly created documents (despite IO errors).
+%% Returns `{ok, Doc, Writer}' which represents the created document and a
+%% handle for the subsequent write calls to fill the object. The initial
+%% revision identifier will be returned by commit/2 which will always succeed
+%% for newly created documents (despite IO errors).
 %%
 %% To create a empty new document set StartRev to <<0:128>>. To derive a document
 %% from an existing one set StartRev to a revision which is available on the Stores.

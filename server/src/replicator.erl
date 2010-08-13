@@ -32,7 +32,7 @@ start_link() ->
 	Result.
 
 event_modified(Uuid, StoreGuid) ->
-	supervisor:start_child(replicator, [{modified, Uuid, StoreGuid}]).
+	start_child([{modified, Uuid, StoreGuid}]).
 
 replicate_uuid(Uuid, Stores, History) ->
 	start_child([{replicate_uuid, Uuid, Stores, History, false}]).
@@ -78,6 +78,7 @@ start_child_sync(Args) ->
 			receive
 				{Ref, Reply} -> Reply
 			after
+				% FIXME: this is deemed to FAIL
 				60000 -> {error, timeout}
 			end;
 

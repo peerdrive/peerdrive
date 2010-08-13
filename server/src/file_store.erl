@@ -26,7 +26,7 @@
 	delete_rev/2, delete_doc/2, sync_get_changes/2, sync_set_anchor/3]).
 
 % Functions used by helper processes (reader/writer/...)
--export([commit/3, lock/2, unlock/2]).
+-export([commit/3, insert_rev/3, lock/2, unlock/2]).
 
 -include("store.hrl").
 -include("file_store.hrl").
@@ -166,7 +166,7 @@ sync_set_anchor(Store, PeerGuid, SeqNum) ->
 %% Functions used by helper processes...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% @doc Insert a new revision into the store and update Uuid to point to that
+%% @doc Commit a new revision into the store and update Uuid to point to that
 %%      revision instead.
 %%
 %% @spec commit(Store, Uuid, Object) -> Result
@@ -176,6 +176,16 @@ sync_set_anchor(Store, PeerGuid, SeqNum) ->
 %%       Result = {ok, Rev::guid()} | conflict | {error, Error::ecode()}
 commit(Store, Uuid, Object) ->
 	gen_server:call(Store, {commit, Uuid, Object}).
+
+%% @doc Import a new revision into the store.
+%%
+%% @spec insert_rev(Store, Rev, Object) -> Result
+%%       Store = pid()
+%%       Rev = guid()
+%%       Object = #object
+%%       Result = ok | {error, ecode()}
+insert_rev(Store, Rev, Object) ->
+	gen_server:call(Store, {insert_rev, Rev, Object}).
 
 %% @doc Lock a part to prevent it from being evicted when getting
 %%      unreferenced.
@@ -759,7 +769,7 @@ do_put_uuid(#state{uuids=Uuids} = S, Uuid, OldRev, NewRev) ->
 		% free old version, store new one
 		{ok, {OldRev, _}} ->
 			gen_server:cast(self(), {object_ref_dec, OldRev}),
-			vol_monitor:trigger_mod_uuid(S#state.guid, Uuid),
+			vol_monitor:trigger_mod_doc(S#state.guid, Uuid),
 			S21 = do_objects_ref_inc(S, [NewRev]),
 			Gen = S21#state.gen,
 			{
@@ -842,7 +852,7 @@ do_commit(S, Uuid, Object) ->
 	end,
 	S2 = case Reply of
 		{ok, _} ->
-			vol_monitor:trigger_mod_uuid(S#state.guid, Uuid),
+			vol_monitor:trigger_mod_doc(S#state.guid, Uuid),
 			Gen = S#state.gen,
 			NewState = S#state{
 				gen     = Gen+1,

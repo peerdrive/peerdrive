@@ -47,11 +47,12 @@
 -define(WATCH_IND,          16#00E2).
 -define(DELETE_DOC_REQ,     16#00F0).
 -define(DELETE_REV_REQ,     16#0100).
--define(REPLICATE_DOC_REQ,  16#0110).
--define(REPLICATE_REV_REQ,  16#0120).
--define(MOUNT_REQ,          16#0130).
--define(UNMOUNT_REQ,        16#0140).
--define(PROGRESS_IND,       16#0152).
+-define(SYNC_DOC_REQ,       16#0110).
+-define(REPLICATE_DOC_REQ,  16#0120).
+-define(REPLICATE_REV_REQ,  16#0130).
+-define(MOUNT_REQ,          16#0140).
+-define(UNMOUNT_REQ,        16#0150).
+-define(PROGRESS_IND,       16#0162).
 
 -define(WATCH_CAUSE_MOD, 0). % Doc has been modified
 -define(WATCH_CAUSE_ADD, 1). % Doc/Rev appeared

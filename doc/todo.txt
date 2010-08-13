@@ -119,7 +119,7 @@
 		- usable to emulate old file model (simultanious read/write)
 
 - simplified API
-	- Operations
+	- Data manipulation
 		- peek(Rev, Stores) -- Open a rev for read only access
 			- Rev: Rev to open
 			- Stores: Optional set of stores where to search the rev. If empty
@@ -168,4 +168,24 @@
 					- all stores have rejected with hard errors
 		- abort(Handle)
 			- discard handle
+
+	- Data distribution
+		- sync(Doc, Stores) -- Perform a fast-forward sync
+			- Doc: Document which should be unified among the stores
+			- Stores: Optional set of stores where the document is
+			          synchronized. If empty perform on all stores.
+		- replicate_doc(Doc, Stores) -- Replicate a document to other stores
+			- Doc: Unambigous document
+			- Stores: Where to replicate to
+		- replicate_rev(Rev, Stores) -- Replicate a revision to other stores
+			- Rev: Revision, must be referenced on the destination store
+			- Stores: Where to replicate to
+		- delete_doc(Doc, Stores) -- Delete document
+			- Doc: Document to be deleted
+			- Stores: Optional set of stores where to delete the doc. If empty
+			          delete on all mounted stores.
+		- delete_rev(Rev, Stores) -- Delete revision
+			- Rev: Revision to be deleted
+			- Stores: Optional set of stores where to delete the rev. If empty
+			          delete on all mounted stores.
 

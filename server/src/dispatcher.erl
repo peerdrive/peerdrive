@@ -35,10 +35,10 @@ init(Parent) ->
 
 loop() ->
 	receive
-		{trigger_mod_uuid, local, _Uuid} ->
+		{trigger_mod_doc, local, _Uuid} ->
 			loop();
 
-		{trigger_mod_uuid, StoreGuid, Uuid} ->
+		{trigger_mod_doc, StoreGuid, Uuid} ->
 			replicator:event_modified(Uuid, StoreGuid),
 			loop();
 
