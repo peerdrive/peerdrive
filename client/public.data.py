@@ -48,7 +48,7 @@ if extensions:
 	ext = extensions[0]
 else:
 	ext = ""
-	with HpConnector().read(rev) as r:
+	with HpConnector().peek(rev) as r:
 		meta = hpstruct.loads(r.readAll('META'))
 
 	if "org.hotchpotch.annotation" in meta:
@@ -65,7 +65,7 @@ else:
 path = os.path.join(tempfile.gettempdir(), hash.encode('hex')+ext)
 if not os.path.isfile(path):
 	with open(path, "wb") as file:
-		with HpConnector().read(rev) as reader:
+		with HpConnector().peek(rev) as reader:
 			file.write(reader.readAll('FILE'))
 
 # start external program

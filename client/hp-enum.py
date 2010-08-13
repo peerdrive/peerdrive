@@ -43,7 +43,7 @@ for store in enum.allStores():
 		guid = enum.guid(store)
 		try:
 			rev = HpConnector().lookup(guid).rev(guid)
-			with HpConnector().read(rev) as r:
+			with HpConnector().peek(rev) as r:
 				metaData = hpstruct.loads(r.readAll('META'))
 				realName = metaData["org.hotchpotch.annotation"]["title"]
 		except:

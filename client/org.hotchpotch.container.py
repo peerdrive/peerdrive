@@ -263,7 +263,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 			if guid == this:
 				continue
 			rev = HpConnector().lookup(guid).rev(guid)
-			with HpConnector().read(rev) as r:
+			with HpConnector().peek(rev) as r:
 				try:
 					metaData = hpstruct.loads(r.readAll('META'))
 					storeName = metaData["org.hotchpotch.annotation"]["title"]
@@ -313,11 +313,11 @@ class SyncRules(object):
 	def __init__(self):
 		sysUuid = HpConnector().enum().sysStoreGuid()
 		sysRev = HpConnector().lookup(sysUuid).rev(sysUuid)
-		with HpConnector().read(sysRev) as r:
+		with HpConnector().peek(sysRev) as r:
 			root = hpstruct.loads(r.readAll('HPSD'))
 			self.syncUuid = root["syncrules"].uuid()
 		self.syncRev = HpConnector().lookup(self.syncUuid).rev(sysUuid)
-		with HpConnector().read(self.syncRev) as r:
+		with HpConnector().peek(self.syncRev) as r:
 			self.rules = hpstruct.loads(r.readAll('HPSD'))
 
 	def save(self):
@@ -457,7 +457,7 @@ class CollectionTreeView(QtGui.QTreeView):
 			destStores = c.stat(self.__parent.rev()).volumes()
 			# copy
 			with c.fork(destStores[0], info.uti()) as w:
-				with c.read(sourceRev) as r:
+				with c.peek(sourceRev) as r:
 					for part in info.parts():
 						w.write(part, r.readAll(part))
 				w.commit()
@@ -483,7 +483,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		for store in repVolumes:
 			try:
 				rev = c.lookup(store).rev(store)
-				with c.read(rev) as r:
+				with c.peek(rev) as r:
 					metaData = hpstruct.loads(r.readAll('META'))
 					try:
 						name = metaData["org.hotchpotch.annotation"]["title"]
@@ -1050,7 +1050,7 @@ class CEntry(HpWatch):
 		self.__valid = True
 
 	def __updateColumns(self):
-		with HpConnector().read(self.__rev) as r:
+		with HpConnector().peek(self.__rev) as r:
 			try:
 				metaData = hpstruct.loads(r.readAll('META'))
 			except:

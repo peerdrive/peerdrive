@@ -508,7 +508,7 @@ class HpDict(object):
 		uti = self.__conn.stat(self.__rev).uti()
 		if uti not in HpDict.UTIs:
 			raise IOError("Not a dict: "+uti)
-		with self.__conn.read(self.__rev) as r:
+		with self.__conn.peek(self.__rev) as r:
 			self.__meta    = loads(r.readAll('META'))
 			self.__content = loads(r.readAll('HPSD'))
 
@@ -587,7 +587,7 @@ class HpSet(object):
 		uti = self.__conn.stat(self.__rev).uti()
 		if uti not in HpSet.UTIs:
 			raise IOError("Not a dict: "+uti)
-		with self.__conn.read(self.__rev) as r:
+		with self.__conn.peek(self.__rev) as r:
 			self.__meta = loads(r.readAll('META'))
 			content = loads(r.readAll('HPSD'))
 		self.__content = [ (None, l) for l in content ]
@@ -682,7 +682,7 @@ def _loadTitle(link):
 	rev = link.rev()
 	if rev:
 		try:
-			with hpconnector.HpConnector().read(rev) as r:
+			with hpconnector.HpConnector().peek(rev) as r:
 				meta = loads(r.readAll('META'))
 			if "org.hotchpotch.annotation" in meta:
 				annotation = meta["org.hotchpotch.annotation"]

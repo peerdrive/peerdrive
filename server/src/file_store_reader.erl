@@ -36,7 +36,7 @@ start_link(Path, Parts, User) ->
 				write    = fun(_, _, _, _) -> {error, ebadf} end,
 				truncate = fun(_, _, _) -> {error, ebadf} end,
 				abort    = fun done/1,
-				commit   = fun(_, _, _) -> {error, ebadf} end
+				commit   = fun(Reader, _, _) -> done(Reader), {error, ebadf} end
 			}};
 		Else ->
 			Else

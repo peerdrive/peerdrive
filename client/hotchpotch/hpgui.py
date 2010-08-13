@@ -412,9 +412,9 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		try:
 			# open all contributing revisions
 			for rev in mergeRevs:
-				mergeReaders.append(self.__connection.read(rev))
+				mergeReaders.append(self.__connection.peek(rev))
 
-			with self.__connection.read(baseRev) as baseReader:
+			with self.__connection.peek(baseRev) as baseReader:
 				with self.__connection.merge(self.__uuid, mergeRevs, uti) as writer:
 					for part in commonParts:
 						writer.writeAll(part, baseReader.readAll(part))
@@ -484,7 +484,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __loadFile(self, mutable, rev):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 		try:
-			with self.__connection.read(rev) as r:
+			with self.__connection.peek(rev) as r:
 				try:
 					self.__metaData = hpstruct.loads(r.readAll('META'))
 				except IOError:
@@ -623,7 +623,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __getStoreName(self, store):
 		try:
 			rev = self.__connection.lookup(store).rev(store)
-			with self.__connection.read(rev) as r:
+			with self.__connection.peek(rev) as r:
 				try:
 					metaData = hpstruct.loads(r.readAll('META'))
 					return metaData["org.hotchpotch.annotation"]["title"]
@@ -821,7 +821,7 @@ class DocButton(object):
 			try:
 				rev = HpConnector().lookup(self.__uuid).revs()[0]
 				docIcon = None
-				with HpConnector().read(rev) as r:
+				with HpConnector().peek(rev) as r:
 					try:
 						metaData = hpstruct.loads(r.readAll('META'))
 						docName = metaData["org.hotchpotch.annotation"]["title"]
@@ -863,7 +863,7 @@ class RevButton(object):
 		self.__button.font().setItalic(True)
 
 		try:
-			with HpConnector().read(rev) as r:
+			with HpConnector().peek(rev) as r:
 				try:
 					metaData = hpstruct.loads(r.readAll('META'))
 					title = metaData["org.hotchpotch.annotation"]["title"]

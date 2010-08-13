@@ -30,68 +30,72 @@ def checkGuid(guid):
 	return True
 
 
+def genericReply(reply, body):
+	if reply == _HpConnector.GENERIC_CNF:
+		(code,) = unpack('<L', body)
+		if code == 0:
+			return True
+		elif code == 1:
+			return False # Recoverable conflict (Handle still valid)
+		elif code == 2:
+			raise IOError('ENOENT')
+		elif code == 3:
+			raise IOError('EINVAL')
+		elif code == 4:
+			raise IOError('EMULTIPLE')
+		elif code == 5:
+			raise IOError('EBADF')
+		else:
+			raise IOError('Unknown error')
+	else:
+		raise ConnError('Invalid server reply')
+
+
+def encodeUuidList(uuids):
+	packet = pack('B', len(uuids))
+	for rev in uuids:
+		checkGuid(rev)
+		packet += rev
+	return packet
+
+
 class ConnError(Exception):
     """Base class for exceptions in this module."""
     pass
 
 
 class _HpConnector(object):
-	ENUM_REQ            = 0x0000
-	ENUM_CNF            = 0x0001
-	LOOKUP_REQ          = 0x0010
-	LOOKUP_CNF          = 0x0011
-	STAT_REQ            = 0x0020
-	STAT_CNF            = 0x0021
-	STAT_REJ            = 0x0022
-	READ_START_REQ      = 0x0030
-	READ_START_CNF      = 0x0031
-	READ_START_REJ      = 0x0032
-	READ_PART_REQ       = 0x0040
-	READ_PART_CNF       = 0x0041
-	READ_PART_REJ       = 0x0042
-	READ_DONE_IND       = 0x0053
-	FORK_REQ            = 0x0060
-	FORK_CNF            = 0x0061
-	FORK_REJ            = 0x0062
-	MERGE_REQ           = 0x0070
-	MERGE_CNF           = 0x0071
-	MERGE_REJ           = 0x0072
-	UPDATE_REQ          = 0x0080
-	UPDATE_CNF          = 0x0081
-	UPDATE_REJ          = 0x0082
-	MERGE_TRIVIAL_REQ   = 0x0120
-	MERGE_TRIVIAL_CNF   = 0x0121
-	MERGE_TRIVIAL_REJ   = 0x0122
-	WRITE_TRUNC_REQ     = 0x0090
-	WRITE_TRUNC_CNF     = 0x0091
-	WRITE_TRUNC_REJ     = 0x0092
-	WRITE_PART_REQ      = 0x00A0
-	WRITE_PART_CNF      = 0x00A1
-	WRITE_PART_REJ      = 0x00A2
-	WRITE_COMMIT_REQ    = 0x00B0
-	WRITE_COMMIT_CNF    = 0x00B1
-	WRITE_COMMIT_REJ    = 0x00B2
-	WRITE_ABORT_IND     = 0x00C3
-	WATCH_ADD_REQ       = 0x00D0
-	WATCH_ADD_CNF       = 0x00D1
-	WATCH_ADD_REJ       = 0x00D2
-	WATCH_REM_REQ       = 0x00D3
-	WATCH_REM_CNF       = 0x00D4
-	WATCH_REM_REJ       = 0x00D5
-	WATCH_IND           = 0x00D6
-	DELETE_UUID_REQ     = 0x00E0
-	DELETE_REV_REQ      = 0x00E1
-	DELETE_CNF          = 0x00E2
-	DELETE_REJ          = 0x00E3
-	REPLICATE_UUID_IND  = 0x00F0
-	REPLICATE_REV_IND   = 0x00F1
-	OPEN_UUID_IND       = 0x0103
-	OPEN_REV_IND        = 0x0113
-	MOUNT_REQ           = 0x0130
-	MOUNT_CNF           = 0x0131
-	MOUNT_REJ           = 0x0132
-	UNMOUNT_IND         = 0x0123
-	PROGRESS_IND        = 0x0146
+	GENERIC_CNF         = 0x0001
+	ENUM_REQ            = 0x0010
+	ENUM_CNF            = 0x0011
+	LOOKUP_REQ          = 0x0020
+	LOOKUP_CNF          = 0x0021
+	STAT_REQ            = 0x0030
+	STAT_CNF            = 0x0031
+	PEEK_REQ            = 0x0040
+	PEEK_CNF            = 0x0041
+	FORK_REQ            = 0x0050
+	FORK_CNF            = 0x0051
+	UPDATE_REQ          = 0x0060
+	UPDATE_CNF          = 0x0061
+	READ_REQ            = 0x0070
+	READ_CNF            = 0x0071
+	WRITE_REQ           = 0x0080
+	TRUNC_REQ           = 0x0090
+	COMMIT_REQ          = 0x00A0
+	COMMIT_CNF          = 0x00A1
+	ABORT_REQ           = 0x00B0
+	WATCH_ADD_REQ       = 0x00C0
+	WATCH_REM_REQ       = 0x00D0
+	WATCH_IND           = 0x00E2
+	DELETE_DOC_REQ      = 0x00F0
+	DELETE_REV_REQ      = 0x0100
+	SYNC_DOC_REQ        = 0x0110
+	REPLICATE_DOC_REQ   = 0x0120
+	REPLICATE_REV_REQ   = 0x0130
+	MOUNT_REQ           = 0x0140
+	UNMOUNT_REQ         = 0x0150
+	PROGRESS_IND        = 0x0162
 
 
 	def __init__(self, host = '127.0.0.1', port = 4567):
@@ -118,9 +122,9 @@ class _HpConnector(object):
 		else:
 			raise ConnError('Invalid server reply')
 
-	def lookup(self, uuid):
-		checkGuid(uuid)
-		(reply, body) = self._rpc(_HpConnector.LOOKUP_REQ, uuid)
+	def lookup(self, doc):
+		checkGuid(doc)
+		(reply, body) = self._rpc(_HpConnector.LOOKUP_REQ, doc)
 		if reply == _HpConnector.LOOKUP_CNF:
 			return HpLookup(body)
 		else:
@@ -131,89 +135,40 @@ class _HpConnector(object):
 		(reply, body) = self._rpc(_HpConnector.STAT_REQ, rev)
 		if reply == _HpConnector.STAT_CNF:
 			return HpStat(body)
-		elif reply == _HpConnector.STAT_REJ:
-			raise IOError('Invalid Revision')
 		else:
-			raise ConnError('Invalid server reply')
+			return genericReply(reply, body)
 
-	def read(self, rev):
+	def peek(self, rev, stores=[]):
 		checkGuid(rev)
-		(reply, cookie) = self._rpc(_HpConnector.READ_START_REQ, rev)
-		if reply == _HpConnector.READ_START_CNF:
-			return HpReader(self, cookie, rev)
-		elif reply == _HpConnector.READ_START_REJ:
-			raise IOError('Unknown revision')
+		body = rev + encodeUuidList(stores)
+		(reply, cookie) = self._rpc(_HpConnector.PEEK_REQ, body)
+		if reply == _HpConnector.PEEK_CNF:
+			return HpHandle(self, cookie, None, rev)
 		else:
-			raise ConnError('Invalid server reply')
+			return genericReply(reply, cookie)
 
-	def fork(self, store, uti, startRev = None):
-		checkGuid(store)
-		if startRev:
-			checkGuid(startRev)
-			rev = startRev
+	def fork(self, rev=None, uti='', stores=[]):
+		if rev:
+			checkGuid(rev)
 		else:
 			rev = '\x00'*16
-		(reply, raw) = self._rpc(_HpConnector.FORK_REQ, store+rev+uti)
+		body = rev + encodeUuidList(stores) + uti
+		(reply, raw) = self._rpc(_HpConnector.FORK_REQ, body)
 		if reply == _HpConnector.FORK_CNF:
-			(uuid, cookie) = unpack('<16s4s', raw)
-			return HpWriter(self, cookie, uuid)
-		elif reply == _HpConnector.FORK_REJ:
-			raise IOError('Cannot create document')
+			(cookie, doc) = unpack('<4s16s', raw)
+			return HpHandle(self, cookie, doc, rev)
 		else:
-			raise ConnError('Invalid server reply: %d : %s' % (reply, raw))
+			return genericReply(reply, raw)
 
-	def merge(self, uuid, startRevs, uti):
-		checkGuid(uuid)
-		revs = pack('B', len(startRevs))
-		for rev in startRevs:
-			checkGuid(rev)
-			revs += rev
-		(reply, raw) = self._rpc(_HpConnector.MERGE_REQ, uuid+revs+uti)
-		if reply == _HpConnector.MERGE_CNF:
-			(cookie,) = unpack('<4s', raw)
-			return HpWriter(self, cookie, uuid)
-		elif reply == _HpConnector.MERGE_REJ:
-			cause = unpack('<B', raw)[0]
-			if cause == 0:
-				raise IOError('Conflicting revision')
-			elif cause == 1:
-				raise IOError('Invalid UUID')
-			else:
-				raise IOError('Unknown error')
-		else:
-			raise ConnError('Invalid server reply: %d : %s' % (reply, raw))
-
-	def mergeTrivial(self, uuid, destRev, otherRevs):
-		checkGuid(uuid)
-		checkGuid(destRev)
-		revs = pack('B', len(otherRevs))
-		for rev in otherRevs:
-			checkGuid(rev)
-			revs += rev
-		(reply, newRev) = self._rpc(_HpConnector.MERGE_TRIVIAL_REQ, uuid+destRev+revs)
-		if reply == _HpConnector.MERGE_TRIVIAL_CNF:
-			return newRev
-		elif reply == _HpConnector.MERGE_TRIVIAL_REJ:
-			raise IOError('Trivial merge failed')
-		else:
-			raise ConnError('Invalid server reply: %d : %s' % (reply, newRev.encode('hex')))
-
-	def update(self, Uuid, Rev):
-		checkGuid(Uuid)
-		checkGuid(Rev)
-		(reply, raw) = self._rpc(_HpConnector.UPDATE_REQ, Uuid + Rev)
+	def update(self, doc, rev, uti='', stores=[]):
+		checkGuid(doc)
+		checkGuid(rev)
+		body = doc + rev + encodeUuidList(stores) + uti
+		(reply, raw) = self._rpc(_HpConnector.UPDATE_REQ, body)
 		if reply == _HpConnector.UPDATE_CNF:
-			return HpWriter(self, raw, Uuid)
-		elif reply == _HpConnector.UPDATE_REJ:
-			cause = unpack('<B', raw)[0]
-			if cause == 0:
-				raise IOError('Conflicting revision')
-			elif cause == 1:
-				raise IOError('Invalid UUID')
-			else:
-				raise IOError('Unknown error')
+			return HpHandle(self, raw, doc, rev)
 		else:
-			raise ConnError('Invalid server reply')
+			return genericReply(reply, raw)
 
 	def watch(self, w):
 		if w._incWatchRef() == 1:
@@ -232,55 +187,43 @@ class _HpConnector(object):
 				del self.watchHandlers[ref]
 				self._rpc(_HpConnector.WATCH_REM_REQ, pack('B16s', typ, h))
 
-	def delete_uuid(self, store, uuid):
-		checkGuid(store)
-		checkGuid(uuid)
-		reply = self._rpc(_HpConnector.DELETE_UUID_REQ, store+uuid)[0]
-		if reply == _HpConnector.DELETE_CNF:
-			return True
-		elif reply == _HpConnector.DELETE_REJ:
-			raise IOError('Unknown UUID')
-		else:
-			raise ConnError('Invalid server reply')
+	def delete_doc(self, doc, stores=[]):
+		checkGuid(doc)
+		body = doc + encodeUuidList(stores)
+		(reply, code) = self._rpc(_HpConnector.DELETE_DOC_REQ, body)
+		return genericReply(reply, code)
 
-	def delete_rev(self, store, rev):
-		checkGuid(store)
+	def delete_rev(self, rev, stores=[]):
 		checkGuid(rev)
-		reply = self._rpc(_HpConnector.DELETE_REV_REQ, store+rev)[0]
-		if reply == _HpConnector.DELETE_CNF:
-			return True
-		elif reply == _HpConnector.DELETE_REJ:
-			raise IOError('Unknown revision')
-		else:
-			raise ConnError('Invalid server reply')
+		body = rev + encodeUuidList(stores)
+		(reply, code) = self._rpc(_HpConnector.DELETE_REV_REQ, body)
+		return genericReply(reply, code)
 
-	def replicate_uuid(self, uuid, stores, history=True):
-		checkGuid(uuid)
-		body = pack('16sBB', uuid, int(history), len(stores))
-		for store in stores:
-			checkGuid(store)
-			body += store
-		self._ind(_HpConnector.REPLICATE_UUID_IND, body)
+	def sync(self, doc, stores=[]):
+		checkGuid(doc)
+		body = doc + encodeUuidList(stores)
+		(reply, code) = self._rpc(_HpConnector.SYNC_DOC_REQ, body)
+		return genericReply(reply, code)
+
+	def replicate_doc(self, doc, stores, history=True):
+		checkGuid(doc)
+		body = pack('16sB', doc, int(history)) + encodeUuidList(stores)
+		(reply, code) = self._rpc(_HpConnector.REPLICATE_DOC_REQ, body)
+		return genericReply(reply, code)
 
 	def replicate_rev(self, rev, stores, history=True):
 		checkGuid(rev)
-		body = pack('16sBB', rev, int(history), len(stores))
-		for store in stores:
-			checkGuid(store)
-			body += store
-		self._ind(_HpConnector.REPLICATE_REV_IND, body)
+		body = pack('16sB', rev, int(history)) + encodeUuidList(stores)
+		(reply, code) = self._rpc(_HpConnector.REPLICATE_REV_REQ, body)
+		return genericReply(reply, code)
 
 	def mount(self, store):
-		reply = self._rpc(_HpConnector.MOUNT_REQ, store)[0]
-		if reply == _HpConnector.MOUNT_CNF:
-			return True
-		elif reply == _HpConnector.MOUNT_REJ:
-			return False
-		else:
-			raise ConnError('Invalid server reply')
+		(reply, code) = self._rpc(_HpConnector.MOUNT_REQ, store)
+		return genericReply(reply, code)
 
 	def unmount(self, store):
-		self._ind(_HpConnector.UNMOUNT_IND, store)
+		(reply, code) = self._rpc(_HpConnector.UNMOUNT_REQ, store)
+		return genericReply(reply, code)
 
 	def flush(self):
 		while self.socket.flush():
@@ -573,10 +516,22 @@ class HpStat(object):
 		return (self.__flags & 0x10) != 0
 
 
-
-class HpSeekable(object):
-	def __init__(self):
+class HpHandle(object):
+	def __init__(self, connector, cookie, doc, rev):
 		self.__pos = { }
+		self.connector = connector
+		self.cookie = cookie
+		self.doc = doc
+		self.rev = rev
+		self.active = True
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, type, value, traceback):
+		if self.active:
+			self.abort()
+		return False
 
 	def _getPos(self, part):
 		if part in self.__pos:
@@ -599,22 +554,6 @@ class HpSeekable(object):
 	def tell(self, part):
 		return self._getPos(part)
 
-
-class HpReader(HpSeekable):
-	def __init__(self, connector, cookie, rev):
-		HpSeekable.__init__(self)
-		self.connector = connector
-		self.cookie = cookie
-		self.rev = rev
-		self.active = True
-
-	def __enter__(self):
-		return self
-
-	def __exit__(self, type, value, traceback):
-		self.done()
-		return False
-
 	def read(self, part, length):
 		if not self.active:
 			raise IOError('Document already closed!')
@@ -626,17 +565,15 @@ class HpReader(HpSeekable):
 			else:
 				chunk = length
 			request = pack('<4s4sQL', self.cookie, part, pos, chunk)
-			(reply, data) = self.connector._rpc(_HpConnector.READ_PART_REQ, request)
-			if reply == _HpConnector.READ_PART_CNF:
+			(reply, data) = self.connector._rpc(_HpConnector.READ_REQ, request)
+			if reply == _HpConnector.READ_CNF:
 				size = len(data)
 				result = result + data
 				pos = pos + size
 				if size < chunk:
 					break
-			elif reply == _HpConnector.READ_PART_REJ:
-				raise IOError('Error while reading')
 			else:
-				raise ConnError('Unexpected server response')
+				genericReply(reply, data)
 		self._setPos(part, pos)
 		return result
 
@@ -652,32 +589,6 @@ class HpReader(HpSeekable):
 		self._setPos(part, oldPos)
 		return result
 
-	def done(self):
-		if self.active:
-			self.active = False
-			self.connector._ind(_HpConnector.READ_DONE_IND, self.cookie)
-
-	def getRevision(self):
-		return self.rev
-
-
-class HpWriter(HpSeekable):
-	def __init__(self, connector, cookie, uuid):
-		HpSeekable.__init__(self)
-		self.connector = connector
-		self.cookie = cookie
-		self.uuid = uuid
-		self.rev = None
-		self.active = True
-
-	def __enter__(self):
-		return self
-
-	def __exit__(self, type, value, traceback):
-		if self.active:
-			self.abort()
-		return False
-
 	def write(self, part, data):
 		if not self.active:
 			raise IOError('Document already immutable!')
@@ -687,13 +598,9 @@ class HpWriter(HpSeekable):
 		length = len(data)
 		while length >= i:
 			request = pack('<4s4sQ', self.cookie, part, pos+i) + data[i:i+2048]
-			(reply, empty) = self.connector._rpc(_HpConnector.WRITE_PART_REQ, request)
-			if reply == _HpConnector.WRITE_PART_CNF:
-				i += 2048
-			elif reply == _HpConnector.WRITE_PART_REJ:
-				raise IOError('Error while writing')
-			else:
-				raise ConnError('Unexpected server response')
+			(reply, empty) = self.connector._rpc(_HpConnector.WRITE_REQ, request)
+			genericReply(reply, empty)
+			i += 2048
 
 		self._setPos(part, pos+length)
 
@@ -706,44 +613,35 @@ class HpWriter(HpSeekable):
 		if not self.active:
 			raise IOError('Document already immutable!')
 		request = pack('4s4sQ', self.cookie, part, self._getPos(part))
-		(reply, empty) = self.connector._rpc(_HpConnector.WRITE_TRUNC_REQ, request)
-		if reply == _HpConnector.WRITE_TRUNC_CNF:
-			pass
-		elif reply == _HpConnector.WRITE_TRUNC_REJ:
-			raise IOError('Write error')
-		else:
-			raise ConnError('Unexpected server response')
+		(reply, empty) = self.connector._rpc(_HpConnector.TRUNC_REQ, request)
+		return genericReply(reply, empty)
 
-	def commit(self):
+	def commit(self, mergeRevs=[]):
 		if not self.active:
 			raise IOError('Document already immutable!')
 		self.active = False
-		(reply, raw) = self.connector._rpc(_HpConnector.WRITE_COMMIT_REQ, self.cookie)
-		if reply == _HpConnector.WRITE_COMMIT_CNF:
+		body = self.cookie + encodeUuidList(mergeRevs)
+		(reply, raw) = self.connector._rpc(_HpConnector.COMMIT_REQ, body)
+		if reply == _HpConnector.COMMIT_CNF:
 			self.rev = raw
-			return raw
-		elif reply == _HpConnector.WRITE_COMMIT_REJ:
-			cause = unpack('<B', raw)[0]
-			if cause == 0:
-				raise IOError('Conflicting revision')
-			elif cause == 1:
-				raise IOError('Write error')
-			else:
-				raise IOError('Unknown error')
+			return True
 		else:
-			raise ConnError('Unexpected server response')
+			genericReply(reply, raw)
+			self.active = True
+			return False
 
 	def abort(self):
 		if self.active:
-			self.connector._ind(_HpConnector.WRITE_ABORT_IND, self.cookie)
+			(reply, code) = self.connector._rpc(_HpConnector.ABORT_REQ, self.cookie)
 			self.active = False
+			return genericReply(reply, code)
 		else:
 			raise IOError('Document already immutable!')
 
-	def getUUID(self):
-		return self.uuid
+	def getDoc(self):
+		return self.doc
 
-	def getRevision(self):
+	def getRev(self):
 		return self.rev
 
 _connector = None

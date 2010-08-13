@@ -26,7 +26,7 @@ if len(sys.argv) == 2:
 		guid = HpConnector().enum().guid(sys.argv[1])
 		try:
 			rev = HpConnector().lookup(guid).rev(guid)
-			with HpConnector().read(rev) as r:
+			with HpConnector().peek(rev) as r:
 				metaData = hpstruct.loads(r.readAll('META'))
 				name = metaData["org.hotchpotch.annotation"]["title"]
 		except:

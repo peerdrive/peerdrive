@@ -26,7 +26,7 @@ class _HpRegistry(hpconnector.HpWatch):
 
 		sysUuid = self.connection.enum().sysStoreGuid()
 		sysRev = self.connection.lookup(sysUuid).rev(sysUuid)
-		with self.connection.read(sysRev) as r:
+		with self.connection.peek(sysRev) as r:
 			root = hpstruct.loads(r.readAll('HPSD'))
 			self.regUuid = root["registry"].uuid()
 
@@ -35,8 +35,8 @@ class _HpRegistry(hpconnector.HpWatch):
 
 	def loadRegistry(self):
 		regRev = self.connection.lookup(self.regUuid).revs()[0]
-		with self.connection.read(regRev) as r:
-			self.registry = hpstruct.loads(r.read('HPSD', 10000000))
+		with self.connection.peek(regRev) as r:
+			self.registry = hpstruct.loads(r.readAll('HPSD'))
 
 	def triggered(self, cause):
 		if cause == hpconnector.HpWatch.CAUSE_MODIFIED:

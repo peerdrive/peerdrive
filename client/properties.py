@@ -109,7 +109,7 @@ class PropertiesDialog(QtGui.QDialog):
 	def __save(self):
 		rev = self.revs[0]
 		self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
-		with HpConnector().read(rev) as r:
+		with HpConnector().peek(rev) as r:
 			metaData = hpstruct.loads(r.readAll('META'))
 		setMetaData(metaData, ["org.hotchpotch.annotation", "title"], str(self.annoTab.titleEdit.text()))
 		setMetaData(metaData, ["org.hotchpotch.annotation", "description"], str(self.annoTab.descEdit.text()))
@@ -193,7 +193,7 @@ class HistoryTab(QtGui.QWidget):
 						comment = ""
 						if 'META' in stat.parts():
 							try:
-								with HpConnector().read(rev) as r:
+								with HpConnector().peek(rev) as r:
 									metaData = hpstruct.loads(r.readAll('META'))
 									comment = extractMetaData(
 										metaData,
@@ -240,7 +240,7 @@ class AnnotationTab(QtGui.QWidget):
 		tags = []
 		for rev in revs:
 			try:
-				with HpConnector().read(rev) as r:
+				with HpConnector().peek(rev) as r:
 					metaData = hpstruct.loads(r.readAll('META'))
 					self.__title = extractMetaData(
 						metaData,

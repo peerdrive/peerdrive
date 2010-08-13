@@ -61,8 +61,7 @@ abort(Broker) ->
 % @spec: init(Op) -> {ok, #state} | {stop, Reason}
 
 init({peek, Rev, Stores, User}) ->
-	StoreIfcs = get_store_ifcs(Stores),
-	case do_peek(Rev, StoreIfcs) of
+	case do_peek(Rev, Stores) of
 		{ok, Handle} ->
 			process_flag(trap_exit, true),
 			link(User),
@@ -73,8 +72,7 @@ init({peek, Rev, Stores, User}) ->
 	end;
 
 init({fork, Doc, StartRev, Stores, Uti, User}) ->
-	StoreIfcs = get_store_ifcs(Stores),
-	case do_fork(Doc, StartRev, StoreIfcs, Uti) of
+	case do_fork(Doc, StartRev, Stores, Uti) of
 		{ok, Handles} ->
 			process_flag(trap_exit, true),
 			link(User),
@@ -85,8 +83,7 @@ init({fork, Doc, StartRev, Stores, Uti, User}) ->
 	end;
 
 init({update, Doc, Rev, Stores, Uti, User}) ->
-	StoreIfcs = get_store_ifcs(Stores),
-	case do_update(Doc, Rev, StoreIfcs, Uti) of
+	case do_update(Doc, Rev, Stores, Uti) of
 		{ok, Handles} ->
 			process_flag(trap_exit, true),
 			link(User),
@@ -158,24 +155,6 @@ terminate(_, _)          -> ok.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-get_store_ifcs(StoreList) ->
-	case StoreList of
-		[] ->
-			lists:map(fun({_Guid, Ifc}) -> Ifc end, volman:stores());
-
-		_ ->
-			lists:foldl(
-				fun(Guid, Acc) ->
-					case volman:store(Guid) of
-						{ok, Ifc} -> [Ifc | Acc];
-						error     -> Acc
-					end
-				end,
-				[],
-				StoreList)
-	end.
-
 
 do_peek(_Rev, []) ->
 	{error, enoent};

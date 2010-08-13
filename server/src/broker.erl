@@ -20,7 +20,7 @@
 	delete_rev/2, delete_doc/2, fork/3, lookup/1,
 	read/4, peek/2, replicate_rev/2, replicate_uuid/2,
 	stat/1, update/4, abort/1, commit/2, write/4,
-	truncate/3]).
+	truncate/3, sync/2]).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -82,7 +82,7 @@ stat(Rev) ->
 %%       Reason = ecode()
 peek(Rev, Stores) ->
 	User = self(),
-	broker_io:start({peek, Rev, Stores, User}).
+	broker_io:start({peek, Rev, get_store_ifcs(Stores), User}).
 
 
 %% @doc Fork a new document from an existing revision.
@@ -104,7 +104,8 @@ peek(Rev, Stores) ->
 fork(StartRev, Stores, Uti) ->
 	User = self(),
 	Doc = crypto:rand_bytes(16),
-	case broker_io:start({fork, Doc, StartRev, Stores, Uti, User}) of
+	StoreIfcs = get_store_ifcs(Stores),
+	case broker_io:start({fork, Doc, StartRev, StoreIfcs, Uti, User}) of
 		{ok, Handle} ->
 			{ok, Doc, Handle};
 		{error, _} = Error ->
@@ -126,7 +127,8 @@ fork(StartRev, Stores, Uti) ->
 %%       Reason = ecode()
 update(Doc, Rev, Stores, Uti) ->
 	User = self(),
-	broker_io:start({update, Doc, Rev, Stores, Uti, User}).
+	StoreIfcs = get_store_ifcs(Stores),
+	broker_io:start({update, Doc, Rev, StoreIfcs, Uti, User}).
 
 
 %% @doc Read a part of a document
@@ -175,6 +177,20 @@ delete_rev(Store, Rev) ->
 	end.
 
 
+%% @doc Synchronize a document between different stores to the same revision.
+%%
+%% Tries to perform a fast-forward merge for the document on the given stores
+%% if the revisions differ.
+%%
+%% @spec sync(Doc, Stores) -> ok | {error, Reason}
+%%       Doc = guid()
+%%       Stores = [guid()]
+%%       Reason = ecode()
+sync(Doc, Stores) ->
+	StoreIfcs = get_store_ifcs(Stores),
+	broker_syncer:sync(Doc, StoreIfcs).
+
+
 %% @doc Replicate a Uuid to a new store.
 %%
 %% The Uuid must be unambiguous, that is it must have the same revision on all
@@ -215,4 +231,27 @@ replicate_rev(Rev, ToStore) ->
 		error ->
 			{error, enoent}
 	end.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Local functions...
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+get_store_ifcs(StoreList) ->
+	case StoreList of
+		[] ->
+			lists:map(fun({_Guid, Ifc}) -> Ifc end, volman:stores());
+
+		_ ->
+			lists:foldl(
+				fun(Guid, Acc) ->
+					case volman:store(Guid) of
+						{ok, Ifc} -> [Ifc | Acc];
+						error     -> Acc
+					end
+				end,
+				[],
+				StoreList)
+	end.
+
 
