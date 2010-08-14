@@ -751,10 +751,12 @@ do_write_start_update(S, Uuid, StartRev, Uti, User) ->
 start_writer(S, State, User) ->
 	WriterLocks = dict:fold(
 		fun(_Part, Hash, Acc) -> [Hash | Acc] end,
+		[],
 		State#ws.orig),
 	ServerLocks = lists:foldl(
 		fun(Hash, Acc) -> orddict:update_counter(Hash, 1, Acc) end,
-		S#state.locks),
+		S#state.locks,
+		WriterLocks),
 	{ok, Writer} = file_store_writer:start(State#ws{locks=WriterLocks}, User),
 	{S#state{locks=ServerLocks}, Writer}.
 

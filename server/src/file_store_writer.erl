@@ -289,6 +289,7 @@ cleanup(#ws{locks=Locks, server=Server} = S) ->
 	% close readers
 	dict:fold(
 		fun(_Hash, IODevice, _) -> file:close(IODevice) end,
+		ok,
 		S#ws.readers),
 	S#ws{locks=[], readers=[]}.
 

@@ -288,13 +288,14 @@ send_indication(Socket, Indication, Data) ->
 send_generic_reply(RetPath, Reply) ->
 	BinCode = case Reply of
 		ok             -> 0;
-		conflict       -> 1;
+		conflict       -> 1; % recoverable conflict
 		{error, Error} ->
 			case Error of
-				enoent    -> 2;
-				einval    -> 3;
-				emultiple -> 4;
-				ebadf     -> 5;
+				conflict  -> 2; % unrecoverable conflict
+				enoent    -> 3;
+				einval    -> 4;
+				emultiple -> 5;
+				ebadf     -> 6;
 				_         -> 16#ffffffff
 			end;
 		{ok, _} -> 0

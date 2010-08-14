@@ -323,7 +323,8 @@ class SyncRules(object):
 	def save(self):
 		with HpConnector().update(self.syncUuid, self.syncRev) as w:
 			w.writeAll('HPSD', hpstruct.dumps(self.rules))
-			self.rev = w.commit()
+			w.commit()
+			self.rev = w.getRev()
 
 	def deleteRule(self, store, peer):
 		self.rules = [r for r in self.rules if (r["from"].decode('hex') != store) or (r["to"].decode('hex') != peer)]
@@ -456,12 +457,12 @@ class CollectionTreeView(QtGui.QTreeView):
 			info = c.stat(sourceRev)
 			destStores = c.stat(self.__parent.rev()).volumes()
 			# copy
-			with c.fork(destStores[0], info.uti()) as w:
+			with c.fork(destStores, info.uti()) as w:
 				with c.peek(sourceRev) as r:
 					for part in info.parts():
 						w.write(part, r.readAll(part))
 				w.commit()
-				destUuid = w.getUUID()
+				destUuid = w.getDoc()
 			# add link
 			self.model().insertLink(hpstruct.DocLink(destUuid))
 		elif choice in openRevActions:

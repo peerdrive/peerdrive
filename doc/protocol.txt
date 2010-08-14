@@ -91,10 +91,11 @@ Body =
 ECode =
 	0	Success
 	1	Recoverable conflict (Handle still valid)
-	2	ENOENT
-	3	EINVAL
-	4	EMULTIPLE
-	5	EBADF
+	2	Unrecoverable conflict (Handle discarded)
+	3	ENOENT
+	4	EINVAL
+	5	EMULTIPLE
+	6	EBADF
 
 	0xffffffff	Unknown error
 

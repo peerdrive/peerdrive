@@ -38,12 +38,14 @@ def genericReply(reply, body):
 		elif code == 1:
 			return False # Recoverable conflict (Handle still valid)
 		elif code == 2:
-			raise IOError('ENOENT')
+			raise IOError('Revision conflict')
 		elif code == 3:
-			raise IOError('EINVAL')
+			raise IOError('ENOENT')
 		elif code == 4:
-			raise IOError('EMULTIPLE')
+			raise IOError('EINVAL')
 		elif code == 5:
+			raise IOError('EMULTIPLE')
+		elif code == 6:
 			raise IOError('EBADF')
 		else:
 			raise IOError('Unknown error')
@@ -147,7 +149,7 @@ class _HpConnector(object):
 		else:
 			return genericReply(reply, cookie)
 
-	def fork(self, rev=None, uti='', stores=[]):
+	def fork(self, stores=[], uti='', rev=None):
 		if rev:
 			checkGuid(rev)
 		else:
@@ -616,7 +618,7 @@ class HpHandle(object):
 		(reply, empty) = self.connector._rpc(_HpConnector.TRUNC_REQ, request)
 		return genericReply(reply, empty)
 
-	def commit(self, mergeRevs=[]):
+	def commit(self, retry=False, mergeRevs=[]):
 		if not self.active:
 			raise IOError('Document already immutable!')
 		self.active = False
@@ -627,8 +629,12 @@ class HpHandle(object):
 			return True
 		else:
 			genericReply(reply, raw)
-			self.active = True
-			return False
+			if retry:
+				self.active = True
+				return False
+			else:
+				self.abort()
+				raise IOError('Revision conflict')
 
 	def abort(self):
 		if self.active:

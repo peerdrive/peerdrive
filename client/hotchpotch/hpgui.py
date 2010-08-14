@@ -501,7 +501,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		if self.__isMutable() and self.needSave():
 			with self.__connection.update(self.__uuid, self.__rev) as writer:
 				self.__saveFileInternal(comment, False, writer)
-				newRev = writer.commit()
+				writer.commit()
+				newRev = writer.getRev()
 			print "rev:%s" % newRev.encode("hex")
 			sys.stdout.flush()
 			self.__rev = newRev

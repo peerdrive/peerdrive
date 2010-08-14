@@ -94,11 +94,11 @@ def importFile(store, path, name=""):
 
 		#print 'META: ', repr(meta)
 		with open(path, "rb") as file:
-			with HpConnector().fork(store, uti) as writer:
+			with HpConnector().fork([store], uti) as writer:
 				writer.write('FILE', file.read())
 				writer.write('META', hpstruct.dumps(meta))
 				writer.commit()
-				link = hpstruct.DocLink(writer.getUUID())
+				link = hpstruct.DocLink(writer.getDoc())
 				return link
 	else:
 		return None
@@ -108,11 +108,11 @@ def importFile(store, path, name=""):
 def importObject(store, uti, spec):
 	link = None
 	try:
-		with HpConnector().fork(store, uti) as writer:
+		with HpConnector().fork([store], uti) as writer:
 			for (fourcc, data) in spec:
 				writer.writeAll(fourcc, data)
 			writer.commit()
-			link = hpstruct.DocLink(writer.getUUID())
+			link = hpstruct.DocLink(writer.getDoc())
 	except IOError:
 		pass
 	return link

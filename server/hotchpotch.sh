@@ -47,6 +47,7 @@ erl -noshell -eval "case make:all() of up_to_date -> erlang:halt(); error -> erl
 
 # make sure store directories exist
 mkdir -p $STORES
+mkdir -p /tmp/hotchpotch
 
 # start erlang
 $ERL +A 4 -boot start_sasl -s crypto -s hotchpotch

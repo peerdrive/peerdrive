@@ -120,7 +120,8 @@ class PropertiesDialog(QtGui.QDialog):
 			setMetaData(metaData, ["org.hotchpotch.annotation", "tags"], tagList)
 		with HpConnector().update(self.uuid, rev) as writer:
 			writer.writeAll('META', hpstruct.dumps(metaData))
-			self.revs[0] = writer.commit()
+			writer.commit()
+			self.revs[0] = writer.getRev()
 
 
 class DocumentTab(QtGui.QWidget):

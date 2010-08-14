@@ -512,7 +512,7 @@ class HpDict(object):
 			self.__meta    = loads(r.readAll('META'))
 			self.__content = loads(r.readAll('HPSD'))
 
-	def create(self, name, store):
+	def create(self, name, stores):
 		if self.__rev or self.__uuid:
 			raise IOError("Not new")
 
@@ -524,11 +524,12 @@ class HpDict(object):
 				"comment" : "<<Created by import>>"
 			}
 		}
-		with hpconnector.HpConnector().fork(store, "org.hotchpotch.dict") as w:
+		with hpconnector.HpConnector().fork(stores, "org.hotchpotch.dict") as w:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(self.__content))
-			self.__rev = w.commit()
-			self.__uuid = w.getUUID()
+			w.commit()
+			self.__rev = w.getRev()
+			self.__uuid = w.getDoc()
 		return DocLink(self.__uuid)
 
 	def save(self):
@@ -597,7 +598,7 @@ class HpSet(object):
 			self.__content = [ (_loadTitle(l), l) for (t, l) in self.__content ]
 			self.__didCache = True
 
-	def create(self, name, store):
+	def create(self, name, stores):
 		if self.__rev or self.__uuid:
 			raise IOError("Not new")
 
@@ -612,11 +613,12 @@ class HpSet(object):
 		content = [ link for (descr, link) in self.__content ]
 		for link in content:
 			link.update()
-		with hpconnector.HpConnector().fork(store, "org.hotchpotch.set") as w:
+		with hpconnector.HpConnector().fork(stores, "org.hotchpotch.set") as w:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(content))
-			self.__rev = w.commit()
-			self.__uuid = w.getUUID()
+			w.commit()
+			self.__rev = w.regRev()
+			self.__uuid = w.getDoc()
 		return DocLink(self.__uuid)
 
 	def save(self):
@@ -729,9 +731,9 @@ def walkPath(path, create=False):
 		elif create:
 			name = step.split(':')[-1]
 			if ':' in nextStep:
-				next = HpDict().create(name, storeGuid)
+				next = HpDict().create(name, [storeGuid])
 			else:
-				next = HpSet().create(name, storeGuid)
+				next = HpSet().create(name, [storeGuid])
 			curContainer[step] = next
 			curContainer.save()
 			curContainer = HpContainer(next)
