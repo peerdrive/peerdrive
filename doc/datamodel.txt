@@ -58,12 +58,13 @@ As entry point to the link chain there is a root document in each store, just
 like the root directory in file systems.
 
 There are two types of links in Hotchpotch:
-	- Document link: points to a UUID (document)
-	- Revision link: points to a special revision
+	- Document link: points to a document (which points to the latest revision)
+	- Revision link: points to a revision
 
 A document link additionally contains a list of all known revisions of the
-document which it refers to. This is used when navigating in the history, that
-is when examining an old revision of a document.
+document which it refers to at the time the link was created/updated. This is
+used when navigating in the history, that is when examining an old revision of
+a document.
 
 In essence Hotchpotch links are like symbolic links in the meaning that they
 symbolically refer to another document/revision. But they are also like hard links
@@ -135,4 +136,81 @@ uint32 = 0x64, ?unsigned long?
 sint32 = 0x65, ?signed long?
 uint64 = 0x66, ?unsigned long long?
 sint64 = 0x67, ?signed long long?
+
+
+== Client interface ==
+
+Hotchpotch clients manipulate documents through a high level API...
+
+=== Document manipulation ===
+
+- peek(Rev, Stores) -- Open a rev for read only access
+	- Rev: Rev to open
+	- Stores: Optional set of stores where to search the rev. If empty
+			  search on all mounted stores.
+- fork(Rev, Stores, Uti) -- Create a new document
+	- Rev: Starting Rev of the new document (parent and initial
+		   content). Use special Rev <<0:128>> when creating empty
+		   document.
+	- Stores: Optional set of stores where to search the Rev. If empty
+			  try on all mounted stores where Rev exists.
+	- Uti: Uti of the new document. If not given keep value of starting
+		   revision.
+- update(Doc, Rev, Stores, Uti, Preliminary) -- Udate a document
+	- Doc: Document to be updated
+	- Rev: Current revision of the document which will be updated. At
+		   least one store must point to this revision or the operation
+		   will fail immediately. Any store which points to another
+		   revision will not be updated.
+	- Stores: Optional set of stores where to search the rev. If empty
+			  search on all mounted stores.
+	- Uti: Uti of the updated document. If not given keep the previous
+		   value.
+	- Preliminary: Make the new revision preliminary. Preliminary
+				   predecessors are always overwritten, regardless of
+				   this flag.
+- read(Handle, Part, Offset, Length)
+	- Handle: as returned by open/fork/update
+	- Part: FourCC
+	- Offset, Length: guess what ;)
+- write(Handle, Part, Offset, Data)
+	- Handle: as returned by fork/update
+	- Part: FourCC
+	- Offset
+	- Data
+- commit(Handle, MergeRevs)
+	- Handle: as returned by fork/update
+	- MergeRevs: Additional parent revisions in case of a merge, empty
+				 otherwise. If not given keep the previous value.
+	- tristate result
+		- success
+			- at least one store has commited
+		- retry
+			- no store has comitted
+			- at least one store has rejected due to conflicting revision
+		- fail
+			- all stores have rejected with hard errors
+- abort(Handle)
+	- discard handle
+
+=== Data distribution ===
+
+- sync(Doc, Stores) -- Perform a fast-forward sync
+	- Doc: Document which should be unified among the stores
+	- Stores: Optional set of stores where the document is
+			  synchronized. If empty perform on all stores.
+- replicate_doc(Doc, Stores) -- Replicate a document to other stores
+	- Doc: Unambigous document
+	- Stores: Where to replicate to
+- replicate_rev(Rev, Stores) -- Replicate a revision to other stores
+	- Rev: Revision, must be referenced on the destination store
+	- Stores: Where to replicate to
+- delete_doc(Doc, Stores) -- Delete document
+	- Doc: Document to be deleted
+	- Stores: Optional set of stores where to delete the doc. If empty
+			  delete on all mounted stores.
+- delete_rev(Rev, Stores) -- Delete revision
+	- Rev: Revision to be deleted
+	- Stores: Optional set of stores where to delete the rev. If empty
+			  delete on all mounted stores.
 
