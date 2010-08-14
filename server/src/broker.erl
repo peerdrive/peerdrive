@@ -158,23 +158,31 @@ abort(Handle) ->
 
 
 % ok | {error, Reason}
-delete_doc(Store, Doc) ->
-	case volman:store(Store) of
-		{ok, StoreIfc} ->
-			store:delete_doc(StoreIfc, Doc);
-		error ->
-			{error, enoent}
-	end.
+delete_doc(Doc, Stores) ->
+	lists:foldl(
+		fun(Store, Result) ->
+			case store:delete_doc(Store, Doc) of
+				ok              -> Result;
+				{error, enoent} -> Result;
+				Else            -> Else
+			end
+		end,
+		ok,
+		get_store_ifcs(Stores)).
 
 
 % ok | {error, Reason}
-delete_rev(Store, Rev) ->
-	case volman:store(Store) of
-		{ok, StoreIfc} ->
-			store:delete_rev(StoreIfc, Rev);
-		error ->
-			{error, enoent}
-	end.
+delete_rev(Rev, Stores) ->
+	lists:foldl(
+		fun(Store, Result) ->
+			case store:delete_rev(Store, Rev) of
+				ok              -> Result;
+				{error, enoent} -> Result;
+				Else            -> Else
+			end
+		end,
+		ok,
+		get_store_ifcs(Stores)).
 
 
 %% @doc Synchronize a document between different stores to the same revision.

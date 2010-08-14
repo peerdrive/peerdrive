@@ -188,13 +188,15 @@ handle_packet(Packet, S) ->
 			S;
 
 		?DELETE_DOC_REQ ->
-			<<Store:16/binary, Doc:16/binary>> = Body,
-			spawn_link(fun () -> do_delete_doc(Store, Doc, RetPath) end),
+			<<Doc:16/binary, Body1/binary>> = Body,
+			{Stores, <<>>} = parse_revisions(Body1),
+			spawn_link(fun () -> do_delete_doc(Doc, Stores, RetPath) end),
 			S;
 
 		?DELETE_REV_REQ ->
-			<<Store:16/binary, Rev:16/binary>> = Body,
-			spawn_link(fun () -> do_delete_rev(Store, Rev, RetPath) end),
+			<<Rev:16/binary, Body1/binary>> = Body,
+			{Stores, <<>>} = parse_revisions(Body1),
+			spawn_link(fun () -> do_delete_rev(Rev, Stores, RetPath) end),
 			S;
 
 		?SYNC_DOC_REQ ->
@@ -464,13 +466,13 @@ io_loop(Handle) ->
 	end.
 
 
-do_delete_doc(Store, Doc, RetPath) ->
-	Reply = broker:delete_doc(Store, Doc),
+do_delete_doc(Doc, Stores, RetPath) ->
+	Reply = broker:delete_doc(Doc, Stores),
 	send_generic_reply(RetPath, Reply).
 
 
-do_delete_rev(Store, Rev, RetPath) ->
-	Reply = broker:delete_rev(Store, Rev),
+do_delete_rev(Rev, Stores, RetPath) ->
+	Reply = broker:delete_rev(Rev, Stores),
 	send_generic_reply(RetPath, Reply).
 
 

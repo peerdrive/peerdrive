@@ -45,8 +45,8 @@ sync(Doc, Stores) ->
 %% The algorithm ends with an error when no such revision was found yet and the
 %% ends of all revision histories were reached.
 calc_dest_rev(Revs) ->
-	% State :: [ {Heads::[guid()], Path::set()} ]
-	State = [ {[Rev], sets:from_list([Rev])} || Rev <- Revs ],
+	% State :: [ {BaseRev::guid(), Heads::[guid()], Path::set()} ]
+	State = [ {Rev, [Rev], sets:from_list([Rev])} || Rev <- Revs ],
 	calc_dest_loop(Revs, State).
 
 
@@ -66,46 +66,42 @@ calc_dest_loop(BaseRevs, State) ->
 	end.
 
 
-find_ff_head(BaseRevs, State) ->
-	{_Heads, Paths} = lists:unzip(State),
-	find_ff_head_step(BaseRevs, lists:zip(BaseRevs, Paths)).
-
-
-find_ff_head_step(_BaseRevs, []) ->
+find_ff_head(_BaseRevs, []) ->
 	error;
 
-find_ff_head_step(BaseRevs, [{Candidate, Path} | Paths]) ->
+find_ff_head(BaseRevs, [{Candidate, _Heads, Path} | Paths]) ->
 	case lists:all(fun(Rev) -> sets:is_element(Rev, Path) end, BaseRevs) of
 		true -> {ok, Candidate};
-		false -> find_ff_head_step(BaseRevs, Paths)
+		false -> find_ff_head(BaseRevs, Paths)
 	end.
 
 
 calc_dest_step(State) ->
 	lists:foldl(
 		fun(RevInfo, {AccState, AccAddedSth}) ->
-			{Heads, _Path} = NewRevInfo = follow(RevInfo),
+			{_BaseRev, Heads, _Path} = NewRevInfo = follow(RevInfo),
 			{[NewRevInfo|AccState], (Heads =/= []) or AccAddedSth}
 		end,
 		{[], false},
 		State).
 
 
-follow({Heads, Path}) ->
+follow({BaseRev, Heads, Path}) ->
 	lists:foldl(
-		fun(Head, {AccHeads, AccPath}) ->
+		fun(Head, {AccBase, AccHeads, AccPath} = Acc) ->
 			case broker:stat(Head) of
 				{ok, _Flags, _Parts, Parents, _Mtime, _Uti, _Volumes} ->
 					{
+						AccBase,
 						Parents ++ AccHeads,
 						sets:union(sets:from_list(Parents), AccPath)
 					};
 
 				error ->
-					{AccHeads, AccPath}
+					Acc
 			end
 		end,
-		{[], Path},
+		{BaseRev, [], Path},
 		Heads).
 
 
@@ -134,7 +130,7 @@ do_sync(Doc, DestRev, AllStores) ->
 create_tmp(LeadStore, DestRev) ->
 	Doc = crypto:rand_bytes(16),
 	case store:put_uuid(LeadStore, Doc, DestRev, DestRev) of
-		ok              -> {ok, Doc, DestRev};
+		ok              -> {ok, Doc};
 		{error, Reason} -> {error, Reason}
 	end.
 
@@ -159,6 +155,6 @@ switch(Doc, NewRev, Stores) ->
 
 cleanup(TmpDoc, Stores) ->
 	lists:foreach(
-		fun({Store, _Rev}) -> store:delete_uuid(Store, TmpDoc) end,
+		fun({Store, _Rev}) -> store:delete_doc(Store, TmpDoc) end,
 		Stores).
 
