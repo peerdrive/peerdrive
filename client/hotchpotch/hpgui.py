@@ -28,8 +28,8 @@ import hpstruct
 
 def showDocument(link):
 	if isinstance(link, hpstruct.DocLink):
-		args = ['doc:'+link.uuid().encode('hex')]
-		rev = HpConnector().lookup(link.uuid()).revs()[0]
+		args = ['doc:'+link.doc().encode('hex')]
+		rev = HpConnector().lookup(link.doc()).revs()[0]
 	else:
 		args = ['rev:'+link.rev().encode('hex')]
 		rev = link.rev()
@@ -45,7 +45,7 @@ def showDocument(link):
 
 def showProperties(link):
 	if isinstance(link, hpstruct.DocLink):
-		args = ['doc:'+link.uuid().encode('hex')]
+		args = ['doc:'+link.doc().encode('hex')]
 	else:
 		args = ['rev:'+link.rev().encode('hex')]
 	if sys.platform == "win32":
@@ -73,24 +73,24 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 		# parse command line
 		if len(argv) == 2 and argv[1].startswith('doc:'):
-			self.__uuid = argv[1][4:].decode("hex")
+			self.__doc = argv[1][4:].decode("hex")
 			self.__rev = None
 		elif len(argv) == 2 and argv[1].startswith('rev:'):
-			self.__uuid = None
+			self.__doc = None
 			self.__rev = argv[1][4:].decode("hex")
 		elif len(argv) == 2:
 			link = hpstruct.resolvePath(argv[1])
 			if isinstance(link, hpstruct.DocLink):
-				self.__uuid = link.uuid()
+				self.__doc = link.doc()
 				self.__rev = None
 			else:
-				self.__uuid = None
+				self.__doc = None
 				self.__rev = link.rev()
 		else:
 			print "Usage: %s <Document>" % (self.__uti)
 			print
 			print "Document:"
-			print "    doc:<UUID>      ...open the latest version of the given document"
+			print "    doc:<document>  ...open the latest version of the given document"
 			print "    rev:<revision>  ...display the given revision"
 			print "    <hp-path-spec>  ...open by path spec"
 			sys.exit(1)
@@ -192,8 +192,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self._annotationDock.hide()
 
 		# see what we have to do
-		if self.__uuid:
-			revs = self.__connection.lookup(self.__uuid).revs()
+		if self.__doc:
+			revs = self.__connection.lookup(self.__doc).revs()
 			if len(revs) == 0:
 				print "Could not find the document"
 				sys.exit(2)
@@ -205,7 +205,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				print "rev:%s" % self.__rev.encode("hex")
 			self.__setMutable(True)
 			self.__loadFile(True, self.__rev)
-			HpWatch.__init__(self, HpWatch.TYPE_UUID, self.__uuid)
+			HpWatch.__init__(self, HpWatch.TYPE_DOC, self.__doc)
 		else:
 			self.__setMutable(False)
 			self.__loadFile(False, self.__rev)
@@ -218,8 +218,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.dragWidget.setPixmap(self.__getUtiPixmap())
 		self.__update()
 
-	def uuid(self):
-		return self.__uuid
+	def doc(self):
+		return self.__doc
 
 	def rev(self):
 		return self.__rev
@@ -323,7 +323,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			# fast-forward merge?
 			if fastForward:
 				self.statusBar().showMessage("Document merged by fast-forward", 10000)
-				return self.__connection.mergeTrivial(self.__uuid, base, [])
+				return self.__connection.mergeTrivial(self.__doc, base, [])
 
 			# can the application help?
 			newRev = self.__mergeAuto(base, revs)
@@ -369,11 +369,11 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			base = revs[i]
 			otherRevs = revs[:]
 			del otherRevs[i]
-			#print "merge uuid:%s, base:%s, otherRevs:%s" % (
-			#	self.__uuid.encode("hex"),
+			#print "merge doc:%s, base:%s, otherRevs:%s" % (
+			#	self.__doc.encode("hex"),
 			#	base.encode("hex"),
 			#	map(lambda x: x.encode("hex"), otherRevs))
-			return self.__connection.mergeTrivial(self.__uuid, base, otherRevs)
+			return self.__connection.mergeTrivial(self.__doc, base, otherRevs)
 		else:
 			return None
 
@@ -415,7 +415,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				mergeReaders.append(self.__connection.peek(rev))
 
 			with self.__connection.peek(baseRev) as baseReader:
-				with self.__connection.merge(self.__uuid, mergeRevs, uti) as writer:
+				with self.__connection.merge(self.__doc, mergeRevs, uti) as writer:
 					for part in commonParts:
 						writer.writeAll(part, baseReader.readAll(part))
 					conflicts = self.docMergePerform(writer, baseReader, mergeReaders, changedParts)
@@ -499,7 +499,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	def saveFile(self, comment = ""):
 		if self.__isMutable() and self.needSave():
-			with self.__connection.update(self.__uuid, self.__rev) as writer:
+			with self.__connection.update(self.__doc, self.__rev) as writer:
 				self.__saveFileInternal(comment, False, writer)
 				writer.commit()
 				newRev = writer.getRev()
@@ -587,7 +587,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		menu = QtGui.QMenu(self)
 		options = {}
 		if self.__isMutable():
-			volumes = self.__connection.lookup(self.__uuid).stores()
+			volumes = self.__connection.lookup(self.__doc).stores()
 		else:
 			volumes = self.__connection.stat(self.__rev).volumes()
 		for store in volumes:
@@ -614,12 +614,11 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		else:
 			volumes = []
 
-		for volume in volumes:
-			if self.__isMutable():
-				self.__connection.delete_uuid(volume, self.__uuid)
-			else:
-				self.__connection.delete_rev(volume, self.__rev)
-			# the watch will trigger and close the window
+		if self.__isMutable():
+			self.__connection.delete_doc(self.__doc, volumes)
+		else:
+			self.__connection.delete_rev(self.__rev, volumes)
+		# the watch will trigger and close the window
 
 	def __getStoreName(self, store):
 		try:
@@ -635,7 +634,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	def __update(self):
 		if self.__isMutable():
-			info = self.__connection.lookup(self.__uuid)
+			info = self.__connection.lookup(self.__doc)
 			allStores = info.stores()
 
 			# check for all the nasty conditions
@@ -664,7 +663,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			del self.__storeButtons[store]
 
 	def __updateWithMerge(self, revs):
-		tmpUuid = None
+		tmpDoc = None
 		tmpStore = None
 		mergeRevs = revs[:]
 
@@ -675,26 +674,27 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				tmpStore = s.volumes()[0]
 				with self.__connection.fork(tmpStore, s.uti(), self.__rev) as w:
 					self.__saveFileInternal("<<Temporary automatic checkpoint>>", True, w)
-					mergeRevs.append(w.commit())
-					tmpUuid = w.getUUID()
+					w.commit()
+					mergeRevs.append(w.getRev())
+					tmpDoc = w.getDoc()
 
 			self.__rev = self.__merge(mergeRevs)
 
 		finally:
-			if tmpUuid:
-				self.__connection.delete_uuid(tmpStore, tmpUuid)
+			if tmpDoc:
+				self.__connection.delete_doc(tmpDoc, [tmpStore])
 		self.__connection.watch(self)
 
 	def __showProperties(self):
 		if self.__isMutable():
-			link = hpstruct.DocLink(self.__uuid, False)
+			link = hpstruct.DocLink(self.__doc, False)
 		else:
 			link = hpstruct.RevLink(self.__rev)
 		showProperties(link)
 
 	def __saveSettings(self):
-		if self.__uuid:
-			hash = self.__uuid.encode('hex')
+		if self.__doc:
+			hash = self.__doc.encode('hex')
 		else:
 			hash = self.__rev.encode('hex')
 		path = ".settings/" + hash[0:2]
@@ -706,8 +706,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			pickle.dump(settings, f)
 
 	def __loadSettings(self):
-		if self.__uuid:
-			hash = self.__uuid.encode('hex')
+		if self.__doc:
+			hash = self.__doc.encode('hex')
 		else:
 			hash = self.__rev.encode('hex')
 		path = ".settings/" + hash[0:2] + "/" + hash[2:]
@@ -765,9 +765,9 @@ class DragWidget(QtGui.QLabel):
 
 		drag = QtGui.QDrag(self)
 		mimeData = QtCore.QMimeData()
-		uuid = self.__parent.uuid()
-		if uuid:
-			hpstruct.DocLink(uuid, False).mimeData(mimeData)
+		doc = self.__parent.doc()
+		if doc:
+			hpstruct.DocLink(doc, False).mimeData(mimeData)
 		else:
 			rev = self.__parent.rev()
 			hpstruct.RevLink(rev).mimeData(mimeData)
@@ -783,14 +783,14 @@ class DocButton(object):
 
 	# convenient class to watch store
 	class DocumentWatch(HpWatch):
-		def __init__(self, uuid, callback):
+		def __init__(self, doc, callback):
 			self.__callback = callback
-			super(DocButton.DocumentWatch, self).__init__(HpWatch.TYPE_UUID, uuid)
+			super(DocButton.DocumentWatch, self).__init__(HpWatch.TYPE_DOC, doc)
 		
 		def triggered(self, cause):
 			self.__callback(cause)
 
-	def __init__(self, uuid=None, withText=False):
+	def __init__(self, doc=None, withText=False):
 		self.__watch = None
 		self.__withText = withText
 		self.__button = QtGui.QToolButton()
@@ -798,18 +798,18 @@ class DocButton(object):
 		QtCore.QObject.connect(self.__button, QtCore.SIGNAL("clicked()"), self.__clicked)
 		if withText:
 			self.__button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-		self.setDocument(uuid)
+		self.setDocument(doc)
 
 	def cleanup(self):
 		self.setDocument(None)
 
-	def setDocument(self, uuid):
-		self.__uuid = uuid
+	def setDocument(self, doc):
+		self.__doc = doc
 		if self.__watch:
 			HpConnector().unwatch(self.__watch)
 			self.__watch = None
-		if uuid:
-			self.__watch = DocButton.DocumentWatch(uuid, self.__update)
+		if doc:
+			self.__watch = DocButton.DocumentWatch(doc, self.__update)
 			HpConnector().watch(self.__watch)
 		self.__update(0)
 
@@ -817,10 +817,10 @@ class DocButton(object):
 		if cause == HpWatch.CAUSE_DISAPPEARED:
 			self.setDocument(None)
 
-		if self.__uuid:
+		if self.__doc:
 			self.__button.setEnabled(True)
 			try:
-				rev = HpConnector().lookup(self.__uuid).revs()[0]
+				rev = HpConnector().lookup(self.__doc).revs()[0]
 				docIcon = None
 				with HpConnector().peek(rev) as r:
 					try:
@@ -850,8 +850,8 @@ class DocButton(object):
 			self.__button.setToolTip(docName)
 
 	def __clicked(self):
-		if self.__uuid:
-			showDocument(hpstruct.DocLink(self.__uuid, False))
+		if self.__doc:
+			showDocument(hpstruct.DocLink(self.__doc, False))
 
 	def getWidget(self):
 		return self.__button

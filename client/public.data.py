@@ -25,15 +25,15 @@ from hotchpotch import hpstruct, HpConnector, HpRegistry
 
 # parse command line
 if len(sys.argv) == 2 and sys.argv[1].startswith('doc:'):
-	uuid = sys.argv[1][4:].decode("hex")
-	rev = HpConnector().lookup(uuid).revs()[0]
+	doc = sys.argv[1][4:].decode("hex")
+	rev = HpConnector().lookup(doc).revs()[0]
 elif len(sys.argv) == 2 and sys.argv[1].startswith('rev:'):
 	rev = sys.argv[1][4:].decode("hex")
 else:
 	print "Usage: public.data.py <Document> ..."
 	print
 	print "Document:"
-	print "    doc:<UUID>      ...open the latest version of the given document"
+	print "    doc:<document>  ...open the latest version of the given document"
 	print "    rev:<revision>  ...display the given revision"
 	sys.exit(1)
 

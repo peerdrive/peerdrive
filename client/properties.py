@@ -58,39 +58,39 @@ def genRevButton(rev):
 	return button
 
 class PropertiesDialog(QtGui.QDialog):
-	def __init__(self, guid, isUuid, parent=None):
+	def __init__(self, uuid, isDoc, parent=None):
 		super(PropertiesDialog, self).__init__(parent)
 
 		mainLayout = QtGui.QVBoxLayout()
 		mainLayout.setSizeConstraint(QtGui.QLayout.SetFixedSize)
 
-		if isUuid:
-			self.uuid = guid
-			info = HpConnector().lookup(guid)
+		if isDoc:
+			self.doc = uuid
+			info = HpConnector().lookup(uuid)
 			mainLayout.addWidget(DocumentTab(info.stores(), "document"))
 			self.revs = info.revs()
 		else:
-			self.uuid = None
-			info = HpConnector().stat(guid)
+			self.doc = None
+			info = HpConnector().stat(uuid)
 			mainLayout.addWidget(DocumentTab(info.volumes(), "revision"))
-			self.revs = [guid]
+			self.revs = [uuid]
 
 		if len(self.revs) == 0:
 			QtGui.QMessageBox.warning(self, 'Missing document', 'The requested document was not found on any store.')
 			sys.exit(1)
 
 		tabWidget = QtGui.QTabWidget()
-		self.annoTab = AnnotationTab(self.revs, isUuid and (len(self.revs) == 1))
+		self.annoTab = AnnotationTab(self.revs, isDoc and (len(self.revs) == 1))
 		QtCore.QObject.connect(self.annoTab, QtCore.SIGNAL("changed()"), self.__changed)
 		tabWidget.addTab(self.annoTab, "Annotation")
 		tabWidget.addTab(HistoryTab(self.revs), "History")
-		if isUuid:
+		if isDoc:
 			tabWidget.addTab(RevisionTab(self.revs), "Revisions")
 		else:
 			tabWidget.addTab(RevisionTab(self.revs), "Revision")
 		mainLayout.addWidget(tabWidget)
 
-		if isUuid and (len(self.revs) == 1):
+		if isDoc and (len(self.revs) == 1):
 			self.buttonBox = QtGui.QDialogButtonBox(
 				QtGui.QDialogButtonBox.Save |
 				QtGui.QDialogButtonBox.Close)
@@ -118,7 +118,7 @@ class PropertiesDialog(QtGui.QDialog):
 			tagSet = set([ tag.strip() for tag in str(tagString).split(',')])
 			tagList = list(tagSet)
 			setMetaData(metaData, ["org.hotchpotch.annotation", "tags"], tagList)
-		with HpConnector().update(self.uuid, rev) as writer:
+		with HpConnector().update(self.doc, rev) as writer:
 			writer.writeAll('META', hpstruct.dumps(metaData))
 			writer.commit()
 			self.revs[0] = writer.getRev()
@@ -325,13 +325,13 @@ if __name__ == '__main__':
 	app = QtGui.QApplication(sys.argv)
 
 	if (len(sys.argv) == 2) and sys.argv[1].startswith('doc:'):
-		guid = sys.argv[1][4:].decode('hex')
-		dialog = PropertiesDialog(guid, True)
+		uuid = sys.argv[1][4:].decode('hex')
+		dialog = PropertiesDialog(uuid, True)
 	elif (len(sys.argv) == 2) and sys.argv[1].startswith('rev:'):
-		guid = sys.argv[1][4:].decode('hex')
-		dialog = PropertiesDialog(guid, False)
+		uuid = sys.argv[1][4:].decode('hex')
+		dialog = PropertiesDialog(uuid, False)
 	else:
-		print "Usage: properties.py [uuid:|rev:]GUID"
+		print "Usage: properties.py [doc:|rev:]UUID"
 		sys.exit(1)
 
 	sys.exit(dialog.exec_())

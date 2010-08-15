@@ -40,14 +40,14 @@ for store in enum.allStores():
 		state += '-'
 
 	if enum.isMounted(store):
-		guid = enum.guid(store)
+		doc = enum.doc(store)
 		try:
-			rev = HpConnector().lookup(guid).rev(guid)
+			rev = HpConnector().lookup(doc).rev(doc)
 			with HpConnector().peek(rev) as r:
 				metaData = hpstruct.loads(r.readAll('META'))
 				realName = metaData["org.hotchpotch.annotation"]["title"]
 		except:
 			realName = "unknwown"
-		print "%s  %s %s  %s [%s]" % (state, store.ljust(8), guid.encode("hex"), realName, mountName)
+		print "%s  %s %s  %s [%s]" % (state, store.ljust(8), doc.encode("hex"), realName, mountName)
 	else:
 		print "%s  %s [%s]" % (state, store.ljust(8), mountName)

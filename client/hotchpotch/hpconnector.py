@@ -23,10 +23,10 @@ import sys
 import atexit
 
 
-def checkGuid(guid):
-	valid = (guid.__class__ == str) and (len(guid) == 16)
+def checkUuid(uuid):
+	valid = (uuid.__class__ == str) and (len(uuid) == 16)
 	if not valid:
-		raise IOError('Invalid GUID: '+str(guid.__class__)+' '+str(guid))
+		raise IOError('Invalid UUID: '+str(uuid.__class__)+' '+str(uuid))
 	return True
 
 
@@ -56,7 +56,7 @@ def genericReply(reply, body):
 def encodeUuidList(uuids):
 	packet = pack('B', len(uuids))
 	for rev in uuids:
-		checkGuid(rev)
+		checkUuid(rev)
 		packet += rev
 	return packet
 
@@ -125,7 +125,7 @@ class _HpConnector(object):
 			raise ConnError('Invalid server reply')
 
 	def lookup(self, doc):
-		checkGuid(doc)
+		checkUuid(doc)
 		(reply, body) = self._rpc(_HpConnector.LOOKUP_REQ, doc)
 		if reply == _HpConnector.LOOKUP_CNF:
 			return HpLookup(body)
@@ -133,7 +133,7 @@ class _HpConnector(object):
 			raise ConnError('Invalid server reply')
 
 	def stat(self, rev):
-		checkGuid(rev)
+		checkUuid(rev)
 		(reply, body) = self._rpc(_HpConnector.STAT_REQ, rev)
 		if reply == _HpConnector.STAT_CNF:
 			return HpStat(body)
@@ -141,7 +141,7 @@ class _HpConnector(object):
 			return genericReply(reply, body)
 
 	def peek(self, rev, stores=[]):
-		checkGuid(rev)
+		checkUuid(rev)
 		body = rev + encodeUuidList(stores)
 		(reply, cookie) = self._rpc(_HpConnector.PEEK_REQ, body)
 		if reply == _HpConnector.PEEK_CNF:
@@ -151,7 +151,7 @@ class _HpConnector(object):
 
 	def fork(self, stores=[], uti='', rev=None):
 		if rev:
-			checkGuid(rev)
+			checkUuid(rev)
 		else:
 			rev = '\x00'*16
 		body = rev + encodeUuidList(stores) + uti
@@ -163,8 +163,8 @@ class _HpConnector(object):
 			return genericReply(reply, raw)
 
 	def update(self, doc, rev, uti='', stores=[]):
-		checkGuid(doc)
-		checkGuid(rev)
+		checkUuid(doc)
+		checkUuid(rev)
 		body = doc + rev + encodeUuidList(stores) + uti
 		(reply, raw) = self._rpc(_HpConnector.UPDATE_REQ, body)
 		if reply == _HpConnector.UPDATE_CNF:
@@ -190,31 +190,31 @@ class _HpConnector(object):
 				self._rpc(_HpConnector.WATCH_REM_REQ, pack('B16s', typ, h))
 
 	def delete_doc(self, doc, stores=[]):
-		checkGuid(doc)
+		checkUuid(doc)
 		body = doc + encodeUuidList(stores)
 		(reply, code) = self._rpc(_HpConnector.DELETE_DOC_REQ, body)
 		return genericReply(reply, code)
 
 	def delete_rev(self, rev, stores=[]):
-		checkGuid(rev)
+		checkUuid(rev)
 		body = rev + encodeUuidList(stores)
 		(reply, code) = self._rpc(_HpConnector.DELETE_REV_REQ, body)
 		return genericReply(reply, code)
 
 	def sync(self, doc, stores=[]):
-		checkGuid(doc)
+		checkUuid(doc)
 		body = doc + encodeUuidList(stores)
 		(reply, code) = self._rpc(_HpConnector.SYNC_DOC_REQ, body)
 		return genericReply(reply, code)
 
 	def replicate_doc(self, doc, stores, history=True):
-		checkGuid(doc)
+		checkUuid(doc)
 		body = pack('16sB', doc, int(history)) + encodeUuidList(stores)
 		(reply, code) = self._rpc(_HpConnector.REPLICATE_DOC_REQ, body)
 		return genericReply(reply, code)
 
 	def replicate_rev(self, rev, stores, history=True):
-		checkGuid(rev)
+		checkUuid(rev)
 		body = pack('16sB', rev, int(history)) + encodeUuidList(stores)
 		(reply, code) = self._rpc(_HpConnector.REPLICATE_REV_REQ, body)
 		return genericReply(reply, code)
@@ -339,11 +339,11 @@ class HpWatch(object):
 	CAUSE_DIMINISHED  = 3
 	CAUSE_DISAPPEARED = 4
 
-	TYPE_UUID = 0
-	TYPE_REV  = 1
+	TYPE_DOC = 0
+	TYPE_REV = 1
 
 	def __init__(self, typ, h):
-		checkGuid(h)
+		checkUuid(h)
 		self.__typ = typ
 		self.__h = h
 		self.__refcount = 0
@@ -373,11 +373,11 @@ class HpEnum(object):
 
 	def __init__(self, packet):
 		self.__stores = { }
-		self.__sysStoreGuid = None
+		self.__sysStore = None
 		(storeCount,) = unpack_from('B', packet, 0)
 		pos = 1
 		for i in range(storeCount):
-			(guid, flags, idLen) = unpack_from('<16sLH', packet, pos)
+			(doc, flags, idLen) = unpack_from('<16sLH', packet, pos)
 			pos += 22
 			id = packet[pos:pos+idLen]
 			pos += idLen
@@ -385,12 +385,12 @@ class HpEnum(object):
 			pos += 2
 			name = packet[pos:pos+nameLen]
 			pos += nameLen
-			self.__stores[id] = (guid, flags, name)
+			self.__stores[id] = (doc, flags, name)
 			if flags & HpEnum.FLAG_SYSTEM:
-				self.__sysStoreGuid = guid
+				self.__sysStore = doc
 
-	def sysStoreGuid(self):
-		return self.__sysStoreGuid
+	def sysStore(self):
+		return self.__sysStore
 
 	def allStores(self):
 		return self.__stores.keys()
@@ -413,13 +413,13 @@ class HpEnum(object):
 		else:
 			return False
 
-	def store(self, guid):
+	def store(self, doc):
 		for (store, info) in self.__stores.items():
-			if info[0] == guid:
+			if info[0] == doc:
 				return store
 		return None
 
-	def guid(self, store):
+	def doc(self, store):
 		return self.__stores[store][0]
 
 	def name(self, store):

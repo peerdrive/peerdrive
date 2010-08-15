@@ -23,9 +23,9 @@ from hotchpotch import HpConnector, hpstruct
 
 if len(sys.argv) == 2:
 	if HpConnector().mount(sys.argv[1]):
-		guid = HpConnector().enum().guid(sys.argv[1])
+		doc = HpConnector().enum().doc(sys.argv[1])
 		try:
-			rev = HpConnector().lookup(guid).rev(guid)
+			rev = HpConnector().lookup(doc).rev(doc)
 			with HpConnector().peek(rev) as r:
 				metaData = hpstruct.loads(r.readAll('META'))
 				name = metaData["org.hotchpotch.annotation"]["title"]

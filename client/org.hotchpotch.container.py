@@ -101,7 +101,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 			self.fileToolBar.removeAction(self.delAct)
 			self.fileMenu.removeAction(self.delAct)
 			enum = HpConnector().enum()
-			if enum.isRemovable(enum.store(self.uuid())):
+			if enum.isRemovable(enum.store(self.doc())):
 				self.fileMenu.insertAction(self.cleanAct, self.unmountAct)
 				actions = self.fileToolBar.actions()
 				if len(actions) > 1:
@@ -244,7 +244,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 	def __unmountStore(self):
 		self.saveFile("Automatically saved before unmounting")
 		enum = HpConnector().enum()
-		HpConnector().unmount(enum.store(self.uuid()))
+		HpConnector().unmount(enum.store(self.doc()))
 
 	def __dataChanged(self):
 		# some fields in the model have changed. Doesn't mean we have to save...
@@ -254,15 +254,15 @@ class CollectionWindow(hpgui.HpMainWindow):
 	def __showStoreSyncMenu(self):
 		self.syncMenu.clear()
 		rules = SyncRules()
-		this = self.uuid()
+		this = self.doc()
 		enum = HpConnector().enum()
 		for store in enum.allStores():
 			if not enum.isMounted(store):
 				continue
-			guid = enum.guid(store)
-			if guid == this:
+			uuid = enum.doc(store)
+			if uuid == this:
 				continue
-			rev = HpConnector().lookup(guid).rev(guid)
+			rev = HpConnector().lookup(uuid).rev(uuid)
 			with HpConnector().peek(rev) as r:
 				try:
 					metaData = hpstruct.loads(r.readAll('META'))
@@ -273,55 +273,55 @@ class CollectionWindow(hpgui.HpMainWindow):
 			menu.setSeparatorsCollapsible(False)
 			menu.addSeparator().setText("Local changes")
 			group = QtGui.QActionGroup(self)
-			action = RuleAction(menu, this, guid, None)
-			action.setChecked(not rules.mode(this, guid))
+			action = RuleAction(menu, this, uuid, None)
+			action.setChecked(not rules.mode(this, uuid))
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, this, guid, "ff")
-			action.setChecked(rules.mode(this, guid) == "ff")
+			action = RuleAction(menu, this, uuid, "ff")
+			action.setChecked(rules.mode(this, uuid) == "ff")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, this, guid, "savemerge")
-			action.setChecked(rules.mode(this, guid) == "savemerge")
+			action = RuleAction(menu, this, uuid, "savemerge")
+			action.setChecked(rules.mode(this, uuid) == "savemerge")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, this, guid, "automerge")
-			action.setChecked(rules.mode(this, guid) == "automerge")
+			action = RuleAction(menu, this, uuid, "automerge")
+			action.setChecked(rules.mode(this, uuid) == "automerge")
 			group.addAction(action)
 			menu.addAction(action)
 			menu.addSeparator().setText("Peer changes")
 			group = QtGui.QActionGroup(self)
-			action = RuleAction(menu, guid, this, None)
-			action.setChecked(not rules.mode(guid, this))
+			action = RuleAction(menu, uuid, this, None)
+			action.setChecked(not rules.mode(uuid, this))
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, guid, this, "ff")
-			action.setChecked(rules.mode(guid, this) == "ff")
+			action = RuleAction(menu, uuid, this, "ff")
+			action.setChecked(rules.mode(uuid, this) == "ff")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, guid, this, "savemerge")
-			action.setChecked(rules.mode(guid, this) == "savemerge")
+			action = RuleAction(menu, uuid, this, "savemerge")
+			action.setChecked(rules.mode(uuid, this) == "savemerge")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, guid, this, "automerge")
-			action.setChecked(rules.mode(guid, this) == "automerge")
+			action = RuleAction(menu, uuid, this, "automerge")
+			action.setChecked(rules.mode(uuid, this) == "automerge")
 			group.addAction(action)
 			menu.addAction(action)
 
 
 class SyncRules(object):
 	def __init__(self):
-		sysUuid = HpConnector().enum().sysStoreGuid()
-		sysRev = HpConnector().lookup(sysUuid).rev(sysUuid)
+		sysDoc = HpConnector().enum().sysStore()
+		sysRev = HpConnector().lookup(sysDoc).rev(sysDoc)
 		with HpConnector().peek(sysRev) as r:
 			root = hpstruct.loads(r.readAll('HPSD'))
-			self.syncUuid = root["syncrules"].uuid()
-		self.syncRev = HpConnector().lookup(self.syncUuid).rev(sysUuid)
+			self.syncDoc = root["syncrules"].doc()
+		self.syncRev = HpConnector().lookup(self.syncDoc).rev(sysDoc)
 		with HpConnector().peek(self.syncRev) as r:
 			self.rules = hpstruct.loads(r.readAll('HPSD'))
 
 	def save(self):
-		with HpConnector().update(self.syncUuid, self.syncRev) as w:
+		with HpConnector().update(self.syncDoc, self.syncRev) as w:
 			w.writeAll('HPSD', hpstruct.dumps(self.rules))
 			w.commit()
 			self.rev = w.getRev()
@@ -410,7 +410,7 @@ class CollectionTreeView(QtGui.QTreeView):
 			if link:
 				# ourself?
 				if isinstance(link, hpstruct.DocLink):
-					if link.uuid() == self.__parent.uuid():
+					if link.doc() == self.__parent.doc():
 						return
 				# already contained?
 				if not self.model().validateDragEnter(link):
@@ -449,7 +449,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		if choice in repActions:
 			store = repActions[choice]
 			if isinstance(link, hpstruct.DocLink):
-				c.replicate_uuid(link.uuid(), [store])
+				c.replicate_doc(link.doc(), [store])
 			else:
 				c.replicate_rev(link.rev(), [store])
 		elif choice in createActions:
@@ -462,9 +462,9 @@ class CollectionTreeView(QtGui.QTreeView):
 					for part in info.parts():
 						w.write(part, r.readAll(part))
 				w.commit()
-				destUuid = w.getDoc()
+				destDoc = w.getDoc()
 			# add link
-			self.model().insertLink(hpstruct.DocLink(destUuid))
+			self.model().insertLink(hpstruct.DocLink(destDoc))
 		elif choice in openRevActions:
 			rev = openRevActions[choice]
 			hpgui.showDocument(hpstruct.RevLink(rev))
@@ -475,11 +475,9 @@ class CollectionTreeView(QtGui.QTreeView):
 		menu.addSeparator()
 		allVolumes = set(c.stat(self.__parent.rev()).volumes())
 		if isinstance(link, hpstruct.DocLink):
-			curVolumes = set(c.lookup(link.uuid()).stores())
-			isUuid = True
+			curVolumes = set(c.lookup(link.doc()).stores())
 		else:
 			curVolumes = set(c.stat(link.rev()).volumes())
-			isUuid = False
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
 			try:
@@ -501,7 +499,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		actions = { }
 
 		c = HpConnector()
-		sysStore = hpstruct.HpContainer(hpstruct.DocLink(c.enum().sysStoreGuid()))
+		sysStore = hpstruct.HpContainer(hpstruct.DocLink(c.enum().sysStore()))
 		templatesDict = hpstruct.HpContainer(sysStore.get("templates:"))
 		for (name, link) in templatesDict.items():
 			icon = QtGui.QIcon(HpRegistry().getIcon(c.stat(link.rev()).uti()))
@@ -517,7 +515,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		actions = {}
 		if isinstance(link, hpstruct.DocLink):
 			c = HpConnector()
-			revs = c.lookup(link.uuid()).revs()
+			revs = c.lookup(link.doc()).revs()
 			if len(revs) == 1:
 				action = menu.addAction("Open revision (read only)")
 				actions[action] = revs[0]
@@ -842,7 +840,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 			if index.isValid() and (index.column() == 0):
 				link = self.getItem(index).getLink()
 				if isinstance(link, hpstruct.DocLink):
-					data += ',uuid:' + link.uuid().encode('hex')
+					data += ',doc:' + link.doc().encode('hex')
 				else:
 					data += ',rev:' + link.rev().encode('hex')
 		if data == "":
@@ -905,7 +903,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		linkList = str(mimeData.data('application/x-hotchpotch-linklist'))
 		for link in linkList.split(','):
 			(cls, val) = link.split(':')
-			if cls == 'uuid':
+			if cls == 'doc':
 				link = hpstruct.DocLink(val.decode("hex"), False)
 			elif cls == 'rev':
 				link = hpstruct.RevLink(val.decode("hex"))
@@ -969,7 +967,7 @@ class CEntry(HpWatch):
 		self.__columnDefs = columns[:]
 
 		if isinstance(link, hpstruct.DocLink):
-			super(CEntry, self).__init__(HpWatch.TYPE_UUID, link.uuid())
+			super(CEntry, self).__init__(HpWatch.TYPE_DOC, link.doc())
 		else:
 			super(CEntry, self).__init__(HpWatch.TYPE_REV, link.rev())
 

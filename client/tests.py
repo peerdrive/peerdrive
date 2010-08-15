@@ -6,10 +6,10 @@ class TestSync(unittest.TestCase):
 	def setUp(self):
 		if not HpConnector().enum().isMounted('rem1'):
 			HpConnector().mount('rem1')
-		self.store1 = HpConnector().enum().guid('rem1')
+		self.store1 = HpConnector().enum().doc('rem1')
 		if not HpConnector().enum().isMounted('rem2'):
 			HpConnector().mount('rem2')
-		self.store2 = HpConnector().enum().guid('rem2')
+		self.store2 = HpConnector().enum().doc('rem2')
 
 	def test_already_same(self):
 		c = HpConnector()

@@ -77,7 +77,7 @@ class RevLink(object):
 	def update(self):
 		pass
 
-	def uuid(self):
+	def doc(self):
 		return None
 
 	def revs(self):
@@ -87,66 +87,66 @@ class RevLink(object):
 class DocLink(object):
 	MIME_TYPE = 'application/x-hotchpotch-doclink'
 
-	def __init__(self, uuid=None, autoUpdate=True):
-		self.__uuid = uuid
+	def __init__(self, doc=None, autoUpdate=True):
+		self.__doc = doc
 		self.__revs = []
 		self.__updated = False
-		if uuid and autoUpdate:
+		if doc and autoUpdate:
 			self.update()
 		else:
 			self.__revs = None
 
 	def __eq__(self, link):
 		if isinstance(link, DocLink):
-			if link.__uuid == self.__uuid:
+			if link.__doc == self.__doc:
 				return True
 		return False
 
 	def __ne__(self, link):
 		if isinstance(link, DocLink):
-			if link.__uuid == self.__uuid:
+			if link.__doc == self.__doc:
 				return False
 		return True
 
 	def __hash__(self):
-		return hash(self.__uuid)
+		return hash(self.__doc)
 
 	def _fromStruct(self, decoder):
-		self.__uuid = decoder._getStr(16)
+		self.__doc = decoder._getStr(16)
 		self.__revs = []
 		revCount = decoder._getInt('B')
 		for i in xrange(revCount):
 			self.__revs.append(decoder._getStr(16))
 
 	def _toStruct(self):
-		data = struct.pack('<B16sB', 0x41, self.__uuid, len(self.__revs))
+		data = struct.pack('<B16sB', 0x41, self.__doc, len(self.__revs))
 		for rev in self.__revs:
 			data = data + rev
 		return data
 
 	def _fromDict(self, dct):
-		self.__uuid = dct['uuid'].decode('hex')
+		self.__doc = dct['doc'].decode('hex')
 		self.__revs = [ rev.decode('hex') for rev in dct['revs'] ]
 
 	def _toDict(self):
 		return {
 			"__dlink__" : True,
-			"uuid" : self.__uuid.encode('hex'),
+			"doc" : self.__doc.encode('hex'),
 			"revs" : [ rev.encode('hex') for rev in self.__revs ] }
 
 	def _fromMime(self, mimeData):
-		self.__uuid = str(mimeData.data(DocLink.MIME_TYPE)).decode('hex')
+		self.__doc = str(mimeData.data(DocLink.MIME_TYPE)).decode('hex')
 		self.update()
 
 	def mimeData(self, mimeData):
-		mimeData.setData(DocLink.MIME_TYPE, self.__uuid.encode('hex'))
+		mimeData.setData(DocLink.MIME_TYPE, self.__doc.encode('hex'))
 
 	def update(self):
-		self.__revs = hpconnector.HpConnector().lookup(self.__uuid).revs()
+		self.__revs = hpconnector.HpConnector().lookup(self.__doc).revs()
 		self.__updated = True
 
-	def uuid(self):
-		return self.__uuid
+	def doc(self):
+		return self.__doc
 
 	def rev(self):
 		if not self.__updated:
@@ -497,12 +497,12 @@ class HpDict(object):
 		self.__conn = hpconnector.HpConnector()
 		if link:
 			self.__rev = link.rev()
-			self.__uuid = link.uuid()
+			self.__doc = link.doc()
 			self.__load()
 		else:
 			self.__content = { }
 			self.__rev = None
-			self.__uuid = None
+			self.__doc = None
 
 	def __load(self):
 		uti = self.__conn.stat(self.__rev).uti()
@@ -513,7 +513,7 @@ class HpDict(object):
 			self.__content = loads(r.readAll('HPSD'))
 
 	def create(self, name, stores):
-		if self.__rev or self.__uuid:
+		if self.__rev or self.__doc:
 			raise IOError("Not new")
 
 		if not name:
@@ -529,13 +529,13 @@ class HpDict(object):
 			w.writeAll('HPSD', dumps(self.__content))
 			w.commit()
 			self.__rev = w.getRev()
-			self.__uuid = w.getDoc()
-		return DocLink(self.__uuid)
+			self.__doc = w.getDoc()
+		return DocLink(self.__doc)
 
 	def save(self):
 		self.__meta["org.hotchpotch.annotation"]["comment"] = "<<Changed by import>>"
-		if self.__rev and self.__uuid:
-			with hpconnector.HpConnector().update(self.__uuid, self.__rev) as w:
+		if self.__rev and self.__doc:
+			with hpconnector.HpConnector().update(self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
 				w.writeAll('HPSD', dumps(self.__content))
 				self.__rev = w.commit()
@@ -577,12 +577,12 @@ class HpSet(object):
 		self.__conn = hpconnector.HpConnector()
 		if link:
 			self.__rev = link.rev()
-			self.__uuid = link.uuid()
+			self.__doc = link.doc()
 			self.__load()
 		else:
 			self.__content = []
 			self.__rev = None
-			self.__uuid = None
+			self.__doc = None
 
 	def __load(self):
 		uti = self.__conn.stat(self.__rev).uti()
@@ -599,7 +599,7 @@ class HpSet(object):
 			self.__didCache = True
 
 	def create(self, name, stores):
-		if self.__rev or self.__uuid:
+		if self.__rev or self.__doc:
 			raise IOError("Not new")
 
 		if not name:
@@ -618,16 +618,16 @@ class HpSet(object):
 			w.writeAll('HPSD', dumps(content))
 			w.commit()
 			self.__rev = w.regRev()
-			self.__uuid = w.getDoc()
-		return DocLink(self.__uuid)
+			self.__doc = w.getDoc()
+		return DocLink(self.__doc)
 
 	def save(self):
-		if self.__rev and self.__uuid:
+		if self.__rev and self.__doc:
 			self.__meta["org.hotchpotch.annotation"]["comment"] = "<<Changed by import>>"
 			content = [ link for (descr, link) in self.__content ]
 			for link in content:
 				link.update()
-			with hpconnector.HpConnector().update(self.__uuid, self.__rev) as w:
+			with hpconnector.HpConnector().update(self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
 				w.writeAll('HPSD', dumps(content))
 				self.__rev = w.commit()
@@ -700,7 +700,7 @@ def _loadTitle(link):
 # Path resolving
 ###############################################################################
 
-# return (store:guid, container:HpContainer, docName:str)
+# return (store:uuid, container:HpContainer, docName:str)
 def walkPath(path, create=False):
 	steps = path.split('/')
 	storeName = steps[0]
@@ -711,19 +711,19 @@ def walkPath(path, create=False):
 
 	# search for store
 	enum = hpconnector.HpConnector().enum()
-	storeGuid = None
+	storeDoc = None
 	for mount in enum.allStores():
 		if not enum.isMounted(mount):
 			continue
-		mountGuid = enum.guid(mount)
-		if (mount == storeName) or (mountGuid.encode("hex").startswith(storeName)):
-			storeGuid = mountGuid
+		mountDoc = enum.doc(mount)
+		if (mount == storeName) or (mountDoc.encode("hex").startswith(storeName)):
+			storeDoc = mountDoc
 			break
-	if not storeGuid:
+	if not storeDoc:
 		raise StructError("Store not found")
 
 	# walk the path
-	curContainer = HpDict(DocLink(storeGuid, False))
+	curContainer = HpDict(DocLink(storeDoc, False))
 	for (step, nextStep) in steps:
 		next = curContainer.get(step)
 		if next:
@@ -731,9 +731,9 @@ def walkPath(path, create=False):
 		elif create:
 			name = step.split(':')[-1]
 			if ':' in nextStep:
-				next = HpDict().create(name, [storeGuid])
+				next = HpDict().create(name, [storeDoc])
 			else:
-				next = HpSet().create(name, [storeGuid])
+				next = HpSet().create(name, [storeDoc])
 			curContainer[step] = next
 			curContainer.save()
 			curContainer = HpContainer(next)
@@ -741,14 +741,14 @@ def walkPath(path, create=False):
 			raise StructError("Invalid path")
 
 	# return result
-	return (storeGuid, curContainer, docName)
+	return (storeDoc, curContainer, docName)
 
 
 def resolvePath(path):
 	if '/' in path:
-		(storeGuid, container, docName) = walkPath(path)
+		(storeDoc, container, docName) = walkPath(path)
 		return container[docName]
 	else:
-		storeGuid = hpconnector.HpConnector().enum().guid(path)
-		return DocLink(storeGuid, False)
+		storeDoc = hpconnector.HpConnector().enum().doc(path)
+		return DocLink(storeDoc, False)
 

@@ -24,7 +24,7 @@ from hotchpotch.hpgui import DocButton, RevButton
 from hotchpotch.hpconnector import HpWatch
 
 PROGRESS_SYNC = 0
-PROGRESS_REP_UUID = 1
+PROGRESS_REP_DOC = 1
 PROGRESS_REP_REV = 2
 
 class Launchbox(QtGui.QDialog):
@@ -75,9 +75,9 @@ class Launchbox(QtGui.QDialog):
 
 class StoreWidget(QtGui.QWidget):
 	class StoreWatch(HpWatch):
-		def __init__(self, uuid, callback):
+		def __init__(self, doc, callback):
 			self.__callback = callback
-			super(StoreWidget.StoreWatch, self).__init__(HpWatch.TYPE_UUID, uuid)
+			super(StoreWidget.StoreWatch, self).__init__(HpWatch.TYPE_DOC, doc)
 		
 		def triggered(self, cause):
 			if cause == HpWatch.CAUSE_DISAPPEARED:
@@ -109,10 +109,10 @@ class StoreWidget(QtGui.QWidget):
 		enum = HpConnector().enum()
 		self.mountBtn.setEnabled(enum.isRemovable(self.mountId))
 		if enum.isMounted(self.mountId):
-			uuid = enum.guid(self.mountId)
+			doc = enum.doc(self.mountId)
 			self.mountBtn.setText("Unmount")
-			self.storeBtn.setDocument(uuid)
-			self.watch = StoreWidget.StoreWatch(uuid, self.update)
+			self.storeBtn.setDocument(doc)
+			self.watch = StoreWidget.StoreWatch(doc, self.update)
 			HpConnector().watch(self.watch)
 			self.mounted = True
 		else:
@@ -132,13 +132,13 @@ class SyncWidget(QtGui.QFrame):
 	def __init__(self, tag, parent=None):
 		super(SyncWidget, self).__init__(parent)
 		self.tag = tag
-		fromGuid = tag[0:16]
-		toGuid = tag[16:32]
+		fromUuid = tag[0:16]
+		toUuid = tag[16:32]
 
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
-		self.fromBtn = DocButton(fromGuid, True)
-		self.toBtn = DocButton(toGuid, True)
+		self.fromBtn = DocButton(fromUuid, True)
+		self.toBtn = DocButton(toUuid, True)
 		self.progressBar = QtGui.QProgressBar()
 		self.progressBar.setMaximum(256)
 
@@ -166,14 +166,14 @@ class ReplicationWidget(QtGui.QFrame):
 	def __init__(self, typ, tag, parent=None):
 		super(ReplicationWidget, self).__init__(parent)
 		self.tag = tag
-		guid = tag[0:16]
+		uuid = tag[0:16]
 		stores = tag[16:]
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
-		if typ == PROGRESS_REP_UUID:
-			self.docBtn = DocButton(guid, True)
+		if typ == PROGRESS_REP_DOC:
+			self.docBtn = DocButton(uuid, True)
 		else:
-			self.docBtn = RevButton(guid, True)
+			self.docBtn = RevButton(uuid, True)
 		self.progressBar = QtGui.QProgressBar()
 		self.progressBar.setMaximum(256)
 

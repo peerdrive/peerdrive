@@ -24,17 +24,17 @@ class _HpRegistry(hpconnector.HpWatch):
 	def __init__(self):
 		self.connection = hpconnector.HpConnector()
 
-		sysUuid = self.connection.enum().sysStoreGuid()
-		sysRev = self.connection.lookup(sysUuid).rev(sysUuid)
+		sysDoc = self.connection.enum().sysStore()
+		sysRev = self.connection.lookup(sysDoc).rev(sysDoc)
 		with self.connection.peek(sysRev) as r:
 			root = hpstruct.loads(r.readAll('HPSD'))
-			self.regUuid = root["registry"].uuid()
+			self.regDoc = root["registry"].doc()
 
-		hpconnector.HpWatch.__init__(self, hpconnector.HpWatch.TYPE_UUID, self.regUuid)
+		hpconnector.HpWatch.__init__(self, hpconnector.HpWatch.TYPE_DOC, self.regDoc)
 		self.loadRegistry()
 
 	def loadRegistry(self):
-		regRev = self.connection.lookup(self.regUuid).revs()[0]
+		regRev = self.connection.lookup(self.regDoc).revs()[0]
 		with self.connection.peek(regRev) as r:
 			self.registry = hpstruct.loads(r.readAll('HPSD'))
 
@@ -94,7 +94,7 @@ class _HpRegistry(hpconnector.HpWatch):
 				if not (data is None):
 					return data
 			return None
-	
+
 	def _searchAll(self, uti, key):
 		if uti not in self.registry:
 			return []
