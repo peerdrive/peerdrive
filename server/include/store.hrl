@@ -28,7 +28,7 @@
 		contains,
 		lookup,
 		stat,
-		put_uuid,
+		put_doc,
 		put_rev_start,
 		peek,
 		fork,

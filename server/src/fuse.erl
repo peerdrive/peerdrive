@@ -454,8 +454,8 @@ stores_opendir(stores, Cache) ->
 %% Documents
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-doc_make_node({doc, Store, Uuid} = Oid) ->
-	case store:lookup(Store, Uuid) of
+doc_make_node({doc, Store, Doc} = Oid) ->
+	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case store:stat(Store, Rev) of
 				{ok, _Flags, _Parts, _Parents, _Mtime, Uti} ->
@@ -498,8 +498,8 @@ doc_make_node_dict(Oid) ->
 	}}.
 
 
-dict_getattr({doc, Store, Uuid}, Ino) ->
-	case store:lookup(Store, Uuid) of
+dict_getattr({doc, Store, Doc}, Ino) ->
+	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case store:stat(Store, Rev) of
 				{ok, _Flags, _Parts, _Parents, Mtime, _Uti} ->
@@ -519,12 +519,12 @@ dict_getattr({doc, Store, Uuid}, Ino) ->
 	end.
 
 
-dict_lookup({doc, Store, Uuid}, Name, Cache) ->
-	case dict_read_entries(Store, Uuid, Cache) of
+dict_lookup({doc, Store, Doc}, Name, Cache) ->
+	case dict_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			case dict:find(Name, Entries) of
-				{ok, {dlink, ChildUuid, _Revs}} ->
-					{entry, {doc, Store, ChildUuid}, NewCache};
+				{ok, {dlink, ChildDoc, _Revs}} ->
+					{entry, {doc, Store, ChildDoc}, NewCache};
 
 				_ ->
 					{error, NewCache}
@@ -535,14 +535,14 @@ dict_lookup({doc, Store, Uuid}, Name, Cache) ->
 	end.
 
 
-dict_getnode({doc, _Store, _Uuid} = Oid) ->
+dict_getnode({doc, _Store, _Doc} = Oid) ->
 	doc_make_node(Oid);
 dict_getnode(_) ->
 	error.
 
 
-dict_opendir({doc, Store, Uuid}, Cache) ->
-	case dict_read_entries(Store, Uuid, Cache) of
+dict_opendir({doc, Store, Doc}, Cache) ->
+	case dict_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			Content = map_filter(
 				fun(E) -> dict_opendir_filter(Store, E) end,
@@ -571,8 +571,8 @@ dict_opendir_filter(_, _) ->
 	skip.
 
 
-dict_read_entries(Store, Uuid, {CacheRev, CacheEntries}=Cache) ->
-	case store:lookup(Store, Uuid) of
+dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
+	case store:lookup(Store, Doc) of
 		{ok, CacheRev} ->
 			{ok, CacheEntries, Cache};
 
@@ -609,8 +609,8 @@ doc_make_node_set(Oid) ->
 	}}.
 
 
-set_getattr({doc, Store, Uuid}, Ino) ->
-	case store:lookup(Store, Uuid) of
+set_getattr({doc, Store, Doc}, Ino) ->
+	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case store:stat(Store, Rev) of
 				{ok, _Flags, _Parts, _Parents, Mtime, _Uti} ->
@@ -630,8 +630,8 @@ set_getattr({doc, Store, Uuid}, Ino) ->
 	end.
 
 
-set_lookup({doc, Store, Uuid}, Name, Cache) ->
-	case set_read_entries(Store, Uuid, Cache) of
+set_lookup({doc, Store, Doc}, Name, Cache) ->
+	case set_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			case find_entry(fun(E) -> set_lookup_cmp(Name, E) end, Entries) of
 				{value, Oid} -> {entry, Oid, NewCache};
@@ -653,14 +653,14 @@ set_lookup_cmp(_, _) ->
 	error.
 
 
-set_getnode({doc, _Store, _Uuid} = Oid) ->
+set_getnode({doc, _Store, _Doc} = Oid) ->
 	doc_make_node(Oid);
 set_getnode(_) ->
 	error.
 
 
-set_opendir({doc, Store, Uuid}, Cache) ->
-	case set_read_entries(Store, Uuid, Cache) of
+set_opendir({doc, Store, Doc}, Cache) ->
+	case set_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			Content = map_filter(fun set_opendir_filter/1, Entries),
 			{ok, Content, NewCache};
@@ -686,8 +686,8 @@ set_opendir_filter(_) ->
 	skip.
 
 
-set_read_entries(Store, Uuid, {CacheRev, CacheEntries}=Cache) ->
-	case store:lookup(Store, Uuid) of
+set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
+	case store:lookup(Store, Doc) of
 		{ok, CacheRev} ->
 			{ok, CacheEntries, Cache};
 
@@ -714,15 +714,15 @@ set_read_entries_filter(_, _) ->
 	skip.
 
 
-set_read_title(Store, Uuid) ->
-	case set_read_title_meta(Store, Uuid) of
-		{ok, <<"">>} -> "." ++ util:bin_to_hexstr(Uuid);
+set_read_title(Store, Doc) ->
+	case set_read_title_meta(Store, Doc) of
+		{ok, <<"">>} -> "." ++ util:bin_to_hexstr(Doc);
 		{ok, Title}  -> sanitize(binary_to_list(Title));
-		error        -> "." ++ util:bin_to_hexstr(Uuid)
+		error        -> "." ++ util:bin_to_hexstr(Doc)
 	end.
 
-set_read_title_meta(Store, Uuid) ->
-	case store:lookup(Store, Uuid) of
+set_read_title_meta(Store, Doc) ->
+	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case util:read_rev_struct(Rev, <<"META">>) of
 				{ok, Meta} ->
@@ -760,8 +760,8 @@ doc_make_node_file(Oid) ->
 	}}.
 
 
-file_getattr({doc, Store, Uuid}, Ino) ->
-	case store:lookup(Store, Uuid) of
+file_getattr({doc, Store, Doc}, Ino) ->
+	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case store:stat(Store, Rev) of
 				{ok, _Flags, Parts, _Parents, Mtime, _Uti} ->
@@ -796,8 +796,8 @@ file_getattr({doc, Store, Uuid}, Ino) ->
 	end.
 
 
-file_open({doc, Store, Uuid}) ->
-	case store:lookup(Store, Uuid) of
+file_open({doc, Store, Doc}) ->
+	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case store:peek(Store, Rev) of
 				{ok, Reader} ->

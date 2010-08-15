@@ -18,7 +18,7 @@
 
 -export([
 	delete_rev/2, delete_doc/2, fork/3, lookup/1,
-	read/4, peek/2, replicate_rev/2, replicate_uuid/2,
+	read/4, peek/2, replicate_rev/2, replicate_doc/2,
 	stat/1, update/4, abort/1, commit/2, write/4,
 	truncate/3, sync/2]).
 
@@ -27,13 +27,13 @@
 %% Hotchpotch operations...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% @doc Lookup a UUID.
-%% @spec lookup(Uuid) -> [{Rev, [StoreGuid]}]
-%%       Rev, StoreGuid = guid()
-lookup(Uuid) ->
+%% @doc Lookup a document.
+%% @spec lookup(Doc) -> [{Rev, [Store]}]
+%%       Rev, Store = guid()
+lookup(Doc) ->
 	RevDict = lists:foldl(
 		fun({StoreGuid, StoreIfc}, Dict) ->
-			case store:lookup(StoreIfc, Uuid) of
+			case store:lookup(StoreIfc, Doc) of
 				{ok, Rev} -> dict:append(Rev, StoreGuid, Dict);
 				error     -> Dict
 			end
@@ -199,21 +199,21 @@ sync(Doc, Stores) ->
 	broker_syncer:sync(Doc, StoreIfcs).
 
 
-%% @doc Replicate a Uuid to a new store.
+%% @doc Replicate a document to a new store.
 %%
-%% The Uuid must be unambiguous, that is it must have the same revision on all
-%% stores in the system. The Uuid may already exist on the destination store.
+%% The Doc must be unambiguous, that is it must have the same revision on all
+%% stores in the system. The Doc may already exist on the destination store.
 %%
-%% @spec replicate_uuid(Uuid, Store) -> ok | {error, Reason}
-replicate_uuid(Uuid, ToStore) ->
+%% @spec replicate_doc(Doc, Store) -> ok | {error, Reason}
+replicate_doc(Doc, ToStore) ->
 	case volman:store(ToStore) of
 		{ok, StoreIfc} ->
-			case lookup(Uuid) of
+			case lookup(Doc) of
 				[] ->
 					{error, enoent};
 
 				[{Rev, _}] ->
-					store:put_uuid(StoreIfc, Uuid, Rev, Rev);
+					store:put_doc(StoreIfc, Doc, Rev, Rev);
 
 				_ ->
 					{error, conflict}

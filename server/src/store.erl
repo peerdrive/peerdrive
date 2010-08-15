@@ -17,7 +17,7 @@
 -module(store).
 
 -export([guid/1, contains/2, lookup/2, stat/2]).
--export([put_uuid/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
+-export([put_doc/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
 -export([abort/1, commit/3, fork/4, peek/2, read/4, truncate/3, update/4, write/4]).
 -export([delete_rev/2, delete_doc/2]).
@@ -34,7 +34,7 @@ guid(#store{this=Store, guid=Guid}) ->
 %% @doc Lookup a document.
 %%
 %% Returns `{ok, Rev}' if the document is found on the store, or `error' if no such
-%% UUID exists.
+%% document exists.
 %%
 %% @spec lookup(Store, Doc) -> {ok, Rev} | error
 %%       Store = #store
@@ -141,18 +141,18 @@ delete_doc(#store{this=Store, delete_doc=DeleteDoc}, Doc) ->
 delete_rev(#store{this=Store, delete_rev=DeleteRev}, Rev) ->
 	DeleteRev(Store, Rev).
 
-%% @doc Put/update a UUID in the store
+%% @doc Put/update a document in the store
 %%
-%% Let's a UUID point to a new revision. If the UUID does not exist yet then it
-%% is created and points to NewRev. If the UUID exits it must either point
+%% Let's a document point to a new revision. If the Doc does not exist yet then it
+%% is created and points to NewRev. If the Doc exits it must either point
 %% OldRev or NewRev, otherwise the call will fail.
 %%
-%% @spec put_uuid(Store, Uuid, OldRev, NewRev) -> ok | {error, Reason}
+%% @spec put_doc(Store, Doc, OldRev, NewRev) -> ok | {error, Reason}
 %%       Store = #store
-%%       Uuid = OldRev = NewRev = guid()
+%%       Doc = OldRev = NewRev = guid()
 %%       Reason = ecode()
-put_uuid(#store{this=Store, put_uuid=PutUuid}, Uuid, OldRev, NewRev) ->
-	PutUuid(Store, Uuid, OldRev, NewRev).
+put_doc(#store{this=Store, put_doc=PutDoc}, Doc, OldRev, NewRev) ->
+	PutDoc(Store, Doc, OldRev, NewRev).
 
 %% @doc Put/import a revision into the store.
 %%

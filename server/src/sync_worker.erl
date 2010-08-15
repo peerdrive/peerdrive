@@ -36,16 +36,16 @@ start_link(Mode, Store, Peer) ->
 init(Parent, Mode, StoreGuid, ToGuid) ->
 	SyncFun = case Mode of
 		ff ->
-			fun sync_uuid_ff/5;
+			fun sync_doc_ff/5;
 
 		automerge ->
 			fun (P1, P2, P3, P4, P5) ->
-				sync_uuid_merge(P1, P2, P3, P4, P5, true)
+				sync_doc_merge(P1, P2, P3, P4, P5, true)
 			end;
 
 		savemerge ->
 			fun (P1, P2, P3, P4, P5) ->
-				sync_uuid_merge(P1, P2, P3, P4, P5, false)
+				sync_doc_merge(P1, P2, P3, P4, P5, false)
 			end
 	end,
 	case volman:store(StoreGuid) of
@@ -114,9 +114,9 @@ loop(#state{fromifc=FromIfc, toguid=ToGuid, monitor=Monitor, numdone=OldDone, nu
 
 loop_check_msg(#state{fromguid=FromGuid, toguid=ToGuid} = State, Backlog, Timeout) ->
 	receive
-		{trigger_mod_doc, FromGuid, _Uuid} -> loop_check_msg(State, Backlog, 0);
-		{trigger_rem_store, FromGuid}      -> ok;
-		{trigger_rem_store, ToGuid}        -> ok;
+		{trigger_mod_doc, FromGuid, _Doc} -> loop_check_msg(State, Backlog, 0);
+		{trigger_rem_store, FromGuid}     -> ok;
+		{trigger_rem_store, ToGuid}       -> ok;
 
 		% deliberately ignore all other messages
 		_ -> loop_check_msg(State, Backlog, Timeout)
@@ -126,25 +126,25 @@ loop_check_msg(#state{fromguid=FromGuid, toguid=ToGuid} = State, Backlog, Timeou
 
 
 sync_step(
-		{Uuid, SeqNum},
+		{Doc, SeqNum},
 		#state{syncfun=SyncFun, fromifc=FromIfc, toguid=ToGuid, toifc=ToIfc}) ->
-	sync_uuid(Uuid, FromIfc, ToIfc, SyncFun),
+	sync_doc(Doc, FromIfc, ToIfc, SyncFun),
 	store:sync_set_anchor(FromIfc, ToGuid, SeqNum).
 
 
-sync_uuid(Uuid, FromIfc, ToIfc, SyncFun) ->
-	case store:lookup(FromIfc, Uuid) of
+sync_doc(Doc, FromIfc, ToIfc, SyncFun) ->
+	case store:lookup(FromIfc, Doc) of
 		{ok, FromRev} ->
-			case store:lookup(ToIfc, Uuid) of
+			case store:lookup(ToIfc, Doc) of
 				{ok, FromRev} ->
 					% points to same revision. done :)
 					ok;
 
 				{ok, ToRev} ->
 					% need to do something
-					case SyncFun(Uuid, FromIfc, FromRev, ToIfc, ToRev) of
+					case SyncFun(Doc, FromIfc, FromRev, ToIfc, ToRev) of
 						ok ->
-							vol_monitor:trigger_mod_doc(local, Uuid);
+							vol_monitor:trigger_mod_doc(local, Doc);
 						ignore ->
 							ok;
 						{error, _Reason} ->
@@ -167,15 +167,15 @@ sync_uuid(Uuid, FromIfc, ToIfc, SyncFun) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-sync_uuid_ff(Uuid, _FromIfc, FromRev, ToIfc, ToRev) ->
-	case store:lookup(ToIfc, Uuid) of
+sync_doc_ff(Doc, _FromIfc, FromRev, ToIfc, ToRev) ->
+	case store:lookup(ToIfc, Doc) of
 		{ok, FromRev} ->
 			ignore; % phantom change
 
 		_Else ->
 			case is_ff_head(FromRev, ToRev) of
 				true ->
-					case store:put_uuid(ToIfc, Uuid, ToRev, FromRev) of
+					case store:put_doc(ToIfc, Doc, ToRev, FromRev) of
 						ok ->
 							% We're done. The replicator will kick in
 							% automatically at this stage...
@@ -235,7 +235,7 @@ is_ff_head_search([FromRev|OtherRevs], ToRev, MinMtime) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-sync_uuid_merge(Uuid, FromIfc, FromRev, ToIfc, ToRev, Force) ->
+sync_doc_merge(Doc, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 	case get_merge_base([FromRev, ToRev]) of
 		{ok, BaseRevs} ->
 			% FIXME: This test assumes that get_merge_base/1 found the optimal
@@ -243,7 +243,7 @@ sync_uuid_merge(Uuid, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 			case lists:member(ToRev, BaseRevs) of
 				true ->
 					% can be handled by fast-forward
-					sync_uuid_ff(Uuid, FromIfc, FromRev, ToIfc, ToRev);
+					sync_doc_ff(Doc, FromIfc, FromRev, ToIfc, ToRev);
 
 				false ->
 					% seems to be a real merge
@@ -253,10 +253,10 @@ sync_uuid_merge(Uuid, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 						none ->
 							% fall back to fast-forward
 							% FIXME: don't we already known it's no FF?
-							sync_uuid_ff(Uuid, FromIfc, FromRev, ToIfc, ToRev);
+							sync_doc_ff(Doc, FromIfc, FromRev, ToIfc, ToRev);
 
 						SyncFun ->
-							SyncFun(FromIfc, Uuid, BaseRev, FromRev,
+							SyncFun(FromIfc, Doc, BaseRev, FromRev,
 								ToRev, UtiSet, Force)
 					end
 			end;
@@ -359,13 +359,13 @@ traverse(Heads, Path) ->
 %% the other store via fast-forward.
 %%
 
-merge_hpsd(Store, Uuid, BaseRev, FromRev, ToRev, UtiSet, Force) ->
+merge_hpsd(Store, Doc, BaseRev, FromRev, ToRev, UtiSet, Force) ->
 	case merge_hpsd_read([FromRev, ToRev, BaseRev]) of
 		{ok, [FromData, ToData, BaseData]} ->
 			case merge_hpsd_parts(BaseData, FromData, ToData, [], Force) of
 				{ok, NewData} ->
 					[Uti] = sets:to_list(UtiSet),
-					merge_hpsd_write(Store, Uuid, FromRev, ToRev, Uti, NewData);
+					merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData);
 
 				{error, _} = Error ->
 					Error
@@ -471,8 +471,8 @@ merge_hpsd_parts(
 	end.
 
 
-merge_hpsd_write(Store, Uuid, FromRev, ToRev, Uti, NewData) ->
-	case store:update(Store, Uuid, FromRev, Uti) of
+merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData) ->
+	case store:update(Store, Doc, FromRev, Uti) of
 		{ok, Writer} ->
 			Written = lists:foldl(
 				fun({Part, Data}, Result) ->
@@ -520,9 +520,9 @@ merge_hpsd_update_dlinks(Data) when is_record(Data, dict, 9) ->
 merge_hpsd_update_dlinks(Data) when is_list(Data) ->
 	lists:map(fun(Value) -> merge_hpsd_update_dlinks(Value) end, Data);
 
-merge_hpsd_update_dlinks({dlink, Uuid, _Revs}) ->
-	Revs = lists:map(fun({Rev, _StoreList}) -> Rev end, broker:lookup(Uuid)),
-	{dlink, Uuid, Revs};
+merge_hpsd_update_dlinks({dlink, Doc, _Revs}) ->
+	Revs = lists:map(fun({Rev, _StoreList}) -> Rev end, broker:lookup(Doc)),
+	{dlink, Doc, Revs};
 
 merge_hpsd_update_dlinks(Data) ->
 	Data.

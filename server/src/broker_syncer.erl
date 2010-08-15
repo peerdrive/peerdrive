@@ -129,7 +129,7 @@ do_sync(Doc, DestRev, AllStores) ->
 
 create_tmp(LeadStore, DestRev) ->
 	Doc = crypto:rand_bytes(16),
-	case store:put_uuid(LeadStore, Doc, DestRev, DestRev) of
+	case store:put_doc(LeadStore, Doc, DestRev, DestRev) of
 		ok              -> {ok, Doc};
 		{error, Reason} -> {error, Reason}
 	end.
@@ -137,14 +137,14 @@ create_tmp(LeadStore, DestRev) ->
 
 replicate_tmp_doc(TmpDoc, RepStores) ->
 	Stores = lists:map(fun({Store, _Rev}) -> store:guid(Store) end, RepStores),
-	replicator:replicate_uuid_sync(TmpDoc, Stores, true).
+	replicator:replicate_doc_sync(TmpDoc, Stores, true).
 
 
 switch(Doc, NewRev, Stores) ->
 	% point of no return: once we switch one store we have to do it for all
 	lists:foldl(
 		fun({Store, OldRev}, Result) ->
-			case store:put_uuid(Store, Doc, OldRev, NewRev) of
+			case store:put_doc(Store, Doc, OldRev, NewRev) of
 				ok    -> Result;
 				Error -> Error
 			end

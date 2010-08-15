@@ -138,7 +138,7 @@ do_write(#state{needed=Needed} = S, Part, Data) ->
 	end.
 
 
-% calculate hashes, close&move to correct dir, update uuid
+% calculate hashes, close&move to correct dir, update document
 % returns ok | {error, Reason}
 do_commit(S) ->
 	% first check if all needed parts are valid

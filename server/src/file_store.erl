@@ -21,7 +21,7 @@
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % Store interface
--export([guid/1, contains/2, stat/2, lookup/2, put_uuid/4, put_rev_start/3,
+-export([guid/1, contains/2, stat/2, lookup/2, put_doc/4, put_rev_start/3,
 	peek/2, fork/4, update/4,
 	delete_rev/2, delete_doc/2, sync_get_changes/2, sync_set_anchor/3]).
 
@@ -35,7 +35,7 @@
 % path:    string,  base directory
 % guid:    binary,  GUID of the store
 % gen:     integer, Generation of the store
-% uuids:   dict: Uuid --> {Revision, Generation}
+% uuids:   dict: Document --> {Revision, Generation}
 % objects: dict: Revision --> {refcount, #object | stub}
 % parts:   dict: PartHash --> refcount
 % peers:   dict: GUID --> Generation
@@ -101,10 +101,10 @@ fsck(Store) ->
 guid(Store) ->
 	gen_server:call(Store, guid).
 
-%% @doc Lookup a UUID.
+%% @doc Lookup a document.
 %% @see store:lookup/2
-lookup(Store, Uuid) ->
-	gen_server:call(Store, {lookup, Uuid}).
+lookup(Store, Doc) ->
+	gen_server:call(Store, {lookup, Doc}).
 
 %% @doc Check if a revision exists in the store
 %% @see store:contains/2
@@ -131,7 +131,7 @@ fork(Store, Doc, StartRev, Uti) ->
 update(Store, Doc, StartRev, Uti) ->
 	gen_server:call(Store, {update, Doc, StartRev, Uti}).
 
-%% @doc Delete a UUID
+%% @doc Delete a document
 %% @see store:delete_doc/2
 delete_doc(Store, Doc) ->
 	gen_server:call(Store, {delete_doc, Doc}).
@@ -141,10 +141,10 @@ delete_doc(Store, Doc) ->
 delete_rev(Store, Rev) ->
 	gen_server:call(Store, {delete_rev, Rev}).
 
-%% @doc Put/update a UUID in the store
-%% @see store:put_uuid/4
-put_uuid(Store, Uuid, OldRev, NewRev) ->
-	gen_server:call(Store, {put_uuid, Uuid, OldRev, NewRev}).
+%% @doc Put/update a document in the store
+%% @see store:put_doc/4
+put_doc(Store, Doc, OldRev, NewRev) ->
+	gen_server:call(Store, {put_doc, Doc, OldRev, NewRev}).
 
 %% @doc Put/import a revision into the store.
 %% @see store:put_rev_start/3
@@ -166,16 +166,16 @@ sync_set_anchor(Store, PeerGuid, SeqNum) ->
 %% Functions used by helper processes...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% @doc Commit a new revision into the store and update Uuid to point to that
-%%      revision instead.
+%% @doc Commit a new revision into the store and update the Doc to point to the
+%%      new revision instead.
 %%
-%% @spec commit(Store, Uuid, Object) -> Result
+%% @spec commit(Store, Doc, Object) -> Result
 %%       Store = pid()
-%%       Uuid = guid()
+%%       Doc = guid()
 %%       Object = #object
 %%       Result = {ok, Rev::guid()} | conflict | {error, Error::ecode()}
-commit(Store, Uuid, Object) ->
-	gen_server:call(Store, {commit, Uuid, Object}).
+commit(Store, Doc, Object) ->
+	gen_server:call(Store, {commit, Doc, Object}).
 
 %% @doc Import a new revision into the store.
 %%
@@ -250,8 +250,8 @@ handle_call_internal(guid, _From, S) ->
 	{reply, S#state.guid, S};
 
 % returns `{ok, Rev} | error'
-handle_call_internal({lookup, Uuid}, _From, S) ->
-	case dict:find(Uuid, S#state.uuids) of
+handle_call_internal({lookup, Doc}, _From, S) ->
+	case dict:find(Doc, S#state.uuids) of
 		{ok, {Rev, _Gen}} -> {reply, {ok, Rev}, S};
 		error             -> {reply, error, S}
 	end;
@@ -279,9 +279,9 @@ handle_call_internal({fork, Doc, StartRev, Uti}, From, S) ->
 	{S2, Reply} = do_write_start_fork(S, Doc, StartRev, Uti, User),
 	{reply, Reply, S2};
 
-handle_call_internal({update, Uuid, StartRev, Uti}, From, S) ->
+handle_call_internal({update, Doc, StartRev, Uti}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_update(S, Uuid, StartRev, Uti, User),
+	{S2, Reply} = do_write_start_update(S, Doc, StartRev, Uti, User),
 	{reply, Reply, S2};
 
 handle_call_internal({delete_rev, Rev}, _From, S) ->
@@ -292,8 +292,8 @@ handle_call_internal({delete_doc, Doc}, _From, S) ->
 	{S2, Reply} = do_delete_doc(S, Doc),
 	{reply, Reply, S2};
 
-handle_call_internal({put_uuid, Uuid, OldRev, NewRev}, _From, S) ->
-	{S2, Reply} = do_put_uuid(S, Uuid, OldRev, NewRev),
+handle_call_internal({put_doc, Doc, OldRev, NewRev}, _From, S) ->
+	{S2, Reply} = do_put_doc(S, Doc, OldRev, NewRev),
 	{reply, Reply, S2};
 
 handle_call_internal({put_rev, Rev, Object}, From, S) ->
@@ -320,8 +320,8 @@ handle_call_internal({insert_rev, Rev, Object}, _From, S) ->
 	{reply, Reply, S2};
 
 % internal: commit a new object
-handle_call_internal({commit, Uuid, Object}, _From, S) ->
-	{S2, Reply} = do_commit(S, Uuid, Object),
+handle_call_internal({commit, Doc, Object}, _From, S) ->
+	{S2, Reply} = do_commit(S, Doc, Object),
 	{reply, Reply, S2};
 
 % internal: add part refcount
@@ -439,7 +439,7 @@ make_interface(Pid) ->
 		contains           = fun contains/2,
 		lookup             = fun lookup/2,
 		stat               = fun stat/2,
-		put_uuid           = fun put_uuid/4,
+		put_doc            = fun put_doc/4,
 		put_rev_start      = fun put_rev_start/3,
 		peek               = fun peek/2,
 		fork               = fun fork/4,
@@ -576,7 +576,7 @@ do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc) ->
 % #state{
 %   path:    base directory
 %   gen:     integer
-%   uuids:   dict: Uuid --> {Revision, Generation}
+%   uuids:   dict: Document --> {Revision, Generation}
 %   objects: dict: Revision --> {refcount, #object | stub}
 %   parts:   dict: PartHash --> refcount
 %   peers:   dict: GUID --> Generation
@@ -586,13 +586,13 @@ do_dump(#state{path=Path} = S) ->
 	io:format("Guid: ~s~n", [util:bin_to_hexstr(S#state.guid)]),
 	io:format("Gen:  ~p~n", [S#state.gen]),
 	io:format("Path: ~s~n", [S#state.path]),
-	io:format("Uuids:~n"),
+	io:format("Documents:~n"),
 	dict:fold(
-		fun (Uuid, {Rev, Gen}, _) ->
-			io:format("    ~s -> ~s @ ~p~n", [util:bin_to_hexstr(Uuid), util:bin_to_hexstr(Rev), Gen])
+		fun (Doc, {Rev, Gen}, _) ->
+			io:format("    ~s -> ~s @ ~p~n", [util:bin_to_hexstr(Doc), util:bin_to_hexstr(Rev), Gen])
 		end,
 		ok, S#state.uuids),
-	io:format("Objects:~n"),
+	io:format("Revisions:~n"),
 	dict:fold(
 		fun (Rev, {RefCount, Object}, _) ->
 			io:format("    ~s #~w~n", [util:bin_to_hexstr(Rev), RefCount]),
@@ -708,8 +708,8 @@ do_write_start_fork(S, Doc, StartRev, Uti, User) ->
 
 
 % returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
-do_write_start_update(S, Uuid, StartRev, Uti, User) ->
-	case dict:find(Uuid, S#state.uuids) of
+do_write_start_update(S, Doc, StartRev, Uti, User) ->
+	case dict:find(Doc, S#state.uuids) of
 		{ok, {StartRev, _Gen}} ->
 			case dict:fetch(StartRev, S#state.objects) of
 				{_, stub} ->
@@ -725,7 +725,7 @@ do_write_start_update(S, Uuid, StartRev, Uti, User) ->
 						path      = S#state.path,
 						server    = self(),
 						flags     = Object#object.flags,
-						doc       = Uuid,
+						doc       = Doc,
 						baserevs  = [StartRev],
 						mergerevs = [],
 						uti       = RealUti,
@@ -742,7 +742,7 @@ do_write_start_update(S, Uuid, StartRev, Uti, User) ->
 			{S, {error, conflict}};
 
 		error ->
-			% unknown UUID
+			% unknown document
 			{S, {error, enoent}}
 	end.
 
@@ -762,8 +762,8 @@ start_writer(S, State, User) ->
 
 
 % ok | {error, Reason}
-do_put_uuid(#state{uuids=Uuids} = S, Uuid, OldRev, NewRev) ->
-	case dict:find(Uuid, Uuids) of
+do_put_doc(#state{uuids=Uuids} = S, Doc, OldRev, NewRev) ->
+	case dict:find(Doc, Uuids) of
 		% already pointing to requested rev
 		{ok, {NewRev, _}} ->
 			{S, ok};
@@ -771,13 +771,13 @@ do_put_uuid(#state{uuids=Uuids} = S, Uuid, OldRev, NewRev) ->
 		% free old version, store new one
 		{ok, {OldRev, _}} ->
 			gen_server:cast(self(), {object_ref_dec, OldRev}),
-			vol_monitor:trigger_mod_doc(S#state.guid, Uuid),
+			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
 			S21 = do_objects_ref_inc(S, [NewRev]),
 			Gen = S21#state.gen,
 			{
 				S21#state{
 					gen     = Gen+1,
-					uuids   = dict:store(Uuid, {NewRev, Gen}, S21#state.uuids),
+					uuids   = dict:store(Doc, {NewRev, Gen}, S21#state.uuids),
 					changed = true
 				},
 				ok
@@ -787,15 +787,15 @@ do_put_uuid(#state{uuids=Uuids} = S, Uuid, OldRev, NewRev) ->
 		{ok, _} ->
 			{S, {error, conflict}};
 
-		% Uuid does not exist (yet)...
+		% document does not exist (yet)...
 		error ->
-			vol_monitor:trigger_add_doc(S#state.guid, Uuid),
+			vol_monitor:trigger_add_doc(S#state.guid, Doc),
 			S21 = do_objects_ref_inc(S, [NewRev]),
 			Gen = S21#state.gen,
 			{
 				S21#state{
 					gen     = Gen+1,
-					uuids   = dict:store(Uuid, {NewRev, Gen}, S21#state.uuids),
+					uuids   = dict:store(Doc, {NewRev, Gen}, S21#state.uuids),
 					changed = true
 				},
 				ok
@@ -838,9 +838,9 @@ do_put_rev(S, Rev, Object, User) ->
 
 %%% Commit %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_commit(S, Uuid, Object) ->
+do_commit(S, Doc, Object) ->
 	NewRev = store:hash_object(Object),
-	Reply = case dict:find(Uuid, S#state.uuids) of
+	Reply = case dict:find(Doc, S#state.uuids) of
 		{ok, {CurrentRev, _Gen}} ->
 			case lists:member(CurrentRev, Object#object.parents) of
 				true  ->
@@ -854,11 +854,11 @@ do_commit(S, Uuid, Object) ->
 	end,
 	S2 = case Reply of
 		{ok, _} ->
-			vol_monitor:trigger_mod_doc(S#state.guid, Uuid),
+			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
 			Gen = S#state.gen,
 			NewState = S#state{
 				gen     = Gen+1,
-				uuids   = dict:store(Uuid, {NewRev, Gen}, S#state.uuids)
+				uuids   = dict:store(Doc, {NewRev, Gen}, S#state.uuids)
 			},
 			add_object(NewState, NewRev, 1, Object);
 
@@ -974,7 +974,7 @@ extract_refs(Data) when is_record(Data, dict, 9) ->
 extract_refs(Data) when is_list(Data) ->
 	lists:foldl(fun(Value, Acc) -> extract_refs(Value)++Acc end, [], Data);
 
-extract_refs({dlink, _Uuid, Revs}) ->
+extract_refs({dlink, _Doc, Revs}) ->
 	Revs;
 
 extract_refs({rlink, Rev}) ->
@@ -986,23 +986,23 @@ extract_refs(_) ->
 
 %%% Synching %%%%%%%%%%%%%%%%
 
-% returns [{Uuid, SeqNum}]
+% returns [{Doc, SeqNum}]
 do_sync_get_changes(#state{uuids=Uuids, peers=Peers}, PeerGuid) ->
 	Anchor = case dict:find(PeerGuid, Peers) of
 		{ok, Value} -> Value;
 		error       -> 0
 	end,
 	Changes = dict:fold(
-		fun(Uuid, {_Rev, SeqNum}, Acc) ->
+		fun(Doc, {_Rev, SeqNum}, Acc) ->
 			if
-				SeqNum > Anchor -> [{Uuid, SeqNum} | Acc];
+				SeqNum > Anchor -> [{Doc, SeqNum} | Acc];
 				true            -> Acc
 			end
 		end,
 		[],
 		Uuids),
 	lists:sort(
-		fun({_Uuid1, Seq1}, {_Uuid2, Seq2}) -> Seq1 =< Seq2 end,
+		fun({_Doc1, Seq1}, {_Doc2, Seq2}) -> Seq1 =< Seq2 end,
 		Changes).
 
 
@@ -1101,7 +1101,7 @@ fsc_check_part_refcounts(Parts, PartRefCounts) ->
 
 fsck_calc_rev_refcounts(Uuids, Objects, Path) ->
 	UCount = dict:fold(
-		fun(_Uuid, {Rev, _Gen}, Acc) -> dict:update_counter(Rev, 1, Acc) end,
+		fun(_Doc, {Rev, _Gen}, Acc) -> dict:update_counter(Rev, 1, Acc) end,
 		dict:new(),
 		Uuids),
 	dict:fold(

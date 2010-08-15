@@ -19,7 +19,7 @@
 
 -export([start_link/0]).
 -export([cancel/0, event_modified/2, replicate_rev/3, replicate_rev_sync/3,
-         replicate_uuid/3, replicate_uuid_sync/3]).
+         replicate_doc/3, replicate_doc_sync/3]).
 -export([init/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -31,14 +31,14 @@ start_link() ->
 	%io:format("replicator: start_link ~w~n", [Result]),
 	Result.
 
-event_modified(Uuid, StoreGuid) ->
-	start_child([{modified, Uuid, StoreGuid}]).
+event_modified(Doc, StoreGuid) ->
+	start_child([{modified, Doc, StoreGuid}]).
 
-replicate_uuid(Uuid, Stores, History) ->
-	start_child([{replicate_uuid, Uuid, Stores, History, false}]).
+replicate_doc(Doc, Stores, History) ->
+	start_child([{replicate_doc, Doc, Stores, History, false}]).
 
-replicate_uuid_sync(Uuid, Stores, History) ->
-	start_child_sync([{replicate_uuid, Uuid, Stores, History, true}]).
+replicate_doc_sync(Doc, Stores, History) ->
+	start_child_sync([{replicate_doc, Doc, Stores, History, true}]).
 
 replicate_rev(Rev, Stores, History) ->
 	start_child([{replicate_rev, Rev, Stores, History, false}]).

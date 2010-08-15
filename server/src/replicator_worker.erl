@@ -49,11 +49,11 @@ cancel(Worker) ->
 
 init({Request, From}) ->
 	Tag = case Request of
-		{modified, Uuid, StoreGuid} ->
-			{rep_doc, Uuid, [StoreGuid]};
+		{modified, Doc, StoreGuid} ->
+			{rep_doc, Doc, [StoreGuid]};
 
-		{replicate_uuid, Uuid, Stores, _History, _Important} ->
-			{rep_doc, Uuid, Stores};
+		{replicate_doc, Doc, Stores, _History, _Important} ->
+			{rep_doc, Doc, Stores};
 
 		{replicate_rev, Rev, Stores, _History, _Important} ->
 			{rep_rev, Rev, Stores}
@@ -97,12 +97,12 @@ terminate(_Reason, #state{from=From, result=Result, monitor=Monitor}) ->
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Uuid: UUID to replicate
+% Doc: Document to replicate
 % Stores: Destination stores
 % History: Also replicate the history of the document
-% Important: queue an error if replication fails for this UUID
-push_uuid(Backlog, Uuid, Stores, History, Important) ->
-	queue:in({replicate_uuid, Uuid, Stores, History, Important}, Backlog).
+% Important: queue an error if replication fails for this document
+push_doc(Backlog, Doc, Stores, History, Important) ->
+	queue:in({replicate_doc, Doc, Stores, History, Important}, Backlog).
 
 push_rev(Backlog, Rev, Stores, History, Important) ->
 	queue:in({replicate_rev, Rev, Stores, History, Important}, Backlog).
@@ -116,11 +116,11 @@ run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = State) ->
 		{{value, Item}, Remaining} ->
 			PrevSize = queue:len(Remaining),
 			NewState = case Item of
-				{modified, Uuid, StoreGuid} ->
-					State#state{backlog=do_modified(Remaining, Uuid, StoreGuid)};
+				{modified, Doc, StoreGuid} ->
+					State#state{backlog=do_modified(Remaining, Doc, StoreGuid)};
 
-				{replicate_uuid, Uuid, Stores, History, Important} ->
-					State#state{backlog=do_replicate_uuid(Remaining, Uuid, Stores, History, Important)};
+				{replicate_doc, Doc, Stores, History, Important} ->
+					State#state{backlog=do_replicate_doc(Remaining, Doc, Stores, History, Important)};
 
 				{replicate_rev, Rev, Stores, History, Important} ->
 					State#state{backlog=do_replicate_rev(Remaining, Rev, Stores, History, Important, false)};
@@ -135,10 +135,10 @@ run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = State) ->
 			State
 	end.
 
-do_modified(Backlog, Uuid, StoreGuid) ->
+do_modified(Backlog, Doc, StoreGuid) ->
 	case volman:store(StoreGuid) of
 		{ok, StoreIfc} ->
-			case store:lookup(StoreIfc, Uuid) of
+			case store:lookup(StoreIfc, Doc) of
 				{ok, Rev} -> sticky_handling(Backlog, Rev, [StoreGuid], true);
 				error     -> Backlog
 			end;
@@ -147,12 +147,12 @@ do_modified(Backlog, Uuid, StoreGuid) ->
 			Backlog
 	end.
 
-do_replicate_uuid(Backlog, Uuid, ToStores, History, Important) ->
-	case broker:lookup(Uuid) of
+do_replicate_doc(Backlog, Doc, ToStores, History, Important) ->
+	case broker:lookup(Doc) of
 		[{Rev, _Stores}] ->
 			RepStores = lists:filter(
 				fun(Dest) ->
-					case broker:replicate_uuid(Uuid, Dest) of
+					case broker:replicate_doc(Doc, Dest) of
 						ok               -> true;
 						{error, _Reason} -> false
 					end
@@ -162,7 +162,7 @@ do_replicate_uuid(Backlog, Uuid, ToStores, History, Important) ->
 			NewBacklog = do_replicate_rev(Backlog, Rev, RepStores, History, Important, true),
 			if
 				Important and (RepStores =/= ToStores) ->
-					push_error(NewBacklog, rep_uuid_failed);
+					push_error(NewBacklog, rep_doc_failed);
 				true ->
 					NewBacklog
 			end;
@@ -223,13 +223,13 @@ sticky_handling(Backlog, Rev, ToStores, Latest) ->
 			case meta_read_bool(MetaData, ?SYNC_STICKY) of
 				true ->
 					History = meta_read_bool(MetaData, ?SYNC_HISTORY),
-					{RevRefs, UuidRefs} = read_references(Rev, Latest),
+					{RevRefs, DocRefs} = read_references(Rev, Latest),
 					NewBacklog = lists:foldl(
 						fun(Reference, BackAcc) ->
-							push_uuid(BackAcc, Reference, ToStores, History, false)
+							push_doc(BackAcc, Reference, ToStores, History, false)
 						end,
 						Backlog,
-						UuidRefs),
+						DocRefs),
 					lists:foldl(
 						fun(Reference, BackAcc) ->
 							push_rev(BackAcc, Reference, ToStores, History, false)
@@ -268,25 +268,25 @@ read_references(Rev, Latest) ->
 
 read_references_loop(Dict, Latest) when is_record(Dict, dict, 9) ->
 	dict:fold(
-		fun(_Key, Value, {AccRev, AccUuid}) ->
-			{Revs, Uuids} = read_references_loop(Value, Latest),
-			{Revs++AccRev, Uuids++AccUuid}
+		fun(_Key, Value, {AccRev, AccDoc}) ->
+			{Revs, Docs} = read_references_loop(Value, Latest),
+			{Revs++AccRev, Docs++AccDoc}
 		end,
 		{[], []},
 		Dict);
 read_references_loop(List, Latest) when is_list(List) ->
 	lists:foldl(
-		fun(Element, {AccRev, AccUuid}) ->
-			{Revs, Uuids} = read_references_loop(Element, Latest),
-			{Revs++AccRev, Uuids++AccUuid}
+		fun(Element, {AccRev, AccDoc}) ->
+			{Revs, Docs} = read_references_loop(Element, Latest),
+			{Revs++AccRev, Docs++AccDoc}
 		end,
 		{[], []},
 		List);
 read_references_loop({rlink, Rev}, _Latest) ->
 	{[Rev], []};
-read_references_loop({dlink, Uuid, Revs}, Latest) ->
+read_references_loop({dlink, Doc, Revs}, Latest) ->
 	case Latest of
-		true  -> {[], [Uuid]};
+		true  -> {[], [Doc]};
 		false -> {Revs, []}
 	end;
 read_references_loop(_, _) ->

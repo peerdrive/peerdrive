@@ -208,7 +208,7 @@ handle_packet(Packet, S) ->
 		?REPLICATE_DOC_REQ ->
 			<<Doc:16/binary, History:8, Body1/binary>> = Body,
 			{Stores, <<>>} = parse_revisions(Body1),
-			replicator:replicate_uuid(Doc, Stores, as_boolean(History)),
+			replicator:replicate_doc(Doc, Stores, as_boolean(History)),
 			send_generic_reply(RetPath, ok),
 			S;
 

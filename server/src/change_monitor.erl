@@ -38,18 +38,18 @@ start_link() ->
 %%      {watch, Cause, Type, Uuid} where
 %%          Cause = modified | appeared | replicated | diminished | disappeared
 %%          Type  = doc | rev
-%%          Uuid  = uuid()
+%%          Uuid  = guid()
 %%
 %% @spec watch(Type, Uuid) -> ok
 %%       Type = doc | rev
-%%       Uuid = uuid()
+%%       Uuid = guid()
 watch(Type, Uuid) ->
 	gen_server:call(change_monitor, {watch, Type, Uuid}).
 
 %% @doc Stop watching a UUID (Doc or Rev).
 %% @spec unwatch(Type, Uuid) -> ok
 %%       Type = doc | rev
-%%       Uuid = uuid()
+%%       Uuid = guid()
 unwatch(Type, Uuid) ->
 	gen_server:call(change_monitor, {unwatch, Type, Uuid}).
 
@@ -71,8 +71,8 @@ init([]) ->
 
 handle_info({trigger_mod_doc, Store, Doc}, #state{watches=Watches} = State) ->
 	% This is a special trigger. Only forward special locally generated events.
-	% This prevents useless flooding of change notifications if the UUID exists
-	% on several stores.
+	% This prevents useless flooding of change notifications if the document
+	% exists on several stores.
 	case Store of
 		local ->
 			case dict:find({doc, Doc}, Watches) of

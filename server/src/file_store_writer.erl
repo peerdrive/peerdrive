@@ -222,7 +222,7 @@ close_reader(ClosePart, Readers) ->
 		Readers).
 
 
-% calculate hashes, close&move to correct dir, update uuid
+% calculate hashes, close&move to correct dir, update document
 % returns {ok, Hash} | conflict | {error, Reason}
 do_commit(S, Mtime, MergeRevs) ->
 	NewParts = dict:fold(
