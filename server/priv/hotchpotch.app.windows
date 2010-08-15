@@ -6,9 +6,9 @@
 		{vsn, "0.0.1"},
 		{modules, [
 			broker,
-			broker_merger,
+			broker_io,
 			broker_replicator,
-			broker_writer,
+			broker_syncer,
 			change_monitor,
 			client_servlet,
 			dispatcher,
