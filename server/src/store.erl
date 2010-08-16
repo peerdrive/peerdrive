@@ -97,7 +97,7 @@ fork(#store{this=Store, fork=Fork}, Doc, StartRev, Uti) ->
 %% The new revision will start with the content of the StartRev revision. If
 %% Doc points already to another revision then the call will fail.
 %%
-%% @spec update(Store, Doc, StartRev) -> {ok, Handle} | {error, Reason}
+%% @spec update(Store, Doc, StartRev, Uti) -> {ok, Handle} | {error, Reason}
 %%        Store = #store
 %%        Handle = #handle
 %%        Doc = guid()

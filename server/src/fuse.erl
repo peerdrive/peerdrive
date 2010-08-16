@@ -13,7 +13,7 @@
 -export ([ code_change/3, handle_info/2, init/1, terminate/2 ]).
 -export ([ getattr/4, lookup/5, forget/5,
            opendir/5, readdir/7, releasedir/5,
-           open/5, read/7, release/5
+           open/5, read/7, write/7, release/5
 		 ]).
 
 -include_lib ("fuserl/include/fuserl.hrl").
@@ -25,7 +25,7 @@
 
 -record(inode, {refcnt, parent, timeout, oid, ifc, cache}).
 -record(ifc, {getattr, lookup, getnode, opendir, open}).
--record(handler, {read, release}).
+-record(handler, {read, write, release, changed=false}).
 
 -define(UNKNOWN_INO, 16#ffffffff).
 -define (DIRATTR (X), #stat{ st_ino = (X),
@@ -286,7 +286,7 @@ releasedir(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{dirs=Dirs} = S) ->
 open(_, Ino, Fi, _Cont, #state{inodes=Inodes, files=Files} = S) ->
 	case gb_trees:lookup(Ino, Inodes) of
 		{value, #inode{oid=Oid, ifc=#ifc{open=Open}}} ->
-			case Open(Oid) of
+			case Open(Oid, Fi#fuse_file_info.flags) of
 				{ok, Handler} ->
 					Id = case gb_trees:is_empty(Files) of
 						true  -> 1;
@@ -298,6 +298,7 @@ open(_, Ino, Fi, _Cont, #state{inodes=Inodes, files=Files} = S) ->
 					};
 
 				{error, Error} ->
+					io:format("Open failed with: ~p~n", [Error]),
 					{#fuse_reply_err{ err = Error }, S}
 			end;
 
@@ -315,9 +316,28 @@ read(_, _Ino, Size, Offset, Fi, _Cont, #state{files=Files} = S) ->
 	end.
 
 
+write(_, _Ino, Data, Offset, Fi, _Cont, #state{files=Files} = S) ->
+	Id = Fi#fuse_file_info.fh,
+	#handler{write=Write, changed=Changed} = Handler = gb_trees:get(Id, Files),
+	case Write(Data, Offset) of
+		ok ->
+			S2 = if
+				Changed ->
+					S;
+				true ->
+					H2 = Handler#handler{changed=true},
+					S#state{files = gb_trees:update(Id, H2, Files)}
+			end,
+			{#fuse_reply_write{count=erlang:size(Data)}, S2};
+
+		{error, Error} ->
+			{#fuse_reply_err{ err = Error }, S}
+	end.
+
+
 release(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{files=Files} = S) ->
-	#handler{release=Release} = gb_trees:get(Id, Files),
-	Release(),
+	#handler{release=Release, changed=Changed} = gb_trees:get(Id, Files),
+	Release(Changed),
 	{#fuse_reply_err{err=ok}, S#state{files=gb_trees:delete(Id, Files)}}.
 
 
@@ -336,7 +356,7 @@ root_make_node() ->
 			lookup  = fun root_lookup/3,
 			getnode = fun root_getnode/1,
 			opendir = fun root_opendir/2,
-			open    = fun(_) -> {error, eacces} end
+			open    = fun(_, _) -> {error, eacces} end
 		}
 	}.
 
@@ -376,7 +396,7 @@ emptydir_make_node(Oid) ->
 			lookup  = fun(_, _, _) -> error end,
 			getnode = fun(_) -> error end,
 			opendir = fun(_, Cache) -> {ok, [], Cache} end,
-			open    = fun(_) -> {error, eacces} end
+			open    = fun(_, _) -> {error, eacces} end
 		}
 	}}.
 
@@ -407,7 +427,7 @@ stores_make_node() ->
 			lookup  = fun stores_lookup/3,
 			getnode = fun stores_getnode/1,
 			opendir = fun stores_opendir/2,
-			open    = fun(_) -> {error, eacces} end
+			open    = fun(_, _) -> {error, eacces} end
 		}
 	}}.
 
@@ -492,7 +512,7 @@ doc_make_node_dict(Oid) ->
 			lookup  = fun dict_lookup/3,
 			getnode = fun dict_getnode/1,
 			opendir = fun dict_opendir/2,
-			open    = fun(_) -> {error, eacces} end
+			open    = fun(_, _) -> {error, eacces} end
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -603,7 +623,7 @@ doc_make_node_set(Oid) ->
 			lookup  = fun set_lookup/3,
 			getnode = fun set_getnode/1,
 			opendir = fun set_opendir/2,
-			open    = fun(_) -> {error, eacces} end
+			open    = fun(_, _) -> {error, eacces} end
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -635,7 +655,7 @@ set_lookup({doc, Store, Doc}, Name, Cache) ->
 		{ok, Entries, NewCache} ->
 			case find_entry(fun(E) -> set_lookup_cmp(Name, E) end, Entries) of
 				{value, Oid} -> {entry, Oid, NewCache};
-				none         -> {error, NewCache}
+				none         -> {error, NewCache} % TODO: look up alternative names
 			end;
 
 		_ ->
@@ -694,9 +714,10 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 		{ok, Rev} ->
 			case util:read_rev_struct(Rev, <<"HPSD">>) of
 				{ok, Entries} when is_list(Entries) ->
-					List = map_filter(
+					RawList = map_filter(
 						fun(E) -> set_read_entries_filter(Store, E) end,
 						Entries),
+					List = set_sanitize_entries(RawList, 4),
 					{ok, List, {Rev, List}};
 				{ok, _} ->
 					error;
@@ -709,7 +730,7 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 
 
 set_read_entries_filter(Store, {dlink, Child, _Revs}) ->
-	{ok, {set_read_title(Store, Child), {doc, Store, Child}}};
+	{ok, {{set_read_title(Store, Child), ""}, {doc, Store, Child}}};
 set_read_entries_filter(_, _) ->
 	skip.
 
@@ -742,6 +763,32 @@ set_read_title_meta(Store, Doc) ->
 	end.
 
 
+set_sanitize_entries(Entries, SuffixLen) ->
+	Dict = lists:foldl(
+		fun({Title, Oid}, Acc) -> dict:append(Title, Oid, Acc) end,
+		dict:new(),
+		Entries),
+	dict:fold(
+		fun({Title, Suffix}, Oids, Acc) ->
+			case Oids of
+				[Oid] -> [{Title++Suffix, Oid} | Acc];
+				_     -> set_sanitize_entry(Title, Oids, SuffixLen) ++ Acc
+			end
+		end,
+		[],
+		Dict).
+
+
+set_sanitize_entry(Title, Oids, SuffixLen) ->
+	NewEntries = lists:map(
+		fun({doc, _, Uuid} = Oid) ->
+			Suffix = "~"++lists:sublist(util:bin_to_hexstr(Uuid), SuffixLen),
+			{{Title, Suffix}, Oid}
+		end,
+		Oids),
+	set_sanitize_entries(NewEntries, SuffixLen+4).
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% All other documents
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -755,7 +802,7 @@ doc_make_node_file(Oid) ->
 			lookup  = fun(_, _, _) -> error end,
 			getnode = fun(_, _) -> error end,
 			opendir = fun(_, _) -> {errror, enotdir} end,
-			open    = fun file_open/1
+			open    = fun file_open/2
 		}
 	}}.
 
@@ -779,7 +826,7 @@ file_getattr({doc, Store, Doc}, Ino) ->
 					end,
 					{ok, #stat{
 						st_ino   = Ino,
-						st_mode  = ?S_IFREG bor 8#0444,
+						st_mode  = ?S_IFREG bor 8#0666,
 						st_nlink = 1,
 						st_atime = Mtime,
 						st_mtime = Mtime,
@@ -796,16 +843,27 @@ file_getattr({doc, Store, Doc}, Ino) ->
 	end.
 
 
-file_open({doc, Store, Doc}) ->
+file_open({doc, Store, Doc}, Flags) ->
 	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
-			case store:peek(Store, Rev) of
-				{ok, Reader} ->
+			Reply = if
+				(Flags band ?O_ACCMODE) =/= ?O_RDONLY ->
+					store:update(Store, Doc, Rev, keep);
+				true ->
+					store:peek(Store, Rev)
+			end,
+			case Reply of
+				{ok, Handle} ->
 					{ok, #handler{
 						read = fun(Size, Offset) ->
-							file_read(Reader, Size, Offset)
+							file_read(Handle, Size, Offset)
 						end,
-						release = fun() -> store:abort(Reader) end
+						write = fun(Data, Offset) ->
+							file_write(Handle, Data, Offset)
+						end,
+						release = fun(Changed) ->
+							file_release(Handle, Doc, Changed)
+						end
 					}};
 
 				{error, _} ->
@@ -817,12 +875,37 @@ file_open({doc, Store, Doc}) ->
 	end.
 
 
-file_read(Reader, Size, Offset) ->
-	case store:read(Reader, <<"FILE">>, Offset, Size) of
+file_read(Handle, Size, Offset) ->
+	case store:read(Handle, <<"FILE">>, Offset, Size) of
 		{ok, _Data} = R  -> R;
 		eof              -> {ok, <<>>};
 		{error, enoent}  -> {ok, <<>>};
 		{error, _}       -> {error, eio}
+	end.
+
+
+file_write(Handle, Data, Offset) ->
+	store:write(Handle, <<"FILE">>, Offset, Data).
+
+
+file_release(Handle, Doc, Changed) ->
+	case Changed of
+		false ->
+			store:abort(Handle);
+
+		true ->
+			case store:commit(Handle, util:get_time(), []) of
+				conflict ->
+					case store:lookup(Doc) of
+						{ok, CurRev} ->
+							store:commit(Handle, util:get_time(), [CurRev]);
+						error ->
+							error
+					end;
+
+				_Else ->
+					ok
+			end
 	end.
 
 
