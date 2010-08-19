@@ -1,20 +1,20 @@
 -module (fuse).
 -ifndef(windows).
-%-behaviour (fuserl).
+-behaviour (fuserl).
 
-% Directory layout:
-%   /docs/...
-%   /docs/00112233445566778899AABBCCDDEEFF/asdf
-%   /revs/...
-%   /revs/00112233445566778899AABBCCDDEEFF/foo/bar
-%   /stores/usr/...
+%-define(DEBUG(X), X).
+-define(DEBUG(X), ok).
 
 -export ([ get_supervisor_spec/2, start_link/2, start_link/3 ]).
 -export ([ code_change/3, handle_info/2, init/1, terminate/2 ]).
--export ([ getattr/4, lookup/5, forget/5,
+-export ([ getattr/4, setattr/7, lookup/5, forget/5,
            opendir/5, readdir/7, releasedir/5,
-           open/5, read/7, write/7, release/5
+           create/7, open/5, read/7, write/7, release/5
 		 ]).
+-export ([ access/5, flush/5, fsync/6, fsyncdir/6, getlk/6, getxattr/6, link/6,
+           listxattr/5, mkdir/6, mknod/7, readlink/4, removexattr/5, rename/7,
+           rmdir/5, setlk/7, setxattr/7, statfs/4, symlink/6, unlink/5 ]).
+
 
 -include_lib ("fuserl/include/fuserl.hrl").
 
@@ -24,7 +24,15 @@
 -record(state, { inodes, cache, dirs, files, count }).
 
 -record(inode, {refcnt, parent, timeout, oid, ifc, cache}).
--record(ifc, {getattr, lookup, getnode, opendir, open}).
+-record(ifc, {
+	getattr,
+	setattr = fun(_, _, _, _) -> {error, enosys} end,
+	lookup  = fun(_, _, _) -> {error, enoent} end,
+	getnode = fun(_, _) -> error end,
+	opendir = fun(_, _) -> {errror, enotdir} end,
+	open    = fun(_, _) -> {error, eisdir} end,
+	create  = fun(_, _) -> {error, eisdir} end
+}).
 -record(handler, {read, write, release, changed=false}).
 
 -define(UNKNOWN_INO, 16#ffffffff).
@@ -82,132 +90,131 @@ code_change (_OldVsn, State, _Extra) -> { ok, State }.
 handle_info (_Msg, State) -> { noreply, State }.
 terminate (_Reason, _State) -> ok.
 
+
+access(_, Ino, Mask, _, S) ->
+	io:format("access(~p, ~p)~n", [Ino, Mask]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+flush(_, Ino, Fi, _, S) ->
+	io:format("flush(~p, ~p)~n", [Ino, Fi]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+fsync(_, Ino, IsDataSync, Fi, _, S) ->
+	io:format("fsync(~p, ~p, ~p)~n", [Ino, IsDataSync, Fi]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+fsyncdir(_, Ino, IsDataSync, Fi, _, S) ->
+	io:format("fsyncdir(~p, ~p, ~p)~n", [Ino, IsDataSync, Fi]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+getlk(_, Ino, Fi, Lock, _, S) ->
+	io:format("getlk(~p, ~p, ~p)~n", [Ino, Fi, Lock]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+getxattr(_, Ino, Name, Size, _, S) ->
+	io:format("getxattr(~p, ~s, ~p)~n", [Ino, Name, Size]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+link(_, Ino, NewParent, NewName, _, S) ->
+	io:format("link(~p, ~p, ~s)~n", [Ino, NewParent, NewName]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+listxattr(_, Ino, Size, _, S) ->
+	io:format("listxattr(~p, ~p)~n", [Ino, Size]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+mkdir(_, Parent, Name, Mode, _, S) ->
+	io:format("mkdir(~p, ~s, ~p)~n", [Parent, Name, Mode]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+mknod(_, Parent, Name, Mode, Dev, _, S) ->
+	io:format("mknod(~p, ~s, ~p, ~p)~n", [Parent, Name, Mode, Dev]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+readlink(_, Ino, _, S) ->
+	io:format("readlink(~p)~n", [Ino]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+removexattr(_, Ino, Name, _, S) ->
+	io:format("removexattr(~p, ~s)~n", [Ino, Name]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+rename(_, Parent, Name, NewParent, NewName, _, S) ->
+	io:format("rename(~p, ~s, ~p, ~s)~n", [Parent, Name, NewParent, NewName]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+rmdir(_, Ino, Name, _, S) ->
+	io:format("rmdir(~p, ~s)~n", [Ino, Name]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+setlk(_, Ino, Fi, Lock, Sleep, _, S) ->
+	io:format("setlk(~p, ~p, ~p, ~p)~n", [Ino, Fi, Lock, Sleep]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+setxattr(_, Ino, Name, Value, Flags, _, S) ->
+	io:format("setxattr(~p, ~s, ~s, ~p)~n", [Ino, Name, Value, Flags]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+statfs(_, Ino, _, S) ->
+	io:format("statfs(~p)~n", [Ino]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+symlink(_, Link, Ino, Name, _, S) ->
+	io:format("symlink(~s, ~p, ~s)~n", [Link, Ino, Name]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+unlink(_, Ino, Name, _, S) ->
+	io:format("unlin(~p, ~s)k~n", [Ino, Name]),
+	{#fuse_reply_err{err = enosys}, S}.
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% FUSE callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 getattr(_, Ino, _Cont, #state{inodes=Inodes} = S) ->
-	case gb_trees:lookup(Ino, Inodes) of
+	Reply = case gb_trees:lookup(Ino, Inodes) of
 		{value, #inode{oid=Oid, timeout=Timeout, ifc=#ifc{getattr=GetAttr}}} ->
 			case GetAttr(Oid, Ino) of
 				{ok, Attr} ->
 					{#fuse_reply_attr{attr=Attr, attr_timeout_ms=Timeout}, S};
-				error ->
-					{#fuse_reply_err{err=enoent}, S}
+				{error, Error} ->
+					{#fuse_reply_err{err=Error}, S}
 			end;
 		none ->
 			{#fuse_reply_err{ err = enoent }, S}
-	end.
+	end,
+	?DEBUG(io:format("getattr(~p) -> ~p~n", [Ino, element(1, Reply)])),
+	Reply.
 
 
-lookup(_, Parent, Name, _Cont, #state{inodes=Inodes, cache=Cache} = S) ->
-	case gb_trees:lookup(Parent, Inodes) of
-		{value, #inode{oid=Oid, timeout=Timeout, ifc=#ifc{lookup=Lookup,
-		getnode=GetNode}, cache=ParentCache} = ParentNode} ->
-			case Lookup(Oid, Name, ParentCache) of
-				{entry, ChildOid, NewParentCache} ->
-					S2 = S#state{inodes=gb_trees:update(Parent,
-						ParentNode#inode{cache=NewParentCache}, Inodes)},
-					case gb_trees:lookup({Parent, ChildOid}, Cache) of
-						{value, ChildIno} ->
-							lookup_cached(ChildOid, ChildIno, Timeout, S2);
+lookup(_, Parent, Name, _Cont, S) ->
+	LookupOp = fun(ParentNode) ->
+		#inode{oid=Oid, ifc=#ifc{lookup=Lookup}, cache=Cache} = ParentNode,
+		Lookup(Oid, Name, Cache)
+	end,
+	Reply = case do_lookup(Parent, LookupOp, S) of
+		{ok, ChildIno, ChildNode, ParentTimeout, S2} ->
+			case make_entry_param(ChildIno, ChildNode, ParentTimeout) of
+				{ok, EntryParam} ->
+					{#fuse_reply_entry{fuse_entry_param=EntryParam}, S2};
 
-						none ->
-							lookup_new(Parent, ChildOid, GetNode, Timeout, S2)
-					end;
-
-				{error, NewParentCache} ->
+				error ->
 					{
 						#fuse_reply_err{ err = enoent },
-						S#state{inodes=gb_trees:update(Parent,
-							ParentNode#inode{cache=NewParentCache}, Inodes)}
-					};
-
-				error ->
-					{#fuse_reply_err{ err = enoent }, S}
-			end;
-
-		none ->
-			{#fuse_reply_err{ err = enoent }, S}
-	end.
-
-
-lookup_cached(ChildOid, ChildIno, Timeout, #state{inodes=Inodes}=S) ->
-	ChildNode = gb_trees:get(ChildIno, Inodes),
-	case ((ChildNode#inode.ifc)#ifc.getattr)(ChildOid, ChildIno) of
-		{ok, Attr} ->
-			{#fuse_reply_entry{fuse_entry_param=
-				#fuse_entry_param{
-					ino              = ChildIno,
-					generation       = 1,
-					attr_timeout_ms  = ChildNode#inode.timeout,
-					entry_timeout_ms = Timeout,
-					attr             = Attr
-				}},
-				S#state{
-					inodes = gb_trees:update(ChildIno,
-						ChildNode#inode{refcnt=ChildNode#inode.refcnt+1},
-						Inodes)
-				}
-			};
-
-		error ->
-			{#fuse_reply_err{ err = enoent }, S}
-	end.
-
-
-lookup_new(Parent, ChildOid, GetNode, Timeout, #state{inodes=Inodes, cache=Cache, count=Count}=S) ->
-	NewCount = Count+1,
-	case GetNode(ChildOid) of
-		{ok, #inode{ifc=#ifc{getattr=GetAttr}}=ChildNode} ->
-			case GetAttr(ChildOid, NewCount) of
-				{ok, Attr} ->
-					{#fuse_reply_entry{fuse_entry_param=
-						#fuse_entry_param{
-							ino              = NewCount,
-							generation       = 1,
-							attr_timeout_ms  = ChildNode#inode.timeout,
-							entry_timeout_ms = Timeout,
-							attr             = Attr
-						}},
-						S#state{
-							inodes = gb_trees:insert(NewCount,
-								ChildNode#inode{refcnt=1, parent=Parent},
-								Inodes),
-							cache = gb_trees:insert({Parent, ChildOid},
-								NewCount, Cache),
-							count = NewCount
-						}
-					};
-				error ->
-					{#fuse_reply_err{ err = enoent }, S}
-			end;
-
-		error ->
-			{#fuse_reply_err{ err = enoent }, S}
-	end.
-
-
-forget(_, Ino, N, _Cont, #state{inodes=Inodes, cache=Cache} = State) ->
-	NewState = case gb_trees:lookup(Ino, Inodes) of
-		{value, #inode{refcnt=RefCnt} = Node} ->
-			case RefCnt - N of
-				0 ->
-					Key = {Node#inode.parent, Node#inode.oid},
-					State#state{
-						inodes = gb_trees:delete(Ino, Inodes),
-						cache  = gb_trees:delete(Key, Cache)
-					};
-
-				NewRef ->
-					State#state{
-						inodes = gb_trees:update(Ino, Node#inode{refcnt=NewRef}, Inodes)
+						do_forget(ChildIno, 1, S2)
 					}
 			end;
 
-		none ->
-			State
+		{error, Error, S2} ->
+			{#fuse_reply_err{ err = Error }, S2}
 	end,
+	?DEBUG(io:format("lookup(~p, ~s) -> ~p~n", [Parent, Name, element(1, Reply)])),
+	Reply.
+
+
+forget(_, Ino, N, _Cont, State) ->
+	NewState = do_forget(Ino, N, State),
 	{#fuse_reply_none{}, NewState}.
 
 
@@ -276,6 +283,7 @@ readdir(_Ctx, _Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
 		end,
 		{0, Size},
 		safe_nthtail(Offset, Entries)),
+	?DEBUG(io:format("readdir(~p) -> ~p~n", [Ino, DirEntryList])),
 	{#fuse_reply_direntrylist{direntrylist = DirEntryList}, S}.
 
 
@@ -283,27 +291,71 @@ releasedir(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{dirs=Dirs} = S) ->
 	{#fuse_reply_err{err=ok}, S#state{dirs=gb_trees:delete(Id, Dirs)}}.
 
 
-open(_, Ino, Fi, _Cont, #state{inodes=Inodes, files=Files} = S) ->
-	case gb_trees:lookup(Ino, Inodes) of
+open(_, Ino, Fi, _Cont, #state{inodes=Inodes} = S) ->
+	Reply = case gb_trees:lookup(Ino, Inodes) of
 		{value, #inode{oid=Oid, ifc=#ifc{open=Open}}} ->
 			case Open(Oid, Fi#fuse_file_info.flags) of
 				{ok, Handler} ->
-					Id = case gb_trees:is_empty(Files) of
-						true  -> 1;
-						false -> {Max, _} = gb_trees:largest(Files), Max+1
-					end,
+					{Id, S2} = add_file_handler(Handler, S),
 					{
 						#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{fh = Id}},
-						S#state{ files = gb_trees:enter(Id, Handler, Files) }
+						S2
 					};
 
 				{error, Error} ->
-					io:format("Open failed with: ~p~n", [Error]),
 					{#fuse_reply_err{ err = Error }, S}
 			end;
 
 		none ->
 			{#fuse_reply_err{ err = enoent }, S}
+	end,
+	?DEBUG(io:format("open(~p, ~p) -> ~p~n", [Ino, Fi, element(1, Reply)])),
+	Reply.
+
+
+create(_, Parent, Name, _Mode, Fi, _Cont, S) ->
+	LookupOp = fun(ParentNode) ->
+		#inode{oid=Oid, ifc=#ifc{create=Create}, cache=Cache} = ParentNode,
+		Create(Oid, Name, Cache)
+	end,
+	Reply = case do_lookup(Parent, LookupOp, S) of
+		{ok, ChildIno, ChildNode, ParentTimeout, S2} ->
+			create_open(ChildIno, ChildNode, ParentTimeout, Fi, S2);
+
+		{error, Error, S2} ->
+			{#fuse_reply_err{ err = Error }, S2}
+	end,
+	?DEBUG(io:format("create(~s, ~p) -> ~p~n", [Name, Fi, element(1, Reply)])),
+	Reply.
+
+
+create_open(ChildIno, ChildNode, ParentTimeout, Fi, S) ->
+	case make_entry_param(ChildIno, ChildNode, ParentTimeout) of
+		{ok, EntryParam} ->
+			#inode{oid=Oid, ifc=#ifc{open=Open}} = ChildNode,
+			case Open(Oid, Fi#fuse_file_info.flags) of
+				{ok, Handler} ->
+					{Id, S2} = add_file_handler(Handler, S),
+					{
+						#fuse_reply_create{
+							fuse_file_info   = Fi#fuse_file_info{fh=Id},
+							fuse_entry_param = EntryParam
+						},
+						S2
+					};
+
+				{error, Error} ->
+					{
+						#fuse_reply_err{ err = Error },
+						do_forget(ChildIno, 1, S)
+					}
+			end;
+
+		error ->
+			{
+				#fuse_reply_err{ err = enoent },
+				do_forget(ChildIno, 1, S)
+			}
 	end.
 
 
@@ -338,7 +390,155 @@ write(_, _Ino, Data, Offset, Fi, _Cont, #state{files=Files} = S) ->
 release(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{files=Files} = S) ->
 	#handler{release=Release, changed=Changed} = gb_trees:get(Id, Files),
 	Release(Changed),
+	?DEBUG(io:format("release(~p)~n", [Id])),
 	{#fuse_reply_err{err=ok}, S#state{files=gb_trees:delete(Id, Files)}}.
+
+
+setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
+	Reply = case Fi of
+		null ->
+			case gb_trees:lookup(Ino, Inodes) of
+				{value, #inode{oid=Oid, timeout=Timeout, ifc=#ifc{setattr=SetAttr}}} ->
+					case SetAttr(Oid, Ino, Attr, ToSet) of
+						{ok, NewAttr} ->
+							{#fuse_reply_attr{attr=NewAttr, attr_timeout_ms=Timeout}, S};
+
+						{error, Error} ->
+							{#fuse_reply_err{err=Error}, S}
+					end;
+				none ->
+					{#fuse_reply_err{ err = enoent }, S}
+			end;
+
+		#fuse_file_info{} ->
+			{#fuse_reply_err{err = enosys}, S}
+	end,
+	?DEBUG(io:format("setattr(~p, ~p, ~p, ~p) -> ~p~n", [Ino, Attr, ToSet, Fi, element(1, Reply)])),
+	Reply.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Common FUSE functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+do_lookup(Parent, LookupOp, S) ->
+	#state{inodes=Inodes, cache=Cache} = S,
+	case gb_trees:lookup(Parent, Inodes) of
+		{value, ParentNode} ->
+			case LookupOp(ParentNode) of
+				{entry, ChildOid, NewParentCache} ->
+					S2 = S#state{inodes=gb_trees:update(Parent,
+						ParentNode#inode{cache=NewParentCache}, Inodes)},
+					#inode{timeout=Timeout, ifc=#ifc{getnode=GetNode}} = ParentNode,
+					case gb_trees:lookup({Parent, ChildOid}, Cache) of
+						{value, ChildIno} ->
+							do_lookup_cached(ChildIno, Timeout, S2);
+
+						none ->
+							do_lookup_new(Parent, ChildOid, GetNode, Timeout, S2)
+					end;
+
+				{error, Error, NewParentCache} ->
+					{
+						error,
+						Error,
+						S#state{inodes=gb_trees:update(Parent,
+							ParentNode#inode{cache=NewParentCache}, Inodes)}
+					};
+
+				{error, Error} ->
+					{error, Error, S}
+			end;
+
+		none ->
+			{error, enoent, S}
+	end.
+
+
+do_lookup_cached(ChildIno, Timeout, #state{inodes=Inodes}=S) ->
+	ChildNode = gb_trees:get(ChildIno, Inodes),
+	S2 = S#state{
+		inodes = gb_trees:update(
+			ChildIno,
+			ChildNode#inode{refcnt=ChildNode#inode.refcnt+1},
+			Inodes)
+	},
+	{ok, ChildIno, ChildNode, Timeout, S2}.
+
+
+do_lookup_new(ParentIno, ChildOid, GetNode, Timeout, S) ->
+	#state{inodes=Inodes, cache=Cache, count=Count} = S,
+	NewCount = Count+1,
+	case GetNode(ChildOid) of
+		{ok, ChildNode} ->
+			S2 = S#state{
+				inodes = gb_trees:insert(
+					NewCount,
+					ChildNode#inode{refcnt=1, parent=ParentIno},
+					Inodes),
+				cache = gb_trees:insert({ParentIno, ChildOid}, NewCount, Cache),
+				count = NewCount
+			},
+			{ok, NewCount, ChildNode, Timeout, S2};
+
+		error ->
+			{error, enoent, S}
+	end.
+
+
+make_entry_param(ChildIno, ChildNode, ParentTimeout) ->
+	#inode{
+		oid     = ChildOid,
+		ifc     = #ifc{ getattr = GetAttr },
+		timeout = ChildTimeout
+	} = ChildNode,
+	case GetAttr(ChildOid, ChildIno) of
+		{ok, Attr} ->
+			{
+				ok,
+				#fuse_entry_param{
+					ino              = ChildIno,
+					generation       = 1,
+					attr_timeout_ms  = ChildTimeout,
+					entry_timeout_ms = ParentTimeout,
+					attr             = Attr
+				}
+			};
+
+		{error, _} ->
+			error
+	end.
+
+
+do_forget(Ino, N, #state{inodes=Inodes, cache=Cache} = State) ->
+	case gb_trees:lookup(Ino, Inodes) of
+		{value, #inode{refcnt=RefCnt} = Node} ->
+			case RefCnt - N of
+				0 ->
+					?DEBUG(io:format("forget(~p)~n", [Ino])),
+					Key = {Node#inode.parent, Node#inode.oid},
+					State#state{
+						inodes = gb_trees:delete(Ino, Inodes),
+						cache  = gb_trees:delete(Key, Cache)
+					};
+
+				NewRef ->
+					State#state{
+						inodes = gb_trees:update(Ino, Node#inode{refcnt=NewRef}, Inodes)
+					}
+			end;
+
+		none ->
+			State
+	end.
+
+
+add_file_handler(Handler, #state{files=Files} = S) ->
+	Id = case gb_trees:is_empty(Files) of
+		true  -> 1;
+		false -> {Max, _} = gb_trees:largest(Files), Max+1
+	end,
+	{Id, S#state{files = gb_trees:enter(Id, Handler, Files)}}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -349,14 +549,13 @@ root_make_node() ->
 	#inode{
 		refcnt  = 1,
 		parent  = 1,
-		timeout = 1000,
+		timeout = 100000,
 		oid     = root,
 		ifc     = #ifc{
 			getattr = fun(_,_) -> {ok, ?DIRATTR(1)} end,
 			lookup  = fun root_lookup/3,
 			getnode = fun root_getnode/1,
-			opendir = fun root_opendir/2,
-			open    = fun(_, _) -> {error, eacces} end
+			opendir = fun root_opendir/2
 		}
 	}.
 
@@ -367,7 +566,7 @@ root_lookup(root, <<"revs">>, Cache) ->
 root_lookup(root, <<"stores">>, Cache) ->
 	{entry, stores, Cache};
 root_lookup(_, _, _) ->
-	error.
+	{error, enoent}.
 
 root_getnode(docs) ->
 	docs_make_node();
@@ -389,14 +588,11 @@ root_opendir(root, Cache) ->
 
 emptydir_make_node(Oid) ->
 	{ok, #inode{
-		timeout = 1000,
+		timeout = 100000,
 		oid     = Oid,
 		ifc     = #ifc{
 			getattr = fun(_, Ino) -> {ok, ?DIRATTR(Ino)} end,
-			lookup  = fun(_, _, _) -> error end,
-			getnode = fun(_) -> error end,
-			opendir = fun(_, Cache) -> {ok, [], Cache} end,
-			open    = fun(_, _) -> {error, eacces} end
+			opendir = fun(_, Cache) -> {ok, [], Cache} end
 		}
 	}}.
 
@@ -420,14 +616,13 @@ revs_make_node() ->
 
 stores_make_node() ->
 	{ok, #inode{
-		timeout = 5,
+		timeout = 3000,
 		oid     = stores,
 		ifc     = #ifc{
 			getattr = fun(_,Ino) -> {ok, ?DIRATTR(Ino)} end,
 			lookup  = fun stores_lookup/3,
 			getnode = fun stores_getnode/1,
-			opendir = fun stores_opendir/2,
-			open    = fun(_, _) -> {error, eacces} end
+			opendir = fun stores_opendir/2
 		}
 	}}.
 
@@ -450,7 +645,7 @@ stores_lookup(stores, Name, Cache) ->
 		volman:enum())
 	of
 		{value, Oid} -> {entry, Oid, Cache};
-		none         -> error
+		none         -> {error, enoent}
 	end.
 
 
@@ -505,14 +700,14 @@ doc_make_node({doc, Store, Doc} = Oid) ->
 
 doc_make_node_dict(Oid) ->
 	{ok, #inode{
-		timeout = 5,
+		timeout = 1000,
 		oid     = Oid,
 		ifc     = #ifc{
 			getattr = fun dict_getattr/2,
 			lookup  = fun dict_lookup/3,
 			getnode = fun dict_getnode/1,
 			opendir = fun dict_opendir/2,
-			open    = fun(_, _) -> {error, eacces} end
+			create  = fun dict_create/3
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -532,10 +727,10 @@ dict_getattr({doc, Store, Doc}, Ino) ->
 						st_ctime = Mtime
 					}};
 				error ->
-					error
+					{error, enoent}
 			end;
 		error ->
-			error
+			{error, enoent}
 	end.
 
 
@@ -547,11 +742,27 @@ dict_lookup({doc, Store, Doc}, Name, Cache) ->
 					{entry, {doc, Store, ChildDoc}, NewCache};
 
 				_ ->
-					{error, NewCache}
+					{error, enoent, NewCache}
 			end;
 
 		_ ->
-			error
+			{error, enoent}
+	end.
+
+
+dict_create({doc, Store, Doc}, Name, Cache) ->
+	case dict_read_entries(Store, Doc, Cache) of
+		{ok, Entries, NewCache} ->
+			case dict:find(Name, Entries) of
+				{ok, {dlink, ChildDoc, _Revs}} ->
+					{entry, {doc, Store, ChildDoc}, NewCache};
+
+				_ ->
+					{error, eacces, NewCache}
+			end;
+
+		_ ->
+			{error, eacces}
 	end.
 
 
@@ -581,7 +792,7 @@ dict_opendir_filter(Store, {Name, {dlink, Child, _Revs}}) ->
 			case GetAttr(Oid, 0) of
 				{ok, Attr} ->
 					{ok, #direntry{name=binary_to_list(Name), stat=Attr}};
-				error ->
+				{error, _} ->
 					skip
 			end;
 		error ->
@@ -616,14 +827,13 @@ dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 
 doc_make_node_set(Oid) ->
 	{ok, #inode{
-		timeout = 5,
+		timeout = 1000,
 		oid     = Oid,
 		ifc     = #ifc{
 			getattr = fun set_getattr/2,
 			lookup  = fun set_lookup/3,
 			getnode = fun set_getnode/1,
-			opendir = fun set_opendir/2,
-			open    = fun(_, _) -> {error, eacces} end
+			opendir = fun set_opendir/2
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -643,10 +853,10 @@ set_getattr({doc, Store, Doc}, Ino) ->
 						st_ctime = Mtime
 					}};
 				error ->
-					error
+					{error, enoent}
 			end;
 		error ->
-			error
+			{error, enoent}
 	end.
 
 
@@ -655,11 +865,11 @@ set_lookup({doc, Store, Doc}, Name, Cache) ->
 		{ok, Entries, NewCache} ->
 			case find_entry(fun(E) -> set_lookup_cmp(Name, E) end, Entries) of
 				{value, Oid} -> {entry, Oid, NewCache};
-				none         -> {error, NewCache} % TODO: look up alternative names
+				none         -> {error, enoent, NewCache} % TODO: look up alternative names
 			end;
 
 		_ ->
-			error
+			{error, enoent}
 	end.
 
 
@@ -696,7 +906,7 @@ set_opendir_filter({Name, {doc, _, _}=Oid}) ->
 			case GetAttr(Oid, 0) of
 				{ok, Attr} ->
 					{ok, #direntry{name=Name, stat=Attr}};
-				error ->
+				{error, _} ->
 					skip
 			end;
 		error ->
@@ -795,13 +1005,11 @@ set_sanitize_entry(Title, Oids, SuffixLen) ->
 
 doc_make_node_file(Oid) ->
 	{ok, #inode{
-		timeout = 5,
+		timeout = 1000,
 		oid     = Oid,
 		ifc     = #ifc{
 			getattr = fun file_getattr/2,
-			lookup  = fun(_, _, _) -> error end,
-			getnode = fun(_, _) -> error end,
-			opendir = fun(_, _) -> {errror, enotdir} end,
+			setattr = fun file_setattr/4,
 			open    = fun file_open/2
 		}
 	}}.
@@ -810,36 +1018,77 @@ doc_make_node_file(Oid) ->
 file_getattr({doc, Store, Doc}, Ino) ->
 	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
-			case store:stat(Store, Rev) of
-				{ok, _Flags, Parts, _Parents, Mtime, _Uti} ->
-					Size = case find_entry(
-						fun({FCC, Size, _Hash}) ->
-							case FCC of
-								<<"FILE">> -> {ok, Size};
-								_          -> error
-							end
-						end,
-						Parts)
-					of
-						{value, FileSize} -> FileSize;
-						none              -> 0
-					end,
-					{ok, #stat{
-						st_ino   = Ino,
-						st_mode  = ?S_IFREG bor 8#0666,
-						st_nlink = 1,
-						st_atime = Mtime,
-						st_mtime = Mtime,
-						st_ctime = Mtime,
-						st_size  = Size
-					}};
+			file_getattr_rev(Store, Rev, Ino);
+		error ->
+			{error, enoent}
+	end.
 
-				error ->
-					error
+
+file_getattr_rev(Store, Rev, Ino) ->
+	case store:stat(Store, Rev) of
+		{ok, _Flags, Parts, _Parents, Mtime, _Uti} ->
+			Size = case find_entry(
+				fun({FCC, Size, _Hash}) ->
+					case FCC of
+						<<"FILE">> -> {ok, Size};
+						_          -> error
+					end
+				end,
+				Parts)
+			of
+				{value, FileSize} -> FileSize;
+				none              -> 0
+			end,
+			{ok, #stat{
+				st_ino   = Ino,
+				st_mode  = ?S_IFREG bor 8#0666,
+				st_nlink = 1,
+				st_atime = Mtime,
+				st_mtime = Mtime,
+				st_ctime = Mtime,
+				st_size  = Size
+			}};
+
+		error ->
+			{error, enoent}
+	end.
+
+
+file_setattr({doc, Store, Doc}, Ino, Attr, ToSet) ->
+	if
+		(ToSet band ?FUSE_SET_ATTR_SIZE) =/= 0 ->
+			file_truncate(Store, Doc, Ino, Attr#stat.st_size);
+
+		true ->
+			{error, enosys}
+	end.
+
+
+file_truncate(Store, Doc, Ino, Size) ->
+	case store:lookup(Store, Doc) of
+		{ok, Rev} ->
+			case store:update(Store, Doc, Rev, keep) of
+				{ok, Handle} ->
+					case store:truncate(Handle, <<"FILE">>, Size) of
+						ok ->
+							case file_release_commit(Doc, Handle, []) of
+								{ok, CurRev} ->
+									file_getattr_rev(Store, CurRev, Ino);
+								Error ->
+									Error
+							end;
+
+						{error, _} = Error ->
+							store:abort(Handle),
+							Error
+					end;
+
+				{error, _} ->
+					{error, enoent}
 			end;
 
 		error ->
-			error
+			{error, enoent}
 	end.
 
 
@@ -890,22 +1139,24 @@ file_write(Handle, Data, Offset) ->
 
 file_release(Handle, Doc, Changed) ->
 	case Changed of
-		false ->
-			store:abort(Handle);
+		false -> store:abort(Handle);
+		true  -> file_release_commit(Doc, Handle, [])
+	end.
 
-		true ->
-			case store:commit(Handle, util:get_time(), []) of
-				conflict ->
-					case store:lookup(Doc) of
-						{ok, CurRev} ->
-							store:commit(Handle, util:get_time(), [CurRev]);
-						error ->
-							error
-					end;
 
-				_Else ->
-					ok
-			end
+file_release_commit(Doc, Handle, MergeRevs) ->
+	case store:commit(Handle, util:get_time(), MergeRevs) of
+		{ok, _Rev} = Ok ->
+			Ok;
+
+		conflict ->
+			case store:lookup(Doc) of
+				{ok, CurRev} -> file_release_commit(Doc, Handle, [CurRev]);
+				error        -> {error, enoent}
+			end;
+
+		{error, _} = Error ->
+			Error
 	end.
 
 
