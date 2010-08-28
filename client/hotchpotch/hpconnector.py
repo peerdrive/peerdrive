@@ -162,10 +162,10 @@ class _HpConnector(object):
 		else:
 			return genericReply(reply, raw)
 
-	def update(self, doc, rev, uti='', stores=[]):
+	def update(self, doc, rev, mergeRevs=[], uti='', stores=[]):
 		checkUuid(doc)
 		checkUuid(rev)
-		body = doc + rev + encodeUuidList(stores) + uti
+		body = doc + rev + encodeUuidList(mergeRevs) + encodeUuidList(stores) + uti
 		(reply, raw) = self._rpc(_HpConnector.UPDATE_REQ, body)
 		if reply == _HpConnector.UPDATE_CNF:
 			return HpHandle(self, raw, doc, rev)
@@ -618,19 +618,19 @@ class HpHandle(object):
 		(reply, empty) = self.connector._rpc(_HpConnector.TRUNC_REQ, request)
 		return genericReply(reply, empty)
 
-	def commit(self, retry=False, mergeRevs=[]):
+	def commit(self, retry=False, rebaseRevs=[]):
 		if not self.active:
 			raise IOError('Document already immutable!')
 		self.active = False
-		body = self.cookie + encodeUuidList(mergeRevs)
+		body = self.cookie + encodeUuidList(rebaseRevs)
 		(reply, raw) = self.connector._rpc(_HpConnector.COMMIT_REQ, body)
 		if reply == _HpConnector.COMMIT_CNF:
 			self.rev = raw
 			return True
 		else:
 			genericReply(reply, raw)
+			self.active = True
 			if retry:
-				self.active = True
 				return False
 			else:
 				self.abort()

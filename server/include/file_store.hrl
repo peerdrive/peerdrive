@@ -20,8 +20,7 @@
 	server,     % server process pid
 	flags,      % flags of object
 	doc,        % document uuid
-	baserevs,   % base revision of object when writing started
-	mergerevs,  % additional merge revisions
+	baserevs,   % base revision of object
 	uti,        % UTI of object
 	orig,       % dict: FourCC --> Hash
 	new,        % dict: FourCC --> {FileName, IODevice}

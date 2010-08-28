@@ -472,7 +472,7 @@ merge_hpsd_parts(
 
 
 merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData) ->
-	case store:update(Store, Doc, FromRev, Uti) of
+	case store:update(Store, Doc, FromRev, [ToRev], Uti) of
 		{ok, Writer} ->
 			Written = lists:foldl(
 				fun({Part, Data}, Result) ->
@@ -490,7 +490,7 @@ merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData) ->
 				NewData),
 			case Written of
 				ok ->
-					case store:commit(Writer, util:get_time(), [ToRev]) of
+					case store:commit(Writer, util:get_time(), keep) of
 						{ok, _Rev} -> ok;
 						{error, _} = Error -> Error
 					end;

@@ -1067,11 +1067,11 @@ file_setattr({doc, Store, Doc}, Ino, Attr, ToSet) ->
 file_truncate(Store, Doc, Ino, Size) ->
 	case store:lookup(Store, Doc) of
 		{ok, Rev} ->
-			case store:update(Store, Doc, Rev, keep) of
+			case store:update(Store, Doc, Rev, [], keep) of
 				{ok, Handle} ->
 					case store:truncate(Handle, <<"FILE">>, Size) of
 						ok ->
-							case file_release_commit(Doc, Handle, []) of
+							case file_release_commit(Doc, Handle) of
 								{ok, CurRev} ->
 									file_getattr_rev(Store, CurRev, Ino);
 								Error ->
@@ -1097,7 +1097,7 @@ file_open({doc, Store, Doc}, Flags) ->
 		{ok, Rev} ->
 			Reply = if
 				(Flags band ?O_ACCMODE) =/= ?O_RDONLY ->
-					store:update(Store, Doc, Rev, keep);
+					store:update(Store, Doc, Rev, [], keep);
 				true ->
 					store:peek(Store, Rev)
 			end,
@@ -1140,9 +1140,12 @@ file_write(Handle, Data, Offset) ->
 file_release(Handle, Doc, Changed) ->
 	case Changed of
 		false -> store:abort(Handle);
-		true  -> file_release_commit(Doc, Handle, [])
+		true  -> file_release_commit(Doc, Handle)
 	end.
 
+
+file_release_commit(Doc, Handle) ->
+	file_release_commit(Doc, Handle, keep).
 
 file_release_commit(Doc, Handle, MergeRevs) ->
 	case store:commit(Handle, util:get_time(), MergeRevs) of

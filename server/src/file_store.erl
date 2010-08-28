@@ -22,7 +22,7 @@
 
 % Store interface
 -export([guid/1, contains/2, stat/2, lookup/2, put_doc/4, put_rev_start/3,
-	peek/2, fork/4, update/4,
+	peek/2, fork/4, update/5,
 	delete_rev/2, delete_doc/2, sync_get_changes/2, sync_set_anchor/3]).
 
 % Functions used by helper processes (reader/writer/...)
@@ -127,9 +127,9 @@ fork(Store, Doc, StartRev, Uti) ->
 	gen_server:call(Store, {fork, Doc, StartRev, Uti}).
 
 %% @doc Write to an existing document
-%% @see store:update/4
-update(Store, Doc, StartRev, Uti) ->
-	gen_server:call(Store, {update, Doc, StartRev, Uti}).
+%% @see store:update/5
+update(Store, Doc, StartRev, MergeRevs, Uti) ->
+	gen_server:call(Store, {update, Doc, StartRev, MergeRevs, Uti}).
 
 %% @doc Delete a document
 %% @see store:delete_doc/2
@@ -279,9 +279,9 @@ handle_call_internal({fork, Doc, StartRev, Uti}, From, S) ->
 	{S2, Reply} = do_write_start_fork(S, Doc, StartRev, Uti, User),
 	{reply, Reply, S2};
 
-handle_call_internal({update, Doc, StartRev, Uti}, From, S) ->
+handle_call_internal({update, Doc, StartRev, MergeRevs, Uti}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_update(S, Doc, StartRev, Uti, User),
+	{S2, Reply} = do_write_start_update(S, Doc, StartRev, MergeRevs, Uti, User),
 	{reply, Reply, S2};
 
 handle_call_internal({delete_rev, Rev}, _From, S) ->
@@ -443,7 +443,7 @@ make_interface(Pid) ->
 		put_rev_start      = fun put_rev_start/3,
 		peek               = fun peek/2,
 		fork               = fun fork/4,
-		update             = fun update/4,
+		update             = fun update/5,
 		delete_rev         = fun delete_rev/2,
 		delete_doc         = fun delete_doc/2,
 		sync_get_changes   = fun sync_get_changes/2,
@@ -664,7 +664,6 @@ do_write_start_fork(S, Doc, StartRev, Uti, User) ->
 				flags     = 0,
 				doc       = Doc,
 				baserevs  = [],
-				mergerevs = [],
 				uti       = RealUti,
 				orig      = dict:new(),
 				new       = dict:new(),
@@ -695,7 +694,6 @@ do_write_start_fork(S, Doc, StartRev, Uti, User) ->
 						flags     = Object#object.flags,
 						doc       = Doc,
 						baserevs  = [Rev],
-						mergerevs = [],
 						uti       = RealUti,
 						orig      = Parts,
 						new       = dict:new(),
@@ -708,7 +706,7 @@ do_write_start_fork(S, Doc, StartRev, Uti, User) ->
 
 
 % returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
-do_write_start_update(S, Doc, StartRev, Uti, User) ->
+do_write_start_update(S, Doc, StartRev, MergeRevs, Uti, User) ->
 	case dict:find(Doc, S#state.uuids) of
 		{ok, {StartRev, _Gen}} ->
 			case dict:fetch(StartRev, S#state.objects) of
@@ -726,8 +724,7 @@ do_write_start_update(S, Doc, StartRev, Uti, User) ->
 						server    = self(),
 						flags     = Object#object.flags,
 						doc       = Doc,
-						baserevs  = [StartRev],
-						mergerevs = [],
+						baserevs  = [StartRev] ++ MergeRevs,
 						uti       = RealUti,
 						orig      = Parts,
 						new       = dict:new(),

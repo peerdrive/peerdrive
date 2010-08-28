@@ -19,7 +19,7 @@
 -export([guid/1, contains/2, lookup/2, stat/2]).
 -export([put_doc/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
--export([abort/1, commit/3, fork/4, peek/2, read/4, truncate/3, update/4, write/4]).
+-export([abort/1, commit/3, fork/4, peek/2, read/4, truncate/3, update/5, write/4]).
 -export([delete_rev/2, delete_doc/2]).
 -export([sync_get_changes/2, sync_set_anchor/3]).
 -export([hash_object/1]).
@@ -97,15 +97,16 @@ fork(#store{this=Store, fork=Fork}, Doc, StartRev, Uti) ->
 %% The new revision will start with the content of the StartRev revision. If
 %% Doc points already to another revision then the call will fail.
 %%
-%% @spec update(Store, Doc, StartRev, Uti) -> {ok, Handle} | {error, Reason}
+%% @spec update(Store, Doc, StartRev, MergeRevs, Uti) -> {ok, Handle} | {error, Reason}
 %%        Store = #store
 %%        Handle = #handle
 %%        Doc = guid()
-%%        StartRevs = guid()
+%%        StartRev = guid()
+%%        MergeRevs = [guid()]
 %%        Uti = keep | binary()
 %%        Reason = ecode()
-update(#store{this=Store, update=Update}, Doc, StartRev, Uti) ->
-	Update(Store, Doc, StartRev, Uti).
+update(#store{this=Store, update=Update}, Doc, StartRev, MergeRevs, Uti) ->
+	Update(Store, Doc, StartRev, MergeRevs, Uti).
 
 %% @doc Read a part of a document
 %%
@@ -126,8 +127,8 @@ truncate(#handle{this=Handle, truncate=Truncate}, Part, Offset) ->
 	Truncate(Handle, Part, Offset).
 
 % {ok, Rev} | conflict | {error, Reason}
-commit(#handle{this=Handle, commit=Commit}, Mtime, MergeRevs) ->
-	Commit(Handle, Mtime, MergeRevs).
+commit(#handle{this=Handle, commit=Commit}, Mtime, RebaseRevs) ->
+	Commit(Handle, Mtime, RebaseRevs).
 
 % ok
 abort(#handle{this=Handle, abort=Abort}) ->

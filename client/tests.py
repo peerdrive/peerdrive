@@ -33,7 +33,7 @@ class TestSync(unittest.TestCase):
 			doc = w.getDoc()
 			rev = w.getRev()
 
-		with c.update(doc, rev, '', [self.store1]) as w:
+		with c.update(doc, rev, stores=[self.store1]) as w:
 			w.write('FILE', 'update')
 			w.commit()
 			rev = w.getRev()
@@ -55,12 +55,12 @@ class TestSync(unittest.TestCase):
 			doc = w.getDoc()
 			rev = w.getRev()
 
-		with c.update(doc, rev, '', [self.store1]) as w:
+		with c.update(doc, rev, stores=[self.store1]) as w:
 			w.write('FILE', 'first')
 			w.commit()
 			rev1 = w.getRev()
 
-		with c.update(doc, rev, '', [self.store2]) as w:
+		with c.update(doc, rev, stores=[self.store2]) as w:
 			w.write('FILE', 'second')
 			w.commit()
 			rev2 = w.getRev()

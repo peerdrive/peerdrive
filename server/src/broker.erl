@@ -19,7 +19,7 @@
 -export([
 	delete_rev/2, delete_doc/2, fork/3, lookup/1,
 	read/4, peek/2, replicate_rev/2, replicate_doc/2,
-	stat/1, update/4, abort/1, commit/2, write/4,
+	stat/1, update/5, abort/1, commit/2, write/4,
 	truncate/3, sync/2]).
 
 
@@ -119,16 +119,16 @@ fork(StartRev, Stores, Uti) ->
 %% than one store then only the stores pointing to Rev will be updated. All
 %% affected stores are updated simultaniously.
 %%
-%% @spec update(Doc, Rev, Stores, Uti) -> {ok, Handle} | {error, Reason}
+%% @spec update(Doc, Rev, MergeRevs, Stores, Uti) -> {ok, Handle} | {error, Reason}
 %%       Doc, Rev = guid()
-%%       Stores = [guid()]
+%%       MergeRevs, Stores = [guid()]
 %%       Uti = binary()
 %%       Handle = handle()
 %%       Reason = ecode()
-update(Doc, Rev, Stores, Uti) ->
+update(Doc, Rev, MergeRevs, Stores, Uti) ->
 	User = self(),
 	StoreIfcs = get_store_ifcs(Stores),
-	broker_io:start({update, Doc, Rev, StoreIfcs, Uti, User}).
+	broker_io:start({update, Doc, Rev, MergeRevs, StoreIfcs, Uti, User}).
 
 
 %% @doc Read a part of a document
@@ -149,8 +149,8 @@ truncate(Handle, Part, Offset) ->
 	broker_io:truncate(Handle, Part, Offset).
 
 % {ok, Rev} | conflict | {error, Reason}
-commit(Handle, MergeRevs) ->
-	broker_io:commit(Handle, MergeRevs).
+commit(Handle, RebaseRevs) ->
+	broker_io:commit(Handle, RebaseRevs).
 
 % ok
 abort(Handle) ->

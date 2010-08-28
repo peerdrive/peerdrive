@@ -47,8 +47,8 @@ truncate(Broker, Part, Offset) ->
 	gen_server:call(Broker, {truncate, Part, Offset}).
 
 % {ok, Hash} | conflict | {error, Reason}
-commit(Broker, MergeRevs) ->
-	gen_server:call(Broker, {commit, MergeRevs}).
+commit(Broker, RebaseRevs) ->
+	gen_server:call(Broker, {commit, RebaseRevs}).
 
 % ok
 abort(Broker) ->
@@ -82,8 +82,8 @@ init({fork, Doc, StartRev, Stores, Uti, User}) ->
 			{stop, Reason}
 	end;
 
-init({update, Doc, Rev, Stores, Uti, User}) ->
-	case do_update(Doc, Rev, Stores, Uti) of
+init({update, Doc, Rev, MergeRevs, Stores, Uti, User}) ->
+	case do_update(Doc, Rev, MergeRevs, Stores, Uti) of
 		{ok, Handles} ->
 			process_flag(trap_exit, true),
 			link(User),
@@ -111,8 +111,8 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 	distribute(fun(Handle) -> store:truncate(Handle, Part, Offset) end, S);
 
 % {ok, Rev} | conflict | {error, Reason}
-handle_call({commit, MergeRevs}, _From, S) ->
-	do_commit(MergeRevs, S);
+handle_call({commit, RebaseRevs}, _From, S) ->
+	do_commit(RebaseRevs, S);
 
 % ok
 handle_call(abort, _From, S) ->
@@ -187,8 +187,8 @@ do_fork_loop(Doc, StartRev, Uti, [Store | Stores], Handles, Errors) ->
 	end.
 
 
-do_update(Doc, Rev, Stores, Uti) ->
-	case do_update_loop(Doc, Rev, Uti, Stores, [], []) of
+do_update(Doc, Rev, MergeRevs, Stores, Uti) ->
+	case do_update_loop(Doc, Rev, MergeRevs, Uti, Stores, [], []) of
 		{[], Errors} ->
 			{error, consolidate_errors(Errors)};
 		{Handles, _} ->
@@ -196,23 +196,23 @@ do_update(Doc, Rev, Stores, Uti) ->
 	end.
 
 
-do_update_loop(_Doc, _Rev, _Uti, [], Handles, Errors) ->
+do_update_loop(_Doc, _Rev, _MergeRevs, _Uti, [], Handles, Errors) ->
 	{Handles, Errors};
 
-do_update_loop(Doc, Rev, Uti, [Store | Stores], Handles, Errors) ->
-	case store:update(Store, Doc, Rev, Uti) of
+do_update_loop(Doc, Rev, MergeRevs, Uti, [Store | Stores], Handles, Errors) ->
+	case store:update(Store, Doc, Rev, MergeRevs, Uti) of
 		{ok, Handle} ->
-			do_update_loop(Doc, Rev, Uti, Stores, [Handle|Handles], Errors);
+			do_update_loop(Doc, Rev, MergeRevs, Uti, Stores, [Handle|Handles], Errors);
 		{error, Reason} ->
-			do_update_loop(Doc, Rev, Uti, Stores, Handles, [Reason|Errors])
+			do_update_loop(Doc, Rev, MergeRevs, Uti, Stores, Handles, [Reason|Errors])
 	end.
 
 
-do_commit(MergeRevs, S) ->
+do_commit(RebaseRevs, S) ->
 	Mtime = util:get_time(),
 	{Revs, ConflictHandles, Errors} = lists:foldl(
 		fun(Handle, {AccRevs, AccConflicts, AccErrors}) ->
-			case store:commit(Handle, Mtime, MergeRevs) of
+			case store:commit(Handle, Mtime, RebaseRevs) of
 				{ok, Rev}       -> {[Rev|AccRevs], AccConflicts, AccErrors};
 				conflict        -> {AccRevs, [Handle|AccConflicts], AccErrors};
 				{error, Reason} -> {AccRevs, AccConflicts, [Reason|AccErrors]}

@@ -59,7 +59,7 @@ Body =
 	PEEK_CNF            Cookie:32
 	FORK_REQ            Rev:128, StoreCount:8, [Store:128], UTI...
 	FORK_CNF            Cookie:32, Doc:128
-	UPDATE_REQ          Doc:128, Rev:128, StoreCount:8, [Store:128], UTI...
+	UPDATE_REQ          Doc:128, Rev:128, MergeRevsCount:8, [MergeRev:128], StoreCount:8, [Store:128], UTI...
 	UPDATE_CNF          Cookie:32
 
 	READ_REQ            Cookie:32, Part:32, Offset:64, Length:32
@@ -67,7 +67,7 @@ Body =
 	TRUNC_REQ           Cookie:32, Part:32, Offset:64
 	WRITE_REQ           Cookie:32, Part:32, Offset:64, Data...
 
-	COMMIT_REQ          Cookie:32, MergeRevsCount:8, [MergeRev:128]
+	COMMIT_REQ          Cookie:32, RebaseRevsCount:8, [RebaseRev:128]
 	COMMIT_CNF          Rev:128
 	ABORT_REQ           Cookie:32
 

@@ -159,13 +159,14 @@ handle_packet(Packet, S) ->
 
 		?UPDATE_REQ ->
 			<<Doc:16/binary, Rev:16/binary, Body1/binary>> = Body,
-			{Stores, EncUti} = parse_revisions(Body1),
+			{MergeRevs, Body2} = parse_revisions(Body1),
+			{Stores, EncUti} = parse_revisions(Body2),
 			Uti = case EncUti of
 				<<>> -> keep;
 				_    -> EncUti
 			end,
 			start_worker(S, fun(Cookie) -> do_update(Cookie, RetPath, Doc, Rev,
-				Stores, Uti) end);
+				MergeRevs, Stores, Uti) end);
 
 		?WATCH_ADD_REQ ->
 			<<EncType:8, Hash:16/binary>> = Body,
@@ -405,8 +406,8 @@ do_fork(Cookie, RetPath, Rev, Stores, Uti) ->
 	end.
 
 
-do_update(Cookie, RetPath, Doc, Rev, Stores, Uti) ->
-	case broker:update(Doc, Rev, Stores, Uti) of
+do_update(Cookie, RetPath, Doc, Rev, MergeRevs, Stores, Uti) ->
+	case broker:update(Doc, Rev, MergeRevs, Stores, Uti) of
 		{ok, Handle} ->
 			send_reply(RetPath, ?UPDATE_CNF, <<Cookie:32/little>>),
 			io_loop(Handle);
@@ -444,8 +445,12 @@ io_loop(Handle) ->
 			send_generic_reply(RetPath, Reply);
 
 		{?COMMIT_REQ, ReqData, RetPath} ->
-			{MergeRevs, <<>>} = parse_revisions(ReqData),
-			case broker:commit(Handle, MergeRevs) of
+			{RawRebaseRevs, <<>>} = parse_revisions(ReqData),
+			RebaseRevs = case RawRebaseRevs of
+				[] -> keep;
+				_  -> RawRebaseRevs
+			end,
+			case broker:commit(Handle, RebaseRevs) of
 				{ok, Rev} ->
 					send_reply(RetPath, ?COMMIT_CNF, Rev);
 

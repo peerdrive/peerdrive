@@ -156,12 +156,14 @@ Hotchpotch clients manipulate documents through a high level API...
 			  try on all mounted stores where Rev exists.
 	- Uti: Uti of the new document. If not given keep value of starting
 		   revision.
-- update(Doc, Rev, Stores, Uti, Preliminary) -- Udate a document
+- update(Doc, BaseRev, MergeRevs, Stores, Uti, Preliminary) -- Udate a document
 	- Doc: Document to be updated
-	- Rev: Current revision of the document which will be updated. At
-		   least one store must point to this revision or the operation
-		   will fail immediately. Any store which points to another
-		   revision will not be updated.
+	- BaseRev: Current revision of the document which will be updated. At least
+	           one store must point to this revision or the operation will fail
+	           immediately. Any store which points to another revision will not
+	           be updated.
+	- MergeRevs: Additional parent revisions in case of a merge, empty
+				 otherwise.
 	- Stores: Optional set of stores where to search the rev. If empty
 			  search on all mounted stores.
 	- Uti: Uti of the updated document. If not given keep the previous
@@ -178,10 +180,11 @@ Hotchpotch clients manipulate documents through a high level API...
 	- Part: FourCC
 	- Offset
 	- Data
-- commit(Handle, MergeRevs)
+- commit(Handle, Rebase)
 	- Handle: as returned by fork/update
-	- MergeRevs: Additional parent revisions in case of a merge, empty
-				 otherwise. If not given keep the previous value.
+	- Rebase: Optional set of new parent revisions if the commit should be
+	          rebased due to conflicts. If not given the current parent
+	          revisions are kept.
 	- tristate result
 		- success
 			- at least one store has commited

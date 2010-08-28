@@ -52,8 +52,8 @@ write(Writer, Part, Offset, Data) ->
 truncate(Writer, Part, Offset) ->
 	gen_server:call(Writer, {truncate, Part, Offset}).
 
-commit(Writer, Mtime, MergeRevs) ->
-	gen_server:call(Writer, {commit, Mtime, MergeRevs}).
+commit(Writer, Mtime, RebaseRevs) ->
+	gen_server:call(Writer, {commit, Mtime, RebaseRevs}).
 
 abort(Writer) ->
 	gen_server:call(Writer, abort).
@@ -105,8 +105,8 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | conflict | {error, Reason}'
-handle_call({commit, Mtime, MergeRevs}, _From, S) ->
-	do_commit(S, Mtime, MergeRevs);
+handle_call({commit, Mtime, RebaseRevs}, _From, S) ->
+	do_commit(S, Mtime, RebaseRevs);
 
 % returns nothing
 handle_call(abort, _From, S) ->
@@ -224,7 +224,7 @@ close_reader(ClosePart, Readers) ->
 
 % calculate hashes, close&move to correct dir, update document
 % returns {ok, Hash} | conflict | {error, Reason}
-do_commit(S, Mtime, MergeRevs) ->
+do_commit(S, Mtime, RebaseRevs) ->
 	NewParts = dict:fold(
 		% FIXME: this definitely lacks error handling :(
 		fun (Part, {TmpName, IODevice}, Acc) ->
@@ -243,14 +243,14 @@ do_commit(S, Mtime, MergeRevs) ->
 		end,
 		[],
 		S#ws.new),
-	NewMergeRevs = case MergeRevs of
-		keep -> S#ws.mergerevs;
-		_    -> MergeRevs
+	NewBaseRevs = case RebaseRevs of
+		keep -> S#ws.baserevs;
+		_    -> RebaseRevs
 	end,
 	Object = #object{
 		flags   = S#ws.flags,
 		parts   = lists:usort(NewParts ++ dict:to_list(S#ws.orig)),
-		parents = lists:usort(S#ws.baserevs ++ NewMergeRevs),
+		parents = lists:usort(NewBaseRevs),
 		mtime   = Mtime,
 		uti     = S#ws.uti},
 	NewOrig = lists:foldl(
@@ -259,10 +259,10 @@ do_commit(S, Mtime, MergeRevs) ->
 		NewParts),
 	NewLocks = lists:map(fun({_Part, Hash}) -> Hash end, NewParts) ++ S#ws.locks,
 	S2 = S#ws{
-		orig      = NewOrig,
-		new       = dict:new(),
-		locks     = NewLocks,
-		mergerevs = NewMergeRevs},
+		orig     = NewOrig,
+		new      = dict:new(),
+		locks    = NewLocks,
+		baserevs = NewBaseRevs},
 	case file_store:commit(S#ws.server, S#ws.doc, Object) of
 		conflict ->
 			{reply, conflict, S2};
