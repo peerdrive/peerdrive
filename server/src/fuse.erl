@@ -31,7 +31,9 @@
 	getnode = fun(_, _) -> error end,
 	opendir = fun(_, _) -> {errror, enotdir} end,
 	open    = fun(_, _) -> {error, eisdir} end,
-	create  = fun(_, _) -> {error, eisdir} end
+	create  = fun(_, _) -> {error, eisdir} end,
+	link    = fun(_, _, _, _) -> {error, enotdir} end,
+	unlink  = fun(_, _, _) -> {error, enotdir} end
 }).
 -record(handler, {read, write, release, changed=false}).
 
@@ -139,10 +141,6 @@ removexattr(_, Ino, Name, _, S) ->
 	io:format("removexattr(~p, ~s)~n", [Ino, Name]),
 	{#fuse_reply_err{err = enosys}, S}.
 
-rename(_, Parent, Name, NewParent, NewName, _, S) ->
-	io:format("rename(~p, ~s, ~p, ~s)~n", [Parent, Name, NewParent, NewName]),
-	{#fuse_reply_err{err = enosys}, S}.
-
 rmdir(_, Ino, Name, _, S) ->
 	io:format("rmdir(~p, ~s)~n", [Ino, Name]),
 	{#fuse_reply_err{err = enosys}, S}.
@@ -161,10 +159,6 @@ statfs(_, Ino, _, S) ->
 
 symlink(_, Link, Ino, Name, _, S) ->
 	io:format("symlink(~s, ~p, ~s)~n", [Link, Ino, Name]),
-	{#fuse_reply_err{err = enosys}, S}.
-
-unlink(_, Ino, Name, _, S) ->
-	io:format("unlin(~p, ~s)k~n", [Ino, Name]),
 	{#fuse_reply_err{err = enosys}, S}.
 
 
@@ -417,9 +411,79 @@ setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
 	Reply.
 
 
+rename(_, OldParent, OldName, NewParent, NewName, _, S) ->
+	Inodes = S#state.inodes,
+	#inode{
+		oid   = OldOid,
+		ifc   = #ifc{lookup=Lookup},
+		cache = OldCache1
+	} = OldParentNode = gb_trees:get(OldParent, Inodes),
+
+	case Lookup(OldOid, OldName, OldCache1) of
+		{entry, ChildOid, OldCache2} ->
+			#inode{oid=NewOid, ifc=#ifc{link=NewLink}} =
+				gb_trees:get(NewParent, Inodes),
+
+			% first link in new parent
+			case NewLink(NewOid, ChildOid, NewName, OldCache2) of
+				{ok, OldCache3} ->
+					S2 = S#state{inodes=gb_trees:update(OldParent,
+						OldParentNode#inode{cache=OldCache3}, Inodes)},
+					% then unlink form old parent
+					do_unlink(OldParent, OldName, S2);
+
+				{error, Error, OldCache3} ->
+					S2 = S#state{inodes=gb_trees:update(OldParent,
+						OldParentNode#inode{cache=OldCache3}, Inodes)},
+					{#fuse_reply_err{ err = Error }, S2};
+
+				{error, Error} ->
+					S2 = S#state{inodes=gb_trees:update(OldParent,
+						OldParentNode#inode{cache=OldCache2}, Inodes)},
+					{#fuse_reply_err{ err = Error }, S2}
+			end;
+
+		{error, Error, OldCache2} ->
+			S2 = S#state{inodes=gb_trees:update(OldParent,
+				OldParentNode#inode{cache=OldCache2}, Inodes)},
+			{#fuse_reply_err{ err = Error }, S2};
+
+		{error, Error} ->
+			{#fuse_reply_err{ err = Error }, S}
+	end.
+
+
+unlink(_, Parent, Name, _, S) ->
+	do_unlink(Parent, Name, S).
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Common FUSE functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+do_unlink(Parent, Name, S) ->
+	Inodes = S#state.inodes,
+	#inode{
+		oid   = Oid,
+		ifc   = #ifc{unlink=Unlink},
+		cache = Cache
+	} = ParentNode = gb_trees:get(Parent, Inodes),
+	case Unlink(Oid, Name, Cache) of
+		{ok, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(Parent,
+				ParentNode#inode{cache=NewCache}, Inodes)},
+			{#fuse_reply_err{ err = ok }, S2};
+
+		{error, Error, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(Parent,
+				ParentNode#inode{cache=NewCache}, Inodes)},
+			{#fuse_reply_err{ err = Error }, S2};
+
+		{error, Error} ->
+			{#fuse_reply_err{ err = Error }, S}
+	end.
+
 
 do_lookup(Parent, LookupOp, S) ->
 	#state{inodes=Inodes, cache=Cache} = S,
@@ -707,7 +771,9 @@ doc_make_node_dict(Oid) ->
 			lookup  = fun dict_lookup/3,
 			getnode = fun dict_getnode/1,
 			opendir = fun dict_opendir/2,
-			create  = fun dict_create/3
+			create  = fun dict_create/3,
+			link    = fun dict_link/4,
+			unlink  = fun dict_unlink/3
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -720,7 +786,7 @@ dict_getattr({doc, Store, Doc}, Ino) ->
 				{ok, _Flags, _Parts, _Parents, Mtime, _Uti} ->
 					{ok, #stat{
 						st_ino   = Ino,
-						st_mode  = ?S_IFDIR bor 8#0555,
+						st_mode  = ?S_IFDIR bor 8#0777,
 						st_nlink = 1,
 						st_atime = Mtime,
 						st_mtime = Mtime,
@@ -818,6 +884,46 @@ dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 			end;
 		error ->
 			error
+	end.
+
+
+dict_write_entries(Store, Doc, Entries, Cache) ->
+	case write_struct(Store, Doc, <<"HPSD">>, Entries) of
+		{ok, Rev}      -> {ok, {Rev, Entries}};
+		{error, Error} -> {error, Error, Cache}
+	end.
+
+
+dict_link({doc, Store, Doc}, {doc, ChildStore, ChildDoc}, Name, Cache)
+	when Store =:= ChildStore ->
+	case store:lookup(Store, ChildDoc) of
+		{ok, ChildRev} ->
+			case dict_read_entries(Store, Doc, Cache) of
+				{ok, Entries, NewCache} ->
+					NewEntries = dict:store(Name, {dlink, ChildDoc, [ChildRev]},
+						Entries),
+					dict_write_entries(Store, Doc, NewEntries, NewCache);
+
+				error ->
+					{error, enoent}
+			end;
+
+		error ->
+			{error, enoent}
+	end;
+
+dict_link(_, _, _, _) ->
+	{error, eacces}.
+
+
+dict_unlink({doc, Store, Doc}, Name, Cache) ->
+	case dict_read_entries(Store, Doc, Cache) of
+		{ok, Entries, NewCache} ->
+			NewEntries = dict:erase(Name, Entries),
+			dict_write_entries(Store, Doc, NewEntries, NewCache);
+
+		error ->
+			{error, enoent}
 	end.
 
 
@@ -1071,7 +1177,7 @@ file_truncate(Store, Doc, Ino, Size) ->
 				{ok, Handle} ->
 					case store:truncate(Handle, <<"FILE">>, Size) of
 						ok ->
-							case file_release_commit(Doc, Handle) of
+							case file_release_commit(Store, Doc, Handle) of
 								{ok, CurRev} ->
 									file_getattr_rev(Store, CurRev, Ino);
 								Error ->
@@ -1111,7 +1217,7 @@ file_open({doc, Store, Doc}, Flags) ->
 							file_write(Handle, Data, Offset)
 						end,
 						release = fun(Changed) ->
-							file_release(Handle, Doc, Changed)
+							file_release(Store, Doc, Handle, Changed)
 						end
 					}};
 
@@ -1137,24 +1243,24 @@ file_write(Handle, Data, Offset) ->
 	store:write(Handle, <<"FILE">>, Offset, Data).
 
 
-file_release(Handle, Doc, Changed) ->
+file_release(Store, Doc, Handle, Changed) ->
 	case Changed of
 		false -> store:abort(Handle);
-		true  -> file_release_commit(Doc, Handle)
+		true  -> file_release_commit(Store, Doc, Handle)
 	end.
 
 
-file_release_commit(Doc, Handle) ->
-	file_release_commit(Doc, Handle, keep).
+file_release_commit(Store, Doc, Handle) ->
+	file_release_commit(Store, Doc, Handle, keep).
 
-file_release_commit(Doc, Handle, MergeRevs) ->
+file_release_commit(Store, Doc, Handle, MergeRevs) ->
 	case store:commit(Handle, util:get_time(), MergeRevs) of
 		{ok, _Rev} = Ok ->
 			Ok;
 
 		conflict ->
-			case store:lookup(Doc) of
-				{ok, CurRev} -> file_release_commit(Doc, Handle, [CurRev]);
+			case store:lookup(Store, Doc) of
+				{ok, CurRev} -> file_release_commit(Store, Doc, Handle, [CurRev]);
 				error        -> {error, enoent}
 			end;
 
@@ -1220,5 +1326,63 @@ meta_read_entry(_Meta, _Path) ->
 
 sanitize(S) ->
 	lists:filter(fun(C) -> (C /= $/) and (C >= 31) end, S).
+
+
+write_struct(Store, Doc, Part, Struct) ->
+	Data = struct:encode(Struct),
+	case write_struct_open(Store, Doc) of
+		{ok, Handle} ->
+			case store:truncate(Handle, Part, 0) of
+				ok ->
+					case store:write(Handle, Part, 0, Data) of
+						ok ->
+							write_struct_close(Store, Doc, Handle);
+
+						{error, _} = Error ->
+							store:abort(Handle),
+							Error
+					end;
+
+				{error, _} = Error ->
+					store:abort(Handle),
+					Error
+			end;
+
+		{error, _} = Error ->
+			Error
+	end.
+
+
+write_struct_open(Store, Doc) ->
+	case store:lookup(Store, Doc) of
+		{ok, Rev} ->
+			case store:update(Store, Doc, Rev, [], keep) of
+				{ok, _} = Ok       -> Ok;
+				{error, conflict}  -> write_struct_open(Store, Doc);
+				{error, _} = Error -> Error
+			end;
+
+		error ->
+			{error, enoent}
+	end.
+
+
+write_struct_close(Store, Doc, Handle) ->
+	write_struct_close(Store, Doc, Handle, keep).
+
+write_struct_close(Store, Doc, Handle, MergeRevs) ->
+	case store:commit(Handle, util:get_time(), MergeRevs) of
+		{ok, _Rev} = Ok ->
+			Ok;
+
+		conflict ->
+			case store:lookup(Store, Doc) of
+				{ok, CurRev} -> write_struct_close(Store, Doc, Handle, [CurRev]);
+				error        -> {error, enoent}
+			end;
+
+		{error, _} = Error ->
+			Error
+	end.
 
 -endif.
