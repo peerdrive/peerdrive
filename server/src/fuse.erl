@@ -117,10 +117,6 @@ getxattr(_, Ino, Name, Size, _, S) ->
 	io:format("getxattr(~p, ~s, ~p)~n", [Ino, Name, Size]),
 	{#fuse_reply_err{err = enosys}, S}.
 
-link(_, Ino, NewParent, NewName, _, S) ->
-	io:format("link(~p, ~p, ~s)~n", [Ino, NewParent, NewName]),
-	{#fuse_reply_err{err = enosys}, S}.
-
 listxattr(_, Ino, Size, _, S) ->
 	io:format("listxattr(~p, ~p)~n", [Ino, Size]),
 	{#fuse_reply_err{err = enosys}, S}.
@@ -455,6 +451,46 @@ rename(_, OldParent, OldName, NewParent, NewName, _, S) ->
 
 unlink(_, Parent, Name, _, S) ->
 	do_unlink(Parent, Name, S).
+
+
+link(_, Ino, NewParent, NewName, _, S) ->
+	Inodes = S#state.inodes,
+	#inode{oid=ChildOid} = gb_trees:get(Ino, Inodes),
+	#inode{
+		oid     = ParentOid,
+		ifc     = #ifc{link=Link, getnode=GetNode},
+		cache   = ParentCache,
+		timeout = Timeout
+	} = ParentNode = gb_trees:get(NewParent, Inodes),
+	case Link(ParentOid, ChildOid, NewName, ParentCache) of
+		{ok, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(NewParent,
+				ParentNode#inode{cache=NewCache}, Inodes)},
+			case do_lookup_new(NewParent, ChildOid, GetNode, Timeout, S2) of
+				{ok, ChildIno, ChildNode, Timeout, S3} ->
+					case make_entry_param(ChildIno, ChildNode, Timeout) of
+						{ok, EntryParam} ->
+							{#fuse_reply_entry{fuse_entry_param=EntryParam}, S3};
+
+						error ->
+							{
+								#fuse_reply_err{ err = enoent },
+								do_forget(ChildIno, 1, S3)
+							}
+					end;
+
+				{error, Error, S3} ->
+					{#fuse_reply_err{ err = Error }, S3}
+			end;
+
+		{error, Error, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(NewParent,
+				ParentNode#inode{cache=NewCache}, Inodes)},
+			{#fuse_reply_err{ err = Error }, S2};
+
+		{error, Error} ->
+			{#fuse_reply_err{ err = Error }, S}
+	end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
