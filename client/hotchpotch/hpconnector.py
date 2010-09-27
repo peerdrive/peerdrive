@@ -17,10 +17,17 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtNetwork
-from struct import *
 from datetime import datetime
-import sys
+import struct
 import atexit
+
+_errorCodes = {
+	1 : 'ECONFLICT',
+	2 : 'ENOENT',
+	3 : 'EINVAL',
+	4 : 'EBADF',
+	5 : 'EAMBIG'
+}
 
 
 def checkUuid(uuid):
@@ -30,35 +37,29 @@ def checkUuid(uuid):
 	return True
 
 
-def genericReply(reply, body):
-	if reply == _HpConnector.GENERIC_CNF:
-		(code,) = unpack('<L', body)
-		if code == 0:
-			return True
-		elif code == 1:
-			return False # Recoverable conflict (Handle still valid)
-		elif code == 2:
-			raise IOError('Revision conflict')
-		elif code == 3:
-			raise IOError('ENOENT')
-		elif code == 4:
-			raise IOError('EINVAL')
-		elif code == 5:
-			raise IOError('EMULTIPLE')
-		elif code == 6:
-			raise IOError('EBADF')
-		else:
-			raise IOError('Unknown error')
-	else:
-		raise ConnError('Invalid server reply')
-
-
 def encodeUuidList(uuids):
-	packet = pack('B', len(uuids))
+	packet = struct.pack('>B', len(uuids))
 	for rev in uuids:
 		checkUuid(rev)
 		packet += rev
 	return packet
+
+
+def encodeString(string):
+	if isinstance(string, str):
+		return struct.pack('>H', len(string)) + string
+	elif isinstance(string, unicode):
+		encStr = string.encode('utf-8')
+		return struct.pack('>H', len(encStr)) + encStr
+
+
+def raiseError(error):
+	if error == 0:
+		return True
+	elif error in _errorCodes:
+		raise IOError(_errorCodes[error])
+	else:
+		raise IOError('Unknown error')
 
 
 class ConnError(Exception):
@@ -67,7 +68,8 @@ class ConnError(Exception):
 
 
 class _HpConnector(object):
-	GENERIC_CNF         = 0x0001
+	INIT_REQ            = 0x0000
+	INIT_CNF            = 0x0001
 	ENUM_REQ            = 0x0010
 	ENUM_CNF            = 0x0011
 	LOOKUP_REQ          = 0x0020
@@ -76,28 +78,56 @@ class _HpConnector(object):
 	STAT_CNF            = 0x0031
 	PEEK_REQ            = 0x0040
 	PEEK_CNF            = 0x0041
-	FORK_REQ            = 0x0050
-	FORK_CNF            = 0x0051
-	UPDATE_REQ          = 0x0060
-	UPDATE_CNF          = 0x0061
-	READ_REQ            = 0x0070
-	READ_CNF            = 0x0071
-	WRITE_REQ           = 0x0080
-	TRUNC_REQ           = 0x0090
-	COMMIT_REQ          = 0x00A0
-	COMMIT_CNF          = 0x00A1
-	ABORT_REQ           = 0x00B0
-	WATCH_ADD_REQ       = 0x00C0
-	WATCH_REM_REQ       = 0x00D0
-	WATCH_IND           = 0x00E2
-	DELETE_DOC_REQ      = 0x00F0
-	DELETE_REV_REQ      = 0x0100
-	SYNC_DOC_REQ        = 0x0110
-	REPLICATE_DOC_REQ   = 0x0120
-	REPLICATE_REV_REQ   = 0x0130
-	MOUNT_REQ           = 0x0140
-	UNMOUNT_REQ         = 0x0150
-	PROGRESS_IND        = 0x0162
+	CREATE_REQ          = 0x0050
+	CREATE_CNF          = 0x0051
+	FORK_REQ            = 0x0060
+	FORK_CNF            = 0x0061
+	UPDATE_REQ          = 0x0070
+	UPDATE_CNF          = 0x0071
+	RESUME_REQ          = 0x0080
+	RESUME_CNF          = 0x0081
+	READ_REQ            = 0x0090
+	READ_CNF            = 0x0091
+	TRUNC_REQ           = 0x00A0
+	TRUNC_CNF           = 0x00A1
+	WRITE_REQ           = 0x00B0
+	WRITE_CNF           = 0x00B1
+	GET_TYPE_REQ        = 0x00C0
+	GET_TYPE_CNF        = 0x00C1
+	SET_TYPE_REQ        = 0x00D0
+	SET_TYPE_CNF        = 0x00D1
+	GET_PARENTS_REQ     = 0x00E0
+	GET_PARENTS_CNF     = 0x00E1
+	SET_PARENTS_REQ     = 0x00F0
+	SET_PARENTS_CNF     = 0x00F1
+	COMMIT_REQ          = 0x0100
+	COMMIT_CNF          = 0x0101
+	SUSPEND_REQ         = 0x0110
+	SUSPEND_CNF         = 0x0111
+	ABORT_REQ           = 0x0120
+	ABORT_CNF           = 0x0121
+	WATCH_ADD_REQ       = 0x0130
+	WATCH_ADD_CNF       = 0x0131
+	WATCH_REM_REQ       = 0x0140
+	WATCH_REM_CNF       = 0x0141
+	FORGET_REQ          = 0x0150
+	FORGET_CNF          = 0x0151
+	DELETE_DOC_REQ      = 0x0160
+	DELETE_DOC_CNF      = 0x0161
+	DELETE_REV_REQ      = 0x0170
+	DELETE_REV_CNF      = 0x0171
+	SYNC_DOC_REQ        = 0x0180
+	SYNC_DOC_CNF        = 0x0181
+	REPLICATE_DOC_REQ   = 0x0190
+	REPLICATE_DOC_CNF   = 0x0191
+	REPLICATE_REV_REQ   = 0x01A0
+	REPLICATE_REV_CNF   = 0x01A1
+	MOUNT_REQ           = 0x01B0
+	MOUNT_CNF           = 0x01B1
+	UNMOUNT_REQ         = 0x01C0
+	UNMOUNT_CNF         = 0x01C1
+	WATCH_IND           = 0x0002
+	PROGRESS_IND        = 0x0012
 
 
 	def __init__(self, host = '127.0.0.1', port = 4567):
@@ -106,8 +136,7 @@ class _HpConnector(object):
 				self.__readReady)
 		self.socket.connectToHost(host, port)
 		if not self.socket.waitForConnected(1000):
-			print "Could not connect to server!"
-			sys.exit(2)
+			raise IOError("Could not connect to server!")
 		self.next = 0
 		self.queue = []
 		self.buf = ''
@@ -117,60 +146,71 @@ class _HpConnector(object):
 		self.progressIndications = []
 		self.recursion = 0
 
+		try:
+			reply = self._rpc(_HpConnector.INIT_REQ, _HpConnector.INIT_CNF,
+				struct.pack('>L', 0))
+			(version, self.maxPacketSize) = struct.unpack_from('>LL',
+				self._parseDirectResult(reply), 0)
+			if version != 0:
+				raise IOError("Unsupported protocol version!")
+		except:
+			self.socket.disconnectFromHost()
+			raise
+
 	def enum(self):
-		(reply, body) = self._rpc(_HpConnector.ENUM_REQ)
-		if reply == _HpConnector.ENUM_CNF:
-			return HpEnum(body)
-		else:
-			raise ConnError('Invalid server reply')
+		reply = self._rpc(_HpConnector.ENUM_REQ, _HpConnector.ENUM_CNF)
+		return HpEnum(reply)
 
-	def lookup(self, doc):
+	def lookup(self, doc, stores=[]):
 		checkUuid(doc)
-		(reply, body) = self._rpc(_HpConnector.LOOKUP_REQ, doc)
-		if reply == _HpConnector.LOOKUP_CNF:
-			return HpLookup(body)
-		else:
-			raise ConnError('Invalid server reply')
+		request = doc + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.LOOKUP_REQ, _HpConnector.LOOKUP_CNF, request)
+		return HpLookup(reply)
 
-	def stat(self, rev):
+	def stat(self, rev, stores=[]):
 		checkUuid(rev)
-		(reply, body) = self._rpc(_HpConnector.STAT_REQ, rev)
-		if reply == _HpConnector.STAT_CNF:
-			return HpStat(body)
-		else:
-			return genericReply(reply, body)
+		request = rev + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.STAT_REQ, _HpConnector.STAT_CNF, request)
+		(True, stat) = self._parseBrokerResult(reply)
+		return HpStat(stat)
 
 	def peek(self, rev, stores=[]):
 		checkUuid(rev)
-		body = rev + encodeUuidList(stores)
-		(reply, cookie) = self._rpc(_HpConnector.PEEK_REQ, body)
-		if reply == _HpConnector.PEEK_CNF:
-			return HpHandle(self, cookie, None, rev)
-		else:
-			return genericReply(reply, cookie)
+		request = rev + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.PEEK_REQ, _HpConnector.PEEK_CNF, request)
+		(True, handle) = self._parseBrokerResult(reply)
+		return HpHandle(self, handle, None, rev)
 
-	def fork(self, stores=[], uti='', rev=None):
-		if rev:
-			checkUuid(rev)
-		else:
-			rev = '\x00'*16
-		body = rev + encodeUuidList(stores) + uti
-		(reply, raw) = self._rpc(_HpConnector.FORK_REQ, body)
-		if reply == _HpConnector.FORK_CNF:
-			(cookie, doc) = unpack('<4s16s', raw)
-			return HpHandle(self, cookie, doc, rev)
-		else:
-			return genericReply(reply, raw)
+	def create(self, typ, creator, stores=[]):
+		request = encodeString(typ) + encodeString(creator) + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.CREATE_REQ, _HpConnector.CREATE_CNF, request)
+		(True, reply) = self._parseBrokerResult(reply)
+		(handle, doc) = struct.unpack('>4s16s', reply)
+		return HpHandle(self, handle, doc, None)
 
-	def update(self, doc, rev, mergeRevs=[], uti='', stores=[]):
+	def fork(self, rev, creator, stores=[]):
+		checkUuid(rev)
+		request = rev + encodeString(creator) + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.FORK_REQ, _HpConnector.FORK_CNF, request)
+		(True, reply) = self._parseBrokerResult(reply)
+		(handle, doc) = struct.unpack('>4s16s', reply)
+		return HpHandle(self, handle, doc, rev)
+
+	def update(self, doc, rev, creator='', stores=[]):
 		checkUuid(doc)
 		checkUuid(rev)
-		body = doc + rev + encodeUuidList(mergeRevs) + encodeUuidList(stores) + uti
-		(reply, raw) = self._rpc(_HpConnector.UPDATE_REQ, body)
-		if reply == _HpConnector.UPDATE_CNF:
-			return HpHandle(self, raw, doc, rev)
-		else:
-			return genericReply(reply, raw)
+		request = doc + rev + encodeString(creator) + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.UPDATE_REQ, _HpConnector.UPDATE_CNF, request)
+		(True, handle) = self._parseBrokerResult(reply)
+		return HpHandle(self, handle, doc, rev)
+
+	def resume(self, doc, rev, creator='', stores=[]):
+		checkUuid(doc)
+		checkUuid(rev)
+		request = doc + rev + encodeString(creator) + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.RESUME_REQ, _HpConnector.RESUME_CNF, request)
+		(True, handle) = self._parseBrokerResult(reply)
+		return HpHandle(self, handle, doc, rev)
 
 	def watch(self, w):
 		if w._incWatchRef() == 1:
@@ -178,54 +218,82 @@ class _HpConnector(object):
 			if ref in self.watchHandlers:
 				self.watchHandlers[ref].append(w)
 			else:
+				reply = self._rpc(_HpConnector.WATCH_ADD_REQ,
+					_HpConnector.WATCH_ADD_CNF, struct.pack('>B16s', typ, h))
+				self._parseDirectResult(reply)
 				self.watchHandlers[ref] = [w]
-				self._rpc(_HpConnector.WATCH_ADD_REQ, pack('B16s', typ, h))
 
 	def unwatch(self, w):
 		if w._decWatchRef() == 0:
 			(typ, h) = ref = w._getRef()
 			self.watchHandlers[ref].remove(w)
 			if self.watchHandlers[ref] == []:
+				reply = self._rpc(_HpConnector.WATCH_REM_REQ,
+					_HpConnector.WATCH_REM_CNF, struct.pack('>B16s', typ, h))
+				self._parseDirectResult(reply)
 				del self.watchHandlers[ref]
-				self._rpc(_HpConnector.WATCH_REM_REQ, pack('B16s', typ, h))
 
-	def delete_doc(self, doc, stores=[]):
+	def forget(self, doc, rev, stores=[]):
 		checkUuid(doc)
-		body = doc + encodeUuidList(stores)
-		(reply, code) = self._rpc(_HpConnector.DELETE_DOC_REQ, body)
-		return genericReply(reply, code)
+		checkUuid(rev)
+		request = doc + rev + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.FORGET_REQ, _HpConnector.FORGET_CNF,
+			request)
+		(result, empty) = self._parseBrokerResult(reply)
+		return result
+
+	def delete_doc(self, doc, rev, stores=[]):
+		checkUuid(doc)
+		checkUuid(rev)
+		request = doc + rev + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.DELETE_DOC_REQ,
+			_HpConnector.DELETE_DOC_CNF, request)
+		(result, empty) = self._parseBrokerResult(reply)
+		return result
 
 	def delete_rev(self, rev, stores=[]):
 		checkUuid(rev)
-		body = rev + encodeUuidList(stores)
-		(reply, code) = self._rpc(_HpConnector.DELETE_REV_REQ, body)
-		return genericReply(reply, code)
+		request = rev + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.DELETE_REV_REQ,
+			_HpConnector.DELETE_REV_CNF, request)
+		(result, empty) = self._parseBrokerResult(reply)
+		return result
 
 	def sync(self, doc, stores=[]):
 		checkUuid(doc)
-		body = doc + encodeUuidList(stores)
-		(reply, code) = self._rpc(_HpConnector.SYNC_DOC_REQ, body)
-		return genericReply(reply, code)
+		request = doc + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.SYNC_DOC_REQ, _HpConnector.SYNC_DOC_CNF,
+			request)
+		(result, empty) = self._parseBrokerResult(reply)
+		return result
 
-	def replicate_doc(self, doc, stores, history=True):
+	def replicate_doc(self, doc, depth, stores):
 		checkUuid(doc)
-		body = pack('16sB', doc, int(history)) + encodeUuidList(stores)
-		(reply, code) = self._rpc(_HpConnector.REPLICATE_DOC_REQ, body)
-		return genericReply(reply, code)
+		request = struct.pack('>16sQ', doc, depth) + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.REPLICATE_DOC_REQ,
+			_HpConnector.REPLICATE_DOC_CNF, request)
+		(result, empty) = self._parseBrokerResult(reply)
+		return result
 
-	def replicate_rev(self, rev, stores, history=True):
+	def replicate_rev(self, rev, depth, stores):
 		checkUuid(rev)
-		body = pack('16sB', rev, int(history)) + encodeUuidList(stores)
-		(reply, code) = self._rpc(_HpConnector.REPLICATE_REV_REQ, body)
-		return genericReply(reply, code)
+		request = struct.pack('>16sQ', rev, depth) + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.REPLICATE_REV_REQ,
+			_HpConnector.REPLICATE_REV_CNF, request)
+		(result, empty) = self._parseBrokerResult(reply)
+		return result
 
 	def mount(self, store):
-		(reply, code) = self._rpc(_HpConnector.MOUNT_REQ, store)
-		return genericReply(reply, code)
+		reply = self._rpc(_HpConnector.MOUNT_REQ, _HpConnector.MOUNT_CNF,
+			encodeString(store))
+		self._parseDirectResult(reply)
+		return True
 
 	def unmount(self, store):
-		(reply, code) = self._rpc(_HpConnector.UNMOUNT_REQ, store)
-		return genericReply(reply, code)
+		reply = self._rpc(_HpConnector.UNMOUNT_REQ, _HpConnector.UNMOUNT_CNF,
+			encodeString(store))
+		self._parseDirectResult(reply)
+		return True
 
 	def flush(self):
 		while self.socket.flush():
@@ -239,26 +307,52 @@ class _HpConnector(object):
 
 	# protected functions
 
-	def _rpc(self, op, request = ''):
+	def _rpc(self, req_op, cnf_op, request = ''):
 		ref = self.__make_ref()
-		raw_request = pack('<HL', op, ref) + request
+		raw_request = struct.pack('>LH', ref, req_op) + request
 		self.__send(raw_request)
-		raw_reply = self.__poll(ref)
-		reply = unpack_from('<H', raw_reply)[0]
-		return (reply, raw_reply[6:])
+		reply = self.__poll(ref, cnf_op)
+		return reply
 
-	def _ind(self, op, body = ''):
+	def _ind(self, req_op, body = ''):
 		ref = self.__make_ref()
-		raw_ind = pack('<HL', op, ref) + body
+		raw_ind = struct.pack('>LL', ref, req_op) + body
 		self.__send(raw_ind)
+
+	def _parseBrokerResult(self, reply):
+		(result,) = struct.unpack_from('>B', reply, 0)
+		if result == 0:
+			return (True, reply[1:])
+		else:
+			pos = 1
+			if result != 1:
+				(error,) = struct.unpack_from('>L', reply, pos)
+				pos += 4
+			(count,) = struct.unpack_from('>B', reply, pos)
+			errors = []
+			pos += 1
+			for i in range(count):
+				(store, error) = struct.unpack_from('>16sL', reply, pos)
+				pos += 20
+				errors.append({'store': store, 'error': error})
+			if result == 1:
+				return (True, reply[pos:])
+			elif result == 2:
+				return (False, reply[pos:])
+			else:
+				raiseError(error)
+
+	def _parseDirectResult(self, reply):
+		(error,) = struct.unpack_from('>L', reply, 0)
+		raiseError(error)
+		return reply[4:]
 
 	# private functions
 
 	def __send(self, packet):
-		raw = pack('>H', len(packet)) + packet
+		raw = struct.pack('>H', len(packet)) + packet
 		if self.socket.write(raw) == -1:
-			print "Could not send request to server!"
-			sys.exit(2)
+			raise IOError("Could not send request to server!")
 
 	def __readReady(self):
 		# increase recursion depth
@@ -267,16 +361,16 @@ class _HpConnector(object):
 		# unpack incoming packets
 		self.buf = self.buf + str(self.socket.readAll())
 		while len(self.buf) > 2:
-			expect = unpack_from('>H', self.buf, 0)[0] + 2
+			expect = struct.unpack_from('>H', self.buf, 0)[0] + 2
 			if expect <= len(self.buf):
 				packet = self.buf[2:expect]
 				self.buf = self.buf[expect:]
 				# TODO: discard invalid packets
 
 				# immediately remove indications
-				(ind, ref) = unpack_from('<HL', packet, 0)
+				(ref, ind) = struct.unpack_from('>LH', packet, 0)
 				if ind == _HpConnector.WATCH_IND:
-					self.watchIndications.append(unpack_from('BB16s', packet, 6))
+					self.watchIndications.append(struct.unpack('>BB16s', packet[6:]))
 				elif ind == _HpConnector.PROGRESS_IND:
 					self.progressIndications.append(packet[6:])
 				else:
@@ -291,40 +385,40 @@ class _HpConnector(object):
 				dispatched = False
 				watchIndications = self.watchIndications[:]
 				self.watchIndications = []
-				for (cause, typ, h) in watchIndications:
+				for (event, typ, h) in watchIndications:
 					# make explicit copy as watches may get modified by callouts!
 					dispatched = True
 					matches = self.watchHandlers.get((typ, h), [])[:]
 					for i in matches:
-						i.triggered(cause)
+						i.triggered(event)
 
 				progressIndications = self.progressIndications[:]
 				self.progressIndications = []
 				for ind in progressIndications:
 					dispatched = True
 					handlers = self.progressHandlers[:]
-					(typ, prog) = unpack_from('<BH', ind, 0)
+					(typ, prog) = struct.unpack_from('>BH', ind, 0)
 					for handler in handlers:
 						handler(typ, prog, ind[3:])
 
 		# decrease nesting level
 		self.recursion -= 1
 
-	def __poll(self, ref):
+	def __poll(self, ref, cnf_op):
 		# loop until we've received the answer
 		while True:
 			for packet in self.queue:
-				if self.__match(ref, packet):
+				if self.__match(ref, cnf_op, packet):
 					self.queue.remove(packet)
-					return packet
+					return packet[6:]
 
 			if not self.socket.waitForReadyRead(-1):
-				print "Error while waiting for data from server!"
-				sys.exit(2)
+				raise IOError("Error while waiting for data from server!")
 			self.__readReady()
 
-	def __match(self, ref, packet):
-		return unpack_from('<L', packet, 2)[0] == ref
+	def __match(self, cnf_ref, cnf_op, packet):
+		(ref, op) = struct.unpack_from('>LH', packet, 0)
+		return (ref == cnf_ref) and (op == cnf_op)
 
 	def __make_ref(self):
 		ref = self.next
@@ -374,14 +468,14 @@ class HpEnum(object):
 	def __init__(self, packet):
 		self.__stores = { }
 		self.__sysStore = None
-		(storeCount,) = unpack_from('B', packet, 0)
+		(storeCount,) = struct.unpack_from('>B', packet, 0)
 		pos = 1
 		for i in range(storeCount):
-			(doc, flags, idLen) = unpack_from('<16sLH', packet, pos)
+			(doc, flags, idLen) = struct.unpack_from('>16sLH', packet, pos)
 			pos += 22
 			id = packet[pos:pos+idLen]
 			pos += idLen
-			(nameLen,) = unpack_from('<H', packet, pos)
+			(nameLen,) = struct.unpack_from('>H', packet, pos)
 			pos += 2
 			name = packet[pos:pos+nameLen]
 			pos += nameLen
@@ -429,31 +523,61 @@ class HpEnum(object):
 class HpLookup(object):
 	def __init__(self, packet):
 		self.__revs = {}
+		self.__preRevs = {}
 		self.__stores = {}
-		(revCount,) = unpack_from('B', packet, 0)
+
+		# first get the current revisions
+		(revCount,) = struct.unpack_from('>B', packet, 0)
 		pos = 1
 		for i in range(revCount):
-			(rev,) = unpack_from('<16s', packet, pos)
+			(rev,) = struct.unpack_from('>16s', packet, pos)
 			pos += 16
-			(storeCount,) = unpack_from('B', packet, pos)
+			(storeCount,) = struct.unpack_from('>B', packet, pos)
 			pos += 1
 			stores = []
 			for j in range(storeCount):
-				(store,) = unpack_from('<16s', packet, pos)
+				(store,) = struct.unpack_from('>16s', packet, pos)
 				stores.append(store)
-				self.__stores[store] = rev
+				self.__stores[store] = (rev, [])
 				pos += 16
 			self.__revs[rev] = stores
+
+		# now get all the preliminary revisions
+		(revCount,) = struct.unpack_from('>B', packet, pos)
+		pos += 1
+		for i in range(revCount):
+			(rev,) = struct.unpack_from('>16s', packet, pos)
+			pos += 16
+			(storeCount,) = struct.unpack_from('>B', packet, pos)
+			pos += 1
+			stores = []
+			for j in range(storeCount):
+				(store,) = struct.unpack_from('>16s', packet, pos)
+				stores.append(store)
+				self.__stores[store][1].append(rev)
+				pos += 16
+			self.__preRevs[rev] = stores
 
 	def revs(self):
 		return self.__revs.keys()
 
 	def rev(self, store):
-		return self.__stores[store]
+		return self.__stores[store][0]
+
+	def preRevs(self, store=None):
+		if store:
+			return self.__stores[store][1]
+		else:
+			return self.__preRevs.keys()
 
 	def stores(self, rev = None):
 		if rev:
-			return self.__revs[rev]
+			stores = []
+			if rev in self.__revs:
+				stores.extend(self.__revs[rev])
+			if rev in self.__preRevs:
+				stores.extend(self.__preRevs[rev])
+			return stores
 		else:
 			return self.__stores.keys()
 
@@ -465,33 +589,40 @@ class HpStat(object):
 		#   PartsCount:8,  [FourCC:32, Size:64, Hash:128],
 		#   ParentCount:8, [Parent:128],
 		#   VolumeCount:8, [Volume:128],
-		#   Mtime:64, Uti...
-		(flags, count) = unpack_from('<LB', packet, 0)
+		#   TypeLen:16,    [Type],
+		#   CreatorLen:16, [Creator]
+		(flags, count) = struct.unpack_from('>LB', packet, 0)
 		pos = 5
 		self.__flags = flags
 		self.__parts = {}
 		for i in range(count):
-			(fourcc, size, hash) = unpack_from('<4sQ16s', packet, pos)
+			(fourcc, size, hash) = struct.unpack_from('>4sQ16s', packet, pos)
 			pos += 28
 			self.__parts[fourcc] = (size, hash)
 
-		count = unpack_from('B', packet, pos)[0]
+		count = struct.unpack_from('>B', packet, pos)[0]
 		pos += 1
 		self.__parents = []
 		for i in range(count):
 			self.__parents.append(packet[pos:pos+16])
 			pos += 16
 
-		count = unpack_from('B', packet, pos)[0]
+		count = struct.unpack_from('>B', packet, pos)[0]
 		pos += 1
 		self.__volumes = []
 		for i in range(count):
 			self.__volumes.append(packet[pos:pos+16])
 			pos += 16
 
-		self.__mtime = datetime.fromtimestamp(unpack_from('<Q', packet, pos)[0])
+		self.__mtime = datetime.fromtimestamp(struct.unpack_from('>Q', packet, pos)[0])
 		pos += 8
-		self.__uti = packet[pos:]
+		(count,) = struct.unpack_from('>H', packet, pos)
+		pos += 2
+		self.__type = packet[pos:pos+count]
+		pos += count
+		(count,) = struct.unpack_from('>H', packet, pos)
+		pos += 2
+		self.__creator = packet[pos:pos+count]
 
 	def size(self, part):
 		return self.__parts[part][0]
@@ -512,17 +643,20 @@ class HpStat(object):
 		return self.__mtime
 
 	def uti(self):
-		return self.__uti
+		return self.__type
+
+	def creator(self):
+		return self.__creator
 
 	def preliminary(self):
 		return (self.__flags & 0x10) != 0
 
 
 class HpHandle(object):
-	def __init__(self, connector, cookie, doc, rev):
+	def __init__(self, connector, handle, doc, rev):
 		self.__pos = { }
 		self.connector = connector
-		self.cookie = cookie
+		self.handle = handle
 		self.doc = doc
 		self.rev = rev
 		self.active = True
@@ -561,35 +695,37 @@ class HpHandle(object):
 			raise IOError('Document already closed!')
 		result = ''
 		pos = self._getPos(part)
+		packetSize = self.connector.maxPacketSize
 		while length > 0:
-			if length > 2048:
-				chunk = 2048
+			if length > packetSize:
+				chunk = packetSize
 			else:
 				chunk = length
-			request = pack('<4s4sQL', self.cookie, part, pos, chunk)
-			(reply, data) = self.connector._rpc(_HpConnector.READ_REQ, request)
-			if reply == _HpConnector.READ_CNF:
-				size = len(data)
-				result = result + data
-				pos = pos + size
-				if size < chunk:
-					break
-			else:
-				genericReply(reply, data)
+			request = struct.pack('>4s4sQL', self.handle, part, pos, chunk)
+			reply = self.connector._rpc(_HpConnector.READ_REQ,
+				_HpConnector.READ_CNF, request)
+			(True, data) = self.connector._parseBrokerResult(reply)
+			size = len(data)
+			result = result + data
+			pos = pos + size
+			if size < chunk:
+				break
 		self._setPos(part, pos)
 		return result
 
 	def readAll(self, part):
 		result = ''
 		oldPos = self._getPos(part)
-		self._setPos(part, 0)
-		while True:
-			chunk = self.read(part, 0x20000)
-			result = result + chunk
-			if len(chunk) < 0x20000:
-				break
-		self._setPos(part, oldPos)
-		return result
+		try:
+			self._setPos(part, 0)
+			while True:
+				chunk = self.read(part, 0x20000)
+				result = result + chunk
+				if len(chunk) < 0x20000:
+					break
+			return result
+		finally:
+			self._setPos(part, oldPos)
 
 	def write(self, part, data):
 		if not self.active:
@@ -598,37 +734,42 @@ class HpHandle(object):
 		pos = self._getPos(part)
 		i = 0
 		length = len(data)
-		while length >= i:
-			request = pack('<4s4sQ', self.cookie, part, pos+i) + data[i:i+2048]
-			(reply, empty) = self.connector._rpc(_HpConnector.WRITE_REQ, request)
-			genericReply(reply, empty)
-			i += 2048
+		packetSize = self.connector.maxPacketSize
+		while length > i:
+			reqData = data[i:i+packetSize]
+			reqSize = len(reqData)
+			request = struct.pack('>4s4sQ', self.handle, part, pos+i) + reqData
+			reply = self.connector._rpc(_HpConnector.WRITE_REQ,
+				_HpConnector.WRITE_CNF, request)
+			(True, empty) = self.connector._parseBrokerResult(reply)
+			i += reqSize
+			self._setPos(part, pos+i)
 
-		self._setPos(part, pos+length)
 
 	def writeAll(self, part, data):
 		self._setPos(part, 0)
-		self.write(part, data)
 		self.truncate(part)
+		self.write(part, data)
 
 	def truncate(self, part):
 		if not self.active:
 			raise IOError('Document already immutable!')
-		request = pack('4s4sQ', self.cookie, part, self._getPos(part))
-		(reply, empty) = self.connector._rpc(_HpConnector.TRUNC_REQ, request)
-		return genericReply(reply, empty)
+		request = struct.pack('>4s4sQ', self.handle, part, self._getPos(part))
+		reply = self.connector._rpc(_HpConnector.TRUNC_REQ,
+			_HpConnector.TRUNC_CNF, request)
+		(True, empty) = self.connector._parseBrokerResult(reply)
 
-	def commit(self, retry=False, rebaseRevs=[]):
+	def commit(self, retry=False):
 		if not self.active:
 			raise IOError('Document already immutable!')
 		self.active = False
-		body = self.cookie + encodeUuidList(rebaseRevs)
-		(reply, raw) = self.connector._rpc(_HpConnector.COMMIT_REQ, body)
-		if reply == _HpConnector.COMMIT_CNF:
-			self.rev = raw
+		reply = self.connector._rpc(_HpConnector.COMMIT_REQ,
+			_HpConnector.COMMIT_CNF, self.handle)
+		(result, rev) = self.connector._parseBrokerResult(reply)
+		if result:
+			self.rev = rev
 			return True
 		else:
-			genericReply(reply, raw)
 			self.active = True
 			if retry:
 				return False
@@ -636,11 +777,21 @@ class HpHandle(object):
 				self.abort()
 				raise IOError('Revision conflict')
 
+	def suspend(self):
+		if not self.active:
+			raise IOError('Document already immutable!')
+		self.active = False
+		reply = self.connector._rpc(_HpConnector.SUSPEND_REQ,
+			_HpConnector.SUSPEND_CNF, self.handle)
+		(result, rev) = self.connector._parseBrokerResult(reply)
+		self.rev = rev
+
 	def abort(self):
 		if self.active:
-			(reply, code) = self.connector._rpc(_HpConnector.ABORT_REQ, self.cookie)
 			self.active = False
-			return genericReply(reply, code)
+			reply = self.connector._rpc(_HpConnector.ABORT_REQ,
+				_HpConnector.ABORT_CNF, self.handle)
+			self.connector._parseBrokerResult(reply)
 		else:
 			raise IOError('Document already immutable!')
 

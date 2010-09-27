@@ -16,6 +16,8 @@
 
 -module(sync_worker).
 
+-include("store.hrl").
+
 -export([start_link/3]).
 -export([init/4]).
 
@@ -134,13 +136,13 @@ sync_step(
 
 sync_doc(Doc, FromIfc, ToIfc, SyncFun) ->
 	case store:lookup(FromIfc, Doc) of
-		{ok, FromRev} ->
+		{ok, FromRev, _FromPreRevs} ->
 			case store:lookup(ToIfc, Doc) of
-				{ok, FromRev} ->
+				{ok, FromRev, _ToPreRevs} ->
 					% points to same revision. done :)
 					ok;
 
-				{ok, ToRev} ->
+				{ok, ToRev, _ToPreRevs} ->
 					% need to do something
 					case SyncFun(Doc, FromIfc, FromRev, ToIfc, ToRev) of
 						ok ->
@@ -169,7 +171,7 @@ sync_doc(Doc, FromIfc, ToIfc, SyncFun) ->
 
 sync_doc_ff(Doc, _FromIfc, FromRev, ToIfc, ToRev) ->
 	case store:lookup(ToIfc, Doc) of
-		{ok, FromRev} ->
+		{ok, FromRev, _PreRevs} ->
 			ignore; % phantom change
 
 		_Else ->
@@ -195,10 +197,10 @@ sync_doc_ff(Doc, _FromIfc, FromRev, ToIfc, ToRev) ->
 
 
 is_ff_head(FromRev, ToRev) ->
-	case broker:stat(ToRev) of
-		{ok, _Flags, _Parts, _Parents, Mtime, _Uti, _Volumes} ->
+	case broker:stat(ToRev, []) of
+		{ok, _Errors, {#rev_stat{mtime=Mtime}, _Volumes}} ->
 			is_ff_head_search([FromRev], ToRev, Mtime - 60*60*24);
-		error ->
+		{error, _, _} ->
 			false
 	end.
 
@@ -207,8 +209,8 @@ is_ff_head_search([], _ToRev, _MinMtime) ->
 	false;
 
 is_ff_head_search([FromRev|OtherRevs], ToRev, MinMtime) ->
-	case broker:stat(FromRev) of
-		{ok, _Flags, _Parts, Parents, Mtime, _Uti, _Volumes} ->
+	case broker:stat(FromRev, []) of
+		{ok, _Errors, {#rev_stat{parents=Parents, mtime=Mtime}, _Volumes}} ->
 			if
 				FromRev == ToRev ->
 					true;
@@ -225,7 +227,7 @@ is_ff_head_search([FromRev|OtherRevs], ToRev, MinMtime) ->
 					end
 			end;
 
-		error ->
+		{error, _, _} ->
 			false
 	end.
 
@@ -270,10 +272,10 @@ sync_doc_merge(Doc, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 get_utis(Revs) ->
 	lists:foldl(
 		fun(Rev, Acc) ->
-			case broker:stat(Rev) of
-				{ok, _Flags, _Parts, _Parents, _Mtime, Uti, _Volumes} ->
+			case broker:stat(Rev, []) of
+				{ok, _ErrInfo, {#rev_stat{type=Uti}, _Volumes}} ->
 					sets:add_element(Uti, Acc);
-				error ->
+				{error, _, _} ->
 					Acc
 			end
 		end,
@@ -333,13 +335,13 @@ get_merge_base_loop(Paths) ->
 traverse(Heads, Path) ->
 	lists:foldl(
 		fun(Head, {AccHeads, AccPath}) ->
-			case broker:stat(Head) of
-				{ok, _Flags, _Parts, Parents, _Mtime, _Uti, _Volumes} ->
+			case broker:stat(Head, []) of
+				{ok, _Errors, {#rev_stat{parents=Parents}, _Volumes}} ->
 					NewHeads = Parents ++ AccHeads,
 					NewPath = sets:add_element(Head, AccPath),
 					{NewHeads, NewPath};
 
-				error ->
+				{error, _, _} ->
 					{AccHeads, AccPath}
 			end
 		end,
@@ -377,12 +379,12 @@ merge_hpsd(Store, Doc, BaseRev, FromRev, ToRev, UtiSet, Force) ->
 
 
 merge_hpsd_read(Revs) ->
-	case broker:stat(hd(Revs)) of
-		{ok, _Flags, Parts, _Parents, _Mtime, _Uti, _Volumes} ->
+	case broker:stat(hd(Revs), []) of
+		{ok, _ErrInfo, {#rev_stat{parts=Parts}, _Volumes}} ->
 			FCCs = lists:map(fun({FourCC, _Size, _Hash}) -> FourCC end, Parts),
 			merge_hpsd_read_loop(Revs, FCCs, []);
 
-		error ->
+		{error, _, _} ->
 			{error, enoent}
 	end.
 
@@ -392,7 +394,7 @@ merge_hpsd_read_loop([], _FCCs, Acc) ->
 
 merge_hpsd_read_loop([Rev|Revs], FCCs, Acc) ->
 	case broker:peek(Rev, []) of
-		{ok, Reader} ->
+		{ok, _Errors, Reader} ->
 			case merge_hpsd_read_loop_part_loop(Reader, FCCs, []) of
 				{ok, Data} ->
 					broker:abort(Reader),
@@ -403,8 +405,8 @@ merge_hpsd_read_loop([Rev|Revs], FCCs, Acc) ->
 					Error
 			end;
 
-		{error, _} = Error->
-			Error
+		{error, Reason, _} ->
+			{error, Reason}
 	end.
 
 
@@ -423,9 +425,6 @@ merge_hpsd_read_loop_part_loop(Reader, [Part | Remaining], Acc) ->
 						[{Part, Struct} | Acc])
 			end;
 
-		eof ->
-			{error, enoent};
-
 		{error, _} = Error->
 			Error
 	end.
@@ -434,12 +433,12 @@ merge_hpsd_read_loop_part_loop(Reader, [Part | Remaining], Acc) ->
 read_loop(Reader, Part, Offset, Acc) ->
 	Length = 16#10000,
 	case broker:read(Reader, Part, Offset, Length) of
-		{ok, Data} ->
-			read_loop(Reader, Part, Offset+Length, <<Acc/binary, Data/binary>>);
-		eof ->
+		{ok, _Errors, <<>>} ->
 			{ok, Acc};
-		{error, _Reason} = Error ->
-			Error
+		{ok, _Errors, Data} ->
+			read_loop(Reader, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
+		{error, Reason, _Errors} ->
+			{error, Reason}
 	end.
 
 
@@ -472,8 +471,10 @@ merge_hpsd_parts(
 
 
 merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData) ->
-	case store:update(Store, Doc, FromRev, [ToRev], Uti) of
+	case store:update(Store, Doc, FromRev, <<"org.hotchpotch.syncer">>) of
 		{ok, Writer} ->
+			store:set_parents(Writer, [FromRev, ToRev]),
+			store:set_type(Writer, Uti),
 			Written = lists:foldl(
 				fun({Part, Data}, Result) ->
 					FinalData = if
@@ -490,7 +491,7 @@ merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData) ->
 				NewData),
 			case Written of
 				ok ->
-					case store:commit(Writer, util:get_time(), keep) of
+					case store:commit(Writer, util:get_time()) of
 						{ok, _Rev} -> ok;
 						{error, _} = Error -> Error
 					end;
@@ -521,7 +522,8 @@ merge_hpsd_update_dlinks(Data) when is_list(Data) ->
 	lists:map(fun(Value) -> merge_hpsd_update_dlinks(Value) end, Data);
 
 merge_hpsd_update_dlinks({dlink, Doc, _Revs}) ->
-	Revs = lists:map(fun({Rev, _StoreList}) -> Rev end, broker:lookup(Doc)),
+	{CurRevs, _PreRevs} = broker:lookup(Doc, []),
+	Revs = lists:map(fun({Rev, _StoreList}) -> Rev end, CurRevs),
 	{dlink, Doc, Revs};
 
 merge_hpsd_update_dlinks(Data) ->

@@ -15,7 +15,7 @@
            listxattr/5, mkdir/6, mknod/7, readlink/4, removexattr/5, rename/7,
            rmdir/5, setlk/7, setxattr/7, statfs/4, symlink/6, unlink/5 ]).
 
-
+-include("store.hrl").
 -include_lib ("fuserl/include/fuserl.hrl").
 
 % inodes: dict: inode -> #inode
@@ -42,6 +42,8 @@
                              st_mode = ?S_IFDIR bor 8#0555,
                              st_nlink = 1 }).
 -define (LINKATTR, #stat{ st_mode = ?S_IFLNK bor 8#0555, st_nlink = 1 }).
+
+-define(FUSE_CC, <<"org.hotchpotch.fuse">>).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -771,10 +773,10 @@ stores_opendir(stores, Cache) ->
 
 doc_make_node({doc, Store, Doc} = Oid) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			case store:stat(Store, Rev) of
-				{ok, _Flags, _Parts, _Parents, _Mtime, Uti} ->
-					case Uti of
+				{ok, #rev_stat{type=Type}} ->
+					case Type of
 						<<"org.hotchpotch.volume">> ->
 							doc_make_node_dict(Oid);
 						<<"org.hotchpotch.dict">> ->
@@ -785,7 +787,7 @@ doc_make_node({doc, Store, Doc} = Oid) ->
 							doc_make_node_file(Oid)
 					end;
 
-				error ->
+				{error, _} ->
 					error
 			end;
 
@@ -817,9 +819,9 @@ doc_make_node_dict(Oid) ->
 
 dict_getattr({doc, Store, Doc}, Ino) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			case store:stat(Store, Rev) of
-				{ok, _Flags, _Parts, _Parents, Mtime, _Uti} ->
+				{ok, #rev_stat{mtime=Mtime}} ->
 					{ok, #stat{
 						st_ino   = Ino,
 						st_mode  = ?S_IFDIR bor 8#0777,
@@ -828,8 +830,8 @@ dict_getattr({doc, Store, Doc}, Ino) ->
 						st_mtime = Mtime,
 						st_ctime = Mtime
 					}};
-				error ->
-					{error, enoent}
+				Error ->
+					Error
 			end;
 		error ->
 			{error, enoent}
@@ -906,10 +908,10 @@ dict_opendir_filter(_, _) ->
 
 dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 	case store:lookup(Store, Doc) of
-		{ok, CacheRev} ->
+		{ok, CacheRev, _PreRevs} ->
 			{ok, CacheEntries, Cache};
 
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			case util:read_rev_struct(Rev, <<"HPSD">>) of
 				{ok, Entries} when is_record(Entries, dict, 9) ->
 					{ok, Entries, {Rev, Entries}};
@@ -933,7 +935,7 @@ dict_write_entries(Store, Doc, Entries, Cache) ->
 dict_link({doc, Store, Doc}, {doc, ChildStore, ChildDoc}, Name, Cache)
 	when Store =:= ChildStore ->
 	case store:lookup(Store, ChildDoc) of
-		{ok, ChildRev} ->
+		{ok, ChildRev, _PreRevs} ->
 			case dict_read_entries(Store, Doc, Cache) of
 				{ok, Entries, NewCache} ->
 					NewEntries = dict:store(Name, {dlink, ChildDoc, [ChildRev]},
@@ -983,9 +985,9 @@ doc_make_node_set(Oid) ->
 
 set_getattr({doc, Store, Doc}, Ino) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			case store:stat(Store, Rev) of
-				{ok, _Flags, _Parts, _Parents, Mtime, _Uti} ->
+				{ok, #rev_stat{mtime=Mtime}} ->
 					{ok, #stat{
 						st_ino   = Ino,
 						st_mode  = ?S_IFDIR bor 8#0555,
@@ -994,8 +996,8 @@ set_getattr({doc, Store, Doc}, Ino) ->
 						st_mtime = Mtime,
 						st_ctime = Mtime
 					}};
-				error ->
-					{error, enoent}
+				Error ->
+					Error
 			end;
 		error ->
 			{error, enoent}
@@ -1060,10 +1062,10 @@ set_opendir_filter(_) ->
 
 set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 	case store:lookup(Store, Doc) of
-		{ok, CacheRev} ->
+		{ok, CacheRev, _PreRevs} ->
 			{ok, CacheEntries, Cache};
 
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			case util:read_rev_struct(Rev, <<"HPSD">>) of
 				{ok, Entries} when is_list(Entries) ->
 					RawList = map_filter(
@@ -1096,7 +1098,7 @@ set_read_title(Store, Doc) ->
 
 set_read_title_meta(Store, Doc) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			case util:read_rev_struct(Rev, <<"META">>) of
 				{ok, Meta} ->
 					case meta_read_entry(Meta, [<<"org.hotchpotch.annotation">>, <<"title">>]) of
@@ -1159,7 +1161,7 @@ doc_make_node_file(Oid) ->
 
 file_getattr({doc, Store, Doc}, Ino) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			file_getattr_rev(Store, Rev, Ino);
 		error ->
 			{error, enoent}
@@ -1168,7 +1170,7 @@ file_getattr({doc, Store, Doc}, Ino) ->
 
 file_getattr_rev(Store, Rev, Ino) ->
 	case store:stat(Store, Rev) of
-		{ok, _Flags, Parts, _Parents, Mtime, _Uti} ->
+		{ok, #rev_stat{parts=Parts, mtime=Mtime}} ->
 			Size = case find_entry(
 				fun({FCC, Size, _Hash}) ->
 					case FCC of
@@ -1191,8 +1193,8 @@ file_getattr_rev(Store, Rev, Ino) ->
 				st_size  = Size
 			}};
 
-		error ->
-			{error, enoent}
+		Error ->
+			Error
 	end.
 
 
@@ -1208,8 +1210,8 @@ file_setattr({doc, Store, Doc}, Ino, Attr, ToSet) ->
 
 file_truncate(Store, Doc, Ino, Size) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
-			case store:update(Store, Doc, Rev, [], keep) of
+		{ok, Rev, _PreRevs} ->
+			case store:update(Store, Doc, Rev, ?FUSE_CC) of
 				{ok, Handle} ->
 					case store:truncate(Handle, <<"FILE">>, Size) of
 						ok ->
@@ -1236,10 +1238,10 @@ file_truncate(Store, Doc, Ino, Size) ->
 
 file_open({doc, Store, Doc}, Flags) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
+		{ok, Rev, _PreRevs} ->
 			Reply = if
 				(Flags band ?O_ACCMODE) =/= ?O_RDONLY ->
-					store:update(Store, Doc, Rev, [], keep);
+					store:update(Store, Doc, Rev, ?FUSE_CC);
 				true ->
 					store:peek(Store, Rev)
 			end,
@@ -1269,7 +1271,6 @@ file_open({doc, Store, Doc}, Flags) ->
 file_read(Handle, Size, Offset) ->
 	case store:read(Handle, <<"FILE">>, Offset, Size) of
 		{ok, _Data} = R  -> R;
-		eof              -> {ok, <<>>};
 		{error, enoent}  -> {ok, <<>>};
 		{error, _}       -> {error, eio}
 	end.
@@ -1287,17 +1288,18 @@ file_release(Store, Doc, Handle, Changed) ->
 
 
 file_release_commit(Store, Doc, Handle) ->
-	file_release_commit(Store, Doc, Handle, keep).
-
-file_release_commit(Store, Doc, Handle, MergeRevs) ->
-	case store:commit(Handle, util:get_time(), MergeRevs) of
+	case store:commit(Handle, util:get_time()) of
 		{ok, _Rev} = Ok ->
 			Ok;
 
 		conflict ->
 			case store:lookup(Store, Doc) of
-				{ok, CurRev} -> file_release_commit(Store, Doc, Handle, [CurRev]);
-				error        -> {error, enoent}
+				{ok, CurRev, _PreRevs} ->
+					store:set_parents(Handle, [CurRev]),
+					file_release_commit(Store, Doc, Handle);
+				error ->
+					store:abort(Handle),
+					{error, enoent}
 			end;
 
 		{error, _} = Error ->
@@ -1391,8 +1393,8 @@ write_struct(Store, Doc, Part, Struct) ->
 
 write_struct_open(Store, Doc) ->
 	case store:lookup(Store, Doc) of
-		{ok, Rev} ->
-			case store:update(Store, Doc, Rev, [], keep) of
+		{ok, Rev, _PreRevs} ->
+			case store:update(Store, Doc, Rev, ?FUSE_CC) of
 				{ok, _} = Ok       -> Ok;
 				{error, conflict}  -> write_struct_open(Store, Doc);
 				{error, _} = Error -> Error
@@ -1404,17 +1406,18 @@ write_struct_open(Store, Doc) ->
 
 
 write_struct_close(Store, Doc, Handle) ->
-	write_struct_close(Store, Doc, Handle, keep).
-
-write_struct_close(Store, Doc, Handle, MergeRevs) ->
-	case store:commit(Handle, util:get_time(), MergeRevs) of
+	case store:commit(Handle, util:get_time()) of
 		{ok, _Rev} = Ok ->
 			Ok;
 
 		conflict ->
 			case store:lookup(Store, Doc) of
-				{ok, CurRev} -> write_struct_close(Store, Doc, Handle, [CurRev]);
-				error        -> {error, enoent}
+				{ok, CurRev, _PreRevs} ->
+					store:set_parents(Handle, [CurRev]),
+					write_struct_close(Store, Doc, Handle);
+				error ->
+					store:abort(Handle),
+					{error, enoent}
 			end;
 
 		{error, _} = Error ->

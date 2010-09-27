@@ -17,9 +17,13 @@
 
 % parts:   [{PartFourCC, Hash}]
 % parents: [Revision]
-% mitme:   Secs (unix date)
-% uti:     Binary
+% mitme:   UTC, Seconds since epoch (unix date)
+% type:    Binary
+% creator: Binary
 -record(object, {flags=0, parts, parents, mtime, uti}).
+%-record(revision, {flags=0, parts, parents, mtime, type, creator}).
+
+-define(REV_FLAG_PRELIMINARY, 16#100).
 
 -record(store,
 	{
@@ -28,15 +32,28 @@
 		contains,
 		lookup,
 		stat,
-		put_doc,
-		put_rev_start,
 		peek,
+		create,
 		fork,
 		update,
+		resume,
+		forget,
 		delete_rev,
 		delete_doc,
+		put_doc,
+		put_rev_start,
 		sync_get_changes,
 		sync_set_anchor
+	}).
+
+-record(rev_stat,
+	{
+		flags,
+		parts,
+		parents,
+		mtime,
+		type,
+		creator
 	}).
 
 -record(handle,
@@ -46,7 +63,12 @@
 		write,
 		truncate,
 		abort,
-		commit
+		commit,
+		suspend,
+		get_type,
+		set_type,
+		get_parents,
+		set_parents
 	}).
 
 -record(importer,

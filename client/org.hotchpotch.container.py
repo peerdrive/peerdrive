@@ -457,7 +457,7 @@ class CollectionTreeView(QtGui.QTreeView):
 			info = c.stat(sourceRev)
 			destStores = c.stat(self.__parent.rev()).volumes()
 			# copy
-			with c.fork(destStores, info.uti()) as w:
+			with c.create(info.uti(), info.creator(), destStores) as w:
 				with c.peek(sourceRev) as r:
 					for part in info.parts():
 						w.write(part, r.readAll(part))

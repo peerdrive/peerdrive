@@ -45,15 +45,16 @@ get_source_loop(Rev, [{_Guid, Ifc} | Remaining]) ->
 
 replicate(Rev, SourceStore, DestStore) ->
 	case store:stat(SourceStore, Rev) of
-		{ok, Flags, Parts, Parents, Mtime, Uti} ->
+		{ok, Stat} ->
 			Object = #object{
-				flags = Flags,
+				flags = Stat#rev_stat.flags,
 				parts = lists:sort(
-					lists:map(fun({FCC, _Size, Hash}) -> {FCC, Hash} end, Parts)
-					),
-				parents = lists:sort(Parents),
-				mtime   = Mtime,
-				uti     = Uti
+					lists:map(
+						fun({FCC, _Size, Hash}) -> {FCC, Hash} end,
+						Stat#rev_stat.parts)),
+				parents = lists:sort(Stat#rev_stat.parents),
+				mtime   = Stat#rev_stat.mtime,
+				uti     = Stat#rev_stat.type
 			},
 			case store:put_rev_start(DestStore, Rev, Object) of
 				ok ->
@@ -66,8 +67,8 @@ replicate(Rev, SourceStore, DestStore) ->
 					{error, Reason}
 			end;
 
-		error ->
-			{error, enoent}
+		Error ->
+			Error
 	end.
 
 

@@ -18,7 +18,8 @@
 -behaviour(gen_server).
 
 -export([start/2]).
--export([read/4, write/4, truncate/3, commit/3, abort/1]).
+-export([read/4, write/4, truncate/3, commit/2, abort/1, get_type/1,
+	set_type/2, get_parents/1, set_parents/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
@@ -32,12 +33,17 @@ start(State, User) ->
 	case gen_server:start(?MODULE, {State, User}, []) of
 		{ok, Pid} ->
 			{ok, #handle{
-				this     = Pid,
-				read     = fun read/4,
-				write    = fun write/4,
-				truncate = fun truncate/3,
-				abort    = fun abort/1,
-				commit   = fun commit/3
+				this        = Pid,
+				read        = fun read/4,
+				write       = fun write/4,
+				truncate    = fun truncate/3,
+				abort       = fun abort/1,
+				commit      = fun commit/2,
+				suspend     = fun(Writer, _) -> abort(Writer), {error, enosys} end,
+				get_type    = fun get_type/1,
+				set_type    = fun set_type/2,
+				get_parents = fun get_parents/1,
+				set_parents = fun set_parents/2
 			}};
 		Else ->
 			Else
@@ -52,11 +58,23 @@ write(Writer, Part, Offset, Data) ->
 truncate(Writer, Part, Offset) ->
 	gen_server:call(Writer, {truncate, Part, Offset}).
 
-commit(Writer, Mtime, RebaseRevs) ->
-	gen_server:call(Writer, {commit, Mtime, RebaseRevs}).
+commit(Writer, Mtime) ->
+	gen_server:call(Writer, {commit, Mtime}).
 
 abort(Writer) ->
 	gen_server:call(Writer, abort).
+
+get_type(Writer) ->
+	gen_server:call(Writer, get_type).
+
+set_type(Writer, Type) ->
+	gen_server:call(Writer, {set_type, Type}).
+
+get_parents(Writer) ->
+	gen_server:call(Writer, get_parents).
+
+set_parents(Writer, Parents) ->
+	gen_server:call(Writer, {set_parents, Parents}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -70,14 +88,17 @@ init({State, User}) ->
 	{ok, State}.
 
 
-% returns: {ok, Data} | eof | {error, Reason}
+% returns: {ok, Data} | {error, Reason}
 handle_call({read, Part, Offset, Length}, _From, S) ->
 	{S2, File} = get_file_read(S, Part),
 	Reply = case File of
 		{error, Reason} ->
 			{error, Reason};
 		IoDevice ->
-			file:pread(IoDevice, Offset, Length)
+			case file:pread(IoDevice, Offset, Length) of
+				eof -> {ok, <<>>};
+				Else -> Else
+			end
 	end,
 	{reply, Reply, S2};
 
@@ -105,13 +126,25 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | conflict | {error, Reason}'
-handle_call({commit, Mtime, RebaseRevs}, _From, S) ->
-	do_commit(S, Mtime, RebaseRevs);
+handle_call({commit, Mtime}, _From, S) ->
+	do_commit(S, Mtime);
 
 % returns nothing
 handle_call(abort, _From, S) ->
 	S2 = do_abort(S),
-	{stop, normal, ok, S2}.
+	{stop, normal, ok, S2};
+
+handle_call(get_type, _From, S) ->
+	{reply, {ok, S#ws.uti}, S};
+
+handle_call({set_type, Type}, _From, S) ->
+	{reply, ok, S#ws{uti=Type}};
+
+handle_call(get_parents, _From, S) ->
+	{reply, {ok, S#ws.baserevs}, S};
+
+handle_call({set_parents, Parents}, _From, S) ->
+	{reply, ok, S#ws{baserevs=Parents}}.
 
 
 handle_info({'EXIT', _From, _Reason}, S) ->
@@ -224,7 +257,7 @@ close_reader(ClosePart, Readers) ->
 
 % calculate hashes, close&move to correct dir, update document
 % returns {ok, Hash} | conflict | {error, Reason}
-do_commit(S, Mtime, RebaseRevs) ->
+do_commit(S, Mtime) ->
 	NewParts = dict:fold(
 		% FIXME: this definitely lacks error handling :(
 		fun (Part, {TmpName, IODevice}, Acc) ->
@@ -243,14 +276,10 @@ do_commit(S, Mtime, RebaseRevs) ->
 		end,
 		[],
 		S#ws.new),
-	NewBaseRevs = case RebaseRevs of
-		keep -> S#ws.baserevs;
-		_    -> RebaseRevs
-	end,
 	Object = #object{
 		flags   = S#ws.flags,
 		parts   = lists:usort(NewParts ++ dict:to_list(S#ws.orig)),
-		parents = lists:usort(NewBaseRevs),
+		parents = lists:usort(S#ws.baserevs),
 		mtime   = Mtime,
 		uti     = S#ws.uti},
 	NewOrig = lists:foldl(
@@ -261,8 +290,7 @@ do_commit(S, Mtime, RebaseRevs) ->
 	S2 = S#ws{
 		orig     = NewOrig,
 		new      = dict:new(),
-		locks    = NewLocks,
-		baserevs = NewBaseRevs},
+		locks    = NewLocks},
 	case file_store:commit(S#ws.server, S#ws.doc, Object) of
 		conflict ->
 			{reply, conflict, S2};

@@ -9,7 +9,6 @@
 	- rename volumes -> stores
 
 - Server
-	- replace MD5 hashes by SHA1-UUID's
 	- File store improvements
 		- garbage collection
 		- automatically delete old revisions when disk full
@@ -95,24 +94,6 @@
 ================================ brainstorming ================================
 
 - extend semantics
-	- preliminary versions
-		- support overwriting versions
-			- just like "git commit --amend"
-			- updating overwrites previous version
-			- throw away temporary versions to keep history clean
-			- will result in fake merge conditions
-		- indicator for preliminary versions
-			- will not be replicated/synced automatically
-			- hint when merging manually
-			- mitigate fake merge conditions
-		- basis for autosave applications
-			- periodically saves changes as preliminary versions
-			- overwrite previous preliminary version
-			- usefull to save intermediate merge result before checkpointing
-			- finally save as non-preliminary checkpoint
-		- accumulate multiple changes
-			- could be used by command line / scripts
-			- final commit after all changes are done
 	- shared updates
 		- allow dirty reads
 		- only one writer per store and doc

@@ -17,6 +17,8 @@
 -module(replicator_worker).
 -behaviour(gen_server).
 
+-include("store.hrl").
+
 -export([start_link/1, start_link/2]).
 -export([cancel/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
@@ -139,8 +141,10 @@ do_modified(Backlog, Doc, StoreGuid) ->
 	case volman:store(StoreGuid) of
 		{ok, StoreIfc} ->
 			case store:lookup(StoreIfc, Doc) of
-				{ok, Rev} -> sticky_handling(Backlog, Rev, [StoreGuid], true);
-				error     -> Backlog
+				{ok, Rev, _PreRevs} ->
+					sticky_handling(Backlog, Rev, [StoreGuid], true);
+				error ->
+					Backlog
 			end;
 
 		error ->
@@ -148,8 +152,8 @@ do_modified(Backlog, Doc, StoreGuid) ->
 	end.
 
 do_replicate_doc(Backlog, Doc, ToStores, History, Important) ->
-	case broker:lookup(Doc) of
-		[{Rev, _Stores}] ->
+	case broker:lookup(Doc, []) of
+		{[{Rev, _Stores}], _} ->
 			RepStores = lists:filter(
 				fun(Dest) ->
 					case broker:replicate_doc(Doc, Dest) of
@@ -167,7 +171,7 @@ do_replicate_doc(Backlog, Doc, ToStores, History, Important) ->
 					NewBacklog
 			end;
 
-		[] ->
+		{[], _} ->
 			case Important of
 				true  -> push_error(Backlog, enoent);
 				false -> Backlog
@@ -180,8 +184,8 @@ do_replicate_doc(Backlog, Doc, ToStores, History, Important) ->
 	end.
 
 do_replicate_rev(Backlog, Rev, ToStores, History, Important, Latest) ->
-	case broker:stat(Rev) of
-		{ok, _Flags, _Parts, Parents, _Mtime, _Uti, Volumes} ->
+	case broker:stat(Rev, []) of
+		{ok, _ErrInfo, {#rev_stat{parents=Parents}, Volumes}} ->
 			% do actual replication to destination stores
 			RepStores1 = lists:subtract(ToStores, Volumes),
 			RepStores2 = lists:filter(
@@ -210,7 +214,7 @@ do_replicate_rev(Backlog, Rev, ToStores, History, Important, Latest) ->
 					NewBacklog2
 			end;
 
-		error ->
+		{error, _, _} ->
 			case Important of
 				true  -> push_error(Backlog, enoent);
 				false -> Backlog

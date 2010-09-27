@@ -19,20 +19,30 @@
 
 -include("store.hrl").
 
-% Reply: ok | {error, Reason}
+% Reply: {ok, ErrInfo} | {error, Reason, ErrInfo}
 sync(Doc, Stores) ->
 	{AllRevs, AllStores} = lists:foldl(
-		fun(Store, {AccRevs, AccStores} = Acc) ->
-			case store:lookup(Store, Doc) of
-				{ok, SomeRev} -> {[SomeRev|AccRevs], [Store|AccStores]};
-				error         -> Acc
+		fun({_, Ifc} = Store, {AccRevs, AccStores} = Acc) ->
+			case store:lookup(Ifc, Doc) of
+				{ok, SomeRev, _PreRevs} ->
+					{[SomeRev|AccRevs], [Store|AccStores]};
+				error ->
+					Acc
 			end
 		end,
 		{[], []},
 		Stores),
-	case calc_dest_rev(AllRevs) of
-		{ok, DestRev} -> do_sync(Doc, DestRev, lists:zip(AllStores, AllRevs));
-		error         -> {error, conflict}
+	case AllRevs of
+		[] ->
+			{error, enoent, []};
+
+		_ ->
+			case calc_dest_rev(AllRevs) of
+				{ok, DestRev} ->
+					do_sync(Doc, DestRev, lists:zip(AllStores, AllRevs));
+				error ->
+					{error, conflict, []}
+			end
 	end.
 
 
@@ -89,15 +99,16 @@ calc_dest_step(State) ->
 follow({BaseRev, Heads, Path}) ->
 	lists:foldl(
 		fun(Head, {AccBase, AccHeads, AccPath} = Acc) ->
-			case broker:stat(Head) of
-				{ok, _Flags, _Parts, Parents, _Mtime, _Uti, _Volumes} ->
+			case broker:stat(Head, []) of
+				{ok, _ErrInfo, {Stat, _FoundStores}} ->
+					Parents = Stat#rev_stat.parents,
 					{
 						AccBase,
 						Parents ++ AccHeads,
 						sets:union(sets:from_list(Parents), AccPath)
 					};
 
-				error ->
+				{error, _Reason, _ErrInfo} ->
 					Acc
 			end
 		end,
@@ -106,24 +117,24 @@ follow({BaseRev, Heads, Path}) ->
 
 
 do_sync(Doc, DestRev, AllStores) ->
-	{value, {LeadStore, DestRev}, FollowStores} = lists:keytake(DestRev, 2,
-		AllStores),
+	{value, {{LeadStoreGuid, LeadStoreIfc}, DestRev}, FollowStores} =
+		lists:keytake(DestRev, 2, AllStores),
 	% create/set temporary doc on lead store
-	case create_tmp(LeadStore, DestRev) of
+	case create_tmp(LeadStoreIfc, DestRev) of
 		{ok, TmpDoc} ->
 			% replicate temporary doc (with all parent revs) to all stores
 			Reply = case replicate_tmp_doc(TmpDoc, FollowStores) of
-				ok->
+				ok ->
 					switch(Doc, DestRev, AllStores);
 
 				{error, Reason} ->
-					{error, Reason}
+					{error, Reason, []}
 			end,
-			cleanup(TmpDoc, AllStores),
+			cleanup(TmpDoc, DestRev, AllStores),
 			Reply;
 
 		{error, Reason} ->
-			{error, Reason}
+			{error, Reason, [{LeadStoreGuid, Reason}]}
 	end.
 
 
@@ -136,25 +147,31 @@ create_tmp(LeadStore, DestRev) ->
 
 
 replicate_tmp_doc(TmpDoc, RepStores) ->
-	Stores = lists:map(fun({Store, _Rev}) -> store:guid(Store) end, RepStores),
+	Stores = [Guid || {{Guid, _Ifc}, _Rev} <- RepStores],
 	replicator:replicate_doc_sync(TmpDoc, Stores, true).
 
 
 switch(Doc, NewRev, Stores) ->
 	% point of no return: once we switch one store we have to do it for all
-	lists:foldl(
-		fun({Store, OldRev}, Result) ->
+	ErrInfo = lists:foldl(
+		fun({{Guid, Store}, OldRev}, Result) ->
 			case store:put_doc(Store, Doc, OldRev, NewRev) of
-				ok    -> Result;
-				Error -> Error
+				ok ->
+					Result;
+				{error, Reason} ->
+					[{Guid, Reason} | Result]
 			end
 		end,
-		ok,
-		Stores).
+		[],
+		Stores),
+	case ErrInfo of
+		[] -> {ok, []};
+		_  -> broker:consolidate_error(ErrInfo)
+	end.
 
 
-cleanup(TmpDoc, Stores) ->
+cleanup(TmpDoc, DestRev, Stores) ->
 	lists:foreach(
-		fun({Store, _Rev}) -> store:delete_doc(Store, TmpDoc) end,
+		fun({{_, Store}, _Rev}) -> store:delete_doc(Store, TmpDoc, DestRev) end,
 		Stores).
 

@@ -36,8 +36,7 @@ server(Module, Listener, ListenSocket) ->
 				State = Module:init(Socket),
 				loop(Module, Socket, State)
 			after
-				listener:servlet_idle(Listener),
-				Module:terminate()
+				listener:servlet_idle(Listener)
 			end,
 			server(Module, Listener, ListenSocket);
 
@@ -48,19 +47,37 @@ server(Module, Listener, ListenSocket) ->
 
 
 loop(Module, Socket, State) ->
-	inet:setopts(Socket, [{active, once}]),
-	receive
-		{tcp, Socket, Packet} ->
-			NewState = Module:handle_packet(Packet, State),
+	Result = try
+		inet:setopts(Socket, [{active, once}]),
+		receive
+			{tcp, Socket, Packet} ->
+				Module:handle_packet(Packet, State);
+
+			{tcp_closed, _Socket} ->
+				Module:terminate(State),
+				%io:format("[~w] Socket ~w closed~n", [self(), Socket]),
+				closed;
+
+			Info ->
+				Module:handle_info(Info, State)
+		end
+	catch
+		throw:Term   -> {error, {throw, Term}};
+		exit:Reason  -> {error, {exit, Reason}};
+		error:Reason -> {error, {error, {Reason, erlang:get_stacktrace()}}}
+	end,
+	case Result of
+		{ok, NewState} ->
 			loop(Module, Socket, NewState);
-
-		{tcp_closed, _Socket} ->
-			%io:format("[~w] Socket ~w closed~n", [self(), Socket]),
+		{stop, NewState} ->
+			gen_tcp:close(Socket),
+			Module:terminate(NewState);
+		closed ->
 			ok;
-
-		Info ->
-			NewState = Module:handle_info(Info, State),
-			loop(Module, Socket, NewState)
+		{error, Error} ->
+			error_logger:error_report([{module, Module}, {state, State},
+				{error, Error}]),
+			gen_tcp:close(Socket),
+			Module:terminate(State)
 	end.
-
 

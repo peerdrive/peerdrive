@@ -22,8 +22,8 @@
 
 % Store interface
 -export([guid/1, contains/2, stat/2, lookup/2, put_doc/4, put_rev_start/3,
-	peek/2, fork/4, update/5,
-	delete_rev/2, delete_doc/2, sync_get_changes/2, sync_set_anchor/3]).
+	peek/2, create/4, fork/4, update/4,
+	delete_rev/2, delete_doc/3, sync_get_changes/2, sync_set_anchor/3]).
 
 % Functions used by helper processes (reader/writer/...)
 -export([commit/3, insert_rev/3, lock/2, unlock/2]).
@@ -122,19 +122,24 @@ peek(Store, Rev) ->
 	gen_server:call(Store, {peek, Rev}).
 
 %% @doc Create a new document
+%% @see store:create/4
+create(Store, Doc, Type, Creator) ->
+	gen_server:call(Store, {create, Doc, Type, Creator}).
+
+%% @doc Fork a new document
 %% @see store:fork/4
-fork(Store, Doc, StartRev, Uti) ->
-	gen_server:call(Store, {fork, Doc, StartRev, Uti}).
+fork(Store, Doc, StartRev, Creator) ->
+	gen_server:call(Store, {fork, Doc, StartRev, Creator}).
 
 %% @doc Write to an existing document
-%% @see store:update/5
-update(Store, Doc, StartRev, MergeRevs, Uti) ->
-	gen_server:call(Store, {update, Doc, StartRev, MergeRevs, Uti}).
+%% @see store:update/4
+update(Store, Doc, StartRev, Creator) ->
+	gen_server:call(Store, {update, Doc, StartRev, Creator}).
 
 %% @doc Delete a document
-%% @see store:delete_doc/2
-delete_doc(Store, Doc) ->
-	gen_server:call(Store, {delete_doc, Doc}).
+%% @see store:delete_doc/3
+delete_doc(Store, Doc, Rev) ->
+	gen_server:call(Store, {delete_doc, Doc, Rev}).
 
 %% @doc Delete a revision
 %% @see store:delete_rev/2
@@ -252,7 +257,7 @@ handle_call_internal(guid, _From, S) ->
 % returns `{ok, Rev} | error'
 handle_call_internal({lookup, Doc}, _From, S) ->
 	case dict:find(Doc, S#state.uuids) of
-		{ok, {Rev, _Gen}} -> {reply, {ok, Rev}, S};
+		{ok, {Rev, _Gen}} -> {reply, {ok, Rev, []}, S};
 		error             -> {reply, error, S}
 	end;
 
@@ -274,22 +279,27 @@ handle_call_internal({peek, Rev}, From, S) ->
 	Reply = do_peek(S, Rev, User),
 	{reply, Reply, S};
 
-handle_call_internal({fork, Doc, StartRev, Uti}, From, S) ->
+handle_call_internal({create, Doc, Type, Creator}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_fork(S, Doc, StartRev, Uti, User),
+	{S2, Reply} = do_write_start_create(S, Doc, Type, Creator, User),
 	{reply, Reply, S2};
 
-handle_call_internal({update, Doc, StartRev, MergeRevs, Uti}, From, S) ->
+handle_call_internal({fork, Doc, StartRev, Creator}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_update(S, Doc, StartRev, MergeRevs, Uti, User),
+	{S2, Reply} = do_write_start_fork(S, Doc, StartRev, Creator, User),
+	{reply, Reply, S2};
+
+handle_call_internal({update, Doc, StartRev, Creator}, From, S) ->
+	{User, _} = From,
+	{S2, Reply} = do_write_start_update(S, Doc, StartRev, Creator, User),
 	{reply, Reply, S2};
 
 handle_call_internal({delete_rev, Rev}, _From, S) ->
 	{S2, Reply} = do_delete_rev(S, Rev),
 	{reply, Reply, S2};
 
-handle_call_internal({delete_doc, Doc}, _From, S) ->
-	{S2, Reply} = do_delete_doc(S, Doc),
+handle_call_internal({delete_doc, Doc, Rev}, _From, S) ->
+	{S2, Reply} = do_delete_doc(S, Doc, Rev),
 	{reply, Reply, S2};
 
 handle_call_internal({put_doc, Doc, OldRev, NewRev}, _From, S) ->
@@ -442,10 +452,13 @@ make_interface(Pid) ->
 		put_doc            = fun put_doc/4,
 		put_rev_start      = fun put_rev_start/3,
 		peek               = fun peek/2,
+		create             = fun create/4,
 		fork               = fun fork/4,
-		update             = fun update/5,
+		update             = fun update/4,
+		resume             = fun(_, _, _, _) -> {error, enosys} end,
+		forget             = fun(_, _, _) -> {error, enosys} end,
 		delete_rev         = fun delete_rev/2,
-		delete_doc         = fun delete_doc/2,
+		delete_doc         = fun delete_doc/3,
 		sync_get_changes   = fun sync_get_changes/2,
 		sync_set_anchor    = fun sync_set_anchor/3
 	}.
@@ -470,7 +483,7 @@ check_root_doc(S, Name) ->
 				parents = [],
 				mtime   = util:get_time(),
 				uti     = <<"org.hotchpotch.volume">>},
-			Rev = store:hash_object(Object),
+			Rev = store:hash_revision(Object),
 			S4 = S3#state{objects=dict:store(Rev, {1, Object}, S3#state.objects)},
 			Gen = S4#state.gen,
 			S4#state{
@@ -482,7 +495,7 @@ check_root_doc(S, Name) ->
 
 crd_write_part(S, RawContent) ->
 	Content = struct:encode(RawContent),
-	Hash = crypto:md5(Content),
+	Hash = binary_part(crypto:sha(Content), 0, 16),
 	Name = util:build_path(S#state.path, Hash),
 	filelib:ensure_dir(Name),
 	file:write_file(Name, Content),
@@ -490,12 +503,12 @@ crd_write_part(S, RawContent) ->
 	{S2, Hash}.
 
 
-% returns `{ok, Parts, Parents, Mtime, Uti} | error'
+% returns `{ok, #stat{}} | {error, Reason}'
 do_stat(Rev, #state{objects=Objects, path=Path}) ->
 	case dict:find(Rev, Objects) of
 		% object doesn't exist anymore on this store
 		{ok, {_, stub}} ->
-			error;
+			{error, enoent};
 
 		% got'ya
 		{ok, {_, Object}} ->
@@ -510,12 +523,18 @@ do_stat(Rev, #state{objects=Objects, path=Path}) ->
 				end,
 				[],
 				Object#object.parts),
-			{ok, Object#object.flags, Parts, Object#object.parents,
-				Object#object.mtime, Object#object.uti};
+			{ok, #rev_stat{
+				flags   = Object#object.flags,
+				parts   = Parts,
+				parents = Object#object.parents,
+				mtime   = Object#object.mtime,
+				type    = Object#object.uti,
+				creator = <<"">>
+			}};
 
 		% completely unknown...
 		error ->
-			error
+			{error, enoent}
 	end.
 
 do_peek(#state{objects=Objects, path=Path}, Rev, User) ->
@@ -553,7 +572,7 @@ do_delete_rev(#state{guid=Guid, objects=Objects, path=Path} = S, Rev) ->
 	end.
 
 
-do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc) ->
+do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
 	case Doc of
 		Guid ->
 			{S, {error, eaccess}};
@@ -564,6 +583,9 @@ do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc) ->
 					vol_monitor:trigger_rm_doc(Guid, Doc),
 					gen_server:cast(self(), {object_ref_dec, Rev}),
 					{S#state{ uuids=dict:erase(Doc, Uuids), changed=true}, ok};
+
+				{ok, {_OtherRev, _Gen}} ->
+					{S, {error, conflict}};
 
 				error ->
 					{S, {error, enoent}}
@@ -650,63 +672,52 @@ do_dump_object(Object, Path) ->
 %%% Creating & Writing %%%%%%%%%%%%%%%%
 
 % returns `{S2, {ok, Writer} | {error, Reason}}'
-do_write_start_fork(S, Doc, StartRev, Uti, User) ->
-	case StartRev of
-		% create new document
-		<<0:128>> ->
-			RealUti = case Uti of
-				keep -> <<"public.item">>;
-				_    -> Uti
-			end,
+do_write_start_create(S, Doc, Type, _Creator, User) ->
+	State = #ws{
+		path      = S#state.path,
+		server    = self(),
+		flags     = 0,
+		doc       = Doc,
+		baserevs  = [],
+		uti       = Type,
+		orig      = dict:new(),
+		new       = dict:new(),
+		readers   = dict:new(),
+		locks     = []},
+	{S2, Writer} = start_writer(S, State, User),
+	{S2, {ok, Writer}}.
+
+
+% returns `{S2, {ok, Writer} | {error, Reason}}'
+do_write_start_fork(S, Doc, StartRev, _Creator, User) ->
+	case dict:find(StartRev, S#state.objects) of
+		% err, don't known that one...
+		error ->
+			{S, {error, enoent}};
+		{ok, {_, stub}} ->
+			{S, {error, enoent}};
+
+		% load old values and start writer process
+		{ok, {_, Object}} ->
+			Parts = dict:from_list(Object#object.parts),
 			State = #ws{
 				path      = S#state.path,
 				server    = self(),
-				flags     = 0,
+				flags     = Object#object.flags,
 				doc       = Doc,
-				baserevs  = [],
-				uti       = RealUti,
-				orig      = dict:new(),
+				baserevs  = [StartRev],
+				uti       = Object#object.uti,
+				orig      = Parts,
 				new       = dict:new(),
 				readers   = dict:new(),
 				locks     = []},
 			{S2, Writer} = start_writer(S, State, User),
-			{S2, {ok, Writer}};
-
-		% start from existing document
-		Rev ->
-			case dict:find(Rev, S#state.objects) of
-				% err, don't known that one...
-				error ->
-					{S, {error, enoent}};
-				{ok, {_, stub}} ->
-					{S, {error, enoent}};
-
-				% load old values and start writer process
-				{ok, {_, Object}} ->
-					RealUti = case Uti of
-						keep -> Object#object.uti;
-						_    -> Uti
-					end,
-					Parts = dict:from_list(Object#object.parts),
-					State = #ws{
-						path      = S#state.path,
-						server    = self(),
-						flags     = Object#object.flags,
-						doc       = Doc,
-						baserevs  = [Rev],
-						uti       = RealUti,
-						orig      = Parts,
-						new       = dict:new(),
-						readers   = dict:new(),
-						locks     = []},
-					{S2, Writer} = start_writer(S, State, User),
-					{S2, {ok, Writer}}
-			end
+			{S2, {ok, Writer}}
 	end.
 
 
 % returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
-do_write_start_update(S, Doc, StartRev, MergeRevs, Uti, User) ->
+do_write_start_update(S, Doc, StartRev, _Creator, User) ->
 	case dict:find(Doc, S#state.uuids) of
 		{ok, {StartRev, _Gen}} ->
 			case dict:fetch(StartRev, S#state.objects) of
@@ -714,18 +725,14 @@ do_write_start_update(S, Doc, StartRev, MergeRevs, Uti, User) ->
 					{S, {error, orphaned}};
 
 				{_, Object} ->
-					RealUti = case Uti of
-						keep -> Object#object.uti;
-						_    -> Uti
-					end,
 					Parts = dict:from_list(Object#object.parts),
 					State = #ws{
 						path      = S#state.path,
 						server    = self(),
 						flags     = Object#object.flags,
 						doc       = Doc,
-						baserevs  = [StartRev] ++ MergeRevs,
-						uti       = RealUti,
+						baserevs  = [StartRev],
+						uti       = Object#object.uti,
 						orig      = Parts,
 						new       = dict:new(),
 						readers   = dict:new(),
@@ -836,7 +843,7 @@ do_put_rev(S, Rev, Object, User) ->
 %%% Commit %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 do_commit(S, Doc, Object) ->
-	NewRev = store:hash_object(Object),
+	NewRev = store:hash_revision(Object),
 	Reply = case dict:find(Doc, S#state.uuids) of
 		{ok, {CurrentRev, _Gen}} ->
 			case lists:member(CurrentRev, Object#object.parents) of

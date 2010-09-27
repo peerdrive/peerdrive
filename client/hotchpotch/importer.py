@@ -94,7 +94,7 @@ def importFile(store, path, name=""):
 
 		#print 'META: ', repr(meta)
 		with open(path, "rb") as file:
-			with HpConnector().fork([store], uti) as writer:
+			with HpConnector().create(uti, "", [store]) as writer:
 				writer.write('FILE', file.read())
 				writer.write('META', hpstruct.dumps(meta))
 				writer.commit()
@@ -108,7 +108,7 @@ def importFile(store, path, name=""):
 def importObject(store, uti, spec):
 	link = None
 	try:
-		with HpConnector().fork([store], uti) as writer:
+		with HpConnector().create(uti, "", [store]) as writer:
 			for (fourcc, data) in spec:
 				writer.writeAll(fourcc, data)
 			writer.commit()

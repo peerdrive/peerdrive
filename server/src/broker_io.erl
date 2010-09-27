@@ -1,7 +1,7 @@
 %% Hotchpotch
 %% Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 %%
-%% This program is free software: you can redistribute it and/or modify
+%% This program is free software: you can redistribute_write it and/or modify
 %% it under the terms of the GNU General Public License as published by
 %% the Free Software Foundation, either version 3 of the License, or
 %% (at your option) any later version.
@@ -18,9 +18,11 @@
 -behaviour(gen_server).
 
 -export([start/1]).
--export([read/4, write/4, truncate/3, commit/2, abort/1]).
+-export([read/4, write/4, truncate/3, get_parents/1, set_parents/2, get_type/1,
+	set_type/2, commit/1, suspend/1, abort/1]).
 
--export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
+-export([init/1, init/2, handle_call/3, handle_cast/2, code_change/3,
+	handle_info/2, terminate/2]).
 
 -record(state, {handles, user, doc}).
 
@@ -28,29 +30,36 @@
 %% Public broker operations...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
-% Reply: {ok, Broker} | {error, Reason}
-% The init function will link to the user process when successfull.
 start(Operation) ->
-	gen_server:start(?MODULE, Operation, []).
+	proc_lib:start_link(?MODULE, init, [self(), Operation]).
 
-% {ok, Data} | eof | {error, Reason}
 read(Broker, Part, Offset, Length) ->
 	gen_server:call(Broker, {read, Part, Offset, Length}).
 
-% ok | {error, Reason}
 write(Broker, Part, Offset, Data) ->
 	gen_server:call(Broker, {write, Part, Offset, Data}).
 
-% ok | {error, Reason}
 truncate(Broker, Part, Offset) ->
 	gen_server:call(Broker, {truncate, Part, Offset}).
 
-% {ok, Hash} | conflict | {error, Reason}
-commit(Broker, RebaseRevs) ->
-	gen_server:call(Broker, {commit, RebaseRevs}).
+get_parents(Broker) ->
+	gen_server:call(Broker, get_parents).
 
-% ok
+set_parents(Broker, Parents) ->
+	gen_server:call(Broker, {set_parents, Parents}).
+
+get_type(Broker) ->
+	gen_server:call(Broker, get_type).
+
+set_type(Broker, Type) ->
+	gen_server:call(Broker, {set_type, Type}).
+
+commit(Broker) ->
+	gen_server:call(Broker, commit).
+
+suspend(Broker) ->
+	gen_server:call(Broker, suspend).
+
 abort(Broker) ->
 	gen_server:call(Broker, abort).
 
@@ -58,66 +67,65 @@ abort(Broker) ->
 %% gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% @spec: init(Op) -> {ok, #state} | {stop, Reason}
-
-init({peek, Rev, Stores, User}) ->
-	case do_peek(Rev, Stores) of
-		{ok, Handle} ->
+init(Parent, Operation) ->
+	case init_operation(Operation) of
+		{ok, ErrInfo, State} ->
+			proc_lib:init_ack(Parent, {ok, ErrInfo, self()}),
 			process_flag(trap_exit, true),
-			link(User),
-			{ok, #state{handles=[Handle], user=User}};
+			link(Parent),
+			gen_server:enter_loop(?MODULE, [], State#state{user=Parent});
 
-		{error, Reason} ->
-			{stop, Reason}
-	end;
-
-init({fork, Doc, StartRev, Stores, Uti, User}) ->
-	case do_fork(Doc, StartRev, Stores, Uti) of
-		{ok, Handles} ->
-			process_flag(trap_exit, true),
-			link(User),
-			{ok, #state{handles=Handles, user=User, doc=Doc}};
-
-		{error, Reason} ->
-			{stop, Reason}
-	end;
-
-init({update, Doc, Rev, MergeRevs, Stores, Uti, User}) ->
-	case do_update(Doc, Rev, MergeRevs, Stores, Uti) of
-		{ok, Handles} ->
-			process_flag(trap_exit, true),
-			link(User),
-			{ok, #state{handles=Handles, user=User, doc=Doc}};
-
-		{error, Reason} ->
-			{stop, Reason}
+		{error, _Reason, _ErrInfo} = Error ->
+			Error
 	end.
 
 
-% {ok, Data} | eof | {error, Reason}
+init_operation({peek, Rev, Stores}) ->
+	do_peek(Rev, Stores);
+
+init_operation({create, Doc, Type, Creator, Stores}) ->
+	do_create(Doc, Type, Creator, Stores);
+
+init_operation({fork, Doc, StartRev, Creator, Stores}) ->
+	do_fork(Doc, StartRev, Creator, Stores);
+
+init_operation({update, Doc, StartRev, Creator, Stores}) ->
+	do_update(Doc, StartRev, Creator, Stores);
+
+init_operation({resume, Doc, PreRev, Creator, Stores}) ->
+	do_resume(Doc, PreRev, Creator, Stores).
+
+
 handle_call({read, Part, Offset, Length}, _From, S) ->
-	Reply = case S#state.handles of
-		[]         -> {error, enoent};
-		[Handle|_] -> store:read(Handle, Part, Offset, Length)
-	end,
-	{reply, Reply, S};
+	distribute_read(fun(Handle) -> store:read(Handle, Part, Offset, Length) end, S);
 
-% ok | {error, Reason}
 handle_call({write, Part, Offset, Data}, _From, S) ->
-	distribute(fun(Handle) -> store:write(Handle, Part, Offset, Data) end, S);
+	distribute_write(fun(Handle) -> store:write(Handle, Part, Offset, Data) end, S);
 
-% ok | {error, Reason}
 handle_call({truncate, Part, Offset}, _From, S) ->
-	distribute(fun(Handle) -> store:truncate(Handle, Part, Offset) end, S);
+	distribute_write(fun(Handle) -> store:truncate(Handle, Part, Offset) end, S);
 
-% {ok, Rev} | conflict | {error, Reason}
-handle_call({commit, RebaseRevs}, _From, S) ->
-	do_commit(RebaseRevs, S);
+handle_call(get_parents, _From, S) ->
+	distribute_read(fun(Handle) -> store:get_parents(Handle) end, S);
 
-% ok
+handle_call({set_parents, Parents}, _From, S) ->
+	distribute_write(fun(Handle) -> store:set_parents(Handle, Parents) end, S);
+
+handle_call(get_type, _From, S) ->
+	distribute_read(fun(Handle) -> store:get_type(Handle) end, S);
+
+handle_call({set_type, Type}, _From, S) ->
+	distribute_write(fun(Handle) -> store:set_type(Handle, Type) end, S);
+
+handle_call(commit, _From, S) ->
+	do_commit(S);
+
+handle_call(suspend, _From, S) ->
+	do_suspend(S);
+
 handle_call(abort, _From, S) ->
 	do_abort(S#state.handles),
-	{stop, normal, ok, S}.
+	{stop, normal, {ok, []}, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
@@ -133,10 +141,14 @@ handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
 				normal ->
 					% don't care
 					{noreply, S};
-				_Abnormal ->
+
+				Abnormal ->
 					% well, this one was unexpected...
+					error_logger:warning_msg("broker_io: handle died: ~p~n",
+						[Abnormal]),
+					% FIXME: N is a #handle{}
 					Handles = lists:filter(
-						fun(N) -> is_process_alive(N) end,
+						fun({_, N}) -> is_process_alive(N) end,
 						S#state.handles),
 					{noreply, S#state{handles=Handles}}
 			end
@@ -147,6 +159,7 @@ handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
+init(_) -> {stop, enotsup}.
 handle_cast(_, State)    -> {stop, enotsup, State}.
 code_change(_, State, _) -> {ok, State}.
 terminate(_, _)          -> ok.
@@ -156,66 +169,62 @@ terminate(_, _)          -> ok.
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_peek(_Rev, []) ->
-	{error, enoent};
-
-do_peek(Rev, [StoreIfc | Stores]) ->
-	case store:peek(StoreIfc, Rev) of
-		{ok, Handle} -> {ok, Handle};
-		_Else        -> do_peek(Rev, Stores)
-	end.
+do_peek(Rev, Stores) ->
+	do_peek_loop(Rev, Stores, []).
 
 
-do_fork(Doc, StartRev, Stores, Uti) ->
-	case do_fork_loop(Doc, StartRev, Uti, Stores, [], []) of
-		{[], Errors} ->
-			{error, consolidate_errors(Errors)};
-		{Handles, _} ->
-			{ok, Handles}
-	end.
+do_peek_loop(_Rev, [], Errors) ->
+	broker:consolidate_error(Errors);
 
-
-do_fork_loop(_Doc, _StartRev, _Uti, [], Handles, Errors) ->
-	{Handles, Errors};
-
-do_fork_loop(Doc, StartRev, Uti, [Store | Stores], Handles, Errors) ->
-	case store:fork(Store, Doc, StartRev, Uti) of
+do_peek_loop(Rev, [{Guid, Ifc} | Stores], Errors) ->
+	case store:peek(Ifc, Rev) of
 		{ok, Handle} ->
-			do_fork_loop(Doc, StartRev, Uti, Stores, [Handle|Handles], Errors);
+			State = #state{ handles=[{Guid, Handle}] },
+			broker:consolidate_success(Errors, State);
 		{error, Reason} ->
-			do_fork_loop(Doc, StartRev, Uti, Stores, Handles, [Reason|Errors])
+			do_peek_loop(Rev, Stores, [{Guid, Reason} | Errors])
 	end.
 
 
-do_update(Doc, Rev, MergeRevs, Stores, Uti) ->
-	case do_update_loop(Doc, Rev, MergeRevs, Uti, Stores, [], []) of
-		{[], Errors} ->
-			{error, consolidate_errors(Errors)};
-		{Handles, _} ->
-			{ok, Handles}
-	end.
+do_create(Doc, Type, Creator, Stores) ->
+	start_handles(
+		fun(Ifc) -> store:create(Ifc, Doc, Type, Creator) end,
+		Doc,
+		Stores).
 
 
-do_update_loop(_Doc, _Rev, _MergeRevs, _Uti, [], Handles, Errors) ->
-	{Handles, Errors};
-
-do_update_loop(Doc, Rev, MergeRevs, Uti, [Store | Stores], Handles, Errors) ->
-	case store:update(Store, Doc, Rev, MergeRevs, Uti) of
-		{ok, Handle} ->
-			do_update_loop(Doc, Rev, MergeRevs, Uti, Stores, [Handle|Handles], Errors);
-		{error, Reason} ->
-			do_update_loop(Doc, Rev, MergeRevs, Uti, Stores, Handles, [Reason|Errors])
-	end.
+do_fork(Doc, StartRev, Creator, Stores) ->
+	start_handles(
+		fun(Ifc) -> store:fork(Ifc, Doc, StartRev, Creator) end,
+		Doc,
+		Stores).
 
 
-do_commit(RebaseRevs, S) ->
+do_update(Doc, StartRev, Creator, Stores) ->
+	start_handles(
+		fun(Ifc) -> store:update(Ifc, Doc, StartRev, Creator) end,
+		Doc,
+		Stores).
+
+
+do_resume(Doc, PreRev, Creator, Stores) ->
+	start_handles(
+		fun(Ifc) -> store:resume(Ifc, Doc, PreRev, Creator) end,
+		Doc,
+		Stores).
+
+
+do_commit(S) ->
 	Mtime = util:get_time(),
-	{Revs, ConflictHandles, Errors} = lists:foldl(
-		fun(Handle, {AccRevs, AccConflicts, AccErrors}) ->
-			case store:commit(Handle, Mtime, RebaseRevs) of
-				{ok, Rev}       -> {[Rev|AccRevs], AccConflicts, AccErrors};
-				conflict        -> {AccRevs, [Handle|AccConflicts], AccErrors};
-				{error, Reason} -> {AccRevs, AccConflicts, [Reason|AccErrors]}
+	{Revs, Conflicts, Errors} = lists:foldl(
+		fun({Store, Handle}, {AccRevs, AccConflicts, AccErrors}) ->
+			case store:commit(Handle, Mtime) of
+				{ok, Rev} ->
+					{[Rev|AccRevs], AccConflicts, AccErrors};
+				conflict ->
+					{AccRevs, [{Store, Handle}|AccConflicts], AccErrors};
+				{error, Reason} ->
+					{AccRevs, AccConflicts, [{Store, Reason}|AccErrors]}
 			end
 		end,
 		{[], [], []},
@@ -223,57 +232,134 @@ do_commit(RebaseRevs, S) ->
 	case lists:usort(Revs) of
 		[Rev] ->
 			% as expected
-			do_abort(ConflictHandles),
+			do_abort(Conflicts),
 			vol_monitor:trigger_mod_doc(local, S#state.doc),
-			{stop, normal, {ok, Rev}, S#state{handles=[]}};
+			{stop, normal, broker:consolidate_success(Errors, Rev), S};
 
 		[] ->
 			% no writer commited...
-			case ConflictHandles of
+			case Conflicts of
 				[] ->
 					% all were hard errors...
-					{stop, normal, {error, consolidate_errors(Errors)}, S#state{handles=[]}};
+					{stop, normal, broker:consolidate_error(Errors), S};
 
 				Remaining ->
-					{reply, conflict, S#state{handles=Remaining}}
+					% we're still alive...
+					{reply, {retry, conflict, broker:consolidate_filter(Errors)},
+						S#state{handles=Remaining}}
 			end;
 
 		_ ->
 			% internal error: handles did not came to the same revision! WTF?
-			do_abort(ConflictHandles),
-			{stop, normal, {error, einternal}, S#state{handles=[]}}
+			do_abort(Conflicts),
+			{stop, normal, {error, einternal, []}, S}
+	end.
+
+
+do_suspend(S) ->
+	Mtime = util:get_time(),
+	{Revs, Errors} = lists:foldl(
+		fun({Store, Handle}, {AccRevs, AccConflicts, AccErrors}) ->
+			case store:suspend(Handle, Mtime) of
+				{ok, Rev} ->
+					{[Rev|AccRevs], AccConflicts, AccErrors};
+				{error, Reason} ->
+					{AccRevs, AccConflicts, [{Store, Reason}|AccErrors]}
+			end
+		end,
+		{[], [], []},
+		S#state.handles),
+	case lists:usort(Revs) of
+		[Rev] ->
+			% as expected
+			vol_monitor:trigger_mod_doc(local, S#state.doc),
+			{stop, normal, broker:consolidate_success(Errors, Rev), S};
+
+		[] ->
+			% all were hard errors...
+			{stop, normal, broker:consolidate_error(Errors), S};
+
+		_ ->
+			% internal error: handles did not came to the same revision! WTF?
+			{stop, normal, {error, einternal, []}, S}
 	end.
 
 
 do_abort(Handles) ->
-	lists:foreach(fun(Handle) -> store:abort(Handle) end, Handles).
+	lists:foreach(fun({_Guid, Handle}) -> store:abort(Handle) end, Handles).
 
 
-% TODO: parallelize this
-distribute(Fun, S) ->
-	{Errors, Handles} = lists:foldr(
-		fun(Handle, {AccErrors, AccHandles}) ->
+start_handles(Fun, Doc, Stores) ->
+	case start_handles_loop(Fun, Stores, [], []) of
+		{ok, ErrInfo, Handles} ->
+			{ok, ErrInfo, #state{doc=Doc, handles=Handles}};
+		Error ->
+			Error
+	end.
+
+
+start_handles_loop(_Fun, [], Handles, Errors) ->
+	case Handles of
+		[] -> broker:consolidate_error(Errors);
+		_  -> broker:consolidate_success(Errors, Handles)
+	end;
+
+start_handles_loop(Fun, [{Guid, Ifc} | Stores], Handles, Errors) ->
+	case Fun(Ifc) of
+		{ok, Handle} ->
+			start_handles_loop(Fun, Stores, [{Guid, Handle} | Handles], Errors);
+		{error, Reason} ->
+			start_handles_loop(Fun, Stores, Handles, [{Guid, Reason} | Errors])
+	end.
+
+
+distribute_read(Fun, S) ->
+	Reply = case S#state.handles of
+		[] ->
+			{error, enoent, []};
+
+		[{Guid, Handle} | _] ->
+			% TODO: ask more than just the first store if it fails...
+			case Fun(Handle) of
+				{ok, Result}    -> {ok, [], Result};
+				{error, Reason} -> {error, Reason, [{Guid, Reason}]}
+			end
+	end,
+	{reply, Reply, S}.
+
+
+distribute_write(Fun, S) ->
+	% TODO: parallelize this loop
+	{Success, Fail} = lists:foldr(
+		fun({Store, Handle}, {AccSuccess, AccFail}) ->
 			case Fun(Handle) of
 				ok ->
-					{AccErrors, [Handle|AccHandles]};
-				{error, Error} ->
-					store:abort(Handle),
-					{[Error|AccErrors], AccHandles}
+					{[{Store, Handle} | AccSuccess], AccFail};
+
+				{error, Reason} ->
+					{AccSuccess, [{Store, Reason, Handle} | AccFail]}
 			end
 		end,
 		{[], []},
 		S#state.handles),
-	Reply = case Errors of
-		[] -> ok;
-		_  -> {error, consolidate_errors(Errors)}
-	end,
-	{reply, Reply, S#state{handles=Handles}}.
 
+	% let's see what we got...
+	case Success of
+		[] ->
+			% nobody did anything -> no state change -> keep going
+			ErrInfo = lists:map(
+				fun({Store, Reason, _}) -> {Store, Reason} end,
+				Fail),
+			{reply, broker:consolidate_error(ErrInfo), S};
 
-consolidate_errors(Errors) ->
-	case lists:filter(fun(E) -> E =/= enoent end, lists:usort(Errors)) of
-		[]      -> enoent;
-		[Error] -> Error;
-		_       -> emultiple
+		_ ->
+			% at least someone did what he was told
+			ErrInfo = lists:map(
+				fun({Store, Reason, Handle}) ->
+					store:abort(Handle),
+					{Store, Reason}
+				end,
+				Fail),
+			{reply, broker:consolidate_success(ErrInfo), S#state{handles=Success}}
 	end.
 

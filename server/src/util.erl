@@ -78,14 +78,14 @@ gen_tmp_name(RootPath) ->
 % returns {ok, Data} | {error, Reason}
 read_rev(Rev, Part) ->
 	case broker:peek(Rev, []) of
-		{ok, Reader} ->
+		{ok, _Errors, Reader} ->
 			try
 				read_rev_loop(Reader, Part, 0, <<>>)
 			after
 				broker:abort(Reader)
 			end;
 
-		{error, Reason} ->
+		{error, Reason, _Errors} ->
 			{error, Reason}
 	end.
 
@@ -93,11 +93,11 @@ read_rev(Rev, Part) ->
 read_rev_loop(Reader, Part, Offset, Acc) ->
 	Length = 16#10000,
 	case broker:read(Reader, Part, Offset, Length) of
-		{ok, Data} ->
-			read_rev_loop(Reader, Part, Offset+Length, <<Acc/binary, Data/binary>>);
-		eof ->
+		{ok, _Error, <<>>} ->
 			{ok, Acc};
-		{error, Reason} ->
+		{ok, _Errors, Data} ->
+			read_rev_loop(Reader, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
+		{error, Reason, _Errors} ->
 			{error, Reason}
 	end.
 
@@ -122,18 +122,18 @@ get_time() ->
 	(MegaSecs*1000000+Secs).
 
 
-% returns {ok, Md5} | {error, Reason}
+% returns {ok, Sha1} | {error, Reason}
 hash_file(File) ->
 	file:position(File, 0),
-	hash_file_loop(File, crypto:md5_init()).
+	hash_file_loop(File, crypto:sha_init()).
 
 hash_file_loop(File, Ctx1) ->
 	case file:read(File, 16#100000) of
 		{ok, Data} ->
-			Ctx2 = crypto:md5_update(Ctx1, Data),
+			Ctx2 = crypto:sha_update(Ctx1, Data),
 			hash_file_loop(File, Ctx2);
 		eof ->
-			{ok, crypto:md5_final(Ctx1)};
+			{ok, binary_part(crypto:sha_final(Ctx1), 0, 16)};
 		Else ->
 			Else
 	end.

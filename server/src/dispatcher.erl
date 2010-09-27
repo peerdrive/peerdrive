@@ -138,7 +138,7 @@ find_sys_store([{_Id, _Descr, Guid, Tags} | Remaining]) ->
 
 read_doc(StoreIfc, Doc) ->
 	case store:lookup(StoreIfc, Doc) of
-		{ok, Rev} -> util:read_rev_struct(Rev, <<"HPSD">>);
-		error     -> {error, enoent}
+		{ok, Rev, _} -> util:read_rev_struct(Rev, <<"HPSD">>);
+		error        -> {error, enoent}
 	end.
 

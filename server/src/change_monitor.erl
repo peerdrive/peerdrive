@@ -187,8 +187,8 @@ doc_population(Doc) ->
 	lists:foldl(
 		fun({StoreGuid, StoreIfc}, Acc) ->
 			case store:lookup(StoreIfc, Doc) of
-				{ok, _Rev} -> sets:add_element(StoreGuid, Acc);
-				error      -> Acc
+				{ok, _Rev, _PreRevs} -> sets:add_element(StoreGuid, Acc);
+				error -> Acc
 			end
 		end,
 		sets:new(),
@@ -249,7 +249,7 @@ trigger_add_store(StoreGuid, Watches) ->
 					case Type of
 						doc ->
 							case store:lookup(StoreIfc, Hash) of
-								{ok, _Rev} ->
+								{ok, _Rev, _PreRevs} ->
 									case sets:size(StoreSet) of
 										0 -> fire_trigger(appeared, doc, Hash, PidSet);
 										_ -> fire_trigger(replicated, doc, Hash, PidSet)

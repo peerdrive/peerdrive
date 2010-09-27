@@ -14,7 +14,7 @@ class TestSync(unittest.TestCase):
 	def test_already_same(self):
 		c = HpConnector()
 		stores = [self.store1, self.store2]
-		with c.fork(stores) as w:
+		with c.create("public.data", "test", stores) as w:
 			w.commit()
 			doc = w.getDoc()
 			rev = w.getRev()
@@ -22,13 +22,13 @@ class TestSync(unittest.TestCase):
 		self.assertTrue(c.sync(doc))
 		self.assertTrue(c.sync(doc, stores))
 
-		c.delete_doc(doc)
+		c.delete_doc(doc, rev)
 
 
 	def test_good(self):
 		c = HpConnector()
 		stores = [self.store1, self.store2]
-		with c.fork(stores) as w:
+		with c.create("public.data", "test", stores) as w:
 			w.commit()
 			doc = w.getDoc()
 			rev = w.getRev()
@@ -45,12 +45,12 @@ class TestSync(unittest.TestCase):
 		self.assertEqual(l.rev(self.store1), rev)
 		self.assertEqual(l.rev(self.store2), rev)
 
-		c.delete_doc(doc)
+		c.delete_doc(doc, rev)
 
 	def test_bad(self):
 		c = HpConnector()
 		stores = [self.store1, self.store2]
-		with c.fork(stores) as w:
+		with c.create("public.data", "test", stores) as w:
 			w.commit()
 			doc = w.getDoc()
 			rev = w.getRev()
@@ -76,7 +76,8 @@ class TestSync(unittest.TestCase):
 		self.assertEqual(l.rev(self.store1), rev1)
 		self.assertEqual(l.rev(self.store2), rev2)
 
-		c.delete_doc(doc)
+		c.delete_doc(doc, rev1)
+		c.delete_doc(doc, rev2)
 
 if __name__ == '__main__':
 	unittest.main()

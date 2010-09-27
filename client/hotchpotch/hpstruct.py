@@ -524,7 +524,7 @@ class HpDict(object):
 				"comment" : "<<Created by import>>"
 			}
 		}
-		with hpconnector.HpConnector().fork(stores, "org.hotchpotch.dict") as w:
+		with hpconnector.HpConnector().create("org.hotchpotch.dict", "", stores) as w:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(self.__content))
 			w.commit()
@@ -613,7 +613,7 @@ class HpSet(object):
 		content = [ link for (descr, link) in self.__content ]
 		for link in content:
 			link.update()
-		with hpconnector.HpConnector().fork(stores, "org.hotchpotch.set") as w:
+		with hpconnector.HpConnector().create("org.hotchpotch.set", "", stores) as w:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(content))
 			w.commit()

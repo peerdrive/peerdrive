@@ -42,7 +42,7 @@ start(Store, Path, Rev, Object, PartsDone, PartsNeeded, User) ->
 		fun({FourCC, Hash}, Acc) ->
 			FileName = util:gen_tmp_name(Path),
 			{ok, IODevice} = file:open(FileName, [write, read, binary]),
-			dict:store(FourCC, {Hash, FileName, IODevice, crypto:md5_init()}, Acc)
+			dict:store(FourCC, {Hash, FileName, IODevice, crypto:sha_init()}, Acc)
 		end,
 		dict:new(),
 		PartsNeeded),
@@ -125,7 +125,7 @@ do_write(#state{needed=Needed} = S, Part, Data) ->
 		{ok, {Hash, FileName, IODevice, Ctx1}} ->
 			case file:write(IODevice, Data) of
 				ok ->
-					Ctx2 = crypto:md5_update(Ctx1, Data),
+					Ctx2 = crypto:sha_update(Ctx1, Data),
 					Needed2 = dict:store(Part, {Hash, FileName, IODevice, Ctx2}, Needed),
 					{S#state{needed=Needed2}, ok};
 
@@ -143,8 +143,8 @@ do_write(#state{needed=Needed} = S, Part, Data) ->
 do_commit(S) ->
 	% first check if all needed parts are valid
 	Vote = dict:fold(
-		fun (_Part, {Hash, _TmpName, _IODevice, Md5Ctx}, Acc) ->
-			case crypto:md5_final(Md5Ctx) of
+		fun (_Part, {Hash, _TmpName, _IODevice, ShaCtx}, Acc) ->
+			case binary_part(crypto:sha_final(ShaCtx), 0, 16) of
 				Hash  -> Acc;
 				_Else -> error
 			end

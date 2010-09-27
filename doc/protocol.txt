@@ -1,10 +1,11 @@
 
 =============================== Client API ====================================
 
-Packet = Length:16, Opcode:16, Reference:32, Body
+Packet ::= Length::UINT16, Reference::UINT32, Opcode::Opcode, Body
 
-Opcode =
-	GENERIC_CNF         0x0001
+Opcode ::=
+	INIT_REQ            0x0000
+	INIT_CNF            0x0001
 
 	ENUM_REQ            0x0010
 	ENUM_CNF            0x0011
@@ -15,106 +16,198 @@ Opcode =
 
 	PEEK_REQ            0x0040
 	PEEK_CNF            0x0041
-	FORK_REQ            0x0050
-	FORK_CNF            0x0051
-	UPDATE_REQ          0x0060
-	UPDATE_CNF          0x0061
+	CREATE_REQ          0x0050
+	CREATE_CNF          0x0051
+	FORK_REQ            0x0060
+	FORK_CNF            0x0061
+	UPDATE_REQ          0x0070
+	UPDATE_CNF          0x0071
+	RESUME_REQ          0x0080
+	RESUME_CNF          0x0081
 
-	READ_REQ            0x0070
-	READ_CNF            0x0071
-	WRITE_REQ           0x0080
-	TRUNC_REQ           0x0090
+	READ_REQ            0x0090
+	READ_CNF            0x0091
+	TRUNC_REQ           0x00A0
+	TRUNC_CNF           0x00A1
+	WRITE_REQ           0x00B0
+	WRITE_CNF           0x00B1
+	GET_TYPE_REQ        0x00C0
+	GET_TYPE_CNF        0x00C1
+	SET_TYPE_REQ        0x00D0
+	SET_TYPE_CNF        0x00D1
+	GET_PARENTS_REQ     0x00E0
+	GET_PARENTS_CNF     0x00E1
+	SET_PARENTS_REQ     0x00F0
+	SET_PARENTS_CNF     0x00F1
 
-	COMMIT_REQ          0x00A0
-	COMMIT_CNF          0x00A1
-	ABORT_REQ           0x00B0
+	COMMIT_REQ          0x0100
+	COMMIT_CNF          0x0101
+	SUSPEND_REQ         0x0110
+	SUSPEND_CNF         0x0111
+	ABORT_REQ           0x0120
+	ABORT_CNF           0x0121
 
-	WATCH_ADD_REQ       0x00C0
-	WATCH_REM_REQ       0x00D0
-	WATCH_IND           0x00E2
+	WATCH_ADD_REQ       0x0130
+	WATCH_ADD_CNF       0x0131
+	WATCH_REM_REQ       0x0140
+	WATCH_REM_CNF       0x0141
 
-	DELETE_DOC_REQ      0x00F0
-	DELETE_REV_REQ      0x0100
+	FORGET_REQ          0x0150
+	FORGET_CNF          0x0151
+	DELETE_DOC_REQ      0x0160
+	DELETE_DOC_CNF      0x0161
+	DELETE_REV_REQ      0x0170
+	DELETE_REV_CNF      0x0171
 
-	SYNC_DOC_REQ        0x0110
-	REPLICATE_DOC_REQ   0x0120
-	REPLICATE_REV_REQ   0x0130
+	SYNC_DOC_REQ        0x0180
+	SYNC_DOC_CNF        0x0181
+	REPLICATE_DOC_REQ   0x0190
+	REPLICATE_DOC_CNF   0x0191
+	REPLICATE_REV_REQ   0x01A0
+	REPLICATE_REV_CNF   0x01A1
 
-	MOUNT_REQ           0x0140
-	UNMOUNT_REQ         0x0150
+	MOUNT_REQ           0x01B0
+	MOUNT_CNF           0x01B1
+	UNMOUNT_REQ         0x01C0
+	UNMOUNT_CNF         0x01C1
 
-	PROGRESS_IND        0x0162
+	WATCH_IND           0x0002
+	PROGRESS_IND        0x0012
 
-Body =
-	GENERIC_CNF         ECode:32
+Body ::=
+	INIT_REQ            Version::Version
+	INIT_CNF            Result::DirectCnf, Version::Version, MaxPacketSize::UINT32
 
 	ENUM_REQ
-	ENUM_CNF            Count:8, [Guid:128, StoreFlags:32, NameLen:16, NameStr]
-	LOOKUP_REQ          Doc:128
-	LOOKUP_CNF          RevCount:8, [Rev:128, StoreCount:8, [Store:128]]
-	STAT_REQ            Rev:128
-	STAT_CNF            RevFlags:32, PartsCount:8, [FourCC:32, Size:64, Hash:128], ParentCount:8, [Parent:128], VolCount:8, [Volume:128], Mtime:64, UTI...
+	ENUM_CNF            Stores::List(Guid::UUID, Flags::StoreFlags, Id::String, Name::String)
+	LOOKUP_REQ          Doc::UUID, Stores::List(Store::UUID)
+	LOOKUP_CNF          Revs::List(Rev:UUID, Stores::List(Store::UUID)), PreRevs::List(PreRev:UUID, Stores::List(Store::UUID))
+	STAT_REQ            Rev::UUID, Stores::List(Store::UUID)
+	STAT_CNF            Result::BrokerCnf, (Flags::RevFlags, Parts::List(FourCC::UINT32, Size:UINT64, Hash::UINT128), Parents::List(Parent::UUID), Volumes::List(Volume::UUID), Mtime:Time, TypeCode::String, CreatorCode::String)?
 
-	PEEK_REQ            Rev:128, StoreCount:8, [Store:128]
-	PEEK_CNF            Cookie:32
-	FORK_REQ            Rev:128, StoreCount:8, [Store:128], UTI...
-	FORK_CNF            Cookie:32, Doc:128
-	UPDATE_REQ          Doc:128, Rev:128, MergeRevsCount:8, [MergeRev:128], StoreCount:8, [Store:128], UTI...
-	UPDATE_CNF          Cookie:32
+	PEEK_REQ            Rev::UUID, Stores::List(Store::UUID)
+	PEEK_CNF            Result::BrokerCnf, (Handle::UINT32)?
+	CREATE_REQ          TypeCode::String, CreatorCode::String, Stores::List(Store::UUID)
+	CREATE_CNF          Result::BrokerCnf, (Handle::UINT32, Doc::UUID)?
+	FORK_REQ            Rev::UUID, CreatorCode::String, Stores::List(Store::UUID)
+	FORK_CNF            Result::BrokerCnf, (Handle::UINT32, Doc::UUID)?
+	UPDATE_REQ          Doc::UUID, Rev::UUID, CreatorCode::String, Stores::List(Store::UUID)
+	UPDATE_CNF          Result::BrokerCnf, (Handle::UINT32)?
+	RESUME_REQ          Doc::UUID, Rev::UUID, CreatorCode::String, Stores::List(Store::UUID)
+	RESUME_CNF          Result::BrokerCnf, (Handle::UINT32)?
 
-	READ_REQ            Cookie:32, Part:32, Offset:64, Length:32
-	READ_CNF            Data...
-	TRUNC_REQ           Cookie:32, Part:32, Offset:64
-	WRITE_REQ           Cookie:32, Part:32, Offset:64, Data...
+	READ_REQ            Handle::UINT32, Part::UINT32, Offset::UINT64, Length::UINT32
+	READ_CNF            Result::BrokerCnf, Data...
+	TRUNC_REQ           Handle::UINT32, Part::UINT32, Offset::UINT64
+	TRUNC_CNF           Result::BrokerCnf
+	WRITE_REQ           Handle::UINT32, Part::UINT32, Offset::UINT64, Data...
+	WRITE_CNF           Result::BrokerCnf
+	GET_TYPE_REQ        Handle::UINT32
+	GET_TYPE_CNF        Result::BrokerCnf, (TypeCode::String)?
+	SET_TYPE_REQ        Handle::UINT32, TypeCode::String
+	SET_TYPE_CNF        Result::BrokerCnf
+	GET_PARENTS_REQ     Handle::UINT32
+	GET_PARENTS_CNF     Result::BrokerCnf, (Parents::List(Parent::UUID))?
+	SET_PARENTS_REQ     Handle::UINT32, Parents::List(Parent::UUID)
+	SET_PARENTS_CNF     Result::BrokerCnf
 
-	COMMIT_REQ          Cookie:32, RebaseRevsCount:8, [RebaseRev:128]
-	COMMIT_CNF          Rev:128
-	ABORT_REQ           Cookie:32
+	COMMIT_REQ          Handle::UINT32
+	COMMIT_CNF          Result::BrokerCnf, (Rev::UUID)?
+	SUSPEND_REQ         Handle::UINT32
+	SUSPEND_CNF         Result::BrokerCnf, (Rev::UUID)?
+	ABORT_REQ           Handle::UINT32
+	ABORT_CNF           Result::BrokerCnf
 
-	WATCH_ADD_REQ       Type:8 {0=Doc, 1=Rev}, Uuid:128
-	WATCH_REM_REQ       Type:8 {0=Doc, 1=Rev}, Uuid:128
-	WATCH_IND           Cause:8, Type:8 {0=Doc, 1=Rev}, Uuid:128
+	WATCH_ADD_REQ       Type::WatchType, Element::UUID
+	WATCH_ADD_CNF       Result::DirectCnf
+	WATCH_REM_REQ       Type::WatchType, Element::UUID
+	WATCH_REM_CNF       Result::DirectCnf
 
-	DELETE_DOC_REQ      Doc:128, StoreCount:8, [Store:128]
-	DELETE_REV_REQ      Rev:128, StoreCount:8, [Store:128]
+	FORGET_REQ          Doc::UUID, Rev::UUID, Stores::List(Store::UUID)
+	FORGET_CNF          Result::BrokerCnf
+	DELETE_DOC_REQ      Doc::UUID, Rev::UUID, Stores::List(Store::UUID)
+	DELETE_DOC_CNF      Result::BrokerCnf
+	DELETE_REV_REQ      Rev::UUID, Stores::List(Store::UUID)
+	DELETE_REV_CNF      Result::BrokerCnf
 
-	SYNC_DOC_REQ        Doc:128, StoreCount:8, [Store:128]
-	REPLICATE_DOC_REQ   Doc:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
-	REPLICATE_REV_REQ   Rev:128, 0/1:8 {0=shallow, 1=history}, StoreCount:8, [Store:128]
+	SYNC_DOC_REQ        Doc::UUID, Stores::List(Store::UUID)
+	SYNC_DOC_CNF        Result::BrokerCnf
+	REPLICATE_DOC_REQ   Doc::UUID, Depth::Time, Stores::List(Store::UUID)
+	REPLICATE_DOC_CNF   Result::BrokerCnf
+	REPLICATE_REV_REQ   Rev::UUID, Depth::Time, Stores::List(Store::UUID)
+	REPLICATE_REV_CNF   Result::BrokerCnf
 
-	MOUNT_REQ           Id...
-	UNMOUNT_REQ         Id...
+	MOUNT_REQ           Id::String
+	MOUNT_CNF           Result::DirectCnf
+	UNMOUNT_REQ         Id::String
+	UNMOUNT_CNF         Result::DirectCnf
 
+	WATCH_IND           Event::WatchEvent, Type::WatchType, Element::UUID
 	PROGRESS_IND        Type:8 {0=sync, 1=docrep, 2=revrep}, Progress:16 {0..256, 0=start, 0xffff=end}, Data...
 
 
-ECode =
-	0	Success
-	1	Recoverable conflict (Handle still valid)
-	2	Unrecoverable conflict (Handle discarded)
-	3	ENOENT
-	4	EINVAL
-	5	EMULTIPLE
-	6	EBADF
+UUID ::= UINT128
 
-	0xffffffff	Unknown error
+List(Body) ::= NumberOfElements::UINT8, Body{NumberOfElements}
 
-Cause =
-	0	Modified (Doc)
-	1	Appeared (Doc/Rev)
-	2	Replicated (Doc/Rev)
-	3	Diminished (Doc/Rev)
-	4	Disappeared (Doc/Rev)
+String ::= LengthOfString::UINT16, CHAR{LengtOfString}
 
-StoreFlags:
+ErrorCode ::= UINT32
+	0	= EOK
+	1	= ECONFLICT
+	2	= ENOENT
+	3	= EINVAL
+	4	= EBADF
+	5   = EAMBIG
+
+	0xffffffff	= Unknown error
+
+BrokerResult ::= UINT8
+	0	= ok      (operation succeeded everywhere)
+	1	= partial (operation succeeded, but not on all stores)
+	2	= again   (operation failed, but may try again)
+	3	= fail    (operation failed)
+
+DirectCnf ::= Result::ErrorCode
+
+BrokerCnf ::= Result::BrokerResult, ErrInfo::ExtendedInfo
+
+ExtendedInfo ::=
+	Result=0:
+	Result=1:    ErrInfo::List(Store::UUID, Error::ErrorCode)
+	Result=[23]: Error::ErrorCode, ErrInfo::List(Store::UUID, Error::ErrorCode)
+
+WatchType ::= UINT8
+	0	= Doc
+	1	= Rev
+
+WatchEvent ::= UINT8
+	0	= Modified (Doc)
+	1	= Appeared (Doc/Rev)
+	2	= Replicated (Doc/Rev)
+	3	= Diminished (Doc/Rev)
+	4	= Disappeared (Doc/Rev)
+
+StoreFlags ::= UINT32
 	1	Mounted
 	2	Removable
 	4	System Store
 
-RevFlags =
-	0..7  = Type (only 0 defined ATM)
-	8     = Preliminary
-	9..31 = undefined (0)
+RevFlags ::= UINT32
+	[31..9] : undefined (0)
+	[8]     : Preliminary flag
+	[7..0]  : Format version
+		0 = Current format
+
+Version ::= UINT32
+	[31..16] : undefined (0)
+	[15..8]  : Major protocol revision (not compatible to other major revisions)
+		0 = Current
+	[7..0]   : Minor protocol revision (backwards compatible through major revision)
+	    0 = Current
+
+Time ::= UINT64
+	Seconds since epoch, UTC
 
 ============================ Network Store API ================================
 

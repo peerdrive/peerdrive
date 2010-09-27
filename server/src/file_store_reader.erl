@@ -31,12 +31,17 @@ start_link(Path, Parts, User) ->
 	case gen_server:start_link(?MODULE, {Path, Parts, User}, []) of
 		{ok, Pid} ->
 			{ok, #handle{
-				this     = Pid,
-				read     = fun read/4,
-				write    = fun(_, _, _, _) -> {error, ebadf} end,
-				truncate = fun(_, _, _) -> {error, ebadf} end,
-				abort    = fun done/1,
-				commit   = fun(Reader, _, _) -> done(Reader), {error, ebadf} end
+				this        = Pid,
+				read        = fun read/4,
+				write       = fun(_, _, _, _) -> {error, ebadf} end,
+				truncate    = fun(_, _, _) -> {error, ebadf} end,
+				abort       = fun done/1,
+				commit      = fun(Reader, _) -> done(Reader), {error, ebadf} end,
+				suspend     = fun(Reader, _) -> done(Reader), {error, ebadf} end,
+				get_type    = fun(_) -> {error, ebadf} end,
+				set_type    = fun(_, _) -> {error, ebadf} end,
+				get_parents = fun(_) -> {error, ebadf} end,
+				set_parents = fun(_, _) -> {error, ebadf} end
 			}};
 		Else ->
 			Else
@@ -64,11 +69,17 @@ init({Path, Parts, User}) ->
 			{ok, Handles}
 	end.
 
-% returns: {ok, Data} | eof | {error, Reason}
+% returns: {ok, Data} | {error, Reason}
 handle_call({read, Part, Offset, Length}, _From, Handles) ->
 	Reply = case dict:find(Part, Handles) of
-		{ok, Handle} -> file:pread(Handle, Offset, Length);
-		error        -> {error, enoent}
+		{ok, Handle} ->
+			case file:pread(Handle, Offset, Length) of
+				eof -> {ok, <<>>};
+				Else -> Else
+			end;
+
+		error ->
+			{error, enoent}
 	end,
 	{reply, Reply, Handles}.
 
