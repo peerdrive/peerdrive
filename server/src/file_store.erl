@@ -32,15 +32,15 @@
 -include("file_store.hrl").
 -include_lib("kernel/include/file.hrl").
 
-% path:    string,  base directory
-% guid:    binary,  GUID of the store
-% gen:     integer, Generation of the store
-% uuids:   dict: Document --> {Revision, Generation}
-% objects: dict: Revision --> {refcount, #object | stub}
-% parts:   dict: PartHash --> refcount
-% peers:   dict: GUID --> Generation
-% changed: Bool
--record(state, {path, guid, gen, uuids, objects, parts, peers, locks, changed=false}).
+% path:      string,  base directory
+% guid:      binary,  GUID of the store
+% gen:       integer, Generation of the store
+% uuids:     dict: Document --> {Revision, PreRevs, Generation}
+% revisions: dict: Revision --> {refcount, #revision{} | stub}
+% parts:     dict: PartHash --> refcount
+% peers:     dict: GUID --> Generation
+% changed:   Bool
+-record(state, {path, guid, gen, uuids, revisions, parts, peers, locks, changed=false}).
 
 -define(SYNC_INTERVAL, 5000).
 
@@ -59,21 +59,21 @@ start_link(Id, {Path, Name}) ->
 init({Id, Path, Name}) ->
 	case filelib:is_dir(Path) of
 		true ->
-			Guid    = load_guid(Path),
-			Gen     = load_gen(Path),
-			Uuids   = load_uuids(Path),
-			Objects = load_objects(Path),
-			Parts   = load_parts(Path),
-			Peers   = load_peers(Path),
-			State   = #state{
-				path    = Path,
-				guid    = Guid,
-				gen     = Gen,
-				uuids   = Uuids,
-				objects = Objects,
-				parts   = Parts,
-				peers   = Peers,
-				locks   = orddict:new()
+			Guid      = load_guid(Path),
+			Gen       = load_gen(Path),
+			Uuids     = load_uuids(Path),
+			Revisions = load_revisions(Path),
+			Parts     = load_parts(Path),
+			Peers     = load_peers(Path),
+			State     = #state{
+				path      = Path,
+				guid      = Guid,
+				gen       = Gen,
+				uuids     = Uuids,
+				revisions = Revisions,
+				parts     = Parts,
+				peers     = Peers,
+				locks     = orddict:new()
 			},
 			volman:reg_store(Id, Guid, make_interface(self())),
 			process_flag(trap_exit, true),
@@ -93,7 +93,7 @@ fsck(Store) ->
 	gen_server:cast(Store, fsck).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Operations on object store...
+%% Operations on file store...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %% @doc Get GUID of a store
@@ -153,8 +153,8 @@ put_doc(Store, Doc, OldRev, NewRev) ->
 
 %% @doc Put/import a revision into the store.
 %% @see store:put_rev_start/3
-put_rev_start(Store, Rev, Object) ->
-	gen_server:call(Store, {put_rev, Rev, Object}).
+put_rev_start(Store, Rev, Revision) ->
+	gen_server:call(Store, {put_rev, Rev, Revision}).
 
 %% @doc Get changes since the last sync point of peer store
 %% @see store:sync_get_changes/2
@@ -174,23 +174,23 @@ sync_set_anchor(Store, PeerGuid, SeqNum) ->
 %% @doc Commit a new revision into the store and update the Doc to point to the
 %%      new revision instead.
 %%
-%% @spec commit(Store, Doc, Object) -> Result
+%% @spec commit(Store, Doc, Revision) -> Result
 %%       Store = pid()
 %%       Doc = guid()
-%%       Object = #object
+%%       Revision = #revision
 %%       Result = {ok, Rev::guid()} | conflict | {error, Error::ecode()}
-commit(Store, Doc, Object) ->
-	gen_server:call(Store, {commit, Doc, Object}).
+commit(Store, Doc, Revision) ->
+	gen_server:call(Store, {commit, Doc, Revision}).
 
 %% @doc Import a new revision into the store.
 %%
-%% @spec insert_rev(Store, Rev, Object) -> Result
+%% @spec insert_rev(Store, Rev, Revision) -> Result
 %%       Store = pid()
 %%       Rev = guid()
-%%       Object = #object
+%%       Revision = #revision
 %%       Result = ok | {error, ecode()}
-insert_rev(Store, Rev, Object) ->
-	gen_server:call(Store, {insert_rev, Rev, Object}).
+insert_rev(Store, Rev, Revision) ->
+	gen_server:call(Store, {insert_rev, Rev, Revision}).
 
 %% @doc Lock a part to prevent it from being evicted when getting
 %%      unreferenced.
@@ -257,12 +257,14 @@ handle_call_internal(guid, _From, S) ->
 % returns `{ok, Rev} | error'
 handle_call_internal({lookup, Doc}, _From, S) ->
 	case dict:find(Doc, S#state.uuids) of
-		{ok, {Rev, _Gen}} -> {reply, {ok, Rev, []}, S};
-		error             -> {reply, error, S}
+		{ok, {Rev, PreRevs, _Gen}} ->
+			{reply, {ok, Rev, PreRevs}, S};
+		error ->
+			{reply, error, S}
 	end;
 
 handle_call_internal({contains, Rev}, _From, S) ->
-	Reply = case dict:find(Rev, S#state.objects) of
+	Reply = case dict:find(Rev, S#state.revisions) of
 		{ok, {_, stub}} -> false;
 		{ok, {_, _}}    -> true;
 		error           -> false
@@ -306,9 +308,9 @@ handle_call_internal({put_doc, Doc, OldRev, NewRev}, _From, S) ->
 	{S2, Reply} = do_put_doc(S, Doc, OldRev, NewRev),
 	{reply, Reply, S2};
 
-handle_call_internal({put_rev, Rev, Object}, From, S) ->
+handle_call_internal({put_rev, Rev, Revision}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_put_rev(S, Rev, Object, User),
+	{S2, Reply} = do_put_rev(S, Rev, Revision, User),
 	{reply, Reply, S2};
 
 handle_call_internal({sync_get_changes, PeerGuid}, _From, S) ->
@@ -325,13 +327,13 @@ handle_call_internal({lock, Hash}, _From, S) ->
 	{reply, ok, S2};
 
 % internal: ok | {error, Reason}
-handle_call_internal({insert_rev, Rev, Object}, _From, S) ->
-	{S2, Reply} = do_put_rev_commit(S, Rev, Object),
+handle_call_internal({insert_rev, Rev, Revision}, _From, S) ->
+	{S2, Reply} = do_put_rev_commit(S, Rev, Revision),
 	{reply, Reply, S2};
 
-% internal: commit a new object
-handle_call_internal({commit, Doc, Object}, _From, S) ->
-	{S2, Reply} = do_commit(S, Doc, Object),
+% internal: commit a new revision
+handle_call_internal({commit, Doc, Revision}, _From, S) ->
+	{S2, Reply} = do_commit(S, Doc, Revision),
 	{reply, Reply, S2};
 
 % internal: add part refcount
@@ -380,21 +382,21 @@ handle_cast_internal({unlock, Hash}, #state{locks=Locks, parts=Parts}=S) ->
 	end,
 	{noreply, S#state{locks=NewLocks}};
 
-% internal: decrease refcount of a object
-handle_cast_internal({object_ref_dec, Rev}, S) ->
-	{RefCount, Object} = dict:fetch(Rev, S#state.objects),
-	Objects = if
+% internal: decrease refcount of a revision
+handle_cast_internal({revision_ref_dec, Rev}, S) ->
+	{RefCount, Revision} = dict:fetch(Rev, S#state.revisions),
+	Revisions = if
 		RefCount == 1 ->
-			dispose_object(Object, S#state.path),
-			case Object of
+			dispose_revision(Revision, S#state.path),
+			case Revision of
 				stub  -> ok;
 				_Else -> vol_monitor:trigger_rm_rev(S#state.guid, Rev)
 			end,
-			dict:erase(Rev, S#state.objects);
+			dict:erase(Rev, S#state.revisions);
 		true ->
-			dict:store(Rev, {RefCount-1, Object}, S#state.objects)
+			dict:store(Rev, {RefCount-1, Revision}, S#state.revisions)
 	end,
-	{noreply, S#state{objects=Objects, changed=true}};
+	{noreply, S#state{revisions=Revisions, changed=true}};
 
 handle_cast_internal(dump, S) ->
 	do_dump(S),
@@ -478,17 +480,18 @@ check_root_doc(S, Name) ->
 			RootMeta2 = dict:store(<<"org.hotchpotch.annotation">>, Annotation3, RootMeta1),
 			RootMeta3 = dict:store(<<"org.hotchpotch.sync">>, Sync, RootMeta2),
 			{S3, MetaHash} = crd_write_part(S2, RootMeta3),
-			Object = #object{
+			Revision = #revision{
 				parts   = [{<<"HPSD">>, ContentHash}, {<<"META">>, MetaHash}],
 				parents = [],
 				mtime   = util:get_time(),
-				uti     = <<"org.hotchpotch.volume">>},
-			Rev = store:hash_revision(Object),
-			S4 = S3#state{objects=dict:store(Rev, {1, Object}, S3#state.objects)},
+				type    = <<"org.hotchpotch.volume">>,
+				creator = <<"org.hotchpotch.file-store">>},
+			Rev = store:hash_revision(Revision),
+			S4 = S3#state{revisions=dict:store(Rev, {1, Revision}, S3#state.revisions)},
 			Gen = S4#state.gen,
 			S4#state{
 				gen     = Gen+1,
-				uuids   = dict:store(S4#state.guid, {Rev, Gen}, S4#state.uuids),
+				uuids   = dict:store(S4#state.guid, {Rev, [], Gen}, S4#state.uuids),
 				changed = true
 			}
 	end.
@@ -504,14 +507,14 @@ crd_write_part(S, RawContent) ->
 
 
 % returns `{ok, #stat{}} | {error, Reason}'
-do_stat(Rev, #state{objects=Objects, path=Path}) ->
-	case dict:find(Rev, Objects) of
-		% object doesn't exist anymore on this store
+do_stat(Rev, #state{revisions=Revisions, path=Path}) ->
+	case dict:find(Rev, Revisions) of
+		% revision doesn't exist anymore on this store
 		{ok, {_, stub}} ->
 			{error, enoent};
 
 		% got'ya
-		{ok, {_, Object}} ->
+		{ok, {_, Revision}} ->
 			Parts = lists:foldl(
 				fun ({FourCC, Hash}, AccIn) ->
 					case file:read_file_info(util:build_path(Path, Hash)) of
@@ -522,14 +525,14 @@ do_stat(Rev, #state{objects=Objects, path=Path}) ->
 					end
 				end,
 				[],
-				Object#object.parts),
+				Revision#revision.parts),
 			{ok, #rev_stat{
-				flags   = Object#object.flags,
+				flags   = Revision#revision.flags,
 				parts   = Parts,
-				parents = Object#object.parents,
-				mtime   = Object#object.mtime,
-				type    = Object#object.uti,
-				creator = <<"">>
+				parents = Revision#revision.parents,
+				mtime   = Revision#revision.mtime,
+				type    = Revision#revision.type,
+				creator = Revision#revision.creator
 			}};
 
 		% completely unknown...
@@ -537,13 +540,13 @@ do_stat(Rev, #state{objects=Objects, path=Path}) ->
 			{error, enoent}
 	end.
 
-do_peek(#state{objects=Objects, path=Path}, Rev, User) ->
-	case dict:find(Rev, Objects) of
+do_peek(#state{revisions=Revisions, path=Path}, Rev, User) ->
+	case dict:find(Rev, Revisions) of
 		{ok, {_, stub}} ->
 			{error, enoent};
 
-		{ok, {_, Object}} ->
-			file_store_reader:start_link(Path, Object#object.parts, User);
+		{ok, {_, Revision}} ->
+			file_store_reader:start_link(Path, Revision#revision.parts, User);
 
 		error ->
 			{error, enoent}
@@ -551,17 +554,17 @@ do_peek(#state{objects=Objects, path=Path}, Rev, User) ->
 
 %%% Delete %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_delete_rev(#state{guid=Guid, objects=Objects, path=Path} = S, Rev) ->
-	case dict:find(Rev, Objects) of
+do_delete_rev(#state{guid=Guid, revisions=Revisions, path=Path} = S, Rev) ->
+	case dict:find(Rev, Revisions) of
 		{ok, {_, stub}} ->
 			{S, {error, enoent}};
 
-		{ok, {RefCount, Object}} ->
+		{ok, {RefCount, Revision}} ->
 			vol_monitor:trigger_rm_rev(Guid, Rev),
-			dispose_object(Object, Path),
+			dispose_revision(Revision, Path),
 			{
 				S#state{
-					objects=dict:store(Rev, {RefCount, stub}, Objects),
+					revisions=dict:store(Rev, {RefCount, stub}, Revisions),
 					changed=true
 				},
 				ok
@@ -579,12 +582,12 @@ do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
 
 		_ ->
 			case dict:find(Doc, Uuids) of
-				{ok, {Rev, _Gen}} ->
+				{ok, {Rev, _PreRevs, _Gen}} ->
 					vol_monitor:trigger_rm_doc(Guid, Doc),
-					gen_server:cast(self(), {object_ref_dec, Rev}),
+					gen_server:cast(self(), {revision_ref_dec, Rev}),
 					{S#state{ uuids=dict:erase(Doc, Uuids), changed=true}, ok};
 
-				{ok, {_OtherRev, _Gen}} ->
+				{ok, {_OtherRev, _PreRevs, _Gen}} ->
 					{S, {error, conflict}};
 
 				error ->
@@ -598,8 +601,8 @@ do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
 % #state{
 %   path:    base directory
 %   gen:     integer
-%   uuids:   dict: Document --> {Revision, Generation}
-%   objects: dict: Revision --> {refcount, #object | stub}
+%   uuids:   dict: Document --> {Rev, PreRevs, Generation}
+%   revisions: dict: Revision --> {refcount, #revision | stub}
 %   parts:   dict: PartHash --> refcount
 %   peers:   dict: GUID --> Generation
 %   changed: Bool
@@ -610,17 +613,23 @@ do_dump(#state{path=Path} = S) ->
 	io:format("Path: ~s~n", [S#state.path]),
 	io:format("Documents:~n"),
 	dict:fold(
-		fun (Doc, {Rev, Gen}, _) ->
-			io:format("    ~s -> ~s @ ~p~n", [util:bin_to_hexstr(Doc), util:bin_to_hexstr(Rev), Gen])
+		fun (Doc, {Rev, PreRevs, Gen}, _) ->
+			io:format("    ~s -> ~s @ ~p~n", [util:bin_to_hexstr(Doc), util:bin_to_hexstr(Rev), Gen]),
+			lists:foreach(
+				fun(PreRev) ->
+					io:format("                                      + ~s",
+						[util:bin_to_hexstr(PreRev)])
+				end,
+				PreRevs)
 		end,
 		ok, S#state.uuids),
 	io:format("Revisions:~n"),
 	dict:fold(
-		fun (Rev, {RefCount, Object}, _) ->
+		fun (Rev, {RefCount, Revision}, _) ->
 			io:format("    ~s #~w~n", [util:bin_to_hexstr(Rev), RefCount]),
-			do_dump_object(Object, Path)
+			do_dump_revision(Revision, Path)
 		end,
-		ok, S#state.objects),
+		ok, S#state.revisions),
 	io:format("Parts:~n"),
 	dict:fold(
 		fun (Hash, RefCount, _) ->
@@ -635,51 +644,53 @@ do_dump(#state{path=Path} = S) ->
 		ok, S#state.peers).
 
 
-% #object{
+% #revision{
 %   flags:   integer()
 %   parts:   [{PartFourCC, Hash}]*
 %   parents: [Revision]*
 %   mitme:   {MegaSecs, Secs, MicroSecs}
-%   uti:     Binary
+%   type:    Binary
+%   creator: Binary
 % }
-do_dump_object(Object, Path) ->
+do_dump_revision(Revision, Path) ->
 	if
-		Object == stub ->
+		Revision == stub ->
 			ok;
 		true ->
-			io:format("        Flags:~w~n", [Object#object.flags]),
+			io:format("        Flags:~w~n", [Revision#revision.flags]),
 			io:format("        Parts:~n"),
 			lists:foreach(
 				fun ({FourCC, Hash}) ->
 					io:format("            ~s -> ~s~n", [FourCC, util:bin_to_hexstr(Hash)])
 				end,
-				Object#object.parts),
+				Revision#revision.parts),
 			io:format("        Parents:~n"),
 			lists:foreach(
 				fun (Rev) ->
 					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
 				end,
-				Object#object.parents),
+				Revision#revision.parents),
 			io:format("        References:~n"),
 			lists:foreach(
 				fun (Rev) ->
 					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
 				end,
-				get_references(Object, Path))
+				get_references(Revision, Path))
 	end.
 
 
 %%% Creating & Writing %%%%%%%%%%%%%%%%
 
 % returns `{S2, {ok, Writer} | {error, Reason}}'
-do_write_start_create(S, Doc, Type, _Creator, User) ->
+do_write_start_create(S, Doc, Type, Creator, User) ->
 	State = #ws{
 		path      = S#state.path,
 		server    = self(),
 		flags     = 0,
 		doc       = Doc,
 		baserevs  = [],
-		uti       = Type,
+		type      = Type,
+		creator   = Creator,
 		orig      = dict:new(),
 		new       = dict:new(),
 		readers   = dict:new(),
@@ -689,8 +700,8 @@ do_write_start_create(S, Doc, Type, _Creator, User) ->
 
 
 % returns `{S2, {ok, Writer} | {error, Reason}}'
-do_write_start_fork(S, Doc, StartRev, _Creator, User) ->
-	case dict:find(StartRev, S#state.objects) of
+do_write_start_fork(S, Doc, StartRev, Creator, User) ->
+	case dict:find(StartRev, S#state.revisions) of
 		% err, don't known that one...
 		error ->
 			{S, {error, enoent}};
@@ -698,15 +709,16 @@ do_write_start_fork(S, Doc, StartRev, _Creator, User) ->
 			{S, {error, enoent}};
 
 		% load old values and start writer process
-		{ok, {_, Object}} ->
-			Parts = dict:from_list(Object#object.parts),
+		{ok, {_, Revision}} ->
+			Parts = dict:from_list(Revision#revision.parts),
 			State = #ws{
 				path      = S#state.path,
 				server    = self(),
-				flags     = Object#object.flags,
+				flags     = Revision#revision.flags,
 				doc       = Doc,
 				baserevs  = [StartRev],
-				uti       = Object#object.uti,
+				type      = Revision#revision.type,
+				creator   = Creator,
 				orig      = Parts,
 				new       = dict:new(),
 				readers   = dict:new(),
@@ -717,22 +729,27 @@ do_write_start_fork(S, Doc, StartRev, _Creator, User) ->
 
 
 % returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
-do_write_start_update(S, Doc, StartRev, _Creator, User) ->
+do_write_start_update(S, Doc, StartRev, Creator, User) ->
 	case dict:find(Doc, S#state.uuids) of
-		{ok, {StartRev, _Gen}} ->
-			case dict:fetch(StartRev, S#state.objects) of
+		{ok, {StartRev, _PreRevs, _Gen}} ->
+			case dict:fetch(StartRev, S#state.revisions) of
 				{_, stub} ->
 					{S, {error, orphaned}};
 
-				{_, Object} ->
-					Parts = dict:from_list(Object#object.parts),
+				{_, Revision} ->
+					Parts = dict:from_list(Revision#revision.parts),
+					NewCreator = case Creator of
+						keep -> Revision#revision.creator;
+						_    -> Creator
+					end,
 					State = #ws{
 						path      = S#state.path,
 						server    = self(),
-						flags     = Object#object.flags,
+						flags     = Revision#revision.flags,
 						doc       = Doc,
 						baserevs  = [StartRev],
-						uti       = Object#object.uti,
+						type      = Revision#revision.type,
+						creator   = NewCreator,
 						orig      = Parts,
 						new       = dict:new(),
 						readers   = dict:new(),
@@ -769,19 +786,19 @@ start_writer(S, State, User) ->
 do_put_doc(#state{uuids=Uuids} = S, Doc, OldRev, NewRev) ->
 	case dict:find(Doc, Uuids) of
 		% already pointing to requested rev
-		{ok, {NewRev, _}} ->
+		{ok, {NewRev, _, _}} ->
 			{S, ok};
 
 		% free old version, store new one
-		{ok, {OldRev, _}} ->
-			gen_server:cast(self(), {object_ref_dec, OldRev}),
+		{ok, {OldRev, PreRevs, _}} ->
+			gen_server:cast(self(), {revision_ref_dec, OldRev}),
 			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
-			S21 = do_objects_ref_inc(S, [NewRev]),
+			S21 = do_revisions_ref_inc(S, [NewRev]),
 			Gen = S21#state.gen,
 			{
 				S21#state{
 					gen     = Gen+1,
-					uuids   = dict:store(Doc, {NewRev, Gen}, S21#state.uuids),
+					uuids   = dict:store(Doc, {NewRev, PreRevs, Gen}, S21#state.uuids),
 					changed = true
 				},
 				ok
@@ -794,12 +811,12 @@ do_put_doc(#state{uuids=Uuids} = S, Doc, OldRev, NewRev) ->
 		% document does not exist (yet)...
 		error ->
 			vol_monitor:trigger_add_doc(S#state.guid, Doc),
-			S21 = do_objects_ref_inc(S, [NewRev]),
+			S21 = do_revisions_ref_inc(S, [NewRev]),
 			Gen = S21#state.gen,
 			{
 				S21#state{
 					gen     = Gen+1,
-					uuids   = dict:store(Doc, {NewRev, Gen}, S21#state.uuids),
+					uuids   = dict:store(Doc, {NewRev, [], Gen}, S21#state.uuids),
 					changed = true
 				},
 				ok
@@ -808,8 +825,8 @@ do_put_doc(#state{uuids=Uuids} = S, Doc, OldRev, NewRev) ->
 
 
 % ok | {ok, MissingParts, Importer} | {error, Reason}
-do_put_rev(S, Rev, Object, User) ->
-	case dict:find(Rev, S#state.objects) of
+do_put_rev(S, Rev, Revision, User) ->
+	case dict:find(Rev, S#state.revisions) of
 		error ->
 			{S, {error, enotref}};
 
@@ -823,14 +840,14 @@ do_put_rev(S, Rev, Object, User) ->
 					end
 				end,
 				{[], []},
-				Object#object.parts),
+				Revision#revision.parts),
 			case PartsNeeded of
 				[] ->
-					do_put_rev_commit(S, Rev, Object);
+					do_put_rev_commit(S, Rev, Revision);
 
 				_ ->
 					{ok, Importer} = file_store_importer:start(self(),
-						S#state.path, Rev, Object, PartsDone, PartsNeeded,
+						S#state.path, Rev, Revision, PartsDone, PartsNeeded,
 						User),
 					NeededFourCCs = lists:map(fun({FCC, _Hash}) -> FCC end, PartsNeeded),
 					{S, {ok, NeededFourCCs, Importer}}
@@ -842,43 +859,43 @@ do_put_rev(S, Rev, Object, User) ->
 
 %%% Commit %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_commit(S, Doc, Object) ->
-	NewRev = store:hash_revision(Object),
-	Reply = case dict:find(Doc, S#state.uuids) of
-		{ok, {CurrentRev, _Gen}} ->
-			case lists:member(CurrentRev, Object#object.parents) of
+do_commit(S, Doc, Revision) ->
+	NewRev = store:hash_revision(Revision),
+	Result = case dict:find(Doc, S#state.uuids) of
+		{ok, {CurrentRev, CurrentPreRevs, _Gen}} ->
+			case lists:member(CurrentRev, Revision#revision.parents) of
 				true  ->
-					gen_server:cast(self(), {object_ref_dec, CurrentRev}),
-					{ok, NewRev};
+					gen_server:cast(self(), {revision_ref_dec, CurrentRev}),
+					{ok, NewRev, CurrentPreRevs};
 				false ->
 					conflict
 			end;
 		error ->
-			{ok, NewRev}
+			{ok, NewRev, []}
 	end,
-	S2 = case Reply of
-		{ok, _} ->
+	case Result of
+		{ok, Rev, PreRevs} ->
 			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
 			Gen = S#state.gen,
 			NewState = S#state{
 				gen     = Gen+1,
-				uuids   = dict:store(Doc, {NewRev, Gen}, S#state.uuids)
+				uuids   = dict:store(Doc, {Rev, PreRevs, Gen}, S#state.uuids)
 			},
-			add_object(NewState, NewRev, 1, Object);
+			S2 = add_revision(NewState, Rev, 1, Revision),
+			{S2, {ok, Rev}};
 
-		_ ->
-			S
-	end,
-	{S2, Reply}.
+		conflict ->
+			{S, conflict}
+	end.
 
 
-do_put_rev_commit(#state{objects=Objects} = S, Rev, Object) ->
-	case dict:find(Rev, Objects) of
+do_put_rev_commit(#state{revisions=Revisions} = S, Rev, Revision) ->
+	case dict:find(Rev, Revisions) of
 		error ->
 			{S, {error, enotref}};
 
 		{ok, {RefCount, stub}} ->
-			S2 = add_object(S, Rev, RefCount, Object),
+			S2 = add_revision(S, Rev, RefCount, Revision),
 			vol_monitor:trigger_add_rev(S#state.guid, Rev),
 			{S2, ok};
 
@@ -888,21 +905,21 @@ do_put_rev_commit(#state{objects=Objects} = S, Rev, Object) ->
 
 %%% Reference counting %%%%%%%%%%%%%%%%
 
-% do_objects_ref_inc(S, [Rev]) -> S2
-do_objects_ref_inc(S, Revs) ->
-	Objects1 = S#state.objects,
-	Objects2 = lists:foldl(
-		fun (Rev, Objects) ->
-			case dict:find(Rev, Objects) of
+% do_revisions_ref_inc(S, [Rev]) -> S2
+do_revisions_ref_inc(S, Revs) ->
+	Revisions1 = S#state.revisions,
+	Revisions2 = lists:foldl(
+		fun (Rev, Revisions) ->
+			case dict:find(Rev, Revisions) of
 				{ok, {RefCount, Value}} ->
-					dict:store(Rev, {RefCount+1, Value}, Objects);
+					dict:store(Rev, {RefCount+1, Value}, Revisions);
 				error ->
-					dict:store(Rev, {1, stub}, Objects)
+					dict:store(Rev, {1, stub}, Revisions)
 			end
 		end,
-		Objects1,
+		Revisions1,
 		Revs),
-	S#state{objects=Objects2, changed=true}.
+	S#state{revisions=Revisions2, changed=true}.
 
 % do_parts_ref_inc(S, [Hash]) -> S2
 do_parts_ref_inc(#state{parts=Parts1} = S, Hashes) ->
@@ -919,31 +936,31 @@ do_parts_ref_inc(#state{parts=Parts1} = S, Hashes) ->
 	S#state{parts=Parts2, changed=true}.
 
 
-add_object(S, Rev, RefCount, Object) ->
-	Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Object#object.parts),
-	S2 = do_objects_ref_inc(S, get_references(Object, S#state.path)),
+add_revision(S, Rev, RefCount, Revision) ->
+	Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
+	S2 = do_revisions_ref_inc(S, get_references(Revision, S#state.path)),
 	S3 = do_parts_ref_inc(S2, Parts),
 	S3#state{
-		objects=dict:store(Rev, {RefCount, Object}, S3#state.objects),
+		revisions=dict:store(Rev, {RefCount, Revision}, S3#state.revisions),
 		changed=true}.
 
 
-dispose_object(Object, Path) ->
-	case Object of
+dispose_revision(Revision, Path) ->
+	case Revision of
 		stub ->
 			ok;
 
-		#object{parts=Parts} ->
+		#revision{parts=Parts} ->
 			lists:foreach(
-				fun (Rev) -> gen_server:cast(self(), {object_ref_dec, Rev}) end,
-				get_references(Object, Path)),
+				fun (Rev) -> gen_server:cast(self(), {revision_ref_dec, Rev}) end,
+				get_references(Revision, Path)),
 			lists:foreach(
 				fun({_, Hash}) -> gen_server:cast(self(), {part_ref_dec, Hash}) end,
 				Parts)
 	end.
 
 
-get_references(#object{parts=Parts, parents=Parents}, Path) ->
+get_references(#revision{parts=Parts, parents=Parents}, Path) ->
 	CheckParts = lists:filter(
 		fun ({FourCC, _Hash}) ->
 			case FourCC of
@@ -997,7 +1014,7 @@ do_sync_get_changes(#state{uuids=Uuids, peers=Peers}, PeerGuid) ->
 		error       -> 0
 	end,
 	Changes = dict:fold(
-		fun(Doc, {_Rev, SeqNum}, Acc) ->
+		fun(Doc, {_Rev, _PreRevs, SeqNum}, Acc) ->
 			if
 				SeqNum > Anchor -> [{Doc, SeqNum} | Acc];
 				true            -> Acc
@@ -1016,19 +1033,19 @@ do_sync_set_anchor(#state{peers=Peers} = S, PeerGuid, SeqNum) ->
 
 %%% Fsck %%%%%%%%%%%%%%%%
 
-do_fsck(#state{uuids=Uuids, objects=Objects, parts=Parts, path=Path}) ->
+do_fsck(#state{uuids=Uuids, revisions=Revisions, parts=Parts, path=Path}) ->
 	% check if all parts exist and hashes are correct
 	io:format("Checking parts...~n"),
 	fsck_check_parts(Parts, Path),
 	% calculate Hash refcounts and check excessive/missing Parts and if
 	% refcounts correct
 	io:format("Check part refcounts...~n"),
-	PartRefCounts = fsck_calc_part_refcounts(Objects),
+	PartRefCounts = fsck_calc_part_refcounts(Revisions),
 	fsc_check_part_refcounts(Parts, PartRefCounts),
 	% calculate Rev refcounts and check if correct
 	io:format("Check rev refcounts...~n"),
-	RevRefCounts = fsck_calc_rev_refcounts(Uuids, Objects, Path),
-	fsck_check_rev_refcounts(Objects, RevRefCounts),
+	RevRefCounts = fsck_calc_rev_refcounts(Uuids, Revisions, Path),
+	fsck_check_rev_refcounts(Revisions, RevRefCounts),
 	io:format("Done.~n").
 
 
@@ -1059,22 +1076,22 @@ fsck_check_hash(Hash, Path) ->
 			io:format("  Missing part ~s: ~p~n", [util:bin_to_hexstr(Hash), Reason])
 	end.
 
-fsck_calc_part_refcounts(Objects) ->
+fsck_calc_part_refcounts(Revisions) ->
 	dict:fold(
 		fun
 			(_Rev, {_RefCount, stub}, Acc) -> Acc ;
 			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_obj_refs(Obj, Acc)
 		end,
 		dict:new(),
-		Objects).
+		Revisions).
 
-fsck_add_obj_refs(Object, Acc) ->
+fsck_add_obj_refs(Revision, Acc) ->
 	lists:foldl(
 		fun({_FCC, Hash}, HashDict) ->
 			dict:update_counter(Hash, 1, HashDict)
 		end,
 		Acc,
-		Object#object.parts).
+		Revision#revision.parts).
 
 fsc_check_part_refcounts(Parts, PartRefCounts) ->
 	Remaining = dict:fold(
@@ -1103,9 +1120,15 @@ fsc_check_part_refcounts(Parts, PartRefCounts) ->
 		ok,
 		Remaining).
 
-fsck_calc_rev_refcounts(Uuids, Objects, Path) ->
+fsck_calc_rev_refcounts(Uuids, Revisions, Path) ->
 	UCount = dict:fold(
-		fun(_Doc, {Rev, _Gen}, Acc) -> dict:update_counter(Rev, 1, Acc) end,
+		fun(_Doc, {Rev, PreRevs, _Gen}, Acc1) ->
+			Acc2 = lists:foldl(
+				fun(R, A) -> dict:update_counter(R, 1, A) end,
+				Acc1,
+				PreRevs),
+			dict:update_counter(Rev, 1, Acc2)
+		end,
 		dict:new(),
 		Uuids),
 	dict:fold(
@@ -1114,7 +1137,7 @@ fsck_calc_rev_refcounts(Uuids, Objects, Path) ->
 			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_rev_refs(Obj, Acc, Path)
 		end,
 		UCount,
-		Objects).
+		Revisions).
 
 fsck_add_rev_refs(Obj, RevDict, Path) ->
 	Refs = get_references(Obj, Path),
@@ -1123,27 +1146,27 @@ fsck_add_rev_refs(Obj, RevDict, Path) ->
 		RevDict,
 		Refs).
 
-fsck_check_rev_refcounts(Objects, RevRefCounts) ->
+fsck_check_rev_refcounts(Revisions, RevRefCounts) ->
 	Remaining = dict:fold(
 		fun(Rev, RefCount, Acc) ->
 			case dict:find(Rev, Acc) of
 				{ok, {RefCount, _}} ->
 					dict:erase(Rev, Acc);
 				{ok, {Wrong, _}} ->
-					io:format("  Wrong object refcount ~s: ~p <> ~p~n",
+					io:format("  Wrong revision refcount ~s: ~p <> ~p~n",
 						[util:bin_to_hexstr(Rev), RefCount, Wrong]),
 					dict:erase(Rev, Acc);
 				error ->
-					io:format("  Missing object ~s # ~p~n", [
+					io:format("  Missing revision ~s # ~p~n", [
 						util:bin_to_hexstr(Rev), RefCount]),
 					Acc
 			end
 		end,
-		Objects,
+		Revisions,
 		RevRefCounts),
 	dict:fold(
 		fun(Rev, {RefCount, _}, Acc) ->
-			io:format("  Excessive object ~s # ~p~n", [util:bin_to_hexstr(Rev),
+			io:format("  Excessive revision ~s # ~p~n", [util:bin_to_hexstr(Rev),
 				RefCount]),
 			Acc
 		end,
@@ -1155,10 +1178,10 @@ fsck_check_rev_refcounts(Objects, RevRefCounts) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 load_uuids(Path) ->
-	load_dict(Path, "uuids.dict").
+	load_dict(Path, "documents.dict").
 
-load_objects(Path) ->
-	load_dict(Path, "objects.dict").
+load_revisions(Path) ->
+	load_dict(Path, "revisions.dict").
 
 load_parts(Path) ->
 	load_dict(Path, "parts.dict").
@@ -1183,10 +1206,10 @@ do_checkpoint(S) ->
 		true ->
 			file:write_file(S#state.path ++ "/guid", term_to_binary(S#state.guid)),
 			file:write_file(S#state.path ++ "/generation", term_to_binary(S#state.gen)),
-			save_dict(S#state.path, "uuids.dict",   S#state.uuids),
-			save_dict(S#state.path, "objects.dict", S#state.objects),
-			save_dict(S#state.path, "parts.dict",   S#state.parts),
-			save_dict(S#state.path, "peers.dict",   S#state.peers);
+			save_dict(S#state.path, "documents.dict", S#state.uuids),
+			save_dict(S#state.path, "revisions.dict", S#state.revisions),
+			save_dict(S#state.path, "parts.dict",     S#state.parts),
+			save_dict(S#state.path, "peers.dict",     S#state.peers);
 
 		false ->
 			ok

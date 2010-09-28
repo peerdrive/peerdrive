@@ -24,19 +24,19 @@
 -include("store.hrl").
 -include("file_store.hrl").
 
-% store:   pid of the store
-% path:    base directory
-% rev:     the revision of the object
-% object:  THE object
-% done:    list of already present hashes
-% needed:  dict: FourCC --> {Hash, FileName, IODevice, Md5Ctx}
--record(state, {storepid, path, rev, object, done, needed}).
+% store:    pid of the store
+% path:     base directory
+% rev:      the id of the revision
+% revision: the revision record
+% done:     list of already present hashes
+% needed:   dict: FourCC --> {Hash, FileName, IODevice, Md5Ctx}
+-record(state, {storepid, path, rev, revision, done, needed}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start(Store, Path, Rev, Object, PartsDone, PartsNeeded, User) ->
+start(Store, Path, Rev, Revision, PartsDone, PartsNeeded, User) ->
 	% immediately open temp files for needed parts
 	NeededDict = lists:foldl(
 		fun({FourCC, Hash}, Acc) ->
@@ -50,7 +50,7 @@ start(Store, Path, Rev, Object, PartsDone, PartsNeeded, User) ->
 		storepid = Store,
 		path = Path,
 		rev = Rev,
-		object = Object,
+		revision = Revision,
 		done = PartsDone,
 		needed = NeededDict},
 	case gen_server:start(?MODULE, {self(), State, User}, []) of
@@ -168,7 +168,7 @@ do_commit(S) ->
 				end,
 				ok,
 				S#state.needed),
-			file_store:insert_rev(S#state.storepid, S#state.rev, S#state.object);
+			file_store:insert_rev(S#state.storepid, S#state.rev, S#state.revision);
 
 		error ->
 			do_abort(S),

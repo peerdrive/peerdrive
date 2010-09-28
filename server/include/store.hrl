@@ -20,8 +20,7 @@
 % mitme:   UTC, Seconds since epoch (unix date)
 % type:    Binary
 % creator: Binary
--record(object, {flags=0, parts, parents, mtime, uti}).
-%-record(revision, {flags=0, parts, parents, mtime, type, creator}).
+-record(revision, {flags=0, parts, parents, mtime, type, creator}).
 
 -define(REV_FLAG_PRELIMINARY, 16#100).
 

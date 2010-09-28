@@ -250,8 +250,8 @@ sync_doc_merge(Doc, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 				false ->
 					% seems to be a real merge
 					BaseRev = hd(BaseRevs),
-					UtiSet = get_utis([BaseRev, FromRev, ToRev]),
-					case get_sync_fun(UtiSet) of
+					TypeSet = get_types([BaseRev, FromRev, ToRev]),
+					case get_sync_fun(TypeSet) of
 						none ->
 							% fall back to fast-forward
 							% FIXME: don't we already known it's no FF?
@@ -259,7 +259,7 @@ sync_doc_merge(Doc, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 
 						SyncFun ->
 							SyncFun(FromIfc, Doc, BaseRev, FromRev,
-								ToRev, UtiSet, Force)
+								ToRev, TypeSet, Force)
 					end
 			end;
 
@@ -269,12 +269,12 @@ sync_doc_merge(Doc, FromIfc, FromRev, ToIfc, ToRev, Force) ->
 	end.
 
 
-get_utis(Revs) ->
+get_types(Revs) ->
 	lists:foldl(
 		fun(Rev, Acc) ->
 			case broker:stat(Rev, []) of
-				{ok, _ErrInfo, {#rev_stat{type=Uti}, _Volumes}} ->
-					sets:add_element(Uti, Acc);
+				{ok, _ErrInfo, {#rev_stat{type=Type}, _Volumes}} ->
+					sets:add_element(Type, Acc);
 				{error, _, _} ->
 					Acc
 			end
@@ -284,10 +284,10 @@ get_utis(Revs) ->
 
 
 % FIXME: hard coded at the moment
-get_sync_fun(UtiSet) ->
-	case sets:to_list(UtiSet) of
-		[Uti] ->
-			case Uti of
+get_sync_fun(TypeSet) ->
+	case sets:to_list(TypeSet) of
+		[Type] ->
+			case Type of
 				<<"org.hotchpotch.volume">> -> fun merge_hpsd/7;
 				<<"org.hotchpotch.dict">>   -> fun merge_hpsd/7;
 				<<"org.hotchpotch.set">>    -> fun merge_hpsd/7;
@@ -361,13 +361,13 @@ traverse(Heads, Path) ->
 %% the other store via fast-forward.
 %%
 
-merge_hpsd(Store, Doc, BaseRev, FromRev, ToRev, UtiSet, Force) ->
+merge_hpsd(Store, Doc, BaseRev, FromRev, ToRev, TypeSet, Force) ->
 	case merge_hpsd_read([FromRev, ToRev, BaseRev]) of
 		{ok, [FromData, ToData, BaseData]} ->
 			case merge_hpsd_parts(BaseData, FromData, ToData, [], Force) of
 				{ok, NewData} ->
-					[Uti] = sets:to_list(UtiSet),
-					merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData);
+					[Type] = sets:to_list(TypeSet),
+					merge_hpsd_write(Store, Doc, FromRev, ToRev, Type, NewData);
 
 				{error, _} = Error ->
 					Error
@@ -470,11 +470,11 @@ merge_hpsd_parts(
 	end.
 
 
-merge_hpsd_write(Store, Doc, FromRev, ToRev, Uti, NewData) ->
+merge_hpsd_write(Store, Doc, FromRev, ToRev, Type, NewData) ->
 	case store:update(Store, Doc, FromRev, <<"org.hotchpotch.syncer">>) of
 		{ok, Writer} ->
 			store:set_parents(Writer, [FromRev, ToRev]),
-			store:set_type(Writer, Uti),
+			store:set_type(Writer, Type),
 			Written = lists:foldl(
 				fun({Part, Data}, Result) ->
 					FinalData = if

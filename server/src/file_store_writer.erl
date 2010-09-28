@@ -135,10 +135,10 @@ handle_call(abort, _From, S) ->
 	{stop, normal, ok, S2};
 
 handle_call(get_type, _From, S) ->
-	{reply, {ok, S#ws.uti}, S};
+	{reply, {ok, S#ws.type}, S};
 
 handle_call({set_type, Type}, _From, S) ->
-	{reply, ok, S#ws{uti=Type}};
+	{reply, ok, S#ws{type=Type}};
 
 handle_call(get_parents, _From, S) ->
 	{reply, {ok, S#ws.baserevs}, S};
@@ -276,12 +276,13 @@ do_commit(S, Mtime) ->
 		end,
 		[],
 		S#ws.new),
-	Object = #object{
+	Revision = #revision{
 		flags   = S#ws.flags,
 		parts   = lists:usort(NewParts ++ dict:to_list(S#ws.orig)),
 		parents = lists:usort(S#ws.baserevs),
 		mtime   = Mtime,
-		uti     = S#ws.uti},
+		type    = S#ws.type,
+		creator = S#ws.creator},
 	NewOrig = lists:foldl(
 		fun({Part, Hash}, Acc) -> dict:store(Part, Hash, Acc) end,
 		S#ws.orig,
@@ -291,7 +292,7 @@ do_commit(S, Mtime) ->
 		orig     = NewOrig,
 		new      = dict:new(),
 		locks    = NewLocks},
-	case file_store:commit(S#ws.server, S#ws.doc, Object) of
+	case file_store:commit(S#ws.server, S#ws.doc, Revision) of
 		conflict ->
 			{reply, conflict, S2};
 		Reply ->

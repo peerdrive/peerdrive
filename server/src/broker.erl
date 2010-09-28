@@ -144,7 +144,7 @@ peek(Rev, Stores) ->
 %% @doc Create a new, empty document.
 %%
 %% Returns a `{Doc, Handle}' which represents the created document and a
-%% handle for the subsequent write calls to fill the object. The initial
+%% handle for the subsequent write calls to fill the revision. The initial
 %% revision identifier will be returned by commit/1 which will always succeed
 %% for newly created documents (despite IO errors).
 %%
@@ -172,7 +172,7 @@ create(Type, Creator, Stores) ->
 %% @doc Fork a new document from an existing revision.
 %%
 %% Returns `{ok, Doc, Handle}' which represents the created document and a
-%% handle for the subsequent write calls to update the object. The initial
+%% handle for the subsequent write calls to update the revision. The initial
 %% content will be taken from StartRev.
 %%
 %% The handle can only be commited or aborted but not suspended because the new

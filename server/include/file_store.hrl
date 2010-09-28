@@ -18,10 +18,11 @@
 -record(ws, {
 	path,       % base directory of server
 	server,     % server process pid
-	flags,      % flags of object
+	flags,      % flags of revision
 	doc,        % document uuid
-	baserevs,   % base revision of object
-	uti,        % UTI of object
+	baserevs,   % base revision of revision
+	type,       % Type UTI of revision
+	creator,    % Creator of revision
 	orig,       % dict: FourCC --> Hash
 	new,        % dict: FourCC --> {FileName, IODevice}
 	readers,    % dict: FourcC --> IODevice

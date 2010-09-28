@@ -313,16 +313,16 @@ put_doc(#store{this=Store, put_doc=PutDoc}, Doc, OldRev, NewRev) ->
 %% put_rev_part/3 calls. If all parts are already available in the store then
 %% the function just returns `ok'.
 %%
-%% @spec put_rev_start(Store, Rev, Object) -> Result
+%% @spec put_rev_start(Store, Rev, Revision) -> Result
 %%       Store = #store{}
 %%       Rev = guid()
-%%       Object = #object
+%%       Revision = #revision
 %%       Result = ok | {ok, MissingParts, Importer} | {error, Reason}
 %%       MissingParts = [FourCC]
 %%       Importer = #importer
 %%       Reason = ecode()
-put_rev_start(#store{this=Store, put_rev_start=PutRevStart}, Rev, Object) ->
-	PutRevStart(Store, Rev, Object).
+put_rev_start(#store{this=Store, put_rev_start=PutRevStart}, Rev, Revision) ->
+	PutRevStart(Store, Rev, Revision).
 
 %% @doc Add data to a revision that's imported
 %%
@@ -363,24 +363,24 @@ sync_set_anchor(#store{this=Store, sync_set_anchor=SyncSetAnchor}, PeerGuid, Seq
 	SyncSetAnchor(Store, PeerGuid, SeqNum).
 
 
-hash_revision(#object{flags=Flags, mtime=Mtime} = Revision) ->
-	Parts = Revision#object.parts,
+hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
+	Parts = Revision#revision.parts,
 	BinParts = lists:foldl(
 		fun ({FourCC, Hash}, AccIn) ->
 			<<AccIn/binary, FourCC/binary, Hash/binary>>
 		end,
 		<<(length(Parts)):8>>,
 		Parts),
-	Parents = Revision#object.parents,
+	Parents = Revision#revision.parents,
 	BinParents = lists:foldl(
 		fun (Parent, AccIn) ->
 			<<AccIn/binary, Parent/binary>>
 		end,
 		<<(length(Parents)):8>>,
 		Parents),
-	Type = Revision#object.uti,
+	Type = Revision#revision.type,
 	BinType = <<(size(Type)):32/little, Type/binary>>,
-	Creator = <<"">>, %Revision#revision.creator,
+	Creator = Revision#revision.creator,
 	BinCreator = <<(size(Creator)):32/little, Creator/binary>>,
 	binary_part(
 		crypto:sha(<<Flags:32/little, BinParts/binary, BinParents/binary,

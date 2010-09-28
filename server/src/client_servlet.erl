@@ -725,7 +725,10 @@ encode_error_code(Error) ->
 		eambig    -> 5;
 
 		ok        -> 0;
-		_         -> 16#ffffffff
+		_         ->
+			error_logger:warning_report([{module, ?MODULE},
+				{reason, "Non-encodable error"}, {error, Error}]),
+			16#ffffffff
 	end,
 	<<Code:32>>.
 

@@ -46,7 +46,7 @@ get_source_loop(Rev, [{_Guid, Ifc} | Remaining]) ->
 replicate(Rev, SourceStore, DestStore) ->
 	case store:stat(SourceStore, Rev) of
 		{ok, Stat} ->
-			Object = #object{
+			Revision = #revision{
 				flags = Stat#rev_stat.flags,
 				parts = lists:sort(
 					lists:map(
@@ -54,9 +54,10 @@ replicate(Rev, SourceStore, DestStore) ->
 						Stat#rev_stat.parts)),
 				parents = lists:sort(Stat#rev_stat.parents),
 				mtime   = Stat#rev_stat.mtime,
-				uti     = Stat#rev_stat.type
+				type    = Stat#rev_stat.type,
+				creator = Stat#rev_stat.creator
 			},
-			case store:put_rev_start(DestStore, Rev, Object) of
+			case store:put_rev_start(DestStore, Rev, Revision) of
 				ok ->
 					ok;
 
