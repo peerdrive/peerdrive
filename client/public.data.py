@@ -39,7 +39,7 @@ else:
 
 
 stat = HpConnector().stat(rev)
-uti  = stat.uti()
+uti  = stat.type()
 hash = stat.hash('FILE')
 
 # determine extension

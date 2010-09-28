@@ -52,7 +52,6 @@ def encodeString(string):
 		encStr = string.encode('utf-8')
 		return struct.pack('>H', len(encStr)) + encStr
 
-
 def raiseError(error):
 	if error == 0:
 		return True
@@ -642,7 +641,7 @@ class HpStat(object):
 	def mtime(self):
 		return self.__mtime
 
-	def uti(self):
+	def type(self):
 		return self.__type
 
 	def creator(self):
@@ -692,7 +691,7 @@ class HpHandle(object):
 
 	def read(self, part, length):
 		if not self.active:
-			raise IOError('Document already closed!')
+			raise IOError('Handle expired')
 		result = ''
 		pos = self._getPos(part)
 		packetSize = self.connector.maxPacketSize
@@ -729,7 +728,7 @@ class HpHandle(object):
 
 	def write(self, part, data):
 		if not self.active:
-			raise IOError('Document already immutable!')
+			raise IOError('Handle expired')
 
 		pos = self._getPos(part)
 		i = 0
@@ -753,7 +752,7 @@ class HpHandle(object):
 
 	def truncate(self, part):
 		if not self.active:
-			raise IOError('Document already immutable!')
+			raise IOError('Handle expired')
 		request = struct.pack('>4s4sQ', self.handle, part, self._getPos(part))
 		reply = self.connector._rpc(_HpConnector.TRUNC_REQ,
 			_HpConnector.TRUNC_CNF, request)
@@ -761,7 +760,7 @@ class HpHandle(object):
 
 	def commit(self, retry=False):
 		if not self.active:
-			raise IOError('Document already immutable!')
+			raise IOError('Handle expired')
 		self.active = False
 		reply = self.connector._rpc(_HpConnector.COMMIT_REQ,
 			_HpConnector.COMMIT_CNF, self.handle)
@@ -779,7 +778,7 @@ class HpHandle(object):
 
 	def suspend(self):
 		if not self.active:
-			raise IOError('Document already immutable!')
+			raise IOError('Handle expired')
 		self.active = False
 		reply = self.connector._rpc(_HpConnector.SUSPEND_REQ,
 			_HpConnector.SUSPEND_CNF, self.handle)
@@ -793,7 +792,44 @@ class HpHandle(object):
 				_HpConnector.ABORT_CNF, self.handle)
 			self.connector._parseBrokerResult(reply)
 		else:
-			raise IOError('Document already immutable!')
+			raise IOError('Handle expired')
+
+	def getType(self):
+		if not self.active:
+			raise IOError('Handle expired')
+		reply = self.connector._rpc(_HpConnector.GET_TYPE_REQ,
+			_HpConnector.GET_TYPE_CNF, self.handle)
+		(True, result) = self.connector._parseBrokerResult(reply)
+		(length,) = struct.unpack_from('>H', result, 0)
+		return result[2:2+length]
+
+	def setType(self, uti):
+		if not self.active:
+			raise IOError('Handle expired')
+		request = self.handle + encodeString(uti)
+		reply = self.connector._rpc(_HpConnector.SET_TYPE_REQ,
+			_HpConnector.SET_TYPE_CNF, request)
+		(True, empty) = self.connector._parseBrokerResult(reply)
+
+	def getParents(self):
+		if not self.active:
+			raise IOError('Handle expired')
+		reply = self.connector._rpc(_HpConnector.GET_PARENTS_REQ,
+			_HpConnector.GET_PARENTS_CNF, self.handle)
+		(True, result) = self.connector._parseBrokerResult(reply)
+		parents = []
+		(count,) = struct.unpack_from('>B', result, 0)
+		for i in range(count):
+			parents.append(result[i*16+1:i*16+17])
+		return parents
+
+	def setParents(self, parents):
+		if not self.active:
+			raise IOError('Handle expired')
+		request = self.handle + encodeUuidList(parents)
+		reply = self.connector._rpc(_HpConnector.SET_PARENTS_REQ,
+			_HpConnector.SET_PARENTS_CNF, request)
+		(True, empty) = self.connector._parseBrokerResult(reply)
 
 	def getDoc(self):
 		return self.doc

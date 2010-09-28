@@ -33,7 +33,7 @@ def showDocument(link):
 	else:
 		args = ['rev:'+link.rev().encode('hex')]
 		rev = link.rev()
-	uti = HpConnector().stat(rev).uti()
+	uti = HpConnector().stat(rev).type()
 	executable = HpRegistry().getExecutable(uti)
 	if executable:
 		if sys.platform == "win32":
@@ -380,7 +380,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __mergeAuto(self, baseRev, mergeRevs):
 		# see what has changed...
 		s = self.__connection.stat(baseRev)
-		utis = set([s.uti()])
+		utis = set([s.type()])
 		origParts = set(s.parts())
 		origHashes = {}
 		changedParts = set()
@@ -388,7 +388,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			origHashes[part] = s.hash(part)
 		for rev in mergeRevs:
 			s = self.__connection.stat(rev)
-			utis.add(s.uti())
+			utis.add(s.type())
 			mergeParts = set(s.parts())
 			# account for added/removed parts
 			changedParts |= mergeParts ^ origParts
@@ -533,7 +533,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __getUtiPixmap(self):
 		if self.__utiPixmap is None:
 			if self.__rev:
-				uti = self.__connection.stat(self.__rev).uti()
+				uti = self.__connection.stat(self.__rev).type()
 			else:
 				uti = self.__uti
 			self.__utiPixmap = QtGui.QPixmap(HpRegistry().getIcon(uti))
@@ -672,7 +672,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			if self.needSave():
 				s = self.__connection.stat(self.__rev)
 				tmpStore = s.volumes()[0]
-				with self.__connection.fork(tmpStore, s.uti(), self.__rev) as w:
+				with self.__connection.fork(tmpStore, s.type(), self.__rev) as w:
 					self.__saveFileInternal("<<Temporary automatic checkpoint>>", True, w)
 					w.commit()
 					mergeRevs.append(w.getRev())
@@ -830,7 +830,7 @@ class DocButton(object):
 					except:
 						docName = "Unnamed"
 				if not docIcon:
-					uti = HpConnector().stat(rev).uti()
+					uti = HpConnector().stat(rev).type()
 					docIcon = QtGui.QIcon(HpRegistry().getIcon(uti))
 			except IOError:
 				docName = ''
@@ -870,7 +870,7 @@ class RevButton(object):
 					title = metaData["org.hotchpotch.annotation"]["title"]
 				except:
 					title = "Unnamed"
-			uti = HpConnector().stat(rev).uti()
+			uti = HpConnector().stat(rev).type()
 			revIcon = QtGui.QIcon(HpRegistry().getIcon(uti))
 		except IOError:
 			title = ''

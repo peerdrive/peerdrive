@@ -99,6 +99,109 @@ class TestCreatorCode(CommonParts):
 		self.assertEqual(s.creator(), "test.foo")
 
 
+class TestTypeCode(CommonParts):
+
+	def test_create(self):
+		c = HpConnector()
+		with c.create("test.format", "test.ignore", [self.store1]) as w:
+			self.assertEqual(w.getType(), "test.format")
+			w.commit()
+			doc = w.getDoc()
+			rev = w.getRev()
+			self.disposeDoc(doc)
+
+		s = c.stat(rev)
+		self.assertEqual(s.type(), "test.format")
+
+	def test_fork_keep(self):
+		c = HpConnector()
+		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.commit()
+			doc1 = w.getDoc()
+			rev1 = w.getRev()
+			self.disposeDoc(doc1)
+
+		with c.fork(rev1, "test.ignore") as w:
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.write('FILE', 'update')
+			w.commit()
+			doc2 = w.getDoc()
+			rev2 = w.getRev()
+			self.disposeDoc(doc2)
+
+		s = c.stat(rev1)
+		self.assertEqual(s.type(), "test.format.foo")
+		s = c.stat(rev2)
+		self.assertEqual(s.type(), "test.format.foo")
+
+	def test_fork_change(self):
+		c = HpConnector()
+		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.commit()
+			doc1 = w.getDoc()
+			rev1 = w.getRev()
+			self.disposeDoc(doc1)
+
+		with c.fork(rev1, "test.ignore") as w:
+			w.write('FILE', 'update')
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.setType("test.format.bar")
+			self.assertEqual(w.getType(), "test.format.bar")
+			w.commit()
+			doc2 = w.getDoc()
+			rev2 = w.getRev()
+			self.disposeDoc(doc2)
+
+		s = c.stat(rev1)
+		self.assertEqual(s.type(), "test.format.foo")
+		s = c.stat(rev2)
+		self.assertEqual(s.type(), "test.format.bar")
+
+	def test_update_keep(self):
+		c = HpConnector()
+		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.commit()
+			doc = w.getDoc()
+			rev1 = w.getRev()
+			self.disposeDoc(doc)
+
+		with c.update(doc, rev1, "test.ignore") as w:
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.write('FILE', 'update')
+			w.commit()
+			rev2 = w.getRev()
+
+		s = c.stat(rev1)
+		self.assertEqual(s.type(), "test.format.foo")
+		s = c.stat(rev2)
+		self.assertEqual(s.type(), "test.format.foo")
+
+	def test_update_change(self):
+		c = HpConnector()
+		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.commit()
+			doc = w.getDoc()
+			rev1 = w.getRev()
+			self.disposeDoc(doc)
+
+		with c.update(doc, rev1, "test.ignore") as w:
+			self.assertEqual(w.getType(), "test.format.foo")
+			w.write('FILE', 'update')
+			w.setType("test.format.bar")
+			self.assertEqual(w.getType(), "test.format.bar")
+			w.commit()
+			rev2 = w.getRev()
+
+		s = c.stat(rev1)
+		self.assertEqual(s.type(), "test.format.foo")
+		s = c.stat(rev2)
+		self.assertEqual(s.type(), "test.format.bar")
+
+
 class TestSync(CommonParts):
 
 	def test_already_same(self):

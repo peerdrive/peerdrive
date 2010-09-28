@@ -481,7 +481,7 @@ def HpContainer(link):
 	else:
 		link.update()
 		rev = link.rev()
-	uti = hpconnector.HpConnector().stat(rev).uti()
+	uti = hpconnector.HpConnector().stat(rev).type()
 	if uti in HpDict.UTIs:
 		return HpDict(link)
 	elif uti in HpSet.UTIs:
@@ -505,7 +505,7 @@ class HpDict(object):
 			self.__doc = None
 
 	def __load(self):
-		uti = self.__conn.stat(self.__rev).uti()
+		uti = self.__conn.stat(self.__rev).type()
 		if uti not in HpDict.UTIs:
 			raise IOError("Not a dict: "+uti)
 		with self.__conn.peek(self.__rev) as r:
@@ -585,7 +585,7 @@ class HpSet(object):
 			self.__doc = None
 
 	def __load(self):
-		uti = self.__conn.stat(self.__rev).uti()
+		uti = self.__conn.stat(self.__rev).type()
 		if uti not in HpSet.UTIs:
 			raise IOError("Not a dict: "+uti)
 		with self.__conn.peek(self.__rev) as r:

@@ -597,7 +597,8 @@ io_loop(Handle) ->
 				Error ->
 					encode_broker_result(Error)
 			end,
-			send_reply(RetPath, ?GET_PARENTS_CNF, Reply);
+			send_reply(RetPath, ?GET_PARENTS_CNF, Reply),
+			io_loop(Handle);
 
 		{?SET_TYPE_REQ, Body, RetPath} ->
 			{Type, <<>>} = parse_string(Body),
@@ -613,7 +614,8 @@ io_loop(Handle) ->
 				Error ->
 					encode_broker_result(Error)
 			end,
-			send_reply(RetPath, ?GET_TYPE_CNF, Reply);
+			send_reply(RetPath, ?GET_TYPE_CNF, Reply),
+			io_loop(Handle);
 
 		closed ->
 			broker:abort(Handle);

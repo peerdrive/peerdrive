@@ -61,7 +61,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 	# HpGui callbacks
 
 	def docRead(self, readWrite, r):
-		uti = HpConnector().stat(self.rev()).uti()
+		uti = HpConnector().stat(self.rev()).type()
 		if uti in DictModel.UTIs:
 			model = DictModel(self)
 		elif uti in SetModel.UTIs:
@@ -97,7 +97,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 		model.doLoad(r, readWrite, autoClean)
 		self.__setEditable(readWrite)
 		self.__checkMetaData()
-		if readWrite and HpConnector().stat(self.rev()).uti() == "org.hotchpotch.volume":
+		if readWrite and HpConnector().stat(self.rev()).type() == "org.hotchpotch.volume":
 			self.fileToolBar.removeAction(self.delAct)
 			self.fileMenu.removeAction(self.delAct)
 			enum = HpConnector().enum()
@@ -457,7 +457,7 @@ class CollectionTreeView(QtGui.QTreeView):
 			info = c.stat(sourceRev)
 			destStores = c.stat(self.__parent.rev()).volumes()
 			# copy
-			with c.create(info.uti(), info.creator(), destStores) as w:
+			with c.create(info.type(), info.creator(), destStores) as w:
 				with c.peek(sourceRev) as r:
 					for part in info.parts():
 						w.write(part, r.readAll(part))
@@ -502,7 +502,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		sysStore = hpstruct.HpContainer(hpstruct.DocLink(c.enum().sysStore()))
 		templatesDict = hpstruct.HpContainer(sysStore.get("templates:"))
 		for (name, link) in templatesDict.items():
-			icon = QtGui.QIcon(HpRegistry().getIcon(c.stat(link.rev()).uti()))
+			icon = QtGui.QIcon(HpRegistry().getIcon(c.stat(link.rev()).type()))
 			action = newMenu.addAction(icon, name)
 			actions[action] = link
 
@@ -1034,16 +1034,16 @@ class CEntry(HpWatch):
 			s = HpConnector().stat(rev)
 		except IOError:
 			return
-		self.__uti = s.uti()
+		self.__uti = s.type()
 		if needMerge:
-			image = QtGui.QImage(HpRegistry().getIcon(s.uti()))
+			image = QtGui.QImage(HpRegistry().getIcon(s.type()))
 			painter = QtGui.QPainter()
 			painter.begin(image)
 			painter.drawImage(0, 0, QtGui.QImage("icons/uti/merge_overlay.png"))
 			painter.end()
 			self.__icon = QtGui.QIcon(QtGui.QPixmap.fromImage(image))
 		else:
-			self.__icon = QtGui.QIcon(HpRegistry().getIcon(s.uti()))
+			self.__icon = QtGui.QIcon(HpRegistry().getIcon(s.type()))
 
 		self.__updateColumns()
 		self.__valid = True

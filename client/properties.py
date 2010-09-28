@@ -153,7 +153,7 @@ class RevisionTab(QtGui.QWidget):
 			stat = HpConnector().stat(rev)
 
 			layout.addWidget(genRevButton(rev), 0, col)
-			layout.addWidget(QtGui.QLabel(HpRegistry().getDisplayString(stat.uti())), 1, col)
+			layout.addWidget(QtGui.QLabel(HpRegistry().getDisplayString(stat.type())), 1, col)
 			layout.addWidget(QtGui.QLabel(str(stat.mtime())), 2, col)
 			size = 0
 			for part in stat.parts():
