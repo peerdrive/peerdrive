@@ -22,11 +22,11 @@
 
 % Store interface
 -export([guid/1, contains/2, stat/2, lookup/2, put_doc/4, put_rev_start/3,
-	peek/2, create/4, fork/4, update/4,
+	peek/2, create/4, fork/4, update/4, resume/4, forget/3,
 	delete_rev/2, delete_doc/3, sync_get_changes/2, sync_set_anchor/3]).
 
 % Functions used by helper processes (reader/writer/...)
--export([commit/3, insert_rev/3, lock/2, unlock/2]).
+-export([commit/4, suspend/4, insert_rev/3, lock/2, unlock/2]).
 
 -include("store.hrl").
 -include("file_store.hrl").
@@ -136,6 +136,16 @@ fork(Store, Doc, StartRev, Creator) ->
 update(Store, Doc, StartRev, Creator) ->
 	gen_server:call(Store, {update, Doc, StartRev, Creator}).
 
+%% @doc Resume writing to a document
+%% @see store:resume/4
+resume(Store, Doc, PreRev, Creator) ->
+	gen_server:call(Store, {resume, Doc, PreRev, Creator}).
+
+%% @doc Remove a pending preliminary revision from a document.
+%% @see store:forget/3
+forget(Store, Doc, PreRev) ->
+	gen_server:call(Store, {forget, Doc, PreRev}).
+
 %% @doc Delete a document
 %% @see store:delete_doc/3
 delete_doc(Store, Doc, Rev) ->
@@ -174,13 +184,23 @@ sync_set_anchor(Store, PeerGuid, SeqNum) ->
 %% @doc Commit a new revision into the store and update the Doc to point to the
 %%      new revision instead.
 %%
-%% @spec commit(Store, Doc, Revision) -> Result
+%% @spec commit(Store, Doc, PreRev, Revision) -> Result
 %%       Store = pid()
-%%       Doc = guid()
+%%       Doc, PreRev = guid()
 %%       Revision = #revision
 %%       Result = {ok, Rev::guid()} | conflict | {error, Error::ecode()}
-commit(Store, Doc, Revision) ->
-	gen_server:call(Store, {commit, Doc, Revision}).
+commit(Store, Doc, PreRev, Revision) ->
+	gen_server:call(Store, {commit, Doc, PreRev, Revision}).
+
+%% @doc Queue a preliminary revision.
+%%
+%% @spec suspend(Store, Doc, PreRev, Revision) -> Result
+%%       Store = pid()
+%%       Doc, PreRev = guid()
+%%       Revision = #revision
+%%       Result = {ok, Rev::guid()} | {error, Error::ecode()}
+suspend(Store, Doc, PreRev, Revision) ->
+	gen_server:call(Store, {suspend, Doc, PreRev, Revision}).
 
 %% @doc Import a new revision into the store.
 %%
@@ -296,6 +316,15 @@ handle_call_internal({update, Doc, StartRev, Creator}, From, S) ->
 	{S2, Reply} = do_write_start_update(S, Doc, StartRev, Creator, User),
 	{reply, Reply, S2};
 
+handle_call_internal({resume, Doc, PreRev, Creator}, From, S) ->
+	{User, _} = From,
+	{S2, Reply} = do_write_start_resume(S, Doc, PreRev, Creator, User),
+	{reply, Reply, S2};
+
+handle_call_internal({forget, Doc, PreRev}, _From, S) ->
+	{S2, Reply} = do_forget(S, Doc, PreRev),
+	{reply, Reply, S2};
+
 handle_call_internal({delete_rev, Rev}, _From, S) ->
 	{S2, Reply} = do_delete_rev(S, Rev),
 	{reply, Reply, S2};
@@ -332,8 +361,13 @@ handle_call_internal({insert_rev, Rev, Revision}, _From, S) ->
 	{reply, Reply, S2};
 
 % internal: commit a new revision
-handle_call_internal({commit, Doc, Revision}, _From, S) ->
-	{S2, Reply} = do_commit(S, Doc, Revision),
+handle_call_internal({commit, Doc, PreRev, Revision}, _From, S) ->
+	{S2, Reply} = do_commit(S, Doc, PreRev, Revision),
+	{reply, Reply, S2};
+
+% internal: queue a preliminary revision
+handle_call_internal({suspend, Doc, PreRev, Revision}, _From, S) ->
+	{S2, Reply} = do_suspend(S, Doc, PreRev, Revision),
 	{reply, Reply, S2};
 
 % internal: add part refcount
@@ -344,59 +378,18 @@ handle_call_internal({parts_ref_inc, PartHashes}, _From, S) ->
 
 % internal: decrease part refcount
 handle_cast_internal({part_ref_dec, PartHash}, S) ->
-	RefCount = dict:fetch(PartHash, S#state.parts)-1,
-	Parts = if
-		RefCount == 0 ->
-			% defer deletion if currently locked
-			case orddict:find(PartHash, S#state.locks) of
-				{ok, Value} when Value > 0 ->
-					ok;
-				_ ->
-					file:delete(util:build_path(S#state.path, PartHash))
-			end,
-			dict:erase(PartHash, S#state.parts);
-		true ->
-			dict:store(PartHash, RefCount, S#state.parts)
-	end,
-	{noreply, S#state{parts=Parts, changed=true}};
+	S2 = do_part_ref_dec(S, PartHash),
+	{noreply, S2};
 
 % internal: unlock a part
-handle_cast_internal({unlock, Hash}, #state{locks=Locks, parts=Parts}=S) ->
-	Depth = orddict:fetch(Hash, Locks)-1,
-	Refs = case dict:find(Hash, Parts) of
-		{ok, Value} -> Value;
-		error       -> 0
-	end,
-	NewLocks = case Depth of
-		0 ->
-			if
-				Refs == 0 ->
-					file:delete(util:build_path(S#state.path, Hash));
-				true ->
-					ok
-			end,
-			orddict:erase(Hash, Locks);
-
-		_ ->
-			orddict:store(Hash, Depth, Locks)
-	end,
-	{noreply, S#state{locks=NewLocks}};
+handle_cast_internal({unlock, Hash}, S) ->
+	S2 = do_unlock(S, Hash),
+	{noreply, S2};
 
 % internal: decrease refcount of a revision
 handle_cast_internal({revision_ref_dec, Rev}, S) ->
-	{RefCount, Revision} = dict:fetch(Rev, S#state.revisions),
-	Revisions = if
-		RefCount == 1 ->
-			dispose_revision(Revision, S#state.path),
-			case Revision of
-				stub  -> ok;
-				_Else -> vol_monitor:trigger_rm_rev(S#state.guid, Rev)
-			end,
-			dict:erase(Rev, S#state.revisions);
-		true ->
-			dict:store(Rev, {RefCount-1, Revision}, S#state.revisions)
-	end,
-	{noreply, S#state{revisions=Revisions, changed=true}};
+	S2 = do_revision_ref_dec(S, Rev),
+	{noreply, S2};
 
 handle_cast_internal(dump, S) ->
 	do_dump(S),
@@ -428,7 +421,8 @@ terminate(Reason, State) ->
 	case Reason of
 		shutdown -> do_checkpoint(State);
 		normal   -> do_checkpoint(State);
-		Error    -> io:format("store: Unexpected terminate: ~p~n", [Error])
+		_        ->
+			error_logger:error_msg("store: Unexpected termination, not syncing~n")
 	end.
 
 
@@ -457,8 +451,8 @@ make_interface(Pid) ->
 		create             = fun create/4,
 		fork               = fun fork/4,
 		update             = fun update/4,
-		resume             = fun(_, _, _, _) -> {error, enosys} end,
-		forget             = fun(_, _, _) -> {error, enosys} end,
+		resume             = fun resume/4,
+		forget             = fun forget/3,
 		delete_rev         = fun delete_rev/2,
 		delete_doc         = fun delete_doc/3,
 		sync_get_changes   = fun sync_get_changes/2,
@@ -554,6 +548,33 @@ do_peek(#state{revisions=Revisions, path=Path}, Rev, User) ->
 
 %%% Delete %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+do_forget(#state{guid=Guid, uuids=Uuids} = S, Doc, PreRev) ->
+	case dict:find(Doc, Uuids) of
+		{ok, {Rev, PreRevs, _Gen}} ->
+			case lists:member(PreRev, PreRevs) of
+				true ->
+					revision_ref_dec(PreRev),
+					NewPreRevs = lists:filter(
+						fun(R) -> R =/= PreRev end,
+						PreRevs),
+					vol_monitor:trigger_mod_doc(Guid, Doc),
+					Gen = S#state.gen,
+					S2 = S#state{
+						gen     = Gen+1,
+						uuids   = dict:store(Doc, {Rev, NewPreRevs, Gen}, Uuids),
+						changed = true
+					},
+					{S2, ok};
+
+				false ->
+					{S, {error, conflict}}
+			end;
+
+		error ->
+			{S, {error, enoent}}
+	end.
+
+
 do_delete_rev(#state{guid=Guid, revisions=Revisions, path=Path} = S, Rev) ->
 	case dict:find(Rev, Revisions) of
 		{ok, {_, stub}} ->
@@ -582,9 +603,10 @@ do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
 
 		_ ->
 			case dict:find(Doc, Uuids) of
-				{ok, {Rev, _PreRevs, _Gen}} ->
+				{ok, {Rev, PreRevs, _Gen}} ->
 					vol_monitor:trigger_rm_doc(Guid, Doc),
-					gen_server:cast(self(), {revision_ref_dec, Rev}),
+					revision_ref_dec(Rev),
+					lists:foreach(fun(R) -> revision_ref_dec(R) end, PreRevs),
 					{S#state{ uuids=dict:erase(Doc, Uuids), changed=true}, ok};
 
 				{ok, {_OtherRev, _PreRevs, _Gen}} ->
@@ -617,7 +639,7 @@ do_dump(#state{path=Path} = S) ->
 			io:format("    ~s -> ~s @ ~p~n", [util:bin_to_hexstr(Doc), util:bin_to_hexstr(Rev), Gen]),
 			lists:foreach(
 				fun(PreRev) ->
-					io:format("                                      + ~s",
+					io:format("                                      + ~s~n",
 						[util:bin_to_hexstr(PreRev)])
 				end,
 				PreRevs)
@@ -768,6 +790,49 @@ do_write_start_update(S, Doc, StartRev, Creator, User) ->
 	end.
 
 
+% returns `{S2, {ok, Writer} | {error, Reason}}'
+do_write_start_resume(S, Doc, PreRev, Creator, User) ->
+	case dict:find(Doc, S#state.uuids) of
+		{ok, {_Rev, PreRevs, _Gen}} ->
+			case lists:member(PreRev, PreRevs) of
+				true ->
+					case dict:fetch(PreRev, S#state.revisions) of
+						{_, stub} ->
+							{S, {error, orphaned}};
+
+						{_, Revision} ->
+							Parts = dict:from_list(Revision#revision.parts),
+							NewCreator = case Creator of
+								keep -> Revision#revision.creator;
+								_    -> Creator
+							end,
+							State = #ws{
+								path      = S#state.path,
+								server    = self(),
+								flags     = Revision#revision.flags,
+								doc       = Doc,
+								prerev    = PreRev,
+								baserevs  = Revision#revision.parents,
+								type      = Revision#revision.type,
+								creator   = NewCreator,
+								orig      = Parts,
+								new       = dict:new(),
+								readers   = dict:new(),
+								locks     = []},
+							{S2, Writer} = start_writer(S, State, User),
+							{S2, {ok, Writer}}
+					end;
+
+				false ->
+					{S, {error, conflict}}
+			end;
+
+		error ->
+			% unknown document
+			{S, {error, enoent}}
+	end.
+
+
 % lock part hashes, then start writer process
 start_writer(S, State, User) ->
 	WriterLocks = dict:fold(
@@ -791,7 +856,7 @@ do_put_doc(#state{uuids=Uuids} = S, Doc, OldRev, NewRev) ->
 
 		% free old version, store new one
 		{ok, {OldRev, PreRevs, _}} ->
-			gen_server:cast(self(), {revision_ref_dec, OldRev}),
+			revision_ref_dec(OldRev),
 			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
 			S21 = do_revisions_ref_inc(S, [NewRev]),
 			Gen = S21#state.gen,
@@ -859,14 +924,22 @@ do_put_rev(S, Rev, Revision, User) ->
 
 %%% Commit %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_commit(S, Doc, Revision) ->
+do_commit(S, Doc, OldPreRev, Revision) ->
 	NewRev = store:hash_revision(Revision),
 	Result = case dict:find(Doc, S#state.uuids) of
 		{ok, {CurrentRev, CurrentPreRevs, _Gen}} ->
 			case lists:member(CurrentRev, Revision#revision.parents) of
 				true  ->
-					gen_server:cast(self(), {revision_ref_dec, CurrentRev}),
-					{ok, NewRev, CurrentPreRevs};
+					revision_ref_dec(CurrentRev),
+					NewPreRevs = lists:filter(
+						fun(R) ->
+							case R of
+								OldPreRev -> revision_ref_dec(R), false;
+								_         -> true
+							end
+						end,
+						CurrentPreRevs),
+					{ok, NewRev, NewPreRevs};
 				false ->
 					conflict
 			end;
@@ -877,15 +950,44 @@ do_commit(S, Doc, Revision) ->
 		{ok, Rev, PreRevs} ->
 			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
 			Gen = S#state.gen,
-			NewState = S#state{
+			S2 = S#state{
 				gen     = Gen+1,
 				uuids   = dict:store(Doc, {Rev, PreRevs, Gen}, S#state.uuids)
 			},
-			S2 = add_revision(NewState, Rev, 1, Revision),
-			{S2, {ok, Rev}};
+			S3 = add_revision(S2, Rev, 1, Revision),
+			{S3, {ok, Rev}};
 
 		conflict ->
 			{S, conflict}
+	end.
+
+
+do_suspend(S, Doc, OldPreRev, Revision) ->
+	NewRev = store:hash_revision(Revision),
+	case dict:find(Doc, S#state.uuids) of
+		{ok, {Rev, PreRevs, _Gen}} ->
+			NewPreRevs = lists:usort(
+				[NewRev] ++
+				lists:filter(
+					fun(R) ->
+						case R of
+							OldPreRev -> revision_ref_dec(R), false;
+							_         -> true
+						end
+					end,
+					PreRevs)
+			),
+			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
+			Gen = S#state.gen,
+			S2 = S#state{
+				gen     = Gen+1,
+				uuids   = dict:store(Doc, {Rev, NewPreRevs, Gen}, S#state.uuids)
+			},
+			S3 = add_revision(S2, NewRev, 1, Revision),
+			{S3, {ok, NewRev}};
+
+		error ->
+			{S, {error, enoent}}
 	end.
 
 
@@ -894,8 +996,8 @@ do_put_rev_commit(#state{revisions=Revisions} = S, Rev, Revision) ->
 		error ->
 			{S, {error, enotref}};
 
-		{ok, {RefCount, stub}} ->
-			S2 = add_revision(S, Rev, RefCount, Revision),
+		{ok, {_RefCount, stub}} ->
+			S2 = add_revision(S, Rev, 0, Revision),
 			vol_monitor:trigger_add_rev(S#state.guid, Rev),
 			{S2, ok};
 
@@ -936,13 +1038,34 @@ do_parts_ref_inc(#state{parts=Parts1} = S, Hashes) ->
 	S#state{parts=Parts2, changed=true}.
 
 
-add_revision(S, Rev, RefCount, Revision) ->
-	Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
-	S2 = do_revisions_ref_inc(S, get_references(Revision, S#state.path)),
-	S3 = do_parts_ref_inc(S2, Parts),
-	S3#state{
-		revisions=dict:store(Rev, {RefCount, Revision}, S3#state.revisions),
-		changed=true}.
+add_revision(S, Rev, RefCountInc, Revision) ->
+	case dict:find(Rev, S#state.revisions) of
+		error when (RefCountInc > 0) ->
+			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
+			S2 = do_revisions_ref_inc(S, get_references(Revision, S#state.path)),
+			S3 = do_parts_ref_inc(S2, Parts),
+			S3#state{
+				revisions=dict:store(Rev, {RefCountInc, Revision}, S3#state.revisions),
+				changed=true};
+
+		{ok, {RefCount, stub}} ->
+			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
+			S2 = do_revisions_ref_inc(S, get_references(Revision, S#state.path)),
+			S3 = do_parts_ref_inc(S2, Parts),
+			S3#state{
+				revisions=dict:store(Rev, {RefCount, Revision}, S3#state.revisions),
+				changed=true};
+
+		{ok, {RefCount, Revision}} ->
+			S#state{
+				revisions=dict:store(Rev, {RefCount+RefCountInc, Revision},
+					S#state.revisions),
+				changed=true}
+	end.
+
+
+revision_ref_dec(Rev) ->
+	gen_server:cast(self(), {revision_ref_dec, Rev}).
 
 
 dispose_revision(Revision, Path) ->
@@ -952,7 +1075,7 @@ dispose_revision(Revision, Path) ->
 
 		#revision{parts=Parts} ->
 			lists:foreach(
-				fun (Rev) -> gen_server:cast(self(), {revision_ref_dec, Rev}) end,
+				fun (Rev) -> revision_ref_dec(Rev) end,
 				get_references(Revision, Path)),
 			lists:foreach(
 				fun({_, Hash}) -> gen_server:cast(self(), {part_ref_dec, Hash}) end,
@@ -1003,6 +1126,62 @@ extract_refs({rlink, Rev}) ->
 
 extract_refs(_) ->
 	[].
+
+
+do_part_ref_dec(S, PartHash) ->
+	RefCount = dict:fetch(PartHash, S#state.parts)-1,
+	Parts = if
+		RefCount == 0 ->
+			% defer deletion if currently locked
+			case orddict:find(PartHash, S#state.locks) of
+				{ok, Value} when Value > 0 ->
+					ok;
+				_ ->
+					file:delete(util:build_path(S#state.path, PartHash))
+			end,
+			dict:erase(PartHash, S#state.parts);
+		true ->
+			dict:store(PartHash, RefCount, S#state.parts)
+	end,
+	S#state{parts=Parts, changed=true}.
+
+
+do_unlock(#state{locks=Locks, parts=Parts} = S, Hash) ->
+	Depth = orddict:fetch(Hash, Locks)-1,
+	Refs = case dict:find(Hash, Parts) of
+		{ok, Value} -> Value;
+		error       -> 0
+	end,
+	NewLocks = case Depth of
+		0 ->
+			if
+				Refs == 0 ->
+					file:delete(util:build_path(S#state.path, Hash));
+				true ->
+					ok
+			end,
+			orddict:erase(Hash, Locks);
+
+		_ ->
+			orddict:store(Hash, Depth, Locks)
+	end,
+	S#state{locks=NewLocks}.
+
+
+do_revision_ref_dec(S, Rev) ->
+	{RefCount, Revision} = dict:fetch(Rev, S#state.revisions),
+	Revisions = if
+		RefCount == 1 ->
+			dispose_revision(Revision, S#state.path),
+			case Revision of
+				stub  -> ok;
+				_Else -> vol_monitor:trigger_rm_rev(S#state.guid, Rev)
+			end,
+			dict:erase(Rev, S#state.revisions);
+		true ->
+			dict:store(Rev, {RefCount-1, Revision}, S#state.revisions)
+	end,
+	S#state{revisions=Revisions, changed=true}.
 
 
 %%% Synching %%%%%%%%%%%%%%%%

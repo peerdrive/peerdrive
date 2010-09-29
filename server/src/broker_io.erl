@@ -76,6 +76,7 @@ init(Parent, Operation) ->
 			gen_server:enter_loop(?MODULE, [], State#state{user=Parent});
 
 		{error, _Reason, _ErrInfo} = Error ->
+			proc_lib:init_ack(Parent, Error),
 			Error
 	end.
 
@@ -259,15 +260,15 @@ do_commit(S) ->
 do_suspend(S) ->
 	Mtime = util:get_time(),
 	{Revs, Errors} = lists:foldl(
-		fun({Store, Handle}, {AccRevs, AccConflicts, AccErrors}) ->
+		fun({Store, Handle}, {AccRevs, AccErrors}) ->
 			case store:suspend(Handle, Mtime) of
 				{ok, Rev} ->
-					{[Rev|AccRevs], AccConflicts, AccErrors};
+					{[Rev|AccRevs], AccErrors};
 				{error, Reason} ->
-					{AccRevs, AccConflicts, [{Store, Reason}|AccErrors]}
+					{AccRevs, [{Store, Reason}|AccErrors]}
 			end
 		end,
-		{[], [], []},
+		{[], []},
 		S#state.handles),
 	case lists:usort(Revs) of
 		[Rev] ->

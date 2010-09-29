@@ -19,7 +19,7 @@
 
 -export([start/2]).
 -export([read/4, write/4, truncate/3, commit/2, abort/1, get_type/1,
-	set_type/2, get_parents/1, set_parents/2]).
+	set_type/2, get_parents/1, set_parents/2, suspend/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
@@ -39,7 +39,7 @@ start(State, User) ->
 				truncate    = fun truncate/3,
 				abort       = fun abort/1,
 				commit      = fun commit/2,
-				suspend     = fun(Writer, _) -> abort(Writer), {error, enosys} end,
+				suspend     = fun suspend/2,
 				get_type    = fun get_type/1,
 				set_type    = fun set_type/2,
 				get_parents = fun get_parents/1,
@@ -60,6 +60,9 @@ truncate(Writer, Part, Offset) ->
 
 commit(Writer, Mtime) ->
 	gen_server:call(Writer, {commit, Mtime}).
+
+suspend(Writer, Mtime) ->
+	gen_server:call(Writer, {suspend, Mtime}).
 
 abort(Writer) ->
 	gen_server:call(Writer, abort).
@@ -131,8 +134,11 @@ handle_call({commit, Mtime}, _From, S) ->
 
 % returns nothing
 handle_call(abort, _From, S) ->
-	S2 = do_abort(S),
-	{stop, normal, ok, S2};
+	{stop, normal, ok, S};
+
+% returns `{ok, Hash} | {error, Reason}'
+handle_call({suspend, Mtime}, _From, S) ->
+	do_suspend(S, Mtime);
 
 handle_call(get_type, _From, S) ->
 	{reply, {ok, S#ws.type}, S};
@@ -148,8 +154,27 @@ handle_call({set_parents, Parents}, _From, S) ->
 
 
 handle_info({'EXIT', _From, _Reason}, S) ->
-	do_abort(S),
 	{stop, orphaned, S}.
+
+
+terminate(_Reason, #ws{locks=Locks, server=Server} = S) ->
+	% unlock hashes
+	lists:foreach(fun(Lock) -> file_store:unlock(Server, Lock) end, Locks),
+	% delete temporary files
+	dict:fold(
+		fun (_, {FileName, IODevice}, _) ->
+			file:close(IODevice),
+			file:delete(FileName)
+		end,
+		ok,
+		S#ws.new),
+	% close readers
+	dict:fold(
+		fun(_Hash, IODevice, _) -> file:close(IODevice) end,
+		ok,
+		S#ws.readers),
+	S#ws{locks=[], readers=[]}.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...
@@ -158,7 +183,6 @@ handle_info({'EXIT', _From, _Reason}, S) ->
 
 handle_cast(_, State)    -> {stop, enotsup, State}.
 code_change(_, State, _) -> {ok, State}.
-terminate(_, _)          -> ok.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -258,6 +282,38 @@ close_reader(ClosePart, Readers) ->
 % calculate hashes, close&move to correct dir, update document
 % returns {ok, Hash} | conflict | {error, Reason}
 do_commit(S, Mtime) ->
+	S2 = close_and_move(S),
+	Revision = #revision{
+		flags   = S2#ws.flags,
+		parts   = lists:usort(dict:to_list(S2#ws.orig)),
+		parents = lists:usort(S2#ws.baserevs),
+		mtime   = Mtime,
+		type    = S2#ws.type,
+		creator = S2#ws.creator},
+	case file_store:commit(S2#ws.server, S2#ws.doc, S2#ws.prerev, Revision) of
+		conflict ->
+			{reply, conflict, S2};
+		Reply ->
+			{stop, normal, Reply, S2}
+	end.
+
+
+% calculate hashes, close&move to correct dir, update document
+% returns {ok, Hash} | {error, Reason}
+do_suspend(S, Mtime) ->
+	S2 = close_and_move(S),
+	Revision = #revision{
+		flags   = S2#ws.flags,
+		parts   = lists:usort(dict:to_list(S2#ws.orig)),
+		parents = lists:usort(S2#ws.baserevs),
+		mtime   = Mtime,
+		type    = S2#ws.type,
+		creator = S2#ws.creator},
+	Reply = file_store:suspend(S2#ws.server, S2#ws.doc, S2#ws.prerev, Revision),
+	{stop, normal, Reply, S2}.
+
+
+close_and_move(S) ->
 	NewParts = dict:fold(
 		% FIXME: this definitely lacks error handling :(
 		fun (Part, {TmpName, IODevice}, Acc) ->
@@ -276,49 +332,14 @@ do_commit(S, Mtime) ->
 		end,
 		[],
 		S#ws.new),
-	Revision = #revision{
-		flags   = S#ws.flags,
-		parts   = lists:usort(NewParts ++ dict:to_list(S#ws.orig)),
-		parents = lists:usort(S#ws.baserevs),
-		mtime   = Mtime,
-		type    = S#ws.type,
-		creator = S#ws.creator},
 	NewOrig = lists:foldl(
 		fun({Part, Hash}, Acc) -> dict:store(Part, Hash, Acc) end,
 		S#ws.orig,
 		NewParts),
 	NewLocks = lists:map(fun({_Part, Hash}) -> Hash end, NewParts) ++ S#ws.locks,
-	S2 = S#ws{
-		orig     = NewOrig,
-		new      = dict:new(),
-		locks    = NewLocks},
-	case file_store:commit(S#ws.server, S#ws.doc, Revision) of
-		conflict ->
-			{reply, conflict, S2};
-		Reply ->
-			{stop, normal, Reply, cleanup(S2)}
-	end.
+	S#ws{
+		orig  = NewOrig,
+		new   = dict:new(),
+		locks = NewLocks}.
 
-
-do_abort(S) ->
-	cleanup(S).
-
-
-cleanup(#ws{locks=Locks, server=Server} = S) ->
-	% unlock hashes
-	lists:foreach(fun(Lock) -> file_store:unlock(Server, Lock) end, Locks),
-	% delete temporary files
-	dict:fold(
-		fun (_, {FileName, IODevice}, _) ->
-			file:close(IODevice),
-			file:delete(FileName)
-		end,
-		ok,
-		S#ws.new),
-	% close readers
-	dict:fold(
-		fun(_Hash, IODevice, _) -> file:close(IODevice) end,
-		ok,
-		S#ws.readers),
-	S#ws{locks=[], readers=[]}.
 

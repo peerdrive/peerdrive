@@ -295,7 +295,7 @@ set_parents(Handle, Parents) ->
 %% @doc Commit a new revision
 %%
 %% One of the parents of this new revision must point to the current revision
-%% of the document, otherwise the function will fail with `confict'. The handle
+%% of the document, otherwise the function will fail with `conflict'. The handle
 %% is still valid in this case and the caller may either rebase the revision
 %% and try again or suspend the handle to keep the changes.
 %%

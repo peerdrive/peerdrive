@@ -93,10 +93,7 @@
 -define(PROGRESS_TYPE_REP_REV, 2).
 
 -define(EOK,       	0).
--define(ECONFLICT, 	1).
--define(ENOENT,    	2).
 -define(EINVAL,    	3).
--define(EBADF,     	4).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -720,11 +717,12 @@ encode_direct_result({error, Reason}) ->
 
 encode_error_code(Error) ->
 	Code = case Error of
-		conflict  -> ?ECONFLICT;
-		enoent    -> ?ENOENT;
+		conflict  -> 1;
+		enoent    -> 2;
 		einval    -> ?EINVAL;
-		ebadf     -> ?EBADF;
+		ebadf     -> 4;
 		eambig    -> 5;
+		enosys    -> 6;
 
 		ok        -> 0;
 		_         ->

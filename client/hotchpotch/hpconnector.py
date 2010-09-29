@@ -26,7 +26,8 @@ _errorCodes = {
 	2 : 'ENOENT',
 	3 : 'EINVAL',
 	4 : 'EBADF',
-	5 : 'EAMBIG'
+	5 : 'EAMBIG',
+	6 : 'ENOSYS'
 }
 
 

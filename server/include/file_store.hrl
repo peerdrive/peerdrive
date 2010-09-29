@@ -20,6 +20,7 @@
 	server,     % server process pid
 	flags,      % flags of revision
 	doc,        % document uuid
+	prerev,     % base preliminary revision, might be 'undefined'
 	baserevs,   % base revision of revision
 	type,       % Type UTI of revision
 	creator,    % Creator of revision

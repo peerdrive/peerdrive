@@ -159,6 +159,7 @@ ErrorCode ::= UINT32
 	3	= EINVAL
 	4	= EBADF
 	5   = EAMBIG
+	6	= ENOSYS
 
 	0xffffffff	= Unknown error
 
