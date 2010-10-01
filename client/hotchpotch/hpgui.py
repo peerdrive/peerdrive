@@ -347,14 +347,14 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		for rev in revs:
 			revInfo = self.__connection.stat(rev)
 			date = str(revInfo.mtime())
-			volumes = None
-			for vol in revInfo.volumes():
-				if volumes:
-					volumes += ", "
+			stores = None
+			for vol in revInfo.stores():
+				if stores:
+					stores += ", "
 				else:
-					volumes = ""
-				volumes += self.__getStoreName(vol)
-			options.append(date + ": " + volumes)
+					stores = ""
+				stores += self.__getStoreName(vol)
+			options.append(date + ": " + stores)
 
 		(choice, ok) = QtGui.QInputDialog.getItem(
 			self,
@@ -587,10 +587,10 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		menu = QtGui.QMenu(self)
 		options = {}
 		if self.__isMutable():
-			volumes = self.__connection.lookup(self.__doc).stores()
+			stores = self.__connection.lookup(self.__doc).stores()
 		else:
-			volumes = self.__connection.stat(self.__rev).volumes()
-		for store in volumes:
+			stores = self.__connection.stat(self.__rev).stores()
+		for store in stores:
 			name = self.__getStoreName(store)
 			if name:
 				action = menu.addAction("Delete item from '%s'" % name)
@@ -606,18 +606,18 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		choice = menu.exec_(QtGui.QCursor.pos())
 
 		if choice is None:
-			volumes = []
+			stores = []
 		elif choice in options:
-			volumes = [options[choice]]
+			stores = [options[choice]]
 		elif choice is delAllAction:
-			volumes = options.values()
+			stores = options.values()
 		else:
-			volumes = []
+			stores = []
 
 		if self.__isMutable():
-			self.__connection.delete_doc(self.__doc, volumes)
+			self.__connection.deleteDoc(self.__doc, stores)
 		else:
-			self.__connection.delete_rev(self.__rev, volumes)
+			self.__connection.deleteRev(self.__rev, stores)
 		# the watch will trigger and close the window
 
 	def __getStoreName(self, store):
@@ -650,7 +650,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 					self.__rev = revs[0]
 				self.__loadFile(True, self.__rev)
 		else:
-			allStores = self.__connection.stat(self.__rev).volumes()
+			allStores = self.__connection.stat(self.__rev).stores()
 
 		for store in allStores:
 			if store not in self.__storeButtons:
@@ -671,7 +671,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		try:
 			if self.needSave():
 				s = self.__connection.stat(self.__rev)
-				tmpStore = s.volumes()[0]
+				tmpStore = s.stores()[0]
 				with self.__connection.fork(tmpStore, s.type(), self.__rev) as w:
 					self.__saveFileInternal("<<Temporary automatic checkpoint>>", True, w)
 					w.commit()
@@ -682,7 +682,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 		finally:
 			if tmpDoc:
-				self.__connection.delete_doc(tmpDoc, [tmpStore])
+				self.__connection.deleteDoc(tmpDoc, [tmpStore])
 		self.__connection.watch(self)
 
 	def __showProperties(self):

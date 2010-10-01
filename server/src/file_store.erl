@@ -478,7 +478,7 @@ check_root_doc(S, Name) ->
 				parts   = [{<<"HPSD">>, ContentHash}, {<<"META">>, MetaHash}],
 				parents = [],
 				mtime   = util:get_time(),
-				type    = <<"org.hotchpotch.volume">>,
+				type    = <<"org.hotchpotch.store">>,
 				creator = <<"org.hotchpotch.file-store">>},
 			Rev = store:hash_revision(Revision),
 			S4 = S3#state{revisions=dict:store(Rev, {1, Revision}, S3#state.revisions)},

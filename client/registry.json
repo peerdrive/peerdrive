@@ -157,7 +157,7 @@
 		"display" : "Dictionary (collection)",
 		"icon" : "uti/folder.png"
 	},
-	"org.hotchpotch.volume" : {
+	"org.hotchpotch.store" : {
 		"conforming" : ["org.hotchpotch.dict"],
 		"display" : "Hotchpotch store",
 		"icon" : "uti/store.png"

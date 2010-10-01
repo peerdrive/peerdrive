@@ -288,7 +288,7 @@ get_sync_fun(TypeSet) ->
 	case sets:to_list(TypeSet) of
 		[Type] ->
 			case Type of
-				<<"org.hotchpotch.volume">> -> fun merge_hpsd/7;
+				<<"org.hotchpotch.store">>  -> fun merge_hpsd/7;
 				<<"org.hotchpotch.dict">>   -> fun merge_hpsd/7;
 				<<"org.hotchpotch.set">>    -> fun merge_hpsd/7;
 				_ -> none

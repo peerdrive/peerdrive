@@ -6,7 +6,6 @@
 			- v4 -> doc's
 			- v5 -> rev's
 		- stores are identified by their root doc UUID
-	- rename volumes -> stores
 
 - Server
 	- File store improvements
@@ -15,10 +14,8 @@
 	- add search engine
 		- lucene
 		- add query API (virtual collections)
-	- add FUSE binding
-		- read docs and revs like normal files
-		- interpret collections and show as directories
-		- direct access by UUID
+	- FUSE binding
+		- direct access by Rev/Doc
 	- network stores
 		- network interface (remote interface)
 		- network store stub
@@ -32,12 +29,7 @@
 			- Doc's are v4 UUIDs
 			- Rev's are v5 UUIDs
 			- Any other UUIDs are not accepted
-		- consistent opcodes
-		- consistent error handling
-			- internally
-			- on protocol level
 		- stat: flags for requested information
-	- support preliminary versions
 	- support shared read/write access
 
 - user interface
@@ -56,7 +48,6 @@
 	- possibility to cancel ongoing replication/synchronzation
 
 - Libs
-	- API cleanups
 	- client side caching
 		- revs
 		- static stat info (dynamic infos on request)

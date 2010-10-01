@@ -777,7 +777,7 @@ doc_make_node({doc, Store, Doc} = Oid) ->
 			case store:stat(Store, Rev) of
 				{ok, #rev_stat{type=Type}} ->
 					case Type of
-						<<"org.hotchpotch.volume">> ->
+						<<"org.hotchpotch.store">> ->
 							doc_make_node_dict(Oid);
 						<<"org.hotchpotch.dict">> ->
 							doc_make_node_dict(Oid);

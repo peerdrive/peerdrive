@@ -72,7 +72,7 @@ class PropertiesDialog(QtGui.QDialog):
 		else:
 			self.doc = None
 			info = HpConnector().stat(uuid)
-			mainLayout.addWidget(DocumentTab(info.volumes(), "revision"))
+			mainLayout.addWidget(DocumentTab(info.stores(), "revision"))
 			self.revs = [uuid]
 
 		if len(self.revs) == 0:
@@ -167,7 +167,7 @@ class RevisionTab(QtGui.QWidget):
 			layout.addWidget(QtGui.QLabel(sizeText), 3, col)
 
 			storeLayout = QtGui.QVBoxLayout()
-			for store in stat.volumes():
+			for store in stat.stores():
 				storeLayout.addWidget(genStoreButton(store))
 			layout.addLayout(storeLayout, 4, col)
 

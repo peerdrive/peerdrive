@@ -97,7 +97,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 		model.doLoad(r, readWrite, autoClean)
 		self.__setEditable(readWrite)
 		self.__checkMetaData()
-		if readWrite and HpConnector().stat(self.rev()).type() == "org.hotchpotch.volume":
+		if readWrite and HpConnector().stat(self.rev()).type() == "org.hotchpotch.store":
 			self.fileToolBar.removeAction(self.delAct)
 			self.fileMenu.removeAction(self.delAct)
 			enum = HpConnector().enum()
@@ -227,7 +227,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 		QtCore.QObject.connect(self.propertiesAct, QtCore.SIGNAL("triggered(bool)"), self.__showProperties)
 
 		self.unmountAct = QtGui.QAction(QtGui.QIcon('icons/unmount.png'), "&Unmount", self)
-		self.unmountAct.setStatusTip("Unmount volume")
+		self.unmountAct.setStatusTip("Unmount store")
 		QtCore.QObject.connect(self.unmountAct, QtCore.SIGNAL("triggered(bool)"), self.__unmountStore)
 
 	def __createMenus(self):
@@ -449,13 +449,13 @@ class CollectionTreeView(QtGui.QTreeView):
 		if choice in repActions:
 			store = repActions[choice]
 			if isinstance(link, hpstruct.DocLink):
-				c.replicate_doc(link.doc(), [store])
+				c.replicateDoc(link.doc(), [store])
 			else:
-				c.replicate_rev(link.rev(), [store])
+				c.replicateRev(link.rev(), [store])
 		elif choice in createActions:
 			sourceRev = createActions[choice].rev()
 			info = c.stat(sourceRev)
-			destStores = c.stat(self.__parent.rev()).volumes()
+			destStores = c.stat(self.__parent.rev()).stores()
 			# copy
 			with c.create(info.type(), info.creator(), destStores) as w:
 				with c.peek(sourceRev) as r:
@@ -473,11 +473,11 @@ class CollectionTreeView(QtGui.QTreeView):
 		actions = { }
 		c = HpConnector()
 		menu.addSeparator()
-		allVolumes = set(c.stat(self.__parent.rev()).volumes())
+		allVolumes = set(c.stat(self.__parent.rev()).stores())
 		if isinstance(link, hpstruct.DocLink):
 			curVolumes = set(c.lookup(link.doc()).stores())
 		else:
-			curVolumes = set(c.stat(link.rev()).volumes())
+			curVolumes = set(c.stat(link.rev()).stores())
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
 			try:
@@ -864,7 +864,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 			return self.__dropLink(data)
 
 	def __dropFile(self, data):
-		store = self._connector.stat(self.__parent.rev()).volumes()[0]
+		store = self._connector.stat(self.__parent.rev()).stores()[0]
 		urlList = data.urls()
 		for url in urlList:
 			try:
@@ -1074,7 +1074,7 @@ class CEntry(HpWatch):
 
 
 class DictModel(CollectionModel):
-	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.volume"]
+	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
 
 	def __init__(self, parent = None):
 		super(DictModel, self).__init__(parent)

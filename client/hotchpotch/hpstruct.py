@@ -491,7 +491,7 @@ def HpContainer(link):
 
 
 class HpDict(object):
-	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.volume"]
+	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
 
 	def __init__(self, link = None):
 		self.__conn = hpconnector.HpConnector()

@@ -35,34 +35,34 @@ rarely used. Symlinks are used but break as soon as the original file is moved.
 In Hotchpotch every document (file) is identified by a 128 bit random unique id
 (UUID). Any document can "point" to another document by it's UUID, even across
 volume boundaries. This allows for arbitrary organization schemes via
-"container" documents. The documents can be moved even between volumes without
-breaking the links between them.
+"container" documents. The documents can be moved even between volumes (called
+'stores' in Hotchpotch) without breaking the links between them.
 
-The same UUID may also exist on more than one store simultaneously. This is no
-error and is a common state when documents are replicated between different
-volumes. In conjunction with versioning Hotchpotch is later able to synchronize
-the replicas on the different volumes.
+The same document (UUID) may also exist on more than one store simultaneously.
+This is no error and is a common state when documents are replicated between
+different stores. In conjunction with versioning Hotchpotch is later able to
+synchronize the replicas on the different stores.
 
 
 === Document versioning ===
 
 The content of each document is stored as a series of immutable revisions as
 opposed to a mutable byte stream in traditional file systems. For this scheme
-each store maintains a mapping of UUIDs to the latest revision of the document
-where each revision is identified by the hash of its content. This is the same
-scheme as git is using to track changes to the repository.
+each store maintains a mapping of document IDs to the latest revision of the
+document where each revision is identified by the hash of its content. This is
+the same scheme as git is using to track changes to the repository.
 
-As a document can exist is more than one volume simultaneously it's history may
+As a document can exist is more than one store simultaneously it's history may
 not be linear and can contain forks. See the following "picture" for an
 illustration of what happens when a document is replicated and changed
-independently on the different volumes. The numbers in parenthesis show on
-which volumes the revision exists.
+independently on the different stores. The numbers in parenthesis show on
+which stores the revision exists.
 
-                          D(1)---F(1)   <-- UUID (Volume 1)
+                          D(1)---F(1)   <-- Doc (Store 1)
                          /
         A(12)---B(12)---C(12)
                          \
-                          E(2)---G(2)   <-- UUID (Volume 2)
+                          E(2)---G(2)   <-- Doc (Store 2)
 
 If the user chooses to synchronize the two versions of the same document
 Hotchpotch is able to find the common ancestor (C) and merge the independent
@@ -70,9 +70,9 @@ changes into one version automatically. After the merge the document exists on
 both stores with the same revision and the same history.
 
                              D(12)---F(12)
-                            /             \         /- UUID (Volume 1)
+                            /             \         /- Doc (Store 1)
         A(12)---B(12)---C(12)              H(12) <-|
-                            \             /         \- UUID (Volume 2)
+                            \             /         \- Doc (Store 2)
                              E(12)---G(12)
 
 Another big advantage for the user is that he is always able to access previous
@@ -81,17 +81,17 @@ does not need to care about overwriting the document and loosing important
 data.
 
 Additionally this allows for a seamless integration of backups. Old revisions
-which are not needed anymore may be moved to a backup volume. If such an old
-revision is needed again only the backup volume needs to be mounted because
-Hotchpotch does not care on which volume a revision is located. Therefore
-normal document handling and backup are seamlessly integrated in Hotchpotch.
+which are not needed anymore may be moved to a backup store. If such an old
+revision is needed again only the backup store needs to be mounted because
+Hotchpotch does not care on which store a revision is located. Therefore normal
+document handling and backup are seamlessly integrated in Hotchpotch.
 
 === Rich meta data ===
 
-In traditional file systems a file is just a stream of bytes with some meta
-data (file name, size, c-/m-/atime, access rights). Later extended attributes
-were added which are user definable key/value pairs, where keys are usually
-strings and values again streams of bytes. BeOS added indexing of these
+In traditional file systems a file is just a stream of bytes with a limited
+amount meta data (file name, size, c-/m-/atime, access rights). Later extended
+attributes were added which are user definable key/value pairs, where keys are
+usually strings and values again streams of bytes. BeOS added indexing of these
 extended attributes and used them extensively for file management.
 
 Hotchpotch takes the concept even further and allows arbitrarily complex meta

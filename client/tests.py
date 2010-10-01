@@ -19,10 +19,10 @@ class CommonParts(unittest.TestCase):
 		for doc in self._disposeDocs:
 			lookup = HpConnector().lookup(doc)
 			for rev in lookup.revs():
-				HpConnector().delete_doc(doc, rev)
+				HpConnector().deleteDoc(doc, rev)
 
 		for rev in self._disposeRevs:
-			HpConnector().delete_rev(rev)
+			HpConnector().deleteRev(rev)
 
 	def disposeDoc(self, doc):
 		self._disposeDocs.append(doc)

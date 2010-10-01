@@ -242,7 +242,7 @@ class _HpConnector(object):
 		(result, empty) = self._parseBrokerResult(reply)
 		return result
 
-	def delete_doc(self, doc, rev, stores=[]):
+	def deleteDoc(self, doc, rev, stores=[]):
 		checkUuid(doc)
 		checkUuid(rev)
 		request = doc + rev + encodeUuidList(stores)
@@ -251,7 +251,7 @@ class _HpConnector(object):
 		(result, empty) = self._parseBrokerResult(reply)
 		return result
 
-	def delete_rev(self, rev, stores=[]):
+	def deleteRev(self, rev, stores=[]):
 		checkUuid(rev)
 		request = rev + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.DELETE_REV_REQ,
@@ -267,7 +267,7 @@ class _HpConnector(object):
 		(result, empty) = self._parseBrokerResult(reply)
 		return result
 
-	def replicate_doc(self, doc, depth, stores):
+	def replicateDoc(self, doc, depth, stores):
 		checkUuid(doc)
 		request = struct.pack('>16sQ', doc, depth) + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.REPLICATE_DOC_REQ,
@@ -275,7 +275,7 @@ class _HpConnector(object):
 		(result, empty) = self._parseBrokerResult(reply)
 		return result
 
-	def replicate_rev(self, rev, depth, stores):
+	def replicateRev(self, rev, depth, stores):
 		checkUuid(rev)
 		request = struct.pack('>16sQ', rev, depth) + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.REPLICATE_REV_REQ,
@@ -609,9 +609,9 @@ class HpStat(object):
 
 		count = struct.unpack_from('>B', packet, pos)[0]
 		pos += 1
-		self.__volumes = []
+		self.__stores = []
 		for i in range(count):
-			self.__volumes.append(packet[pos:pos+16])
+			self.__stores.append(packet[pos:pos+16])
 			pos += 16
 
 		self.__mtime = datetime.fromtimestamp(struct.unpack_from('>Q', packet, pos)[0])
@@ -636,8 +636,8 @@ class HpStat(object):
 	def parents(self):
 		return self.__parents
 
-	def volumes(self):
-		return self.__volumes
+	def stores(self):
+		return self.__stores
 
 	def mtime(self):
 		return self.__mtime
