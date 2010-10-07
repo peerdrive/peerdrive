@@ -771,7 +771,6 @@ class DragWidget(QtGui.QLabel):
 		else:
 			rev = self.__parent.rev()
 			hpstruct.RevLink(rev).mimeData(mimeData)
-			
 
 		drag.setMimeData(mimeData)
 		drag.setPixmap(self.pixmap())
@@ -786,7 +785,7 @@ class DocButton(object):
 		def __init__(self, doc, callback):
 			self.__callback = callback
 			super(DocButton.DocumentWatch, self).__init__(HpWatch.TYPE_DOC, doc)
-		
+
 		def triggered(self, cause):
 			self.__callback(cause)
 

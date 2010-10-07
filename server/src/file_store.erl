@@ -752,11 +752,11 @@ do_write_start_fork(S, Doc, StartRev, Creator, User) ->
 
 % returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
 do_write_start_update(S, Doc, StartRev, Creator, User) ->
-	case dict:find(Doc, S#state.uuids) of
-		{ok, {StartRev, _PreRevs, _Gen}} ->
+	case dict:is_key(Doc, S#state.uuids) of
+		true ->
 			case dict:fetch(StartRev, S#state.revisions) of
 				{_, stub} ->
-					{S, {error, orphaned}};
+					{S, {error, enoent}};
 
 				{_, Revision} ->
 					Parts = dict:from_list(Revision#revision.parts),
@@ -780,11 +780,7 @@ do_write_start_update(S, Doc, StartRev, Creator, User) ->
 					{S2, {ok, Writer}}
 			end;
 
-		{ok, {_OtherRev, _Gen}} ->
-			% wrong revision
-			{S, {error, conflict}};
-
-		error ->
+		false ->
 			% unknown document
 			{S, {error, enoent}}
 	end.

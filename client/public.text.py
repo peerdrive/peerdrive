@@ -18,13 +18,17 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import hpgui
+from hotchpotch import hpgui2
 import diff3
 
-class TextEditWindow(hpgui.HpMainWindow):
+class TextEditWindow(hpgui2.HpMainWindow):
 
 	def __init__(self, argv):
-		super(TextEditWindow, self).__init__(argv, "public.plain-text", True)
+		super(TextEditWindow, self).__init__(
+			argv,
+			"org.hotchpotch.textedit",
+			["public.plain-text"],
+			True)
 
 		self.textEdit = QtGui.QTextEdit()
 		self.setCentralWidget(self.textEdit)
@@ -84,29 +88,29 @@ class TextEditWindow(hpgui.HpMainWindow):
 		self.textEdit.setReadOnly(not readWrite)
 		QtCore.QObject.connect(self.textEdit, QtCore.SIGNAL("textChanged()"), self.emitChanged)
 
-	def docCheckpoint(self, w, force):
-		if force or self.textEdit.document().isModified():
+	def docSave(self, w):
+		if self.textEdit.document().isModified():
 			w.writeAll('FILE', self.textEdit.toPlainText().toUtf8())
 			self.textEdit.document().setModified(False)
 
-	def docMergeCheck(self, heads, utis, changedParts):
-		(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, utis, changedParts)
-		if not uti:
-			return (None, handled)
-		if heads != 2:
-			return (None, handled)
-		return (uti, changedParts & (handled | set(['FILE'])))
+	#def docMergeCheck(self, heads, utis, changedParts):
+	#	(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, utis, changedParts)
+	#	if not uti:
+	#		return (None, handled)
+	#	if heads != 2:
+	#		return (None, handled)
+	#	return (uti, changedParts & (handled | set(['FILE'])))
 
-	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-		conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
-		if 'FILE' in changedParts:
-			baseFile = baseReader.readAll('FILE')
-			rev1File = mergeReaders[0].readAll('FILE')
-			rev2File = mergeReaders[1].readAll('FILE')
-			newFile = diff3.text_merge(baseFile, rev1File, rev2File)
-			writer.writeAll('FILE', newFile)
+	#def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
+	#	conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
+	#	if 'FILE' in changedParts:
+	#		baseFile = baseReader.readAll('FILE')
+	#		rev1File = mergeReaders[0].readAll('FILE')
+	#		rev2File = mergeReaders[1].readAll('FILE')
+	#		newFile = diff3.text_merge(baseFile, rev1File, rev2File)
+	#		writer.writeAll('FILE', newFile)
 
-		return conflicts
+	#	return conflicts
 
 	def needSave(self):
 		default = super(TextEditWindow, self).needSave()
@@ -119,7 +123,6 @@ if __name__ == '__main__':
 
 	app = QtGui.QApplication(sys.argv)
 	mainWin = TextEditWindow(sys.argv)
-	mainWin.mainWindowInit()
 	mainWin.show()
 	sys.exit(app.exec_())
 
