@@ -224,8 +224,8 @@ class TestSync(CommonParts):
 			rev = w.getRev()
 			self.disposeDoc(doc)
 
-		self.assertTrue(c.sync(doc))
-		self.assertTrue(c.sync(doc, stores))
+		self.assertTrue(c.sync(doc) == rev)
+		self.assertTrue(c.sync(doc, stores=stores) == rev)
 
 
 	def test_good(self):
@@ -242,7 +242,7 @@ class TestSync(CommonParts):
 			w.commit()
 			rev = w.getRev()
 
-		self.assertTrue(c.sync(doc))
+		self.assertTrue(c.sync(doc) == rev)
 
 		l = c.lookup(doc)
 		self.assertEqual(len(l.revs()), 1)
@@ -278,6 +278,40 @@ class TestSync(CommonParts):
 		self.assertEqual(len(l.revs()), 2)
 		self.assertEqual(l.rev(self.store1), rev1)
 		self.assertEqual(l.rev(self.store2), rev2)
+
+	def test_merge(self):
+		c = HpConnector()
+		stores = [self.store1, self.store2]
+		with c.create("public.data", "test.ignore", stores) as w:
+			w.commit()
+			doc = w.getDoc()
+			rev = w.getRev()
+			#self.disposeDoc(doc)
+
+		with c.update(doc, rev, stores=[self.store1]) as w:
+			w.write('FILE', 'first')
+			w.commit()
+			rev1 = w.getRev()
+
+		with c.update(doc, rev, stores=[self.store2]) as w:
+			w.write('FILE', 'second')
+			w.commit()
+			rev2 = w.getRev()
+
+		with c.update(doc, rev1, stores=stores) as w:
+			w.setParents([rev1, rev2])
+			w.commit()
+			rev3 = w.getRev()
+
+		self.assertTrue(c.sync(doc) == rev3)
+
+		l = c.lookup(doc)
+		self.assertEqual(l.revs(), [rev3])
+
+		self.assertEqual(set(c.stat(rev).stores()), set(stores))
+		self.assertEqual(set(c.stat(rev1).stores()), set(stores))
+		self.assertEqual(set(c.stat(rev2).stores()), set(stores))
+		self.assertEqual(set(c.stat(rev3).stores()), set(stores))
 
 
 class TestPreRevs(CommonParts):

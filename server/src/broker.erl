@@ -18,9 +18,9 @@
 
 -export([
 	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_parents/1,
-	get_type/1, lookup/2, read/4, peek/2, replicate_rev/2, replicate_doc/2,
+	get_type/1, lookup/2, read/4, peek/2, replicate_rev/4, replicate_doc/4,
 	resume/4, set_parents/2, set_type/2, stat/2, suspend/1, update/4, abort/1,
-	commit/1, write/4, truncate/3, sync/2]).
+	commit/1, write/4, truncate/3, sync/3]).
 
 -export([consolidate_error/1, consolidate_success/2, consolidate_success/1,
 	consolidate_filter/1]).
@@ -431,58 +431,52 @@ delete_rev(Rev, Stores) ->
 %% @doc Synchronize a document between different stores to the same revision.
 %%
 %% Tries to perform a fast-forward merge for the document on the given stores
-%% if the revisions differ.
+%% if the revisions differ. Returns the new, common head if the operation
+%% succeeds.
 %%
-%% @spec sync(Doc, Stores) -> Result
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
-%%       Doc = guid()
+%% @spec sync(Doc, Depth, Stores) -> Result
+%%       Result = {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
+%%       Doc, Rev = guid()
+%%       Depth = interger()
 %%       Stores = [guid()]
 %%       Reason = ecode()
-sync(Doc, Stores) ->
+sync(Doc, Depth, Stores) ->
 	StoreIfcs = get_stores(Stores),
-	broker_syncer:sync(Doc, StoreIfcs).
+	broker_syncer:sync(Doc, Depth, StoreIfcs).
 
 
-%% @doc Replicate a document to a new store.
+%% @doc Replicate a document to new stores.
 %%
 %% The Doc must be unambiguous, that is it must have the same revision on all
-%% stores in the system. The Doc may already exist on the destination store.
+%% source stores. The Doc may already exist on the destination stores. An empty
+%% (src- or dst-)stores list is replaced by the list of all mounted stores.
 %%
-%% @spec replicate_doc(Doc, Store) -> ok | {error, Reason}
-replicate_doc(Doc, ToStore) ->
-	case volman:store(ToStore) of
-		{ok, StoreIfc} ->
-			case lookup(Doc, []) of
-				{[], _PreRevs} ->
-					{error, enoent};
-
-				{[{Rev, _}], _PreRevs} ->
-					store:put_doc(StoreIfc, Doc, Rev, Rev);
-
-				_ ->
-					{error, conflict}
-			end;
-
-		error ->
-			{error, enoent}
-	end.
+%% @spec replicate_doc(Doc, Depth, SrcStores, DstStores) -> Result
+%%       Doc = guid()
+%%       Depth = integer()
+%%       SrcStores, DstStores = [guid()]
+%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
+replicate_doc(Doc, Depth, SrcStores, DstStores) ->
+	SrcStoreIfcs = get_stores(SrcStores),
+	DstStoreIfcs = get_stores(DstStores),
+	replicator:replicate_doc_sync(Doc, Depth, SrcStoreIfcs, DstStoreIfcs).
 
 
 %% @doc Replicate a revision to another store.
 %%
 %% The revision must be referenced by another document on the destination
-%% store, otherwise the revision is immediately eligible for garbage collection
+%% stores, otherwise the revision is immediately eligible for garbage collection
 %% or the destination store may refuse to replicate the revision entirely.
 %%
-%% @spec replicate_rev(Rev, Store) -> ok | {error, Reason}
-replicate_rev(Rev, ToStore) ->
-	case volman:store(ToStore) of
-		{ok, StoreIfc} ->
-			broker_replicator:put_rev(StoreIfc, Rev);
-
-		error ->
-			{error, enoent}
-	end.
+%% @spec replicate_rev(Doc, Depth, SrcStores, DstStores) -> Result
+%%       Doc = guid()
+%%       Depth = integer()
+%%       SrcStores, DstStores = [guid()]
+%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
+replicate_rev(Doc, Depth, SrcStores, DstStores) ->
+	SrcStoreIfcs = get_stores(SrcStores),
+	DstStoreIfcs = get_stores(DstStores),
+	replicator:replicate_rev_sync(Doc, Depth, SrcStoreIfcs, DstStoreIfcs).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

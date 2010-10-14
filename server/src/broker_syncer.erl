@@ -15,12 +15,12 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(broker_syncer).
--export([sync/2]).
+-export([sync/3]).
 
 -include("store.hrl").
 
-% Reply: {ok, ErrInfo} | {error, Reason, ErrInfo}
-sync(Doc, Stores) ->
+% Reply: {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
+sync(Doc, Depth, Stores) ->
 	{AllRevs, AllStores} = lists:foldl(
 		fun({_, Ifc} = Store, {AccRevs, AccStores} = Acc) ->
 			case store:lookup(Ifc, Doc) of
@@ -39,7 +39,7 @@ sync(Doc, Stores) ->
 		_ ->
 			case calc_dest_rev(AllRevs) of
 				{ok, DestRev} ->
-					do_sync(Doc, DestRev, lists:zip(AllStores, AllRevs));
+					do_sync(Doc, Depth, DestRev, lists:zip(AllStores, AllRevs));
 				error ->
 					{error, conflict, []}
 			end
@@ -116,19 +116,19 @@ follow({BaseRev, Heads, Path}) ->
 		Heads).
 
 
-do_sync(Doc, DestRev, AllStores) ->
-	{value, {{LeadStoreGuid, LeadStoreIfc}, DestRev}, FollowStores} =
+do_sync(Doc, Depth, DestRev, AllStores) ->
+	{value, {{LeadStoreGuid, LeadStoreIfc}, DestRev}, _FollowStores} =
 		lists:keytake(DestRev, 2, AllStores),
 	% create/set temporary doc on lead store
 	case create_tmp(LeadStoreIfc, DestRev) of
 		{ok, TmpDoc} ->
 			% replicate temporary doc (with all parent revs) to all stores
-			Reply = case replicate_tmp_doc(TmpDoc, FollowStores) of
-				ok ->
+			Reply = case replicate_tmp_doc(TmpDoc, Depth, AllStores) of
+				{ok, _ErrInfo} -> % FIXME: merge ErrInfos
 					switch(Doc, DestRev, AllStores);
 
-				{error, Reason} ->
-					{error, Reason, []}
+				Error ->
+					Error
 			end,
 			cleanup(TmpDoc, DestRev, AllStores),
 			Reply;
@@ -146,9 +146,9 @@ create_tmp(LeadStore, DestRev) ->
 	end.
 
 
-replicate_tmp_doc(TmpDoc, RepStores) ->
-	Stores = [Guid || {{Guid, _Ifc}, _Rev} <- RepStores],
-	replicator:replicate_doc_sync(TmpDoc, Stores, true).
+replicate_tmp_doc(TmpDoc, Depth, RepStores) ->
+	Stores = [Store || {Store, _Rev} <- RepStores],
+	replicator:replicate_doc_sync(TmpDoc, Depth, Stores, Stores).
 
 
 switch(Doc, NewRev, Stores) ->
@@ -164,8 +164,9 @@ switch(Doc, NewRev, Stores) ->
 		end,
 		[],
 		Stores),
+	vol_monitor:trigger_mod_doc(local, Doc),
 	case ErrInfo of
-		[] -> {ok, []};
+		[] -> {ok, [], NewRev};
 		_  -> broker:consolidate_error(ErrInfo)
 	end.
 

@@ -229,9 +229,13 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.__saveAct.setStatusTip("Create checkpoint of document")
 			QtCore.QObject.connect(self.__saveAct, QtCore.SIGNAL("triggered()"), self.__checkpointFile)
 
+			self.__mergeMenu = QtGui.QMenu()
+			self.__mergeMenu.aboutToShow.connect(self.__mergeShow)
 			self.__mergeAct = QtGui.QAction(QtGui.QIcon('icons/merge.png'), "Merge", self)
 			self.__mergeAct.setStatusTip("Merge other revisions into current document")
-			self.__mergeAct.triggered.connect(self.__mergeShow)
+			self.__mergeAct.setMenu(self.__mergeMenu)
+			self.__mergeAct.triggered.connect(lambda: self.__mergeMenu.exec_(QtGui.QCursor.pos()))
+			self.__mergeAct.setVisible(False)
 
 			self.__stickyAct = QtGui.QAction("Sticky", self)
 			self.__stickyAct.setStatusTip("Automatically replicate referenced documents")
@@ -275,9 +279,12 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.__propertiesAct = QtGui.QAction("&Properties", self)
 		QtCore.QObject.connect(self.__propertiesAct, QtCore.SIGNAL("triggered()"), self.__showProperties)
 
+		self.__delMenu = QtGui.QMenu()
+		self.__delMenu.aboutToShow.connect(self.__deleteFile)
 		self.delAct = QtGui.QAction(QtGui.QIcon('icons/edittrash.png'), "&Delete", self)
 		self.delAct.setStatusTip("Delete the document")
-		QtCore.QObject.connect(self.delAct, QtCore.SIGNAL("triggered()"), self.__deleteFile)
+		self.delAct.setMenu(self.__delMenu)
+		self.delAct.triggered.connect(lambda: self.__delMenu.exec_(QtGui.QCursor.pos()))
 
 		self.__exitAct = QtGui.QAction("Close", self)
 		self.__exitAct.setShortcut("Ctrl+Q")
@@ -288,6 +295,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.fileMenu = self.menuBar().addMenu("&Document")
 		if isEditor:
 			self.fileMenu.addAction(self.__saveAct)
+			self.fileMenu.addAction(self.__mergeAct)
 		self.fileMenu.addAction(self.delAct)
 		if isEditor:
 			self.repMenu = self.fileMenu.addMenu("Replication")
@@ -377,7 +385,38 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				writer.commit()
 			self.__rev = writer.getRev()
 			self.__preliminary = False
-		self.__sync()
+			self.__sync()
+		if self.__isEditor:
+			self.__saveAct.setEnabled(False)
+
+	# returns (type, handled) where:
+	#   type:    the resulting type code (if we would handle it)
+	#   handled: set of parts which this instance can merge automatically
+	def docMergeCheck(self, heads, types, changedParts):
+		# don't care about the number of heads
+		if len(types) != 1:
+			return (None, set(['META'])) # cannot merge different types
+		return (types.copy().pop(), set(['META']))
+
+	# return conflict True/False
+	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
+		baseMeta = hpstruct.loads(baseReader.readAll('META'))
+		if 'META' in changedParts:
+			mergeMeta = []
+			for mr in mergeReaders:
+				mergeMeta.append(hpstruct.loads(mr.readAll('META')))
+			(newMeta, conflict) = hpstruct.merge(baseMeta, mergeMeta)
+		else:
+			newMeta = baseMeta
+
+		# FIXME: ugly, should be common code
+		comment = "<<Automatic merge>>"
+		if "org.hotchpotch.annotation" in newMeta:
+			newMeta["org.hotchpotch.annotation"]["comment"] = comment
+		else:
+			newMeta["org.hotchpotch.annotation"] = { "comment" : comment }
+		writer.writeAll('META', hpstruct.dumps(newMeta))
+		return False
 
 	# === re-implemented inherited methods
 
@@ -460,6 +499,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			else:
 				validRevs = set([self.__rev])
 
+			self.__mergeAct.setVisible(bool(currentRevs - validRevs))
+
 			# check if we're still up-to-date
 			if currentRevs.isdisjoint(validRevs):
 				if self.__preliminary:
@@ -511,7 +552,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 		# sync if more than one store is involved
 		if len(stores) > 1:
-			self.__connection.sync(self.__doc, list(stores))
+			self.__connection.sync(self.__doc, stores=stores)
 
 	def __chooseStartRev(self, lookup, revs, preRevs):
 		dialog = ChooseWindow(lookup, revs, preRevs, self)
@@ -669,41 +710,27 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.__commentPopup.popup(self.metaDataGetField(HpMainWindow.HPA_COMMENT, "Enter comment"))
 
 	def __deleteFile(self):
-		menu = QtGui.QMenu(self)
-		options = {}
+		self.__delMenu.clear()
 		if self.__isMutable():
-			stores = self.__connection.lookup(self.__doc).stores()
+			lookup = self.__connection.lookup(self.__doc)
+			stores = lookup.stores()
+			delFun = lambda store: self.__connection.deleteDoc(self.__doc, lookup.rev(store), [store])
 		else:
 			stores = self.__connection.stat(self.__rev).stores()
-		for store in stores:
-			name = self.__getStoreName(store)
-			if name:
-				action = menu.addAction("Delete item from '%s'" % name)
-				options[action] = store
+			delFun = lambda store: self.__connection.deleteRev(self.__rev, [store])
+		stores = [(self.__getStoreName(store), store) for store in stores]
+		stores = filter(lambda(name,store):name, stores)
+		for (name, store) in stores:
+			action = self.__delMenu.addAction("Delete item from '%s'" % name)
+			action.triggered.connect(lambda: delFun(store))
 
-		if len(options) > 1:
-			menu.addSeparator()
-			delAllAction = menu.addAction("Delete from all stores")
-		else:
-			delAllAction = None
-		menu.addSeparator()
-		menu.addAction("Cancel")
-		choice = menu.exec_(QtGui.QCursor.pos())
-
-		if choice is None:
-			return
-		elif choice in options:
-			stores = [options[choice]]
-		elif choice is delAllAction:
-			stores = options.values()
-		else:
-			return
-
-		if self.__isMutable():
-			self.__connection.deleteDoc(self.__doc, stores)
-		else:
-			self.__connection.deleteRev(self.__rev, stores)
-		# the watch will trigger and close the window
+		if len(stores) > 1:
+			self.__delMenu.addSeparator()
+			delAllAction = self.__delMenu.addAction("Delete from all stores")
+			if self.__isMutable():
+				delAllAction.triggered.connect(lambda: self.__connection.deleteDoc(self.__doc, self.__rev))
+			else:
+				delAllAction.triggered.connect(lambda: self.__connection.deleteRev(self.__rev))
 
 	def __getStoreName(self, store):
 		try:
@@ -718,8 +745,183 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			return None
 
 	def __mergeShow(self):
-		pass
+		lookup = self.__connection.lookup(self.__doc)
+		revs = set(lookup.revs())
+		if self.__preliminary:
+			revs -= set(self.__connection.stat(self.__rev).parents())
+		else:
+			revs -= set([self.__rev])
 
+		self.__mergeMenu.clear()
+		for rev in revs:
+			stores = [self.__getStoreName(store) for store in lookup.stores(rev)]
+			names = reduce(lambda x,y: x+", "+y, stores)
+			action = self.__mergeMenu.addAction(names)
+			action.triggered.connect(lambda: self.__merge(rev))
+
+	def __merge(self, rev):
+		self.checkpoint("<<Save before merge>>")
+
+		lookup = self.__connection.lookup(self.__doc)
+		stores = set(lookup.stores(self.__rev))
+		stores |= set(lookup.stores(rev))
+		revs = [self.__rev, rev]
+
+		# determine common ancestor
+		(fastForward, base) = self.__calculateMergeBase(revs, stores)
+		#print "ff:%s, base:%s" % (fastForward, base.encode("hex"))
+		if base:
+			# fast-forward merge?
+			if fastForward:
+				self.__rev = self.__connection.sync(self.__doc, stores=stores)
+				self.__loadFile()
+				self.statusBar().showMessage("Document merged by fast-forward", 10000)
+				return
+
+			# can the application help?
+			if self.__mergeAuto(base, revs, stores):
+				self.statusBar().showMessage("Document merged automatically", 10000)
+				return
+
+		if self.__mergeOurs(revs, stores):
+			self.statusBar().showMessage("Document merged by user choice", 10000)
+			return
+
+	def __mergeOurs(self, revs, stores):
+		# last resort: "ours"-merge
+		options = []
+		for rev in revs:
+			revInfo = self.__connection.stat(rev, stores)
+			date = str(revInfo.mtime())
+			stores = reduce(
+				lambda x,y: x+", "+y,
+				[self.__getStoreName(s) for s in revInfo.stores()])
+			options.append(date + ": " + stores)
+
+		(choice, ok) = QtGui.QInputDialog.getItem(
+			self,
+			"Select version",
+			"The document could not be merged automatically.\nPlease select" \
+			" a version which should become the current version...",
+			options,
+			0,
+			False)
+		if ok:
+			base = revs[options.index(choice)]
+			with self.__connection.update(self.__doc, base, self.__creator, stores) as w:
+				w.setParents(revs)
+				w.suspend()
+			self.__rev = w.getRev()
+			self.__preliminary = True
+			self.__loadFile()
+			return True
+		else:
+			return False
+
+	def __mergeAuto(self, baseRev, mergeRevs, stores):
+		# see what has changed...
+		s = self.__connection.stat(baseRev, stores)
+		types = set([s.type()])
+		origParts = set(s.parts())
+		origHashes = {}
+		changedParts = set()
+		for part in origParts:
+			origHashes[part] = s.hash(part)
+		for rev in mergeRevs:
+			s = self.__connection.stat(rev, stores)
+			types.add(s.type())
+			mergeParts = set(s.parts())
+			# account for added/removed parts
+			changedParts |= mergeParts ^ origParts
+			# check for changed parts
+			for part in (mergeParts & origParts):
+				if s.hash(part) != origHashes[part]:
+					changedParts.add(part)
+
+		# vote
+		(uti, handledParts) = self.docMergeCheck(len(mergeRevs), types, changedParts)
+		if not uti:
+			return False # couldn't agree on resulting uti
+		if not changedParts.issubset(handledParts):
+			return False # not all changed parts are handled
+
+		# don't use that for large documents... ;-)
+		mergeReaders = []
+		conflicts = False
+		try:
+			# open all contributing revisions
+			for rev in mergeRevs:
+				mergeReaders.append(self.__connection.peek(rev, stores))
+
+			with self.__connection.peek(baseRev, stores) as baseReader:
+				with self.__connection.update(self.__doc, self.__rev, self.__creator, stores) as writer:
+					writer.setType(uti)
+					writer.setParents(mergeRevs)
+					conflicts = self.docMergePerform(writer, baseReader, mergeReaders, changedParts)
+					writer.suspend()
+				self.__rev = writer.getRev()
+				self.__preliminary = True
+		finally:
+			for r in mergeReaders:
+				r.abort()
+
+		self.__loadFile()
+		if conflicts:
+			QtGui.QMessageBox.warning(self, 'Merge conflict', 'There were merge conflicts. Please check the new version...')
+		return True
+
+
+	# FIXME: This whole method is severely broken. It traverses the _whole_
+	# history and selects the merge base based on the mtime. It has also no
+	# provisions for criss-cross merges...
+	def __calculateMergeBase(self, baseVersions, stores):
+		#print "Start: ", [rev.encode('hex') for rev in baseVersions]
+		heads = [[rev] for rev in baseVersions] # list of heads for each rev
+		paths = [set([rev]) for rev in baseVersions] # visited revs for each rev
+		times = { }
+
+		# traverse all paths from all baseVersions
+		addedSth = True
+		while addedSth:
+			addedSth = False
+			for i in xrange(len(heads)):
+				oldHeads = heads[i]
+				newHeads = []
+				for head in oldHeads:
+					try:
+						stat = self.__connection.stat(head, stores)
+						parents = stat.parents()
+						times[head] = stat.mtime()
+						for parent in parents:
+							newHeads.append(parent)
+							paths[i].add(parent)
+							addedSth = True
+					except:
+						pass
+				heads[i] = newHeads
+
+		#print "End:"
+		#for path in paths:
+		#	print "  Path: ", [rev.encode('hex') for rev in path]
+
+		# determine youngest common version
+		commonBase = reduce(lambda x, y: x&y, paths)
+		if len(commonBase) == 0:
+			return (False, None)
+		else:
+			# fast-forward merge?
+			# criteria: all base versions are in the same path
+			for i in xrange(len(baseVersions)):
+				path = paths[i]
+				all = True
+				for rev in baseVersions:
+					all = all and (rev in path)
+				if all:
+					return (True, baseVersions[i])
+
+			# normal merge
+			mergeBase = max(commonBase, key=lambda x: times[x])
+			return (False, mergeBase)
 
 class DragWidget(QtGui.QLabel):
 

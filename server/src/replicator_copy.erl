@@ -14,15 +14,15 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(broker_replicator).
--export([put_rev/2]).
+-module(replicator_copy).
+-export([put_rev/3]).
 
 -include("store.hrl").
 
 
 % returns ok | {error, Reason}
-put_rev(DestStore, Rev) ->
-	case get_source(Rev) of
+put_rev(SourceStores, DestStore, Rev) ->
+	case get_source(Rev, SourceStores) of
 		{ok, SourceStore} ->
 			replicate(Rev, SourceStore, DestStore);
 
@@ -31,15 +31,13 @@ put_rev(DestStore, Rev) ->
 	end.
 
 
-get_source(Rev) ->
-	get_source_loop(Rev, volman:stores()).
-
-get_source_loop(_Rev, []) ->
+get_source(_Rev, []) ->
 	error;
-get_source_loop(Rev, [{_Guid, Ifc} | Remaining]) ->
+
+get_source(Rev, [{_Guid, Ifc} | Remaining]) ->
 	case store:contains(Ifc, Rev) of
 		true -> {ok, Ifc};
-		false -> get_source_loop(Rev, Remaining)
+		false -> get_source(Rev, Remaining)
 	end.
 
 

@@ -754,11 +754,13 @@ do_write_start_fork(S, Doc, StartRev, Creator, User) ->
 do_write_start_update(S, Doc, StartRev, Creator, User) ->
 	case dict:is_key(Doc, S#state.uuids) of
 		true ->
-			case dict:fetch(StartRev, S#state.revisions) of
-				{_, stub} ->
+			case dict:find(StartRev, S#state.revisions) of
+				error ->
+					{S, {error, enoent}};
+				{ok, {_, stub}} ->
 					{S, {error, enoent}};
 
-				{_, Revision} ->
+				{ok, {_, Revision}} ->
 					Parts = dict:from_list(Revision#revision.parts),
 					NewCreator = case Creator of
 						keep -> Revision#revision.creator;
@@ -1049,7 +1051,7 @@ add_revision(S, Rev, RefCountInc, Revision) ->
 			S2 = do_revisions_ref_inc(S, get_references(Revision, S#state.path)),
 			S3 = do_parts_ref_inc(S2, Parts),
 			S3#state{
-				revisions=dict:store(Rev, {RefCount, Revision}, S3#state.revisions),
+				revisions=dict:store(Rev, {RefCount+RefCountInc, Revision}, S3#state.revisions),
 				changed=true};
 
 		{ok, {RefCount, Revision}} ->

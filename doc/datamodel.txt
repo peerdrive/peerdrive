@@ -249,22 +249,24 @@ abort(Handle) -- Discard handle
 
 === Data distribution ===
 
-sync(Doc, History, Stores) -- Perform a fast-forward sync
+sync(Doc, Depth, Stores) -- Perform a fast-forward sync
 	Doc: Document which should be unified among the stores
-	History: Date of oldest revision which should get replicated
+	Depth: Date of oldest revision which should get replicated
 	Stores: Optional set of stores where the document is synchronized. If empty
 		perform on all stores.
 
-replicate_doc(Doc, Depth, Stores) -- Replicate a document to other stores
+replicate_doc(Doc, SrcStores, DstStores, Depth) -- Replicate a document to other stores
 	Doc: Document which should be replicated. Must be unambigous throughout
 		all involved stores.
+	SrcStores: Where to replicate from. If empty search all mounted stores.
+	DstStores: Where to replicate to. If empty replicate to all mounted stores.
 	Depth: Date of oldest revision which should get replicated
-	Stores: Where to replicate to. If empty replicate to all mounted stores.
 
-replicate_rev(Rev, Depth, Stores) -- Replicate a revision to other stores
+replicate_rev(Rev, SrcStores, DstStores, Depth) -- Replicate a revision to other stores
 	Rev: Revision, must be referenced on the destination stores
+	SrcStores: Where to replicate from. If empty search all mounted stores.
+	DstStores: Where to replicate to. If empty replicate to all mounted stores.
 	Depth: Date of oldest revision which should get replicated
-	Stores: Where to replicate to. If empty replicate to all mounted stores.
 
 forget(Doc, Rev, Stores) -- Dispose a pending preliminary revision
 	Doc: Document

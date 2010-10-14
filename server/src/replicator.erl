@@ -18,8 +18,8 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
--export([cancel/0, event_modified/2, replicate_rev/3, replicate_rev_sync/3,
-         replicate_doc/3, replicate_doc_sync/3]).
+-export([cancel/0, event_modified/2, replicate_rev/4, replicate_rev_sync/4,
+         replicate_doc/4, replicate_doc_sync/4]).
 -export([init/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -32,19 +32,25 @@ start_link() ->
 	Result.
 
 event_modified(Doc, StoreGuid) ->
-	start_child([{modified, Doc, StoreGuid}]).
+	case volman:store(StoreGuid) of
+		{ok, StoreIfc} ->
+			start_child([{modified, Doc, {StoreGuid, StoreIfc}}]);
 
-replicate_doc(Doc, Stores, History) ->
-	start_child([{replicate_doc, Doc, Stores, History, false}]).
+		error ->
+			ok
+	end.
 
-replicate_doc_sync(Doc, Stores, History) ->
-	start_child_sync([{replicate_doc, Doc, Stores, History, true}]).
+replicate_doc(Doc, Depth, SrcStores, DstStores) ->
+	start_child([{replicate_doc, Doc, Depth, SrcStores, DstStores, true}]).
 
-replicate_rev(Rev, Stores, History) ->
-	start_child([{replicate_rev, Rev, Stores, History, false}]).
+replicate_doc_sync(Doc, Depth, SrcStores, DstStores) ->
+	start_child_sync([{replicate_doc, Doc, Depth, SrcStores, DstStores, true}]).
 
-replicate_rev_sync(Rev, Stores, History) ->
-	start_child_sync([{replicate_rev, Rev, Stores, History, true}]).
+replicate_rev(Rev, Depth, SrcStores, DstStores) ->
+	start_child([{replicate_rev, Rev, Depth, SrcStores, DstStores, true}]).
+
+replicate_rev_sync(Rev, Depth, SrcStores, DstStores) ->
+	start_child_sync([{replicate_rev, Rev, Depth, SrcStores, DstStores, true}]).
 
 cancel() ->
 	% TODO
@@ -77,12 +83,12 @@ start_child_sync(Args) ->
 		{ok, _WorkerPid} ->
 			receive
 				{Ref, Reply} -> Reply
-			after
-				% FIXME: this is deemed to FAIL
-				60000 -> {error, timeout}
+			%after
+			%	% FIXME: this is deemed to FAIL
+			%	60000 -> {error, timeout}
 			end;
 
-		{error,_} = Error ->
-			Error
+		{error, _} ->
+			{error, enomem, []}
 	end.
 

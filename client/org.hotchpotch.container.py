@@ -449,9 +449,9 @@ class CollectionTreeView(QtGui.QTreeView):
 		if choice in repActions:
 			store = repActions[choice]
 			if isinstance(link, hpstruct.DocLink):
-				c.replicateDoc(link.doc(), [store])
+				c.replicateDoc(link.doc(), dstStores=[store])
 			else:
-				c.replicateRev(link.rev(), [store])
+				c.replicateRev(link.rev(), dstStores=[store])
 		elif choice in createActions:
 			sourceRev = createActions[choice].rev()
 			info = c.stat(sourceRev)

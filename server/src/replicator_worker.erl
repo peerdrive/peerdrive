@@ -54,11 +54,11 @@ init({Request, From}) ->
 		{modified, Doc, StoreGuid} ->
 			{rep_doc, Doc, [StoreGuid]};
 
-		{replicate_doc, Doc, Stores, _History, _Important} ->
-			{rep_doc, Doc, Stores};
+		{replicate_doc, Doc, _Depth, _SrcStores, DstStores, _Important} ->
+			{rep_doc, Doc, DstStores};
 
-		{replicate_rev, Rev, Stores, _History, _Important} ->
-			{rep_rev, Rev, Stores}
+		{replicate_rev, Rev, _Depth, _SrcStores, DstStores, _Important} ->
+			{rep_rev, Rev, DstStores}
 	end,
 	{ok, Monitor} = hysteresis:start(Tag),
 	hysteresis:started(Monitor),
@@ -67,7 +67,7 @@ init({Request, From}) ->
 		#state{
 			backlog = queue:in(Request, queue:new()),
 			from    = From,
-			result  = ok,
+			result  = {undecided, orddict:new()},
 			monitor = Monitor,
 			count   = 1,
 			done    = 0
@@ -87,11 +87,20 @@ handle_info(timeout, State) ->
 		false -> {noreply, NewState, 0}
 	end.
 
-terminate(_Reason, #state{from=From, result=Result, monitor=Monitor}) ->
+terminate(_Reason, #state{from=From, result=RawResult, monitor=Monitor}) ->
 	hysteresis:done(Monitor),
 	hysteresis:stop(Monitor),
 	case From of
-		{Pid, Ref} -> Pid ! {Ref, Result};
+		{Pid, Ref} ->
+			Result = case RawResult of
+				{ok, ErrInfo} ->
+					{ok, orddict:to_list(ErrInfo)};
+				{undecided, ErrInfo} ->
+					broker:consolidate_error(orddict:to_list(ErrInfo));
+				{Reason, ErrInfo} ->
+					{error, Reason, orddict:to_list(ErrInfo)}
+			end,
+			Pid ! {Ref, Result};
 		_Else      -> ok
 	end.
 
@@ -101,16 +110,34 @@ terminate(_Reason, #state{from=From, result=Result, monitor=Monitor}) ->
 
 % Doc: Document to replicate
 % Stores: Destination stores
-% History: Also replicate the history of the document
-% Important: queue an error if replication fails for this document
-push_doc(Backlog, Doc, Stores, History, Important) ->
-	queue:in({replicate_doc, Doc, Stores, History, Important}, Backlog).
+% Depth: Date of oldest revision which gets replicated
+push_doc(Backlog, Doc, Depth, SrcStores, DstStores) ->
+	queue:in({replicate_doc, Doc, Depth, SrcStores, DstStores, false}, Backlog).
 
-push_rev(Backlog, Rev, Stores, History, Important) ->
-	queue:in({replicate_rev, Rev, Stores, History, Important}, Backlog).
 
-push_error(Backlog, Result) ->
-	queue:in({result, {error, Result}}, Backlog).
+push_rev(Backlog, Rev, Depth, SrcStores, DstStores) ->
+	queue:in({replicate_rev, Rev, Depth, SrcStores, DstStores, false}, Backlog).
+
+
+push_error(Backlog, _Result, false) ->
+	Backlog;
+
+push_error(Backlog, Result, true) ->
+	queue:in({fail, Result}, Backlog).
+
+
+push_error(Backlog, _Store, _Result, false) ->
+	Backlog;
+
+push_error(Backlog, Store, Result, true) ->
+	queue:in({fail, Store, Result}, Backlog).
+
+
+push_success(Backlog, false) ->
+	Backlog;
+
+push_success(Backlog, true) ->
+	queue:in(success, Backlog).
 
 
 run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = State) ->
@@ -118,17 +145,35 @@ run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = State) ->
 		{{value, Item}, Remaining} ->
 			PrevSize = queue:len(Remaining),
 			NewState = case Item of
-				{modified, Doc, StoreGuid} ->
-					State#state{backlog=do_modified(Remaining, Doc, StoreGuid)};
+				{modified, Doc, Store} ->
+					State#state{backlog=do_modified(Remaining, Doc, Store)};
 
-				{replicate_doc, Doc, Stores, History, Important} ->
-					State#state{backlog=do_replicate_doc(Remaining, Doc, Stores, History, Important)};
+				{replicate_doc, Doc, Depth, SrcStores, DstStores, Important} ->
+					State#state{
+						backlog = do_replicate_doc(Remaining, Doc, Depth,
+							SrcStores, DstStores, Important)
+					};
 
-				{replicate_rev, Rev, Stores, History, Important} ->
-					State#state{backlog=do_replicate_rev(Remaining, Rev, Stores, History, Important, false)};
+				{replicate_rev, Rev, Depth, SrcStores, DstStores, Important} ->
+					State#state{
+						backlog = do_replicate_rev(Remaining, Rev, Depth,
+							SrcStores, DstStores, Important, false)
+					};
 
-				{result, Result} ->
-					State#state{backlog=Remaining, result=Result}
+				success ->
+					{_Vote, ErrInfo} = State#state.result,
+					State#state{backlog=Remaining, result={ok, ErrInfo}};
+
+				{fail, Reason} ->
+					{_Vote, ErrInfo} = State#state.result,
+					State#state{backlog=Remaining, result={Reason, ErrInfo}};
+
+				{fail, Store, Reason} ->
+					{Vote, ErrInfo} = State#state.result,
+					State#state{
+						backlog = Remaining,
+						result  = {Vote, orddict:store(Store, Reason, ErrInfo)}
+					}
 			end,
 			NextSize = queue:len(NewState#state.backlog),
 			NewState#state{count=OldCount+NextSize-PrevSize, done=Done+1};
@@ -137,106 +182,116 @@ run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = State) ->
 			State
 	end.
 
-do_modified(Backlog, Doc, StoreGuid) ->
-	case volman:store(StoreGuid) of
-		{ok, StoreIfc} ->
-			case store:lookup(StoreIfc, Doc) of
-				{ok, Rev, _PreRevs} ->
-					sticky_handling(Backlog, Rev, [StoreGuid], true);
-				error ->
-					Backlog
-			end;
+
+do_modified(Backlog, Doc, Store) ->
+	{_Guid, Ifc} = Store,
+	case store:lookup(Ifc, Doc) of
+		{ok, Rev, _PreRevs} ->
+			SrcStores = volman:stores(),
+			sticky_handling(Backlog, Rev, SrcStores, [Store], true);
 
 		error ->
 			Backlog
 	end.
 
-do_replicate_doc(Backlog, Doc, ToStores, History, Important) ->
-	case broker:lookup(Doc, []) of
-		{[{Rev, _Stores}], _} ->
-			RepStores = lists:filter(
-				fun(Dest) ->
-					case broker:replicate_doc(Doc, Dest) of
-						ok               -> true;
-						{error, _Reason} -> false
+
+do_replicate_doc(Backlog, _Doc, _Depth, _SrcStores, [], _Important) ->
+	Backlog;
+
+do_replicate_doc(Backlog, Doc, Depth, SrcStores, DstStores, Important) ->
+	case lookup(Doc, SrcStores) of
+		[Rev] ->
+			% replicate doc to all stores, queue errors when failed
+			{NewBacklog, RepStores} = lists:foldl(
+				fun({DestGuid, DestIfc}=Store, {AccBacklog, AccRepStores}) ->
+					case store:put_doc(DestIfc, Doc, Rev, Rev) of
+						ok ->
+							{AccBacklog, [Store|AccRepStores]};
+						{error, Reason} ->
+							{
+								push_error(AccBacklog, DestGuid, Reason, Important),
+								AccRepStores
+							}
 					end
 				end,
-				ToStores),
-			% replicate as far as we can
-			NewBacklog = do_replicate_rev(Backlog, Rev, RepStores, History, Important, true),
-			if
-				Important and (RepStores =/= ToStores) ->
-					push_error(NewBacklog, rep_doc_failed);
-				true ->
-					NewBacklog
-			end;
+				{Backlog, []},
+				DstStores),
+			% replicate corresponding rev
+			do_replicate_rev(NewBacklog, Rev, Depth, SrcStores, RepStores,
+				Important, true);
 
-		{[], _} ->
-			case Important of
-				true  -> push_error(Backlog, enoent);
-				false -> Backlog
-			end;
-		_ ->
-			case Important of
-				true  -> push_error(Backlog, conflict);
-				false -> Backlog
-			end
+		[] -> push_error(Backlog, enoent, Important);
+		_  -> push_error(Backlog, conflict, Important)
 	end.
 
-do_replicate_rev(Backlog, Rev, ToStores, History, Important, Latest) ->
-	case broker:stat(Rev, []) of
-		{ok, _ErrInfo, {#rev_stat{parents=Parents}, Volumes}} ->
-			% do actual replication to destination stores
-			RepStores1 = lists:subtract(ToStores, Volumes),
-			RepStores2 = lists:filter(
-				fun(Dest) ->
-					case broker:replicate_rev(Rev, Dest) of
-						ok               -> true;
-						{error, _Reason} -> false
-					end
-				end,
-				RepStores1),
-			% if History == true then queue all parents with History and ToStores
-			NewBacklog1 = lists:foldl(
-				fun(Parent, BackAcc) ->
-					push_rev(BackAcc, Parent, RepStores2, History, Important)
+
+do_replicate_rev(Backlog, _Rev, _Depth, _SrcStores, [], _Important, _Latest) ->
+	Backlog;
+
+do_replicate_rev(Backlog, Rev, Depth, SrcStores, DstStores, Important, Latest) ->
+	case stat(Rev, SrcStores) of
+		{ok, #rev_stat{parents=Parents, mtime=Mtime}} ->
+			if
+				Mtime >= Depth ->
+					{NewBacklog1, RepStores} = lists:foldl(
+						fun({DstGuid, DstIfc}=Store, {AccBack, AccRep}) ->
+							case replicator_copy:put_rev(SrcStores, DstIfc, Rev) of
+								ok ->
+									{
+										push_success(AccBack, Important),
+										[Store|AccRep]
+									};
+								{error, Reason} ->
+									{
+										push_error(AccBack, DstGuid, Reason, Important),
+										AccRep
+									}
+							end
+						end,
+						{Backlog, []},
+						DstStores),
+					NewBacklog2 = lists:foldl(
+						fun(Parent, BackAcc) ->
+							push_rev(BackAcc, Parent, Depth, SrcStores, RepStores)
+						end,
+						NewBacklog1,
+						Parents),
+					sticky_handling(NewBacklog2, Rev, SrcStores, RepStores, Latest);
+
+				true ->
+					Backlog
+			end;
+
+		{error, ErrInfo} ->
+			lists:foldl(
+				fun({Guid, Error}, AccBack) ->
+					push_error(AccBack, Guid, Error, Important)
 				end,
 				Backlog,
-				case History of
-					true -> Parents;
-					_    -> []
-				end),
-			NewBacklog2 = sticky_handling(NewBacklog1, Rev, RepStores2, Latest),
-			if
-				Important and (RepStores1 =/= RepStores2) ->
-					push_error(NewBacklog2, rep_rev_failed);
-				true ->
-					NewBacklog2
-			end;
-
-		{error, _, _} ->
-			case Important of
-				true  -> push_error(Backlog, enoent);
-				false -> Backlog
-			end
+				ErrInfo)
 	end.
 
-sticky_handling(Backlog, Rev, ToStores, Latest) ->
+
+sticky_handling(Backlog, Rev, SrcStores, DstStores, Latest) ->
 	case util:read_rev_struct(Rev, <<"META">>) of
 		{ok, MetaData} ->
 			case meta_read_bool(MetaData, ?SYNC_STICKY) of
 				true ->
-					History = meta_read_bool(MetaData, ?SYNC_HISTORY),
+					% FIXME: history property should be an integer
+					Depth = case meta_read_bool(MetaData, ?SYNC_HISTORY) of
+						true  -> 0;
+						false -> 16#7FFFFFFFFFFFFFFF
+					end,
 					{RevRefs, DocRefs} = read_references(Rev, Latest),
 					NewBacklog = lists:foldl(
 						fun(Reference, BackAcc) ->
-							push_doc(BackAcc, Reference, ToStores, History, false)
+							push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)
 						end,
 						Backlog,
 						DocRefs),
 					lists:foldl(
 						fun(Reference, BackAcc) ->
-							push_rev(BackAcc, Reference, ToStores, History, false)
+							push_rev(BackAcc, Reference, Depth, SrcStores, DstStores)
 						end,
 						NewBacklog,
 						RevRefs);
@@ -247,6 +302,43 @@ sticky_handling(Backlog, Rev, ToStores, Latest) ->
 
 		{error, _Reason} ->
 			Backlog
+	end.
+
+
+lookup(Doc, Stores) ->
+	RevSet = lists:foldl(
+		fun({_StoreGuid, StoreIfc}, AccRev) ->
+			case store:lookup(StoreIfc, Doc) of
+				{ok, Rev, _PreRevs} -> sets:add_element(Rev, AccRev);
+				error               -> AccRev
+			end
+		end,
+		sets:new(),
+		Stores),
+	sets:to_list(RevSet).
+
+
+stat(Rev, SearchStores) ->
+	{Stat, ErrInfo} = lists:foldl(
+		fun({Guid, Ifc}, {SoFar, ErrInfo} = Acc) ->
+			case SoFar of
+				undef ->
+					case store:stat(Ifc, Rev) of
+						{ok, Stat} ->
+							{Stat, ErrInfo};
+						{error, Reason} ->
+							{undef, [{Guid, Reason} | ErrInfo]}
+					end;
+
+				_ ->
+					Acc
+			end
+		end,
+		{undef, []},
+		SearchStores),
+	case Stat of
+		undef -> {error, ErrInfo};
+		_     -> {ok, Stat}
 	end.
 
 

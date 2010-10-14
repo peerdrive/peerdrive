@@ -93,24 +93,23 @@ class TextEditWindow(hpgui2.HpMainWindow):
 			w.writeAll('FILE', self.textEdit.toPlainText().toUtf8())
 			self.textEdit.document().setModified(False)
 
-	#def docMergeCheck(self, heads, utis, changedParts):
-	#	(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, utis, changedParts)
-	#	if not uti:
-	#		return (None, handled)
-	#	if heads != 2:
-	#		return (None, handled)
-	#	return (uti, changedParts & (handled | set(['FILE'])))
+	def docMergeCheck(self, heads, types, changedParts):
+		(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, types, changedParts)
+		if heads == 2:
+			return (uti, handled | set(['FILE']))
+		else:
+			return (uti, handled)
 
-	#def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-	#	conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
-	#	if 'FILE' in changedParts:
-	#		baseFile = baseReader.readAll('FILE')
-	#		rev1File = mergeReaders[0].readAll('FILE')
-	#		rev2File = mergeReaders[1].readAll('FILE')
-	#		newFile = diff3.text_merge(baseFile, rev1File, rev2File)
-	#		writer.writeAll('FILE', newFile)
+	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
+		conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
+		if 'FILE' in changedParts:
+			baseFile = baseReader.readAll('FILE')
+			rev1File = mergeReaders[0].readAll('FILE')
+			rev2File = mergeReaders[1].readAll('FILE')
+			newFile = diff3.text_merge(baseFile, rev1File, rev2File)
+			writer.writeAll('FILE', newFile)
 
-	#	return conflicts
+		return conflicts
 
 	def needSave(self):
 		default = super(TextEditWindow, self).needSave()

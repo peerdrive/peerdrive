@@ -130,11 +130,11 @@ Body ::=
 	DELETE_REV_REQ      Rev::UUID, Stores::List(Store::UUID)
 	DELETE_REV_CNF      Result::BrokerCnf
 
-	SYNC_DOC_REQ        Doc::UUID, Stores::List(Store::UUID)
-	SYNC_DOC_CNF        Result::BrokerCnf
-	REPLICATE_DOC_REQ   Doc::UUID, Depth::Time, Stores::List(Store::UUID)
+	SYNC_DOC_REQ        Doc::UUID, Depth::Time, Stores::List(Store::UUID)
+	SYNC_DOC_CNF        Result::BrokerCnf, (Rev:UUID)?
+	REPLICATE_DOC_REQ   Doc::UUID, Depth::Time, SrcStores::List(Store::UUID), DstStores::List(Store::UUID)
 	REPLICATE_DOC_CNF   Result::BrokerCnf
-	REPLICATE_REV_REQ   Rev::UUID, Depth::Time, Stores::List(Store::UUID)
+	REPLICATE_REV_REQ   Rev::UUID, Depth::Time, SrcStores::List(Store::UUID), DstStores::List(Store::UUID)
 	REPLICATE_REV_CNF   Result::BrokerCnf
 
 	MOUNT_REQ           Id::String

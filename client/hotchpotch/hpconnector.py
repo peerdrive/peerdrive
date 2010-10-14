@@ -171,20 +171,20 @@ class _HpConnector(object):
 		checkUuid(rev)
 		request = rev + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.STAT_REQ, _HpConnector.STAT_CNF, request)
-		(True, stat) = self._parseBrokerResult(reply)
+		(true, stat) = self._parseBrokerResult(reply)
 		return HpStat(stat)
 
 	def peek(self, rev, stores=[]):
 		checkUuid(rev)
 		request = rev + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.PEEK_REQ, _HpConnector.PEEK_CNF, request)
-		(True, handle) = self._parseBrokerResult(reply)
+		(true, handle) = self._parseBrokerResult(reply)
 		return HpHandle(self, handle, None, rev)
 
 	def create(self, typ, creator, stores=[]):
 		request = encodeString(typ) + encodeString(creator) + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.CREATE_REQ, _HpConnector.CREATE_CNF, request)
-		(True, reply) = self._parseBrokerResult(reply)
+		(true, reply) = self._parseBrokerResult(reply)
 		(handle, doc) = struct.unpack('>4s16s', reply)
 		return HpHandle(self, handle, doc, None)
 
@@ -192,7 +192,7 @@ class _HpConnector(object):
 		checkUuid(rev)
 		request = rev + encodeString(creator) + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.FORK_REQ, _HpConnector.FORK_CNF, request)
-		(True, reply) = self._parseBrokerResult(reply)
+		(true, reply) = self._parseBrokerResult(reply)
 		(handle, doc) = struct.unpack('>4s16s', reply)
 		return HpHandle(self, handle, doc, rev)
 
@@ -201,7 +201,7 @@ class _HpConnector(object):
 		checkUuid(rev)
 		request = doc + rev + encodeString(creator) + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.UPDATE_REQ, _HpConnector.UPDATE_CNF, request)
-		(True, handle) = self._parseBrokerResult(reply)
+		(true, handle) = self._parseBrokerResult(reply)
 		return HpHandle(self, handle, doc, rev)
 
 	def resume(self, doc, rev, creator='', stores=[]):
@@ -209,7 +209,7 @@ class _HpConnector(object):
 		checkUuid(rev)
 		request = doc + rev + encodeString(creator) + encodeUuidList(stores)
 		reply = self._rpc(_HpConnector.RESUME_REQ, _HpConnector.RESUME_CNF, request)
-		(True, handle) = self._parseBrokerResult(reply)
+		(true, handle) = self._parseBrokerResult(reply)
 		return HpHandle(self, handle, doc, rev)
 
 	def watch(self, w):
@@ -259,25 +259,27 @@ class _HpConnector(object):
 		(result, empty) = self._parseBrokerResult(reply)
 		return result
 
-	def sync(self, doc, stores=[]):
-		checkUuid(doc)
-		request = doc + encodeUuidList(stores)
-		reply = self._rpc(_HpConnector.SYNC_DOC_REQ, _HpConnector.SYNC_DOC_CNF,
-			request)
-		(result, empty) = self._parseBrokerResult(reply)
-		return result
-
-	def replicateDoc(self, doc, depth, stores):
+	def sync(self, doc, depth=0, stores=[]):
 		checkUuid(doc)
 		request = struct.pack('>16sQ', doc, depth) + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.SYNC_DOC_REQ, _HpConnector.SYNC_DOC_CNF,
+			request)
+		(result, rev) = self._parseBrokerResult(reply)
+		return rev
+
+	def replicateDoc(self, doc, depth=0, srcStores=[], dstStores=[]):
+		checkUuid(doc)
+		request = struct.pack('>16sQ', doc, depth) + \
+			encodeUuidList(srcStores) + encodeUuidList(dstStores)
 		reply = self._rpc(_HpConnector.REPLICATE_DOC_REQ,
 			_HpConnector.REPLICATE_DOC_CNF, request)
 		(result, empty) = self._parseBrokerResult(reply)
 		return result
 
-	def replicateRev(self, rev, depth, stores):
+	def replicateRev(self, rev, depth=0, srcStores=[], dstStores=[]):
 		checkUuid(rev)
-		request = struct.pack('>16sQ', rev, depth) + encodeUuidList(stores)
+		request = struct.pack('>16sQ', rev, depth) + \
+			encodeUuidList(srcStores) + encodeUuidList(dstStores)
 		reply = self._rpc(_HpConnector.REPLICATE_REV_REQ,
 			_HpConnector.REPLICATE_REV_CNF, request)
 		(result, empty) = self._parseBrokerResult(reply)
@@ -322,6 +324,7 @@ class _HpConnector(object):
 	def _parseBrokerResult(self, reply):
 		(result,) = struct.unpack_from('>B', reply, 0)
 		if result == 0:
+			# all went good
 			return (True, reply[1:])
 		else:
 			pos = 1
@@ -336,10 +339,13 @@ class _HpConnector(object):
 				pos += 20
 				errors.append({'store': store, 'error': error})
 			if result == 1:
+				# partial success
 				return (True, reply[pos:])
 			elif result == 2:
+				# try again
 				return (False, reply[pos:])
 			else:
+				# boom
 				raiseError(error)
 
 	def _parseDirectResult(self, reply):
@@ -704,7 +710,7 @@ class HpHandle(object):
 			request = struct.pack('>4s4sQL', self.handle, part, pos, chunk)
 			reply = self.connector._rpc(_HpConnector.READ_REQ,
 				_HpConnector.READ_CNF, request)
-			(True, data) = self.connector._parseBrokerResult(reply)
+			(true, data) = self.connector._parseBrokerResult(reply)
 			size = len(data)
 			result = result + data
 			pos = pos + size
@@ -741,7 +747,7 @@ class HpHandle(object):
 			request = struct.pack('>4s4sQ', self.handle, part, pos+i) + reqData
 			reply = self.connector._rpc(_HpConnector.WRITE_REQ,
 				_HpConnector.WRITE_CNF, request)
-			(True, empty) = self.connector._parseBrokerResult(reply)
+			(true, empty) = self.connector._parseBrokerResult(reply)
 			i += reqSize
 			self._setPos(part, pos+i)
 
@@ -757,7 +763,7 @@ class HpHandle(object):
 		request = struct.pack('>4s4sQ', self.handle, part, self._getPos(part))
 		reply = self.connector._rpc(_HpConnector.TRUNC_REQ,
 			_HpConnector.TRUNC_CNF, request)
-		(True, empty) = self.connector._parseBrokerResult(reply)
+		(true, empty) = self.connector._parseBrokerResult(reply)
 
 	def commit(self, retry=False):
 		if not self.active:
@@ -800,7 +806,7 @@ class HpHandle(object):
 			raise IOError('Handle expired')
 		reply = self.connector._rpc(_HpConnector.GET_TYPE_REQ,
 			_HpConnector.GET_TYPE_CNF, self.handle)
-		(True, result) = self.connector._parseBrokerResult(reply)
+		(true, result) = self.connector._parseBrokerResult(reply)
 		(length,) = struct.unpack_from('>H', result, 0)
 		return result[2:2+length]
 
@@ -810,14 +816,14 @@ class HpHandle(object):
 		request = self.handle + encodeString(uti)
 		reply = self.connector._rpc(_HpConnector.SET_TYPE_REQ,
 			_HpConnector.SET_TYPE_CNF, request)
-		(True, empty) = self.connector._parseBrokerResult(reply)
+		(true, empty) = self.connector._parseBrokerResult(reply)
 
 	def getParents(self):
 		if not self.active:
 			raise IOError('Handle expired')
 		reply = self.connector._rpc(_HpConnector.GET_PARENTS_REQ,
 			_HpConnector.GET_PARENTS_CNF, self.handle)
-		(True, result) = self.connector._parseBrokerResult(reply)
+		(true, result) = self.connector._parseBrokerResult(reply)
 		parents = []
 		(count,) = struct.unpack_from('>B', result, 0)
 		for i in range(count):
@@ -830,7 +836,7 @@ class HpHandle(object):
 		request = self.handle + encodeUuidList(parents)
 		reply = self.connector._rpc(_HpConnector.SET_PARENTS_REQ,
 			_HpConnector.SET_PARENTS_CNF, request)
-		(True, empty) = self.connector._parseBrokerResult(reply)
+		(true, empty) = self.connector._parseBrokerResult(reply)
 
 	def getDoc(self):
 		return self.doc

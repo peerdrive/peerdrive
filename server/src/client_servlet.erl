@@ -242,17 +242,11 @@ handle_packet(Packet, S) ->
 			{ok, S};
 
 		?REPLICATE_DOC_REQ ->
-			<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
-			{Stores, <<>>} = parse_uuid_list(Body1),
-			replicator:replicate_doc(Doc, Stores, true),
-			send_reply(RetPath, ?REPLICATE_DOC_CNF, encode_broker_result({ok, []})),
+			spawn_link(fun () -> do_replicate_doc(Body, RetPath) end),
 			{ok, S};
 
 		?REPLICATE_REV_REQ ->
-			<<Rev:16/binary, Depth:64, Body1/binary>> = Body,
-			{Stores, <<>>} = parse_uuid_list(Body1),
-			replicator:replicate_rev(Rev, Stores, true),
-			send_reply(RetPath, ?REPLICATE_REV_CNF, encode_broker_result({ok, []})),
+			spawn_link(fun () -> do_replicate_rev(Body, RetPath) end),
 			{ok, S};
 
 		?MOUNT_REQ ->
@@ -476,10 +470,31 @@ do_delete_rev(Body, RetPath) ->
 
 
 do_sync(Body, RetPath) ->
-	{Doc, Body1} = parse_uuid(Body),
+	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
-	Reply = broker:sync(Doc, Stores),
-	send_reply(RetPath, ?SYNC_DOC_CNF, encode_broker_result(Reply)).
+	Reply = case broker:sync(Doc, Depth, Stores) of
+		{ok, _ErrInfo, Rev} = Ok ->
+			<<(encode_broker_result(Ok))/binary, Rev/binary>>;
+		Error ->
+			encode_broker_result(Error)
+	end,
+	send_reply(RetPath, ?SYNC_DOC_CNF, Reply).
+
+
+do_replicate_doc(Body, RetPath) ->
+	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
+	{SrcStores, Body2} = parse_uuid_list(Body1),
+	{DstStores, <<>>} = parse_uuid_list(Body2),
+	Reply = broker:replicate_doc(Doc, Depth, SrcStores, DstStores),
+	send_reply(RetPath, ?REPLICATE_DOC_CNF, encode_broker_result(Reply)).
+
+
+do_replicate_rev(Body, RetPath) ->
+	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
+	{SrcStores, Body2} = parse_uuid_list(Body1),
+	{DstStores, <<>>} = parse_uuid_list(Body2),
+	Reply = broker:replicate_rev(Doc, Depth, SrcStores, DstStores),
+	send_reply(RetPath, ?REPLICATE_REV_CNF, encode_broker_result(Reply)).
 
 
 do_mount(Body, RetPath) ->
