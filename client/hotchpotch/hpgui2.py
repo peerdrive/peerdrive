@@ -184,10 +184,15 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	SYNC_STICKY      = ["org.hotchpotch.sync", "sticky"]
 	SYNC_HISTROY     = ["org.hotchpotch.sync", "history"]
 
-	def __init__(self, argv, creator, types, isEditor):
-		self.__initEventType = QtCore.QEvent.registerEventType()
-		self.__initEvent = QtCore.QEvent(self.__initEventType)
+	class UserEvent(QtCore.QEvent):
+		def __init__(self, eventType, action):
+			self.__action = action
+			QtCore.QEvent.__init__(self, eventType)
 
+		def execute(self):
+			self.__action()
+
+	def __init__(self, argv, creator, types, isEditor):
 		QtGui.QMainWindow.__init__(self)
 		self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
 
@@ -197,6 +202,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.__utiPixmap  = None
 		self.__connection = HpConnector()
 		self.__storeButtons = { }
+		self.__userEventType = QtCore.QEvent.registerEventType()
 
 		# parse command line
 		self.__doc = None
@@ -328,7 +334,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.__loadSettings()
 
 		# post init event for deferred part
-		QtGui.QApplication.postEvent(self, self.__initEvent)
+		self.__postEvent(lambda: self.__startup())
 
 	def doc(self):
 		return self.__doc
@@ -393,6 +399,9 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		if self.__isEditor:
 			self.__saveAct.setEnabled(False)
 
+	def docSaved(self):
+		self.__metaDataChanged = False
+
 	# returns (type, handled) where:
 	#   type:    the resulting type code (if we would handle it)
 	#   handled: set of parts which this instance can merge automatically
@@ -438,16 +447,20 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.__mutable = False # prevent useless saving
 			self.close()
 		else:
-			self.__update()
+			self.__postEvent(lambda: self.__update())
 
 	def event(self, event):
-		if event is self.__initEvent:
-			self.__startup()
+		if event.type() == self.__userEventType:
+			event.execute()
 			return True
 		else:
 			return QtGui.QMainWindow.event(self, event)
 
 	# === private methods
+
+	def __postEvent(self, action):
+		event = HpMainWindow.UserEvent(self.__userEventType, action)
+		QtGui.QApplication.postEvent(self, event)
 
 	def __startup(self):
 		self.fileMenu.addSeparator();
@@ -573,6 +586,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.__loadFile()
 		elif found == []:
 			# if no head found quit
+			# FIXME: let user choose to store as new document!
 			self.close()
 		else:
 			# if more than one head ask user
@@ -603,6 +617,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		dialog = ChooseWindow(lookup, revs, preRevs, self)
 		if dialog.exec_():
 			(self.__rev, self.__preliminary) = dialog.getResult()
+			if self.__preliminary:
+				self.__saveAct.setEnabled(False)
 			return True
 		else:
 			return False
@@ -618,8 +634,6 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				self.__metaDataChanged = False
 				self.docRead(self.__isMutable(), r)
 			self.__extractMetaData()
-			if self.__isEditor:
-				self.__saveAct.setEnabled(False)
 		finally:
 			QtGui.QApplication.restoreOverrideCursor()
 
@@ -639,6 +653,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			sys.stdout.flush()
 			self.__rev = newRev
 			self.__preliminary = True
+			self.docSaved()
 
 	def __saveFileInternal(self, comment, writer):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
@@ -646,7 +661,6 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.metaDataSetField(HpMainWindow.HPA_COMMENT, comment)
 			if self.__metaDataChanged:
 				writer.writeAll('META', hpstruct.dumps(self.__metaData))
-				self.__metaDataChanged = False
 			if self.__isEditor:
 				self.docSave(writer)
 		finally:
@@ -859,6 +873,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.__rev = w.getRev()
 			self.__preliminary = True
 			self.__loadFile()
+			self.emitChanged()
 			return True
 		else:
 			return False
@@ -911,6 +926,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				r.abort()
 
 		self.__loadFile()
+		self.emitChanged()
 		if conflicts:
 			QtGui.QMessageBox.warning(self, 'Merge conflict', 'There were merge conflicts. Please check the new version...')
 		return True

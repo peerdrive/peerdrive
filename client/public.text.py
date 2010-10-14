@@ -91,7 +91,10 @@ class TextEditWindow(hpgui2.HpMainWindow):
 	def docSave(self, w):
 		if self.textEdit.document().isModified():
 			w.writeAll('FILE', self.textEdit.toPlainText().toUtf8())
-			self.textEdit.document().setModified(False)
+
+	def docSaved(self):
+		super(TextEditWindow, self).docSaved()
+		self.textEdit.document().setModified(False)
 
 	def docMergeCheck(self, heads, types, changedParts):
 		(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, types, changedParts)
