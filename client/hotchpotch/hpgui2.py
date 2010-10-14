@@ -20,6 +20,7 @@ from __future__ import with_statement
 
 from PyQt4 import QtCore, QtGui
 import sys, os, subprocess, pickle
+import datetime
 
 from hpconnector import HpWatch, HpConnector
 from hpregistry import HpRegistry
@@ -378,7 +379,10 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.resize(settings["resx"], settings["resy"])
 		self.move(settings["posx"], settings["posy"])
 
-	def checkpoint(self, comment):
+	def checkpoint(self, comment, forceComment=False):
+		# explicitly set comment, the user expects it's comment to be applied
+		if forceComment:
+			self.metaDataSetField(HpMainWindow.HPA_COMMENT, comment)
 		self.__saveFile(comment)
 		if self.__preliminary:
 			with self.__connection.resume(self.__doc, self.__rev) as writer:
@@ -499,14 +503,15 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			else:
 				validRevs = set([self.__rev])
 
-			self.__mergeAct.setVisible(bool(currentRevs - validRevs))
-
 			# check if we're still up-to-date
 			if currentRevs.isdisjoint(validRevs):
 				if self.__preliminary:
 					self.__updateRebase()
 				else:
 					self.__updateFastForward()
+			else:
+				self.__mergeAct.setVisible(bool(currentRevs - validRevs))
+
 		else:
 			allStores = self.__connection.stat(self.__rev).stores()
 
@@ -531,10 +536,50 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	def __updateFastForward(self):
 		# find all heads which lead to current rev
-		# if more than one (or no) head ask user
-		# otherwise just load file
-		print "__updateFastForward not implemented"
-		sys.exit(4)
+		found = []
+		target = self.__rev
+		try:
+			lookup = self.__connection.lookup(self.__doc)
+			depth = self.__connection.stat(target).mtime() - datetime.timedelta(days=1)
+		except IOError:
+			# seems we're gone
+			self.close()
+			return
+		heads = [(rev, set([rev])) for rev in lookup.revs()]
+		while heads:
+			oldHeads = heads
+			heads = []
+			for (rev, tips) in oldHeads:
+				newTips = set()
+				for tip in tips:
+					try:
+						stat = self.__connection.stat(tip)
+						parents = stat.parents()
+						if target in parents:
+							found.append(rev)
+							newTips = None
+							break
+						elif depth < stat.mtime():
+							newTips |= set(parents)
+					except IOError:
+						pass
+
+				if newTips:
+					heads.append((rev, newTips))
+
+		if len(found) == 1:
+			# if exactly one head then just load file
+			self.__rev = found[0]
+			self.__loadFile()
+		elif found == []:
+			# if no head found quit
+			self.close()
+		else:
+			# if more than one head ask user
+			if self.__chooseStartRev(self, lookup, found, []):
+				self.__loadFile()
+			else:
+				self.close()
 
 	def __sync(self):
 		lookup = self.__connection.lookup(self.__doc)
@@ -979,7 +1024,7 @@ class CommentPopup(object):
 		self.__commentEdit.setFocus(QtCore.Qt.OtherFocusReason)
 
 	def __returnPressed(self):
-		self.__parent.checkpoint(str(self.__commentEdit.text()))
+		self.__parent.checkpoint(str(self.__commentEdit.text()), True)
 
 
 class ChooseWindow(QtGui.QDialog):

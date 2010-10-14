@@ -286,7 +286,7 @@ class TestSync(CommonParts):
 			w.commit()
 			doc = w.getDoc()
 			rev = w.getRev()
-			#self.disposeDoc(doc)
+			self.disposeDoc(doc)
 
 		with c.update(doc, rev, stores=[self.store1]) as w:
 			w.write('FILE', 'first')
