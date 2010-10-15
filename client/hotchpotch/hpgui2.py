@@ -139,14 +139,32 @@ class RevButton(object):
 		self.__button = QtGui.QToolButton()
 		self.__button.font().setItalic(True)
 
+		comment = None
+		tags = None
+		mtime = None
 		try:
+			title = "Unnamed"
 			with HpConnector().peek(rev) as r:
 				try:
 					metaData = hpstruct.loads(r.readAll('META'))
-					title = metaData["org.hotchpotch.annotation"]["title"]
+					if "org.hotchpotch.annotation" in metaData:
+						metaData = metaData["org.hotchpotch.annotation"]
+						if "title" in metaData:
+							title = metaData["title"]
+						if "comment" in metaData:
+							comment = metaData["comment"]
+						if "tags" in metaData:
+							tagList = metaData["tags"]
+							tagList.sort()
+							if len(tagList) == 0:
+								tags = ""
+							else:
+								tags = reduce(lambda x,y: x+', '+y, tagList)
 				except:
-					title = "Unnamed"
-			uti = HpConnector().stat(rev).type()
+					pass
+			stat = HpConnector().stat(rev)
+			uti = stat.type()
+			mtime = stat.mtime()
 			revIcon = QtGui.QIcon(HpRegistry().getIcon(uti))
 		except IOError:
 			title = ''
@@ -161,9 +179,16 @@ class RevButton(object):
 		if withText:
 			self.__button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
 			self.__button.setText(title)
-			self.__button.setToolTip("Open revision (read only)")
+			toolTip = "Open revision (read only)"
 		else:
-			self.__button.setToolTip(title)
+			toolTip = title + " (open read only)"
+		if mtime:
+			toolTip += "\n\nMtime: " + str(mtime)
+		if comment:
+			toolTip += "\nComment: " + comment
+		if tags:
+			toolTip += "\nTags: " + tags
+		self.__button.setToolTip(toolTip)
 		QtCore.QObject.connect(self.__button, QtCore.SIGNAL("clicked()"), self.__clicked)
 
 	def cleanup(self):
@@ -395,6 +420,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				writer.commit()
 			self.__rev = writer.getRev()
 			self.__preliminary = False
+			print "rev:%s" % self.__rev.encode("hex")
 			self.__sync()
 		if self.__isEditor:
 			self.__saveAct.setEnabled(False)
@@ -541,11 +567,31 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	def __updateRebase(self):
 		# get current revs on all stores where the preliminary versions exists
-		# if more than one rev ask user
-		# otherwise try to merge alone
-		# if cannot merge ask user
-		print "__updateRebase not implemented"
-		sys.exit(4)
+		heads = set()
+		lookup = self.__connection.lookup(self.__doc)
+		for store in lookup.stores(self.__rev):
+			heads.add(lookup.rev(store))
+
+		# ask user which rev he wants to overwrite or discard current prerev
+		dialog = OverwriteDialog(lookup, heads, self)
+		if dialog.exec_():
+			(rev, overwrite) = dialog.getResult()
+			if overwrite:
+				with self.__connection.resume(self.__doc, self.__rev) as writer:
+					writer.setParents([rev]) # FIXME: will wreck a merge prerev
+					writer.suspend()
+				self.__rev = writer.getRev()
+				print "rev:%s" % self.__rev.encode("hex")
+			else:
+				self.__connection.forget(self.__doc, self.__rev)
+				self.__rev = rev
+				self.__preliminary = False
+				self.__loadFile()
+				self.__saveAct.setEnabled(False)
+		else:
+			self.__rev = None
+			self.__mutable = False
+			self.close()
 
 	def __updateFastForward(self):
 		# find all heads which lead to current rev
@@ -614,11 +660,10 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.__connection.sync(self.__doc, stores=stores)
 
 	def __chooseStartRev(self, lookup, revs, preRevs):
-		dialog = ChooseWindow(lookup, revs, preRevs, self)
+		dialog = ChooseWindow(lookup, self.__doc, revs, preRevs, self)
 		if dialog.exec_():
 			(self.__rev, self.__preliminary) = dialog.getResult()
-			if self.__preliminary:
-				self.__saveAct.setEnabled(False)
+			self.__saveAct.setEnabled(self.__preliminary)
 			return True
 		else:
 			return False
@@ -872,6 +917,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				w.suspend()
 			self.__rev = w.getRev()
 			self.__preliminary = True
+			print "rev:%s" % self.__rev.encode("hex")
 			self.__loadFile()
 			self.emitChanged()
 			return True
@@ -921,6 +967,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 					writer.suspend()
 				self.__rev = writer.getRev()
 				self.__preliminary = True
+				print "rev:%s" % self.__rev.encode("hex")
 		finally:
 			for r in mergeReaders:
 				r.abort()
@@ -1045,9 +1092,10 @@ class CommentPopup(object):
 
 class ChooseWindow(QtGui.QDialog):
 
-	def __init__(self, lookup, revs, preRevs, parent=None):
+	def __init__(self, lookup, doc, revs, preRevs, parent=None):
 		super(ChooseWindow, self).__init__(parent)
 
+		self.__doc = doc
 		self.__result = (None, False)
 		self.__buttons = []
 
@@ -1055,8 +1103,7 @@ class ChooseWindow(QtGui.QDialog):
 		mainLayout.addWidget(QtGui.QLabel("Current revisions:"), 0, 0, 1, 3)
 		row = 1
 		for rev in revs:
-			action = lambda: self.buttonClicked((rev, False))
-			self.createStoreLine(mainLayout, row, lookup, rev, action, False)
+			self.createStoreLine(mainLayout, row, lookup, rev, False)
 			row += 1
 
 		if preRevs:
@@ -1064,8 +1111,7 @@ class ChooseWindow(QtGui.QDialog):
 				row, 0, 1, 3)
 			row += 1
 			for rev in preRevs:
-				action = lambda: self.buttonClicked((rev, True))
-				self.createStoreLine(mainLayout, row, lookup, rev, action, True)
+				self.createStoreLine(mainLayout, row, lookup, rev, True)
 				row += 1
 
 		okButton = QtGui.QPushButton("Quit")
@@ -1076,6 +1122,7 @@ class ChooseWindow(QtGui.QDialog):
 
 		mainLayout.addLayout(buttonsLayout, row, 0, 1, 3)
 		self.setLayout(mainLayout)
+		self.__layout = mainLayout
 
 		self.setWindowTitle("Choose starting revision")
 
@@ -1086,30 +1133,99 @@ class ChooseWindow(QtGui.QDialog):
 	def getResult(self):
 		return self.__result
 
-	def createStoreLine(self, layout, row, lookup, rev, action, preliminary):
+	def createStoreLine(self, layout, row, lookup, rev, preliminary):
+		widgets = []
+
 		button = RevButton(rev, True)
 		self.__buttons.append(button)
+		widgets.append(button.getWidget())
 		layout.addWidget(button.getWidget(), row, 0)
 
 		storesLayout = QtGui.QHBoxLayout()
-		for doc in lookup.stores(rev):
+		stores = lookup.stores(rev)
+		for doc in stores:
 			button = DocButton(doc, True)
 			self.__buttons.append(button)
+			widgets.append(button.getWidget())
 			storesLayout.addWidget(button.getWidget())
 		storesLayout.addStretch()
 		layout.addLayout(storesLayout, row, 1)
 
 		openLayout = QtGui.QHBoxLayout()
 		if preliminary:
-			button = QtGui.QPushButton("Purge")
-			openLayout.addWidget(button)
-			button = QtGui.QPushButton("Resume")
-			button.clicked.connect(action)
-			openLayout.addWidget(button)
+			button1 = QtGui.QPushButton("Purge")
+			widgets.append(button1)
+			openLayout.addWidget(button1)
+			button2 = QtGui.QPushButton("Resume")
+			widgets.append(button2)
+			openLayout.addWidget(button2)
+			button1.clicked.connect(lambda: self.purgeRev(rev, stores, row, widgets))
+			button2.clicked.connect(lambda: self.buttonClicked((rev, True)))
 		else:
 			openLayout.addStretch()
 			button = QtGui.QPushButton("Open")
-			button.clicked.connect(action)
+			button.clicked.connect(lambda: self.buttonClicked((rev, False)))
 			openLayout.addWidget(button)
 		layout.addLayout(openLayout, row, 2)
+
+	def purgeRev(self, rev, stores, row, widgets):
+		HpConnector().forget(self.__doc, rev, stores)
+		for i in xrange(3):
+			item = self.__layout.itemAtPosition(row, i)
+			self.__layout.removeItem(item)
+		for w in widgets:
+			w.deleteLater()
+
+
+class OverwriteDialog(QtGui.QDialog):
+
+	def __init__(self, lookup, revs, parent=None):
+		super(OverwriteDialog, self).__init__(parent)
+
+		self.__result = (None, False)
+		self.__buttons = []
+
+		mainLayout = QtGui.QGridLayout()
+		mainLayout.addWidget(
+			QtGui.QLabel("Choose revision to overwrite or load:"),
+			0, 0, 1, 4)
+		row = 1
+		for rev in revs:
+			button = RevButton(rev, True)
+			self.__buttons.append(button)
+			mainLayout.addWidget(button.getWidget(), row, 0)
+
+			storesLayout = QtGui.QHBoxLayout()
+			for doc in lookup.stores(rev):
+				button = DocButton(doc, True)
+				self.__buttons.append(button)
+				storesLayout.addWidget(button.getWidget())
+			storesLayout.addStretch()
+			mainLayout.addLayout(storesLayout, row, 1)
+
+			button = QtGui.QPushButton("Open")
+			button.clicked.connect(lambda: self.buttonClicked((rev, False)))
+			mainLayout.addWidget(button, row, 2)
+			button = QtGui.QPushButton("Overwrite")
+			button.clicked.connect(lambda: self.buttonClicked((rev, True)))
+			mainLayout.addWidget(button, row, 3)
+			row += 1
+
+		okButton = QtGui.QPushButton("Quit")
+		okButton.clicked.connect(self.reject)
+		buttonsLayout = QtGui.QHBoxLayout()
+		buttonsLayout.addStretch()
+		buttonsLayout.addWidget(okButton)
+
+		mainLayout.addLayout(buttonsLayout, row, 0, 1, 4)
+		self.setLayout(mainLayout)
+
+		self.setWindowTitle("Choose new revision")
+
+	def buttonClicked(self, result):
+		self.__result = result
+		self.accept()
+
+	def getResult(self):
+		return self.__result
 
