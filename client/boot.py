@@ -21,11 +21,11 @@ from __future__ import with_statement
 
 from hotchpotch import hpstruct
 from hotchpotch.importer import importObjectByPath
-from simplejson import loads as loadJSON
+import json
 
 
 with open("registry.json") as file:
-	registry = loadJSON(file.read())
+	registry = json.load(file)
 
 importObjectByPath(
 	"sys/registry",

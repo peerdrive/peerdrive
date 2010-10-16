@@ -20,8 +20,8 @@
 from __future__ import with_statement
 
 import sys
+import json
 from PyQt4 import QtGui
-from simplejson import dumps
 
 # create a QApplication; QImage needs it
 app = QtGui.QApplication(sys.argv)
@@ -36,4 +36,5 @@ data = {
 	}
 }
 
-print dumps(data)
+print json.dumps(data)
+

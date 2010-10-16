@@ -19,7 +19,7 @@
 from __future__ import with_statement
 
 import struct
-import simplejson
+import json
 import hpconnector
 
 
@@ -348,11 +348,11 @@ def dumps(o):
 
 
 def loadJSON(s):
-	return simplejson.loads(s, object_hook=__decode_link)
+	return json.loads(s, object_hook=__decode_link)
 
 
 def dumpJSON(o):
-	return simplejson.dumps(o, default=__encode_link)
+	return json.dumps(o, default=__encode_link)
 
 
 def loadMimeData(mimeData):

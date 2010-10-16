@@ -23,8 +23,8 @@ import sys
 import email
 import email.utils
 import email.header
+import json
 from datetime import datetime
-from simplejson import dumps
 
 with open(sys.argv[1]) as fp:
 	msg = msg = email.message_from_file(fp)
@@ -85,5 +85,5 @@ if attachments != []:
 		data["public.message"]["rfc822"] = {}
 	data["public.message"]["rfc822"]["attachments"] = attachments
 
-print dumps(data)
+print json.dumps(data)
 
