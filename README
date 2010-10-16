@@ -16,9 +16,8 @@ directory for some infos and ideas.
 
 == Requirements ==
 
-Python 2.5/2.6
+Python 2.6
 	+ PyQt >=4.4.x
-	+ simplejson
 	+ magic (optional)
 
 Erlang >= R12

@@ -25,7 +25,10 @@ from hotchpotch import HpConnector, HpRegistry, hpstruct, hpgui
 class ContactWindow(hpgui.HpMainWindow):
 
 	def __init__(self, argv):
-		super(ContactWindow, self).__init__(argv, "org.hotchpotch.contact", True)
+		super(ContactWindow, self).__init__(argv,
+			"org.hotchpotch.contact"
+			["org.hotchpotch.contact"],
+			True)
 
 		self.textEdit = QtGui.QTextEdit()
 		self.setCentralWidget(self.textEdit)
@@ -89,7 +92,6 @@ if __name__ == '__main__':
 
 	app = QtGui.QApplication(sys.argv)
 	mainWin = ContactWindow(sys.argv)
-	mainWin.mainWindowInit()
 	mainWin.show()
 	sys.exit(app.exec_())
 

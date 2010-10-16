@@ -24,7 +24,10 @@ from hotchpotch import hpgui
 class ImageWindow(hpgui.HpMainWindow):
 
 	def __init__(self, argv):
-		super(ImageWindow, self).__init__(argv, "public.image", False)
+		super(ImageWindow, self).__init__(argv,
+			"org.hotchpotch.xv",
+			["public.image"],
+			False)
 		self.imageLabel = QtGui.QLabel()
 		self.imageLabel.setBackgroundRole(QtGui.QPalette.Base)
 		self.imageLabel.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Ignored)
@@ -131,7 +134,6 @@ if __name__ == '__main__':
 
 	app = QtGui.QApplication(sys.argv)
 	mainWin = ImageWindow(sys.argv)
-	mainWin.mainWindowInit()
 	mainWin.show()
 	sys.exit(app.exec_())
 

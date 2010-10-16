@@ -67,6 +67,8 @@ class _HpRegistry(hpconnector.HpWatch):
 		return default
 
 	def getUtiFromMime(self, mime, default = "public.data"):
+		mime = mime.split(';')[0].strip()
+		# maybe support mime parameters too?
 		for (uti, spec) in self.registry.items():
 			if "mimetypes" in spec:
 				if mime in spec["mimetypes"]:

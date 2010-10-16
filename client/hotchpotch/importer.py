@@ -71,7 +71,7 @@ def importFile(store, path, name=""):
 		# determine file type
 		uti = None
 		if mimeGuess:
-			mime = mimeGuess.file(path).split(' ')[0]
+			mime = mimeGuess.file(path)
 			uti = HpRegistry().getUtiFromMime(mime, None)
 		if not uti:
 			ext  = os.path.splitext(path)[1][1:].lower()

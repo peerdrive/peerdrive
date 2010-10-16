@@ -43,7 +43,11 @@ def format(addr):
 class MailWindow(hpgui.HpMainWindow):
 
 	def __init__(self, argv):
-		super(MailWindow, self).__init__(argv, "mime.message.rfc822", False)
+		super(MailWindow, self).__init__(
+			argv,
+			"org.hotchpotch.mailview",
+			["mime.message.rfc822"],
+			False)
 
 		settings = QtWebKit.QWebSettings.globalSettings()
 		settings.setAttribute(QtWebKit.QWebSettings.AutoLoadImages, False)
@@ -190,7 +194,6 @@ if __name__ == '__main__':
 
 	app = QtGui.QApplication(sys.argv)
 	mainWin = MailWindow(sys.argv)
-	mainWin.mainWindowInit()
 	mainWin.show()
 	sys.exit(app.exec_())
 

@@ -30,8 +30,13 @@ from hotchpotch.hpconnector import HpWatch
 class CollectionWindow(hpgui.HpMainWindow):
 	def __init__(self, argv):
 		self.__settings = None
-		super(CollectionWindow, self).__init__(argv, "org.hotchpotch.container", True)
+		super(CollectionWindow, self).__init__(
+			argv,
+			"org.hotchpotch.container",
+			DictModel.UTIs + SetModel.UTIs,
+			True)
 
+		self.__initDone = False
 		self.__knownColumns = set()
 
 		# initialize main view
@@ -68,64 +73,57 @@ class CollectionWindow(hpgui.HpMainWindow):
 			model = SetModel(self)
 		else:
 			raise TypeError('Unhandled UTI: %s' % (uti))
-		self.listView.setModel(model)
-		QtCore.QObject.connect(
-			model,
-			QtCore.SIGNAL("rowsInserted(const QModelIndex &, int, int)"),
-			self.__checkMetaData)
-		QtCore.QObject.connect(
-			model,
-			QtCore.SIGNAL("rowsInserted(const QModelIndex &, int, int)"),
-			self.emitChanged)
-		QtCore.QObject.connect(
-			model,
-			QtCore.SIGNAL("rowsRemoved(const QModelIndex &, int, int)"),
-			self.emitChanged)
-		QtCore.QObject.connect(
-			model,
-			QtCore.SIGNAL("dataChanged(const QModelIndex &, const QModelIndex &)"),
-			self.__dataChanged)
 
+		oldModel = self.listView.model()
+		if oldModel:
+			(avail, active) = self.__getColumnSettings()
+			model.setColumns(avail, active)
+			oldModel.deleteLater()
+		self.listView.setModel(model)
+		self.__setEditable(readWrite)
 		autoClean = self.metaDataGetField(CollectionModel.AUTOCLEAN, False)
 		self.cleanAct.setChecked(autoClean)
 		self.cleanAct.setEnabled(readWrite)
-		if self.__settings:
-			availCols  = self.__settings.get("availcol")
-			activeCols = self.__settings.get("activecol")
-			if availCols and activeCols:
-				model.setColumns(availCols, activeCols)
-		model.doLoad(r, readWrite, autoClean)
-		self.__setEditable(readWrite)
-		self.__checkMetaData()
-		if readWrite and HpConnector().stat(self.rev()).type() == "org.hotchpotch.store":
-			self.fileToolBar.removeAction(self.delAct)
-			self.fileMenu.removeAction(self.delAct)
-			enum = HpConnector().enum()
-			if enum.isRemovable(enum.store(self.doc())):
-				self.fileMenu.insertAction(self.cleanAct, self.unmountAct)
-				actions = self.fileToolBar.actions()
-				if len(actions) > 1:
-					self.fileToolBar.insertAction(actions[1], self.unmountAct)
-				else:
-					self.fileToolBar.addAction(self.unmountAct)
-			self.syncMenu = QtGui.QMenu("Synchronization")
-			self.fileMenu.insertMenu(self.cleanAct, self.syncMenu)
-			QtCore.QObject.connect(
-				self.syncMenu,
-				QtCore.SIGNAL("aboutToShow()"),
-				self.__showStoreSyncMenu)
-		if self.__settings:
-			widths = self.__settings.get("colwidths", [])[:model.columnCount(None)]
-			i = 0
-			for w in widths:
-				self.listView.setColumnWidth(i, w)
-				i += 1
 
-	def docMergeCheck(self, heads, utis, changedParts):
-		(uti, handled) = super(CollectionWindow, self).docMergeCheck(heads, utis, changedParts)
-		if not uti:
-			return (None, handled)
-		return (uti, changedParts & (handled | set(['HPSD'])))
+		model.rowsInserted.connect(self.__checkMetaData)
+		model.rowsInserted.connect(self.emitChanged)
+		model.rowsRemoved.connect(self.emitChanged)
+		model.dataChanged.connect(self.__dataChanged)
+
+		if not self.__initDone:
+			self.__initDone = True
+			if self.__settings:
+				availCols  = self.__settings.get("availcol")
+				activeCols = self.__settings.get("activecol")
+				if availCols and activeCols:
+					model.setColumns(availCols, activeCols)
+			if readWrite and uti == "org.hotchpotch.store":
+				self.fileToolBar.removeAction(self.delAct)
+				self.fileMenu.removeAction(self.delAct)
+				enum = HpConnector().enum()
+				if enum.isRemovable(enum.store(self.doc())):
+					self.fileMenu.insertAction(self.cleanAct, self.unmountAct)
+					actions = self.fileToolBar.actions()
+					if len(actions) > 1:
+						self.fileToolBar.insertAction(actions[1], self.unmountAct)
+					else:
+						self.fileToolBar.addAction(self.unmountAct)
+				self.syncMenu = QtGui.QMenu("Synchronization")
+				self.fileMenu.insertMenu(self.cleanAct, self.syncMenu)
+				self.syncMenu.aboutToShow.connect(self.__showStoreSyncMenu)
+			if self.__settings:
+				widths = self.__settings.get("colwidths", [])[:model.columnCount(None)]
+				i = 0
+				for w in widths:
+					self.listView.setColumnWidth(i, w)
+					i += 1
+
+		model.doLoad(r, readWrite, autoClean)
+		self.__checkMetaData()
+
+	def docMergeCheck(self, heads, types, changedParts):
+		(uti, handled) = super(CollectionWindow, self).docMergeCheck(heads, types, changedParts)
+		return (uti, handled | set(['HPSD']))
 
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
 		conflicts = super(CollectionWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
@@ -140,8 +138,8 @@ class CollectionWindow(hpgui.HpMainWindow):
 
 		return conflicts
 
-	def docCheckpoint(self, w, force):
-		if force or self.listView.model().hasChanged():
+	def docSave(self, w):
+		if self.listView.model().hasChanged():
 			self.listView.model().doSave(w)
 
 	def needSave(self):
@@ -150,17 +148,11 @@ class CollectionWindow(hpgui.HpMainWindow):
 
 	def saveSettings(self, settings):
 		super(CollectionWindow, self).saveSettings(settings)
-		model = self.listView.model()
-		settings["availcol"] = model.availColumns()
-		active = []
-		for a in model.activeColumns():
-			for (key, col) in model.availColumns().items():
-				if a is col:
-					active.append(key)
-					break
+		(avail, active) = self.__getColumnSettings()
+		settings["availcol"] = avail
 		settings["activecol"] = active
 		settings["colwidths"] = [self.listView.columnWidth(i)
-			for i in xrange(model.columnCount(None))]
+			for i in xrange(self.listView.model().columnCount(None))]
 
 	def loadSettings(self, settings):
 		super(CollectionWindow, self).loadSettings(settings)
@@ -168,14 +160,25 @@ class CollectionWindow(hpgui.HpMainWindow):
 
 	# private methods
 
+	def __getColumnSettings(self):
+		model = self.listView.model()
+		avail = model.availColumns()
+		active = []
+		for a in model.activeColumns():
+			for (key, col) in avail.items():
+				if a is col:
+					active.append(key)
+					break
+		return (avail, active)
+
 	def __checkMetaData(self):
 		availColumns = self.listView.model().availColumns()
 		columns = set(availColumns)
 		todo = columns - self.__knownColumns
-		self.__knownColumns = columns
+		self.__knownColumns |= columns
 		for col in todo:
 			column = availColumns[col]
-			action = ColumnAction(self, self.listView.model(), column)
+			action = ColumnAction(self, column)
 			self.columnMenu.addAction(action)
 
 	def __removeRow(self):
@@ -378,22 +381,24 @@ class RuleAction(QtGui.QAction):
 
 
 class ColumnAction(QtGui.QAction):
-	def __init__(self, parent, model, column):
+	def __init__(self, parent, column):
 		super(ColumnAction, self).__init__(parent)
-		self.__model = model
+		self.__parent = parent
 		self.__column = column
 
+		model = parent.listView.model()
 		self.setText(column.name())
 		self.setCheckable(True)
 		self.setChecked(column in model.activeColumns())
 		self.setEnabled(column.removable())
-		QtCore.QObject.connect(self, QtCore.SIGNAL("triggered(bool)"), self.__triggered)
+		self.triggered.connect(self.__triggered)
 
 	def __triggered(self, checked):
+		model = self.__parent.listView.model()
 		if checked:
-			self.__model.addColumn(self.__column)
+			model.addColumn(self.__column)
 		else:
-			self.__model.remColumn(self.__column)
+			model.remColumn(self.__column)
 
 
 class CollectionTreeView(QtGui.QTreeView):
@@ -976,9 +981,6 @@ class CEntry(HpWatch):
 	def isValid(self):
 		return self.__valid
 
-	def needsMerge(self):
-		return isinstance(self.__link, hpstruct.DocLink) and (len(self.__link.revs()) > 1)
-
 	def getColumnData(self, index):
 		return self.__columnValues[index]
 
@@ -1153,7 +1155,6 @@ if __name__ == '__main__':
 
 	app = QtGui.QApplication(sys.argv)
 	mainWin = CollectionWindow(sys.argv)
-	mainWin.mainWindowInit()
 	mainWin.show()
 	sys.exit(app.exec_())
 

@@ -18,10 +18,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import hpgui2
+from hotchpotch import hpgui
 import diff3
 
-class TextEditWindow(hpgui2.HpMainWindow):
+class TextEditWindow(hpgui.HpMainWindow):
 
 	def __init__(self, argv):
 		super(TextEditWindow, self).__init__(
