@@ -9,67 +9,69 @@ Opcode ::=
 
 	ENUM_REQ            0x0010
 	ENUM_CNF            0x0011
-	LOOKUP_REQ          0x0020
-	LOOKUP_CNF          0x0021
-	STAT_REQ            0x0030
-	STAT_CNF            0x0031
+	LOOKUP_DOC_REQ      0x0020
+	LOOKUP_DOC_CNF      0x0021
+	LOOKUP_REV_REQ      0x0030
+	LOOKUP_REV_CNF      0x0031
+	STAT_REQ            0x0040
+	STAT_CNF            0x0041
 
-	PEEK_REQ            0x0040
-	PEEK_CNF            0x0041
-	CREATE_REQ          0x0050
-	CREATE_CNF          0x0051
-	FORK_REQ            0x0060
-	FORK_CNF            0x0061
-	UPDATE_REQ          0x0070
-	UPDATE_CNF          0x0071
-	RESUME_REQ          0x0080
-	RESUME_CNF          0x0081
+	PEEK_REQ            0x0050
+	PEEK_CNF            0x0051
+	CREATE_REQ          0x0060
+	CREATE_CNF          0x0061
+	FORK_REQ            0x0070
+	FORK_CNF            0x0071
+	UPDATE_REQ          0x0080
+	UPDATE_CNF          0x0081
+	RESUME_REQ          0x0090
+	RESUME_CNF          0x0091
 
-	READ_REQ            0x0090
-	READ_CNF            0x0091
-	TRUNC_REQ           0x00A0
-	TRUNC_CNF           0x00A1
-	WRITE_REQ           0x00B0
-	WRITE_CNF           0x00B1
-	GET_TYPE_REQ        0x00C0
-	GET_TYPE_CNF        0x00C1
-	SET_TYPE_REQ        0x00D0
-	SET_TYPE_CNF        0x00D1
-	GET_PARENTS_REQ     0x00E0
-	GET_PARENTS_CNF     0x00E1
-	SET_PARENTS_REQ     0x00F0
-	SET_PARENTS_CNF     0x00F1
+	READ_REQ            0x00A0
+	READ_CNF            0x00A1
+	TRUNC_REQ           0x00B0
+	TRUNC_CNF           0x00B1
+	WRITE_REQ           0x00C0
+	WRITE_CNF           0x00C1
+	GET_TYPE_REQ        0x00D0
+	GET_TYPE_CNF        0x00D1
+	SET_TYPE_REQ        0x00E0
+	SET_TYPE_CNF        0x00E1
+	GET_PARENTS_REQ     0x00F0
+	GET_PARENTS_CNF     0x00F1
+	SET_PARENTS_REQ     0x0100
+	SET_PARENTS_CNF     0x0101
 
-	COMMIT_REQ          0x0100
-	COMMIT_CNF          0x0101
-	SUSPEND_REQ         0x0110
-	SUSPEND_CNF         0x0111
-	ABORT_REQ           0x0120
-	ABORT_CNF           0x0121
+	COMMIT_REQ          0x0110
+	COMMIT_CNF          0x0111
+	SUSPEND_REQ         0x0120
+	SUSPEND_CNF         0x0121
+	ABORT_REQ           0x0130
+	ABORT_CNF           0x0131
 
-	WATCH_ADD_REQ       0x0130
-	WATCH_ADD_CNF       0x0131
-	WATCH_REM_REQ       0x0140
-	WATCH_REM_CNF       0x0141
+	WATCH_ADD_REQ       0x0140
+	WATCH_ADD_CNF       0x0141
+	WATCH_REM_REQ       0x0150
+	WATCH_REM_CNF       0x0151
 
-	FORGET_REQ          0x0150
-	FORGET_CNF          0x0151
-	DELETE_DOC_REQ      0x0160
-	DELETE_DOC_CNF      0x0161
-	DELETE_REV_REQ      0x0170
-	DELETE_REV_CNF      0x0171
+	FORGET_REQ          0x0160
+	FORGET_CNF          0x0161
+	DELETE_DOC_REQ      0x0170
+	DELETE_DOC_CNF      0x0171
+	DELETE_REV_REQ      0x0180
+	DELETE_REV_CNF      0x0181
 
-	SYNC_DOC_REQ        0x0180
-	SYNC_DOC_CNF        0x0181
-	REPLICATE_DOC_REQ   0x0190
-	REPLICATE_DOC_CNF   0x0191
-	REPLICATE_REV_REQ   0x01A0
-	REPLICATE_REV_CNF   0x01A1
+	SYNC_DOC_REQ        0x0190
+	SYNC_DOC_CNF        0x0191
+	REPLICATE_DOC_REQ   0x01A0
+	REPLICATE_DOC_CNF   0x01A1
+	REPLICATE_REV_REQ   0x01B0
+	REPLICATE_REV_CNF   0x01B1
 
-	MOUNT_REQ           0x01B0
-	MOUNT_CNF           0x01B1
-	UNMOUNT_REQ         0x01C0
-	UNMOUNT_CNF         0x01C1
+	MOUNT_REQ           0x01C0
+	MOUNT_CNF           0x01C1
+	UNMOUNT_REQ         0x01D0
+	UNMOUNT_CNF         0x01D1
 
 	WATCH_IND           0x0002
 	PROGRESS_IND        0x0012
@@ -80,10 +82,12 @@ Body ::=
 
 	ENUM_REQ
 	ENUM_CNF            Stores::List(Guid::UUID, Flags::StoreFlags, Id::String, Name::String)
-	LOOKUP_REQ          Doc::UUID, Stores::List(Store::UUID)
-	LOOKUP_CNF          Revs::List(Rev:UUID, Stores::List(Store::UUID)), PreRevs::List(PreRev:UUID, Stores::List(Store::UUID))
+	LOOKUP_DOC_REQ      Doc::UUID, Stores::List(Store::UUID)
+	LOOKUP_DOC_CNF      Revs::List(Rev:UUID, Stores::List(Store::UUID)), PreRevs::List(PreRev:UUID, Stores::List(Store::UUID))
+	LOOKUP_REV_REQ      Rev::UUID, Stores::List(Store::UUID)
+	LOOKUP_REV_CNF      Stores::List(Store::UUID)
 	STAT_REQ            Rev::UUID, Stores::List(Store::UUID)
-	STAT_CNF            Result::BrokerCnf, (Flags::RevFlags, Parts::List(FourCC::UINT32, Size:UINT64, Hash::UINT128), Parents::List(Parent::UUID), Volumes::List(Volume::UUID), Mtime:Time, TypeCode::String, CreatorCode::String)?
+	STAT_CNF            Result::BrokerCnf, (Flags::RevFlags, Parts::List(FourCC::UINT32, Size:UINT64, Hash::UINT128), Parents::List(Parent::UUID), Mtime:Time, TypeCode::String, CreatorCode::String)?
 
 	PEEK_REQ            Rev::UUID, Stores::List(Store::UUID)
 	PEEK_CNF            Result::BrokerCnf, (Handle::UINT32)?

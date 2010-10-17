@@ -24,17 +24,17 @@ class _HpRegistry(hpconnector.HpWatch):
 	def __init__(self):
 		self.connection = hpconnector.HpConnector()
 
-		sysDoc = self.connection.enum().sysStore()
-		sysRev = self.connection.lookup(sysDoc).rev(sysDoc)
+		self.__sysDoc = self.connection.enum().sysStore()
+		sysRev = self.connection.lookup_doc(self.__sysDoc).rev(self.__sysDoc)
 		with self.connection.peek(sysRev) as r:
 			root = hpstruct.loads(r.readAll('HPSD'))
-			self.regDoc = root["registry"].doc()
+			self.__regDoc = root["registry"].doc()
 
-		hpconnector.HpWatch.__init__(self, hpconnector.HpWatch.TYPE_DOC, self.regDoc)
+		hpconnector.HpWatch.__init__(self, hpconnector.HpWatch.TYPE_DOC, self.__regDoc)
 		self.loadRegistry()
 
 	def loadRegistry(self):
-		regRev = self.connection.lookup(self.regDoc).revs()[0]
+		regRev = self.connection.lookup_doc(self.__regDoc).rev(self.__sysDoc)
 		with self.connection.peek(regRev) as r:
 			self.registry = hpstruct.loads(r.readAll('HPSD'))
 

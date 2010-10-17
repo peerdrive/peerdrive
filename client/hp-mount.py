@@ -25,7 +25,7 @@ if len(sys.argv) == 2:
 	if HpConnector().mount(sys.argv[1]):
 		doc = HpConnector().enum().doc(sys.argv[1])
 		try:
-			rev = HpConnector().lookup(doc).rev(doc)
+			rev = HpConnector().lookup_doc(doc).rev(doc)
 			with HpConnector().peek(rev) as r:
 				metaData = hpstruct.loads(r.readAll('META'))
 				name = metaData["org.hotchpotch.annotation"]["title"]

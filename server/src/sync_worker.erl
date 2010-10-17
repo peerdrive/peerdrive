@@ -198,7 +198,7 @@ sync_doc_ff(Doc, _FromIfc, FromRev, ToIfc, ToRev) ->
 
 is_ff_head(FromRev, ToRev) ->
 	case broker:stat(ToRev, []) of
-		{ok, _Errors, {#rev_stat{mtime=Mtime}, _Volumes}} ->
+		{ok, _Errors, #rev_stat{mtime=Mtime}} ->
 			is_ff_head_search([FromRev], ToRev, Mtime - 60*60*24);
 		{error, _, _} ->
 			false
@@ -210,7 +210,7 @@ is_ff_head_search([], _ToRev, _MinMtime) ->
 
 is_ff_head_search([FromRev|OtherRevs], ToRev, MinMtime) ->
 	case broker:stat(FromRev, []) of
-		{ok, _Errors, {#rev_stat{parents=Parents, mtime=Mtime}, _Volumes}} ->
+		{ok, _Errors, #rev_stat{parents=Parents, mtime=Mtime}} ->
 			if
 				FromRev == ToRev ->
 					true;
@@ -273,7 +273,7 @@ get_types(Revs) ->
 	lists:foldl(
 		fun(Rev, Acc) ->
 			case broker:stat(Rev, []) of
-				{ok, _ErrInfo, {#rev_stat{type=Type}, _Volumes}} ->
+				{ok, _ErrInfo, #rev_stat{type=Type}} ->
 					sets:add_element(Type, Acc);
 				{error, _, _} ->
 					Acc
@@ -336,7 +336,7 @@ traverse(Heads, Path) ->
 	lists:foldl(
 		fun(Head, {AccHeads, AccPath}) ->
 			case broker:stat(Head, []) of
-				{ok, _Errors, {#rev_stat{parents=Parents}, _Volumes}} ->
+				{ok, _Errors, #rev_stat{parents=Parents}} ->
 					NewHeads = Parents ++ AccHeads,
 					NewPath = sets:add_element(Head, AccPath),
 					{NewHeads, NewPath};
@@ -380,7 +380,7 @@ merge_hpsd(Store, Doc, BaseRev, FromRev, ToRev, TypeSet, Force) ->
 
 merge_hpsd_read(Revs) ->
 	case broker:stat(hd(Revs), []) of
-		{ok, _ErrInfo, {#rev_stat{parts=Parts}, _Volumes}} ->
+		{ok, _ErrInfo, #rev_stat{parts=Parts}} ->
 			FCCs = lists:map(fun({FourCC, _Size, _Hash}) -> FourCC end, Parts),
 			merge_hpsd_read_loop(Revs, FCCs, []);
 
@@ -522,7 +522,7 @@ merge_hpsd_update_dlinks(Data) when is_list(Data) ->
 	lists:map(fun(Value) -> merge_hpsd_update_dlinks(Value) end, Data);
 
 merge_hpsd_update_dlinks({dlink, Doc, _Revs}) ->
-	{CurRevs, _PreRevs} = broker:lookup(Doc, []),
+	{CurRevs, _PreRevs} = broker:lookup_doc(Doc, []),
 	Revs = lists:map(fun({Rev, _StoreList}) -> Rev end, CurRevs),
 	{dlink, Doc, Revs};
 

@@ -66,13 +66,12 @@ class PropertiesDialog(QtGui.QDialog):
 
 		if isDoc:
 			self.doc = uuid
-			info = HpConnector().lookup(uuid)
+			info = HpConnector().lookup_doc(uuid)
 			mainLayout.addWidget(DocumentTab(info.stores(), "document"))
 			self.revs = info.revs()
 		else:
 			self.doc = None
-			info = HpConnector().stat(uuid)
-			mainLayout.addWidget(DocumentTab(info.stores(), "revision"))
+			mainLayout.addWidget(DocumentTab(HpConnector().lookup_rev(uuid), "revision"))
 			self.revs = [uuid]
 
 		if len(self.revs) == 0:
@@ -95,10 +94,11 @@ class PropertiesDialog(QtGui.QDialog):
 				QtGui.QDialogButtonBox.Save |
 				QtGui.QDialogButtonBox.Close)
 			self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
+			self.buttonBox.accepted.connect(self.__save)
+			self.buttonBox.rejected.connect(self.reject)
 		else:
 			self.buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok)
-		QtCore.QObject.connect(self.buttonBox, QtCore.SIGNAL("accepted()"), self.__save)
-		QtCore.QObject.connect(self.buttonBox, QtCore.SIGNAL("rejected()"), self.reject)
+			self.buttonBox.accepted.connect(self.accept)
 		mainLayout.addWidget(self.buttonBox)
 		self.setLayout(mainLayout)
 		self.setWindowTitle("Properties of %s" % (self.annoTab.getTitle()))
@@ -167,7 +167,7 @@ class RevisionTab(QtGui.QWidget):
 			layout.addWidget(QtGui.QLabel(sizeText), 3, col)
 
 			storeLayout = QtGui.QVBoxLayout()
-			for store in stat.stores():
+			for store in HpConnector().lookup_rev(rev):
 				storeLayout.addWidget(genStoreButton(store))
 			layout.addLayout(storeLayout, 4, col)
 

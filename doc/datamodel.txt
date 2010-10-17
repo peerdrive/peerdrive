@@ -152,8 +152,13 @@ Hotchpotch clients manipulate documents through a high level API...
 
 enum() -- Enumerate stores
 
-lookup(Doc, Stores) -- Query available document revisions
+lookup_doc(Doc, Stores) -- Query available document revisions
 	Doc: Searched document
+	Stores: Optional set of stores where to search. If empty search on all
+		mounted stores.
+
+lookup_rev(Rev, Stores) -- Find stores which have the revison
+	Rev: Revision to look for
 	Stores: Optional set of stores where to search. If empty search on all
 		mounted stores.
 

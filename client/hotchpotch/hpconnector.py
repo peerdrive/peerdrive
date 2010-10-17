@@ -72,60 +72,62 @@ class _HpConnector(object):
 	INIT_CNF            = 0x0001
 	ENUM_REQ            = 0x0010
 	ENUM_CNF            = 0x0011
-	LOOKUP_REQ          = 0x0020
-	LOOKUP_CNF          = 0x0021
-	STAT_REQ            = 0x0030
-	STAT_CNF            = 0x0031
-	PEEK_REQ            = 0x0040
-	PEEK_CNF            = 0x0041
-	CREATE_REQ          = 0x0050
-	CREATE_CNF          = 0x0051
-	FORK_REQ            = 0x0060
-	FORK_CNF            = 0x0061
-	UPDATE_REQ          = 0x0070
-	UPDATE_CNF          = 0x0071
-	RESUME_REQ          = 0x0080
-	RESUME_CNF          = 0x0081
-	READ_REQ            = 0x0090
-	READ_CNF            = 0x0091
-	TRUNC_REQ           = 0x00A0
-	TRUNC_CNF           = 0x00A1
-	WRITE_REQ           = 0x00B0
-	WRITE_CNF           = 0x00B1
-	GET_TYPE_REQ        = 0x00C0
-	GET_TYPE_CNF        = 0x00C1
-	SET_TYPE_REQ        = 0x00D0
-	SET_TYPE_CNF        = 0x00D1
-	GET_PARENTS_REQ     = 0x00E0
-	GET_PARENTS_CNF     = 0x00E1
-	SET_PARENTS_REQ     = 0x00F0
-	SET_PARENTS_CNF     = 0x00F1
-	COMMIT_REQ          = 0x0100
-	COMMIT_CNF          = 0x0101
-	SUSPEND_REQ         = 0x0110
-	SUSPEND_CNF         = 0x0111
-	ABORT_REQ           = 0x0120
-	ABORT_CNF           = 0x0121
-	WATCH_ADD_REQ       = 0x0130
-	WATCH_ADD_CNF       = 0x0131
-	WATCH_REM_REQ       = 0x0140
-	WATCH_REM_CNF       = 0x0141
-	FORGET_REQ          = 0x0150
-	FORGET_CNF          = 0x0151
-	DELETE_DOC_REQ      = 0x0160
-	DELETE_DOC_CNF      = 0x0161
-	DELETE_REV_REQ      = 0x0170
-	DELETE_REV_CNF      = 0x0171
-	SYNC_DOC_REQ        = 0x0180
-	SYNC_DOC_CNF        = 0x0181
-	REPLICATE_DOC_REQ   = 0x0190
-	REPLICATE_DOC_CNF   = 0x0191
-	REPLICATE_REV_REQ   = 0x01A0
-	REPLICATE_REV_CNF   = 0x01A1
-	MOUNT_REQ           = 0x01B0
-	MOUNT_CNF           = 0x01B1
-	UNMOUNT_REQ         = 0x01C0
-	UNMOUNT_CNF         = 0x01C1
+	LOOKUP_DOC_REQ      = 0x0020
+	LOOKUP_DOC_CNF      = 0x0021
+	LOOKUP_REV_REQ      = 0x0030
+	LOOKUP_REV_CNF      = 0x0031
+	STAT_REQ            = 0x0040
+	STAT_CNF            = 0x0041
+	PEEK_REQ            = 0x0050
+	PEEK_CNF            = 0x0051
+	CREATE_REQ          = 0x0060
+	CREATE_CNF          = 0x0061
+	FORK_REQ            = 0x0070
+	FORK_CNF            = 0x0071
+	UPDATE_REQ          = 0x0080
+	UPDATE_CNF          = 0x0081
+	RESUME_REQ          = 0x0090
+	RESUME_CNF          = 0x0091
+	READ_REQ            = 0x00A0
+	READ_CNF            = 0x00A1
+	TRUNC_REQ           = 0x00B0
+	TRUNC_CNF           = 0x00B1
+	WRITE_REQ           = 0x00C0
+	WRITE_CNF           = 0x00C1
+	GET_TYPE_REQ        = 0x00D0
+	GET_TYPE_CNF        = 0x00D1
+	SET_TYPE_REQ        = 0x00E0
+	SET_TYPE_CNF        = 0x00E1
+	GET_PARENTS_REQ     = 0x00F0
+	GET_PARENTS_CNF     = 0x00F1
+	SET_PARENTS_REQ     = 0x0100
+	SET_PARENTS_CNF     = 0x0101
+	COMMIT_REQ          = 0x0110
+	COMMIT_CNF          = 0x0111
+	SUSPEND_REQ         = 0x0120
+	SUSPEND_CNF         = 0x0121
+	ABORT_REQ           = 0x0130
+	ABORT_CNF           = 0x0131
+	WATCH_ADD_REQ       = 0x0140
+	WATCH_ADD_CNF       = 0x0141
+	WATCH_REM_REQ       = 0x0150
+	WATCH_REM_CNF       = 0x0151
+	FORGET_REQ          = 0x0160
+	FORGET_CNF          = 0x0161
+	DELETE_DOC_REQ      = 0x0170
+	DELETE_DOC_CNF      = 0x0171
+	DELETE_REV_REQ      = 0x0180
+	DELETE_REV_CNF      = 0x0181
+	SYNC_DOC_REQ        = 0x0190
+	SYNC_DOC_CNF        = 0x0191
+	REPLICATE_DOC_REQ   = 0x01A0
+	REPLICATE_DOC_CNF   = 0x01A1
+	REPLICATE_REV_REQ   = 0x01B0
+	REPLICATE_REV_CNF   = 0x01B1
+	MOUNT_REQ           = 0x01C0
+	MOUNT_CNF           = 0x01C1
+	UNMOUNT_REQ         = 0x01D0
+	UNMOUNT_CNF         = 0x01D1
 	WATCH_IND           = 0x0002
 	PROGRESS_IND        = 0x0012
 
@@ -161,11 +163,24 @@ class _HpConnector(object):
 		reply = self._rpc(_HpConnector.ENUM_REQ, _HpConnector.ENUM_CNF)
 		return HpEnum(reply)
 
-	def lookup(self, doc, stores=[]):
+	def lookup_doc(self, doc, stores=[]):
 		checkUuid(doc)
 		request = doc + encodeUuidList(stores)
-		reply = self._rpc(_HpConnector.LOOKUP_REQ, _HpConnector.LOOKUP_CNF, request)
+		reply = self._rpc(_HpConnector.LOOKUP_DOC_REQ, _HpConnector.LOOKUP_DOC_CNF, request)
 		return HpLookup(reply)
+
+	def lookup_rev(self, rev, stores=[]):
+		checkUuid(rev)
+		request = rev + encodeUuidList(stores)
+		reply = self._rpc(_HpConnector.LOOKUP_REV_REQ, _HpConnector.LOOKUP_REV_CNF, request)
+		(storeCount,) = struct.unpack_from('>B', reply, 0)
+		pos = 1
+		found = []
+		for i in xrange(storeCount):
+			(store,) = struct.unpack_from('>16s', reply, pos)
+			found.append(store)
+			pos += 16
+		return found
 
 	def stat(self, rev, stores=[]):
 		checkUuid(rev)
@@ -594,7 +609,6 @@ class HpStat(object):
 		#   Flags:32
 		#   PartsCount:8,  [FourCC:32, Size:64, Hash:128],
 		#   ParentCount:8, [Parent:128],
-		#   VolumeCount:8, [Volume:128],
 		#   TypeLen:16,    [Type],
 		#   CreatorLen:16, [Creator]
 		(flags, count) = struct.unpack_from('>LB', packet, 0)
@@ -611,13 +625,6 @@ class HpStat(object):
 		self.__parents = []
 		for i in range(count):
 			self.__parents.append(packet[pos:pos+16])
-			pos += 16
-
-		count = struct.unpack_from('>B', packet, pos)[0]
-		pos += 1
-		self.__stores = []
-		for i in range(count):
-			self.__stores.append(packet[pos:pos+16])
 			pos += 16
 
 		self.__mtime = datetime.fromtimestamp(struct.unpack_from('>Q', packet, pos)[0])
@@ -641,9 +648,6 @@ class HpStat(object):
 
 	def parents(self):
 		return self.__parents
-
-	def stores(self):
-		return self.__stores
 
 	def mtime(self):
 		return self.__mtime

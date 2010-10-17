@@ -18,9 +18,9 @@
 
 -export([
 	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_parents/1,
-	get_type/1, lookup/2, read/4, peek/2, replicate_rev/4, replicate_doc/4,
-	resume/4, set_parents/2, set_type/2, stat/2, suspend/1, update/4, abort/1,
-	commit/1, write/4, truncate/3, sync/3]).
+	get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2, replicate_rev/4,
+	replicate_doc/4, resume/4, set_parents/2, set_type/2, stat/2, suspend/1,
+	update/4, abort/1, commit/1, write/4, truncate/3, sync/3]).
 
 -export([consolidate_error/1, consolidate_success/2, consolidate_success/1,
 	consolidate_filter/1]).
@@ -57,10 +57,10 @@
 %% the document. Searches on the given stores or on all mounted stores if no
 %% store was specified.
 %%
-%% @spec lookup(Doc, Stores) -> {[{Rev, [Store]}], [{PreRev, [Store]}]}
+%% @spec lookup_doc(Doc, Stores) -> {[{Rev, [Store]}], [{PreRev, [Store]}]}
 %%       Doc, Rev, PreRev, Store = guid()
 %%       Stores = [guid()]
-lookup(Doc, Stores) ->
+lookup_doc(Doc, Stores) ->
 	{RevDict, PreRevDict} = lists:foldl(
 		fun({StoreGuid, StoreIfc}, {AccRev, AccPreRev}) ->
 			case store:lookup(StoreIfc, Doc) of
@@ -81,6 +81,26 @@ lookup(Doc, Stores) ->
 	{dict:to_list(RevDict), dict:to_list(PreRevDict)}.
 
 
+%% @doc Lookup a revision.
+%%
+%% Returns the list of stores which contain the specified Rev. Searches on the
+%% given stores or on all mounted stores if no store was specified.
+%%
+%% @spec lookup_rev(Rev, Stores) -> [Store]
+%%       Rev, Store = guid()
+%%       Stores = [guid]
+lookup_rev(Rev, Stores) ->
+	lists:foldl(
+		fun({StoreGuid, StoreIfc}, Acc) ->
+			case store:contains(StoreIfc, Rev) of
+				true  -> [StoreGuid | Acc];
+				false -> Acc
+			end
+		end,
+		[],
+		get_stores(Stores)).
+
+
 %% @doc Get status information about a revision.
 %%
 %% Returns information about a revision if it is found on any of the specified
@@ -97,36 +117,33 @@ lookup(Doc, Stores) ->
 %% If an empty list of stores was given then all mounted stores are searched.
 %%
 %% @spec stat(Rev, SearchStores) -> Result
-%%       Result = {ok, ErrInfo, {Stat, FoundStores}} | {error, Reason, ErrInfo}
+%%       Result = {ok, ErrInfo, Stat} | {error, Reason, ErrInfo}
 %%       Rev = guid()
-%%       SearchStores, FoundStores = [guid()]
+%%       SearchStores = [guid()]
 %%       Stat = #stat{}
 %%       ErrInfo = [{Store::guid(), Reason::ecode()}]
 %%       Reason = ecode()
 stat(Rev, SearchStores) ->
-	{Stat, FoundStores, ErrInfo} = lists:foldl(
-		fun({Guid, Ifc}, {SoFar, FoundStores, ErrInfo} = Acc) ->
+	{Stat, ErrInfo} = lists:foldl(
+		fun({Guid, Ifc}, {SoFar, ErrInfo} = Acc) ->
 			case SoFar of
 				undef ->
 					case store:stat(Ifc, Rev) of
 						{ok, Stat} ->
-							{Stat, [Guid], ErrInfo};
+							{Stat, ErrInfo};
 						{error, Reason} ->
-							{undef, [], [{Guid, Reason} | ErrInfo]}
+							{undef, [{Guid, Reason} | ErrInfo]}
 					end;
 
-				Stat ->
-					case store:contains(Ifc, Rev) of
-						true  -> {Stat, [Guid|FoundStores], ErrInfo};
-						false -> Acc
-					end
+				_Stat ->
+					Acc
 			end
 		end,
-		{undef, [], []},
+		{undef, []},
 		get_stores(SearchStores)),
 	case Stat of
 		undef -> consolidate_error(ErrInfo);
-		_     -> consolidate_success(ErrInfo, {Stat, FoundStores})
+		_     -> consolidate_success(ErrInfo, Stat)
 	end.
 
 

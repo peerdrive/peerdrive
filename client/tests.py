@@ -17,7 +17,7 @@ class CommonParts(unittest.TestCase):
 
 	def tearDown(self):
 		for doc in self._disposeDocs:
-			lookup = HpConnector().lookup(doc)
+			lookup = HpConnector().lookup_doc(doc)
 			for rev in lookup.revs():
 				HpConnector().deleteDoc(doc, rev)
 
@@ -244,7 +244,7 @@ class TestSync(CommonParts):
 
 		self.assertTrue(c.sync(doc) == rev)
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(len(l.revs()), 1)
 		self.assertEqual(l.rev(self.store1), rev)
 		self.assertEqual(l.rev(self.store2), rev)
@@ -274,7 +274,7 @@ class TestSync(CommonParts):
 
 		self.assertRaises(IOError, c.sync, doc)
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(len(l.revs()), 2)
 		self.assertEqual(l.rev(self.store1), rev1)
 		self.assertEqual(l.rev(self.store2), rev2)
@@ -305,13 +305,13 @@ class TestSync(CommonParts):
 
 		self.assertTrue(c.sync(doc) == rev3)
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev3])
 
-		self.assertEqual(set(c.stat(rev).stores()), set(stores))
-		self.assertEqual(set(c.stat(rev1).stores()), set(stores))
-		self.assertEqual(set(c.stat(rev2).stores()), set(stores))
-		self.assertEqual(set(c.stat(rev3).stores()), set(stores))
+		self.assertEqual(set(c.lookup_rev(rev)), set(stores))
+		self.assertEqual(set(c.lookup_rev(rev1)), set(stores))
+		self.assertEqual(set(c.lookup_rev(rev2)), set(stores))
+		self.assertEqual(set(c.lookup_rev(rev3)), set(stores))
 
 
 class TestPreRevs(CommonParts):
@@ -336,7 +336,7 @@ class TestPreRevs(CommonParts):
 		c = HpConnector()
 		(doc, rev1, rev2) = self.createSuspendDoc()
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev2])
 		self.assertRevContent(rev1, {'FILE' : 'ok'})
@@ -356,7 +356,7 @@ class TestPreRevs(CommonParts):
 			w.suspend()
 			rev_s2 = w.getRev()
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev2])
 		self.assertEqual(len(l.preRevs()), 2)
 		self.assertTrue(rev_s1 in l.preRevs())
@@ -377,7 +377,7 @@ class TestPreRevs(CommonParts):
 		(doc, rev1, rev2) = self.createSuspendDoc()
 		self.assertRaises(IOError, c.resume, doc, rev1)
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev2])
 		self.assertRevContent(rev1, {'FILE' : 'ok'})
@@ -390,13 +390,13 @@ class TestPreRevs(CommonParts):
 		with c.resume(doc, rev2) as w:
 			w.writeAll('FILE', 'Hail to the king, baby!')
 
-			l = c.lookup(doc)
+			l = c.lookup_doc(doc)
 			self.assertEqual(l.revs(), [rev1])
 			self.assertEqual(l.preRevs(), [rev2])
 
 			w.abort()
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev2])
 		self.assertRevContent(rev1, {'FILE' : 'ok'})
@@ -411,7 +411,7 @@ class TestPreRevs(CommonParts):
 			w.commit()
 			rev3 = w.getRev()
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev3])
 		self.assertEqual(len(l.preRevs()), 0)
 
@@ -428,7 +428,7 @@ class TestPreRevs(CommonParts):
 			w.suspend()
 			rev3 = w.getRev()
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev3])
 
@@ -447,7 +447,7 @@ class TestPreRevs(CommonParts):
 			w.suspend()
 			rev3 = w.getRev()
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev3])
 
@@ -474,7 +474,7 @@ class TestPreRevs(CommonParts):
 		self.assertRaises(IOError, c.forget, doc, rev1)
 		c.forget(doc, rev_s1)
 
-		l = c.lookup(doc)
+		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev2])
 		self.assertEqual(l.preRevs(), [rev_s2])
 

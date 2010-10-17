@@ -30,7 +30,7 @@ import hpstruct
 def showDocument(link):
 	if isinstance(link, hpstruct.DocLink):
 		args = ['doc:'+link.doc().encode('hex')]
-		rev = HpConnector().lookup(link.doc()).revs()[0]
+		rev = HpConnector().lookup_doc(link.doc()).revs()[0]
 	else:
 		args = ['rev:'+link.rev().encode('hex')]
 		rev = link.rev()
@@ -96,7 +96,7 @@ class DocButton(object):
 		if self.__doc:
 			self.__button.setEnabled(True)
 			try:
-				rev = HpConnector().lookup(self.__doc).revs()[0]
+				rev = HpConnector().lookup_doc(self.__doc).revs()[0]
 				docIcon = None
 				with HpConnector().peek(rev) as r:
 					try:
@@ -496,7 +496,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 		# see what we have to do
 		if self.__doc:
-			l = self.__connection.lookup(self.__doc)
+			l = self.__connection.lookup_doc(self.__doc)
 			revs = l.revs()
 			preRevs = filter(self.__filterPreRev, l.preRevs())
 			if len(revs) == 0:
@@ -534,7 +534,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.__saveFile('<<Internal checkpoint>>')
 
 			# ok, whats up?
-			info = self.__connection.lookup(self.__doc)
+			info = self.__connection.lookup_doc(self.__doc)
 			allStores = info.stores()
 			currentRevs = set(info.revs())
 			if self.__preliminary:
@@ -552,7 +552,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				self.__mergeAct.setVisible(bool(currentRevs - validRevs))
 
 		else:
-			allStores = self.__connection.stat(self.__rev).stores()
+			allStores = self.__connection.lookup_rev(self.__rev)
 
 		# update store buttons in status bar
 		for store in allStores:
@@ -568,7 +568,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __updateRebase(self):
 		# get current revs on all stores where the preliminary versions exists
 		heads = set()
-		lookup = self.__connection.lookup(self.__doc)
+		lookup = self.__connection.lookup_doc(self.__doc)
 		for store in lookup.stores(self.__rev):
 			heads.add(lookup.rev(store))
 
@@ -598,7 +598,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		found = []
 		target = self.__rev
 		try:
-			lookup = self.__connection.lookup(self.__doc)
+			lookup = self.__connection.lookup_doc(self.__doc)
 			depth = self.__connection.stat(target).mtime() - datetime.timedelta(days=1)
 		except IOError:
 			# seems we're gone
@@ -642,7 +642,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				self.close()
 
 	def __sync(self):
-		lookup = self.__connection.lookup(self.__doc)
+		lookup = self.__connection.lookup_doc(self.__doc)
 		stat = self.__connection.stat(self.__rev)
 
 		# get all revs which are heads of __doc and are parents of __rev
@@ -816,11 +816,11 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __deleteFile(self):
 		self.__delMenu.clear()
 		if self.__isMutable():
-			lookup = self.__connection.lookup(self.__doc)
+			lookup = self.__connection.lookup_doc(self.__doc)
 			stores = lookup.stores()
 			delFun = lambda store: self.__connection.deleteDoc(self.__doc, lookup.rev(store), [store])
 		else:
-			stores = self.__connection.stat(self.__rev).stores()
+			stores = self.__connection.lookup_rev(self.__rev)
 			delFun = lambda store: self.__connection.deleteRev(self.__rev, [store])
 		stores = [(self.__getStoreName(store), store) for store in stores]
 		stores = filter(lambda(name,store):name, stores)
@@ -838,7 +838,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	def __getStoreName(self, store):
 		try:
-			rev = self.__connection.lookup(store).rev(store)
+			rev = self.__connection.lookup_doc(store).rev(store)
 			with self.__connection.peek(rev) as r:
 				try:
 					metaData = hpstruct.loads(r.readAll('META'))
@@ -849,7 +849,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			return None
 
 	def __mergeShow(self):
-		lookup = self.__connection.lookup(self.__doc)
+		lookup = self.__connection.lookup_doc(self.__doc)
 		revs = set(lookup.revs())
 		if self.__preliminary:
 			revs -= set(self.__connection.stat(self.__rev).parents())
@@ -866,7 +866,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __merge(self, rev):
 		self.checkpoint("<<Save before merge>>")
 
-		lookup = self.__connection.lookup(self.__doc)
+		lookup = self.__connection.lookup_doc(self.__doc)
 		stores = set(lookup.stores(self.__rev))
 		stores |= set(lookup.stores(rev))
 		revs = [self.__rev, rev]
@@ -895,12 +895,12 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		# last resort: "ours"-merge
 		options = []
 		for rev in revs:
-			revInfo = self.__connection.stat(rev, stores)
-			date = str(revInfo.mtime())
+			revDate = self.__connection.stat(rev, stores).mtime()
+			revStores = self.__connection.lookup_rev(rev, stores)
 			stores = reduce(
 				lambda x,y: x+", "+y,
-				[self.__getStoreName(s) for s in revInfo.stores()])
-			options.append(date + ": " + stores)
+				[self.__getStoreName(s) for s in revStores])
+			options.append(str(revDate) + ": " + stores)
 
 		(choice, ok) = QtGui.QInputDialog.getItem(
 			self,

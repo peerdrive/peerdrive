@@ -100,8 +100,7 @@ follow({BaseRev, Heads, Path}) ->
 	lists:foldl(
 		fun(Head, {AccBase, AccHeads, AccPath} = Acc) ->
 			case broker:stat(Head, []) of
-				{ok, _ErrInfo, {Stat, _FoundStores}} ->
-					Parents = Stat#rev_stat.parents,
+				{ok, _ErrInfo, #rev_stat{parents=Parents}} ->
 					{
 						AccBase,
 						Parents ++ AccHeads,

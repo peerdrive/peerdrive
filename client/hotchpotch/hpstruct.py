@@ -142,7 +142,7 @@ class DocLink(object):
 		mimeData.setData(DocLink.MIME_TYPE, self.__doc.encode('hex'))
 
 	def update(self):
-		self.__revs = hpconnector.HpConnector().lookup(self.__doc).revs()
+		self.__revs = hpconnector.HpConnector().lookup_doc(self.__doc).revs()
 		self.__updated = True
 
 	def doc(self):

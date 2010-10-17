@@ -26,7 +26,7 @@ from hotchpotch import hpstruct, HpConnector, HpRegistry
 # parse command line
 if len(sys.argv) == 2 and sys.argv[1].startswith('doc:'):
 	doc = sys.argv[1][4:].decode("hex")
-	rev = HpConnector().lookup(doc).revs()[0]
+	rev = HpConnector().lookup_doc(doc).revs()[0]
 elif len(sys.argv) == 2 and sys.argv[1].startswith('rev:'):
 	rev = sys.argv[1][4:].decode("hex")
 else:

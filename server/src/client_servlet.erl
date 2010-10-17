@@ -25,60 +25,62 @@
 -define(INIT_CNF,           16#0001).
 -define(ENUM_REQ,           16#0010).
 -define(ENUM_CNF,           16#0011).
--define(LOOKUP_REQ,         16#0020).
--define(LOOKUP_CNF,         16#0021).
--define(STAT_REQ,           16#0030).
--define(STAT_CNF,           16#0031).
--define(PEEK_REQ,           16#0040).
--define(PEEK_CNF,           16#0041).
--define(CREATE_REQ,         16#0050).
--define(CREATE_CNF,         16#0051).
--define(FORK_REQ,           16#0060).
--define(FORK_CNF,           16#0061).
--define(UPDATE_REQ,         16#0070).
--define(UPDATE_CNF,         16#0071).
--define(RESUME_REQ,         16#0080).
--define(RESUME_CNF,         16#0081).
--define(READ_REQ,           16#0090).
--define(READ_CNF,           16#0091).
--define(TRUNC_REQ,          16#00A0).
--define(TRUNC_CNF,          16#00A1).
--define(WRITE_REQ,          16#00B0).
--define(WRITE_CNF,          16#00B1).
--define(GET_TYPE_REQ,       16#00C0).
--define(GET_TYPE_CNF,       16#00C1).
--define(SET_TYPE_REQ,       16#00D0).
--define(SET_TYPE_CNF,       16#00D1).
--define(GET_PARENTS_REQ,    16#00E0).
--define(GET_PARENTS_CNF,    16#00E1).
--define(SET_PARENTS_REQ,    16#00F0).
--define(SET_PARENTS_CNF,    16#00F1).
--define(COMMIT_REQ,         16#0100).
--define(COMMIT_CNF,         16#0101).
--define(SUSPEND_REQ,        16#0110).
--define(SUSPEND_CNF,        16#0111).
--define(ABORT_REQ,          16#0120).
--define(ABORT_CNF,          16#0121).
--define(WATCH_ADD_REQ,      16#0130).
--define(WATCH_ADD_CNF,      16#0131).
--define(WATCH_REM_REQ,      16#0140).
--define(WATCH_REM_CNF,      16#0141).
--define(FORGET_REQ,         16#0150).
--define(FORGET_CNF,         16#0151).
--define(DELETE_DOC_REQ,     16#0160).
--define(DELETE_DOC_CNF,     16#0161).
--define(DELETE_REV_REQ,     16#0170).
--define(DELETE_REV_CNF,     16#0171).
--define(SYNC_DOC_REQ,       16#0180).
--define(SYNC_DOC_CNF,       16#0181).
--define(REPLICATE_DOC_REQ,  16#0190).
--define(REPLICATE_DOC_CNF,  16#0191).
--define(REPLICATE_REV_REQ,  16#01A0).
--define(REPLICATE_REV_CNF,  16#01A1).
--define(MOUNT_REQ,          16#01B0).
--define(MOUNT_CNF,          16#01B1).
--define(UNMOUNT_REQ,        16#01C0).
--define(UNMOUNT_CNF,        16#01C1).
+-define(LOOKUP_DOC_REQ,     16#0020).
+-define(LOOKUP_DOC_CNF,     16#0021).
+-define(LOOKUP_REV_REQ,     16#0030).
+-define(LOOKUP_REV_CNF,     16#0031).
+-define(STAT_REQ,           16#0040).
+-define(STAT_CNF,           16#0041).
+-define(PEEK_REQ,           16#0050).
+-define(PEEK_CNF,           16#0051).
+-define(CREATE_REQ,         16#0060).
+-define(CREATE_CNF,         16#0061).
+-define(FORK_REQ,           16#0070).
+-define(FORK_CNF,           16#0071).
+-define(UPDATE_REQ,         16#0080).
+-define(UPDATE_CNF,         16#0081).
+-define(RESUME_REQ,         16#0090).
+-define(RESUME_CNF,         16#0091).
+-define(READ_REQ,           16#00A0).
+-define(READ_CNF,           16#00A1).
+-define(TRUNC_REQ,          16#00B0).
+-define(TRUNC_CNF,          16#00B1).
+-define(WRITE_REQ,          16#00C0).
+-define(WRITE_CNF,          16#00C1).
+-define(GET_TYPE_REQ,       16#00D0).
+-define(GET_TYPE_CNF,       16#00D1).
+-define(SET_TYPE_REQ,       16#00E0).
+-define(SET_TYPE_CNF,       16#00E1).
+-define(GET_PARENTS_REQ,    16#00F0).
+-define(GET_PARENTS_CNF,    16#00F1).
+-define(SET_PARENTS_REQ,    16#0100).
+-define(SET_PARENTS_CNF,    16#0101).
+-define(COMMIT_REQ,         16#0110).
+-define(COMMIT_CNF,         16#0111).
+-define(SUSPEND_REQ,        16#0120).
+-define(SUSPEND_CNF,        16#0121).
+-define(ABORT_REQ,          16#0130).
+-define(ABORT_CNF,          16#0131).
+-define(WATCH_ADD_REQ,      16#0140).
+-define(WATCH_ADD_CNF,      16#0141).
+-define(WATCH_REM_REQ,      16#0150).
+-define(WATCH_REM_CNF,      16#0151).
+-define(FORGET_REQ,         16#0160).
+-define(FORGET_CNF,         16#0161).
+-define(DELETE_DOC_REQ,     16#0170).
+-define(DELETE_DOC_CNF,     16#0171).
+-define(DELETE_REV_REQ,     16#0180).
+-define(DELETE_REV_CNF,     16#0181).
+-define(SYNC_DOC_REQ,       16#0190).
+-define(SYNC_DOC_CNF,       16#0191).
+-define(REPLICATE_DOC_REQ,  16#01A0).
+-define(REPLICATE_DOC_CNF,  16#01A1).
+-define(REPLICATE_REV_REQ,  16#01B0).
+-define(REPLICATE_REV_CNF,  16#01B1).
+-define(MOUNT_REQ,          16#01C0).
+-define(MOUNT_CNF,          16#01C1).
+-define(UNMOUNT_REQ,        16#01D0).
+-define(UNMOUNT_CNF,        16#01D1).
 -define(WATCH_IND,          16#0002).
 -define(PROGRESS_IND,       16#0012).
 
@@ -182,8 +184,12 @@ handle_packet(Packet, S) ->
 			do_enum(RetPath),
 			{ok, S};
 
-		?LOOKUP_REQ ->
-			spawn_link(fun () -> do_loopup(Body, RetPath) end),
+		?LOOKUP_DOC_REQ ->
+			spawn_link(fun () -> do_loopup_doc(Body, RetPath) end),
+			{ok, S};
+
+		?LOOKUP_REV_REQ ->
+			spawn_link(fun () -> do_loopup_rev(Body, RetPath) end),
 			{ok, S};
 
 		?STAT_REQ ->
@@ -301,16 +307,16 @@ do_enum(RetPath) ->
 	send_reply(RetPath, ?ENUM_CNF, Reply).
 
 
-do_loopup(Body, RetPath) ->
+do_loopup_doc(Body, RetPath) ->
 	% parse request
 	<<Doc:16/binary, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
 
 	% execute
-	{Revs, PreRevs} = broker:lookup(Doc, Stores),
+	{Revs, PreRevs} = broker:lookup_doc(Doc, Stores),
 	RevsBin = do_lookup_encode(Revs),
 	PreRevsBin = do_lookup_encode(PreRevs),
-	send_reply(RetPath, ?LOOKUP_CNF, <<RevsBin/binary, PreRevsBin/binary>>).
+	send_reply(RetPath, ?LOOKUP_DOC_CNF, <<RevsBin/binary, PreRevsBin/binary>>).
 
 
 do_lookup_encode(Revs) ->
@@ -322,6 +328,14 @@ do_lookup_encode(Revs) ->
 		Revs).
 
 
+do_loopup_rev(Body, RetPath) ->
+	<<Rev:16/binary, Body1/binary>> = Body,
+	{Stores, <<>>} = parse_uuid_list(Body1),
+	Found = broker:lookup_rev(Rev, Stores),
+	FoundBin = encode_list(fun(Store) -> Store end, Found),
+	send_reply(RetPath, ?LOOKUP_REV_CNF, FoundBin).
+
+
 do_stat(Body, RetPath) ->
 	% parse request
 	<<Rev:16/binary, Body1/binary>> = Body,
@@ -329,7 +343,7 @@ do_stat(Body, RetPath) ->
 
 	% execute
 	Reply = case broker:stat(Rev, Stores) of
-		{ok, _Errors, {Stat, Volumes}} = Result ->
+		{ok, _Errors, Stat} = Result ->
 			#rev_stat{
 				flags   = Flags,
 				parts   = Parts,
@@ -344,13 +358,11 @@ do_stat(Body, RetPath) ->
 				end,
 				Parts),
 			ReplyParents = encode_list(fun (Parent) -> Parent end, Parents),
-			ReplyVolumes = encode_list(fun (Volume) -> Volume end, Volumes),
 			<<
 				(encode_broker_result(Result))/binary,
 				Flags:32,
 				ReplyParts/binary,
 				ReplyParents/binary,
-				ReplyVolumes/binary,
 				Mtime:64,
 				(encode_string(TypeCode))/binary,
 				(encode_string(CreatorCode))/binary

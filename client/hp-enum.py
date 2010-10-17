@@ -42,7 +42,7 @@ for store in enum.allStores():
 	if enum.isMounted(store):
 		doc = enum.doc(store)
 		try:
-			rev = HpConnector().lookup(doc).rev(doc)
+			rev = HpConnector().lookup_doc(doc).rev(doc)
 			with HpConnector().peek(rev) as r:
 				metaData = hpstruct.loads(r.readAll('META'))
 				realName = metaData["org.hotchpotch.annotation"]["title"]

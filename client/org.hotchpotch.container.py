@@ -265,7 +265,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 			uuid = enum.doc(store)
 			if uuid == this:
 				continue
-			rev = HpConnector().lookup(uuid).rev(uuid)
+			rev = HpConnector().lookup_doc(uuid).rev(uuid)
 			with HpConnector().peek(rev) as r:
 				try:
 					metaData = hpstruct.loads(r.readAll('META'))
@@ -315,11 +315,11 @@ class CollectionWindow(hpgui.HpMainWindow):
 class SyncRules(object):
 	def __init__(self):
 		sysDoc = HpConnector().enum().sysStore()
-		sysRev = HpConnector().lookup(sysDoc).rev(sysDoc)
+		sysRev = HpConnector().lookup_doc(sysDoc).rev(sysDoc)
 		with HpConnector().peek(sysRev) as r:
 			root = hpstruct.loads(r.readAll('HPSD'))
 			self.syncDoc = root["syncrules"].doc()
-		self.syncRev = HpConnector().lookup(self.syncDoc).rev(sysDoc)
+		self.syncRev = HpConnector().lookup_doc(self.syncDoc).rev(sysDoc)
 		with HpConnector().peek(self.syncRev) as r:
 			self.rules = hpstruct.loads(r.readAll('HPSD'))
 
@@ -460,7 +460,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		elif choice in createActions:
 			sourceRev = createActions[choice].rev()
 			info = c.stat(sourceRev)
-			destStores = c.stat(self.__parent.rev()).stores()
+			destStores = c.lookup_rev(self.__parent.rev())
 			# copy
 			with c.create(info.type(), info.creator(), destStores) as w:
 				with c.peek(sourceRev) as r:
@@ -478,15 +478,15 @@ class CollectionTreeView(QtGui.QTreeView):
 		actions = { }
 		c = HpConnector()
 		menu.addSeparator()
-		allVolumes = set(c.stat(self.__parent.rev()).stores())
+		allVolumes = set(c.lookup_rev(self.__parent.rev()))
 		if isinstance(link, hpstruct.DocLink):
-			curVolumes = set(c.lookup(link.doc()).stores())
+			curVolumes = set(c.lookup_doc(link.doc()).stores())
 		else:
-			curVolumes = set(c.stat(link.rev()).stores())
+			curVolumes = set(c.lookup_rev(link.rev()))
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
 			try:
-				rev = c.lookup(store).rev(store)
+				rev = c.lookup_doc(store).rev(store)
 				with c.peek(rev) as r:
 					metaData = hpstruct.loads(r.readAll('META'))
 					try:
@@ -520,7 +520,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		actions = {}
 		if isinstance(link, hpstruct.DocLink):
 			c = HpConnector()
-			revs = c.lookup(link.doc()).revs()
+			revs = c.lookup_doc(link.doc()).revs()
 			if len(revs) == 1:
 				action = menu.addAction("Open revision (read only)")
 				actions[action] = revs[0]
@@ -869,7 +869,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 			return self.__dropLink(data)
 
 	def __dropFile(self, data):
-		store = self._connector.stat(self.__parent.rev()).stores()[0]
+		store = self._connector.lookup_rev(self.__parent.rev())[0]
 		urlList = data.urls()
 		for url in urlList:
 			try:
