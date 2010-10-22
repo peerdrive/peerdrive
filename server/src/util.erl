@@ -107,7 +107,7 @@ read_rev_struct(Rev, Part) ->
 		{ok, Data} ->
 			case catch struct:decode(Data) of
 				{'EXIT', _Reason} ->
-					{error, econvert};
+					{error, einval};
 				Struct ->
 					{ok, Struct}
 			end;
