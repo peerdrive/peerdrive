@@ -19,7 +19,7 @@
 -module(fuse_store).
 
 -export([start_link/0]).
--export([lookup/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
+-export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
 	commit/1, abort/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
 	terminate/2]).
@@ -46,6 +46,9 @@ start_link() ->
 
 lookup(Store, Doc) ->
 	gen_server:call(?MODULE, {lookup, Store, Doc}).
+
+stat(Store, Rev) ->
+	store:stat(Store, Rev).
 
 open_rev(Store, Rev) ->
 	gen_server:call(?MODULE, {open_rev, Store, Rev}).
@@ -83,7 +86,7 @@ handle_call({read, Handle, Part, Offset, Length}, _From, S) ->
 
 handle_call({truncate, Handle, Part, Offset}, _From, S) ->
 	Reply = do_truncate(Handle, Part, Offset, S),
-	{relpy, Reply, S};
+	{reply, Reply, S};
 
 handle_call({write, Handle, Part, Offset, Data}, _From, S) ->
 	Reply = do_write(Handle, Part, Offset, Data, S),
@@ -124,8 +127,8 @@ do_lookup(Store, Doc, S) ->
 		{ok, Rev, _IsPre, _IsOpen, S2} ->
 			{{ok, Rev}, S2};
 
-		{error, Reason, S2} ->
-			{{error, Reason}, S2}
+		{error, S2} ->
+			{error, S2}
 	end.
 
 
@@ -149,7 +152,7 @@ do_open_doc(Store, Doc, Write, S) ->
 				Write ->
 					store:update(Store, Doc, Rev, ?FUSE_CC);
 				true ->
-					store:peek(Store, Doc, Rev)
+					store:peek(Store, Rev)
 			end,
 			case StoreReply of
 				{ok, Handle} ->
@@ -167,8 +170,8 @@ do_open_doc(Store, Doc, Write, S) ->
 		{ok, _Rev, _IsPre, true, S2} ->
 			{{error, eacces}, S2};
 
-		{error, Reason, S2} ->
-			{{error, Reason}, S2}
+		{error, S2} ->
+			{{error, enoent}, S2}
 	end.
 
 
@@ -245,7 +248,7 @@ lookup_internal(Store, Doc, S) ->
 			end;
 
 		error ->
-			{error, enoent, forget(Store, Doc, S)}
+			{error, forget(Store, Doc, S)}
 	end.
 
 
@@ -413,13 +416,14 @@ commit_prerev(Store, Doc, Rev) ->
 			ok;
 
 		{error, Reason} ->
-			error_logger:warning_msg("FUSE: Could not resume: ~w", [Reason])
+			error_logger:warning_msg("FUSE: Could not resume: ~w~n", [Reason])
 	end.
 
 
 commit_prerev_loop(Store, Doc, Handle) ->
 	case store:commit(Handle, util:get_time()) of
 		{ok, _Rev} ->
+			vol_monitor:trigger_mod_doc(local, Doc),
 			ok;
 
 		conflict ->
@@ -433,6 +437,6 @@ commit_prerev_loop(Store, Doc, Handle) ->
 			end;
 
 		{error, Reason} ->
-			error_logger:warning_msg("FUSE: Could not commit: ~w", [Reason])
+			error_logger:warning_msg("FUSE: Could not commit: ~w~n", [Reason])
 	end.
 

@@ -83,7 +83,7 @@
 			]},
 			{interfaces, [
 				{"client", server_sup, [client_servlet, 4567]},
-				{"fuse", fuse, [false, "/tmp/hotchpotch", "default_permissions"]}
+				{"fuse", fuse, ["/tmp/hotchpotch", "default_permissions", []]}
 			]}
 		]}
 	]

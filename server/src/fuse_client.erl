@@ -2,10 +2,10 @@
 -ifndef(windows).
 -behaviour (fuserl).
 
-%-define(DEBUG(X), X).
--define(DEBUG(X), ok).
+-define(DEBUG(X), X).
+%-define(DEBUG(X), ok).
 
--export([ start_link/2, start_link/3 ]).
+-export([ start_link/3 ]).
 -export([ code_change/3, handle_info/2, init/1, terminate/2 ]).
 -export([ getattr/4, setattr/7, lookup/5, forget/5,
            opendir/5, readdir/7, releasedir/5,
@@ -28,7 +28,10 @@
 	cache,   % gb_trees: {ParentInode, OID} -> inode
 	dirs,    % gb_trees: id -> [#direntry]
 	files,   % gb_trees: id -> #handler
-	count    % int: next free inode
+	count,   % int: next free inode
+	uid,
+	gid,
+	umask
 }).
 
 -record(vnode, {
@@ -42,14 +45,14 @@
 
 -record(ifc, {
 	getattr,
-	setattr = fun(_, _, _, _) -> {error, enosys} end,
-	lookup  = fun(_, _, _) -> {error, enoent} end,
-	getnode = fun(_, _) -> error end,
-	opendir = fun(_, _) -> {errror, enotdir} end,
-	open    = fun(_, _) -> {error, eisdir} end,
-	create  = fun(_, _) -> {error, eisdir} end,
-	link    = fun(_, _, _, _) -> {error, enotdir} end,
-	unlink  = fun(_, _, _) -> {error, enotdir} end
+	truncate = fun(_, _) -> {error, enosys} end,
+	lookup   = fun(_, _, _) -> {error, enoent} end,
+	getnode  = fun(_, _) -> error end,
+	opendir  = fun(_, _) -> {errror, enotdir} end,
+	open     = fun(_, _) -> {error, eisdir} end,
+	create   = fun(_, _) -> {error, eisdir} end,
+	link     = fun(_, _, _, _) -> {error, enotdir} end,
+	unlink   = fun(_, _, _) -> {error, enotdir} end
 }).
 
 -record(handler, {read, write, release, changed=false}).
@@ -66,18 +69,16 @@
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(LinkedIn, Dir) ->
-	start_link(LinkedIn, Dir, "").
-
-start_link(LinkedIn, Dir, MountOpts) ->
+start_link(Dir, MountOpts, Options) ->
 	Server = case application:start(fuserl) of
 		ok                               -> ok;
 		{error,{already_started,fuserl}} -> ok;
 		{error, Reason}                  -> {fuserl, Reason}
 	end,
+	LinkedIn = proplists:get_value(linkedin, Options, false),
 	case Server of
 		ok ->
-			fuserlsrv:start_link(?MODULE, LinkedIn, MountOpts, Dir, [], []);
+			fuserlsrv:start_link(?MODULE, LinkedIn, MountOpts, Dir, Options, []);
 		Else ->
 			{error, Else}
 	end.
@@ -86,13 +87,16 @@ start_link(LinkedIn, Dir, MountOpts) ->
 %% Fuserl callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init([]) ->
+init(Options) ->
 	State = #state{
 		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
 		cache  = gb_trees:empty(),
 		dirs   = gb_trees:empty(),
 		files  = gb_trees:empty(),
-		count  = 2 % 1 is the root inode
+		count  = 2, % 1 is the root inode
+		uid    = proplists:get_value(uid, Options, 0),
+		gid    = proplists:get_value(gid, Options, 0),
+		umask  = bnot proplists:get_value(umask, Options, 8#022)
 	},
 	{ok, State}.
 
@@ -175,7 +179,7 @@ getattr(_, Ino, _Cont, #state{inodes=Inodes} = S) ->
 		{value, #vnode{oid=Oid, timeout=Timeout, ifc=#ifc{getattr=GetAttr}}} ->
 			case catch GetAttr(Oid) of
 				{ok, Attr1} ->
-					Attr2 = Attr1#stat{st_ino=Ino},
+					Attr2 = fixup_attr(Attr1, Ino, S),
 					{#fuse_reply_attr{attr=Attr2, attr_timeout_ms=Timeout}, S};
 
 				{error, Error} ->
@@ -196,7 +200,7 @@ lookup(_, Parent, Name, _Cont, S) ->
 	end,
 	Reply = case do_lookup(Parent, LookupOp, S) of
 		{ok, ChildIno, ChildNode, ParentTimeout, S2} ->
-			case make_entry_param(ChildIno, ChildNode, ParentTimeout) of
+			case make_entry_param(ChildIno, ChildNode, ParentTimeout, S2) of
 				{ok, EntryParam} ->
 					{#fuse_reply_entry{fuse_entry_param=EntryParam}, S2};
 
@@ -272,7 +276,7 @@ opendir(_, Ino, Fi, _Cont, #state{inodes=Inodes, dirs=Dirs} = S) ->
 	end.
 
 
-readdir(_Ctx, _Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
+readdir(_Ctx, Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
 	Id = Fi#fuse_file_info.fh,
 	Entries = gb_trees:get(Id, Dirs),
 	DirEntryList = take_while(
@@ -327,12 +331,12 @@ create(_, Parent, Name, _Mode, Fi, _Cont, S) ->
 		{error, Error, S2} ->
 			{#fuse_reply_err{ err = Error }, S2}
 	end,
-	?DEBUG(io:format("create(~s, ~p) -> ~p~n", [Name, Fi, element(1, Reply)])),
+	?DEBUG(io:format("create(~s, ~p) ->~n    ~p~n", [Name, Fi, element(1, Reply)])),
 	Reply.
 
 
 create_open(ChildIno, ChildNode, ParentTimeout, Fi, S) ->
-	case make_entry_param(ChildIno, ChildNode, ParentTimeout) of
+	case make_entry_param(ChildIno, ChildNode, ParentTimeout, S) of
 		{ok, EntryParam} ->
 			#vnode{oid=Oid, ifc=#ifc{open=Open}} = ChildNode,
 			case catch Open(Oid, Fi#fuse_file_info.flags) of
@@ -400,11 +404,10 @@ setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
 	Reply = case Fi of
 		null ->
 			case gb_trees:lookup(Ino, Inodes) of
-				{value, #vnode{oid=Oid, timeout=Timeout, ifc=#ifc{setattr=SetAttr}}} ->
-					case catch SetAttr(Oid, Ino, Attr, ToSet) of
-						{ok, NewAttr1} ->
-							NewAttr2 = NewAttr1#stat{st_ino=Ino},
-							{#fuse_reply_attr{attr=NewAttr2, attr_timeout_ms=Timeout}, S};
+				{value, #vnode{timeout=Timeout}=VNode} ->
+					case catch do_setattr(Ino, VNode, Attr, ToSet, S) of
+						{ok, NewAttr} ->
+							{#fuse_reply_attr{attr=NewAttr, attr_timeout_ms=Timeout}, S};
 
 						{error, Error} ->
 							{#fuse_reply_err{err=Error}, S}
@@ -416,7 +419,7 @@ setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
 		#fuse_file_info{} ->
 			{#fuse_reply_err{err = enosys}, S}
 	end,
-	?DEBUG(io:format("setattr(~p, ~p, ~p, ~p) -> ~p~n", [Ino, Attr, ToSet, Fi, element(1, Reply)])),
+	?DEBUG(io:format("setattr(~p, ~p, ~p, ~p) ->~n    ~p~n", [Ino, Attr, ToSet, Fi, element(1, Reply)])),
 	Reply.
 
 
@@ -428,7 +431,7 @@ rename(_, OldParent, OldName, NewParent, NewName, _, S) ->
 		cache = OldCache1
 	} = OldParentNode = gb_trees:get(OldParent, Inodes),
 
-	case catch Lookup(OldOid, OldName, OldCache1) of
+	Reply = case catch Lookup(OldOid, OldName, OldCache1) of
 		{entry, ChildOid, OldCache2} ->
 			#vnode{oid=NewOid, ifc=#ifc{link=NewLink}} =
 				gb_trees:get(NewParent, Inodes),
@@ -459,11 +462,15 @@ rename(_, OldParent, OldName, NewParent, NewName, _, S) ->
 
 		{error, Error} ->
 			{#fuse_reply_err{ err = Error }, S}
-	end.
+	end,
+	?DEBUG(io:format("rename(~p, ~s, ~p, ~s) -> ~p~n", [OldParent, OldName, NewParent, NewName, element(1, Reply)])),
+	Reply.
 
 
 unlink(_, Parent, Name, _, S) ->
-	do_unlink(Parent, Name, S).
+	Reply = do_unlink(Parent, Name, S),
+	?DEBUG(io:format("unlink(~p, ~s) -> ~p~n", [Parent, Name, element(1, Reply)])),
+	Reply.
 
 
 link(_, Ino, NewParent, NewName, _, S) ->
@@ -475,13 +482,13 @@ link(_, Ino, NewParent, NewName, _, S) ->
 		cache   = ParentCache,
 		timeout = Timeout
 	} = ParentNode = gb_trees:get(NewParent, Inodes),
-	case catch Link(ParentOid, ChildOid, NewName, ParentCache) of
+	Reply = case catch Link(ParentOid, ChildOid, NewName, ParentCache) of
 		{ok, NewCache} ->
 			S2 = S#state{inodes=gb_trees:update(NewParent,
 				ParentNode#vnode{cache=NewCache}, Inodes)},
 			case do_lookup_new(NewParent, ChildOid, GetNode, Timeout, S2) of
 				{ok, ChildIno, ChildNode, Timeout, S3} ->
-					case make_entry_param(ChildIno, ChildNode, Timeout) of
+					case make_entry_param(ChildIno, ChildNode, Timeout, S3) of
 						{ok, EntryParam} ->
 							{#fuse_reply_entry{fuse_entry_param=EntryParam}, S3};
 
@@ -503,7 +510,9 @@ link(_, Ino, NewParent, NewName, _, S) ->
 
 		{error, Error} ->
 			{#fuse_reply_err{ err = Error }, S}
-	end.
+	end,
+	?DEBUG(io:format("link(~p, ~p, ~s) -> ~p~n", [Ino, NewParent, NewName, element(1, Reply)])),
+	Reply.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -599,7 +608,7 @@ do_lookup_new(ParentIno, ChildOid, GetNode, Timeout, S) ->
 	end.
 
 
-make_entry_param(ChildIno, ChildNode, ParentTimeout) ->
+make_entry_param(ChildIno, ChildNode, ParentTimeout, S) ->
 	#vnode{
 		oid     = ChildOid,
 		ifc     = #ifc{ getattr = GetAttr },
@@ -607,7 +616,7 @@ make_entry_param(ChildIno, ChildNode, ParentTimeout) ->
 	} = ChildNode,
 	case catch GetAttr(ChildOid) of
 		{ok, Attr1} ->
-			Attr2 = Attr1#stat{st_ino=ChildIno},
+			Attr2 = fixup_attr(Attr1, ChildIno, S),
 			{
 				ok,
 				#fuse_entry_param{
@@ -653,6 +662,55 @@ add_file_handler(Handler, #state{files=Files} = S) ->
 		false -> {Max, _} = gb_trees:largest(Files), Max+1
 	end,
 	{Id, S#state{files = gb_trees:enter(Id, Handler, Files)}}.
+
+
+do_setattr(Ino, VNode, NewAttr, ToSet, S) ->
+	#vnode{
+		oid     = Oid,
+		ifc     = #ifc{getattr=GetAttr, truncate=Truncate}
+	} = VNode,
+	Attr1 = if
+		(ToSet band ?FUSE_SET_ATTR_SIZE) =/= 0 ->
+			case Truncate(Oid, NewAttr#stat.st_size) of
+				{ok, TmpAttr}-> fixup_attr(TmpAttr, Ino, S);
+				Error -> throw(Error)
+			end;
+
+		true ->
+			case GetAttr(Oid) of
+				{ok, TmpAttr} -> fixup_attr(TmpAttr, Ino, S);
+				Error -> throw(Error)
+			end
+	end,
+	if
+		(((ToSet band ?FUSE_SET_ATTR_UID) =/= 0) and
+		 (NewAttr#stat.st_uid =/= Attr1#stat.st_uid)) ->
+			throw({error, eperm});
+
+		(((ToSet band ?FUSE_SET_ATTR_GID) =/= 0) and
+		 (NewAttr#stat.st_gid =/= Attr1#stat.st_gid)) ->
+			throw({error, eperm});
+
+		% TODO: maybe not a good idea...
+		(ToSet band ?FUSE_SET_ATTR_MODE) =/= 0 ->
+			throw({error, eperm});
+
+		true ->
+			ok
+	end,
+	Attr2 = if
+		(ToSet band ?FUSE_SET_ATTR_ATIME) =/= 0 ->
+			Attr1#stat{st_atime=NewAttr#stat.st_atime};
+		true ->
+			Attr1
+	end,
+	Attr3 = if
+		(ToSet band ?FUSE_SET_ATTR_MTIME) =/= 0 ->
+			Attr2#stat{st_mtime=NewAttr#stat.st_mtime};
+		true ->
+			Attr2
+	end,
+	{ok, Attr3}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -717,9 +775,9 @@ stores_opendir(stores, Cache) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 doc_make_node({doc, Store, Doc} = Oid) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
-			case store:stat(Store, Rev) of
+	case fuse_store:lookup(Store, Doc) of
+		{ok, Rev} ->
+			case fuse_store:stat(Store, Rev) of
 				{ok, #rev_stat{type=Type}} ->
 					case Type of
 						<<"org.hotchpotch.store">> ->
@@ -763,9 +821,9 @@ doc_make_node_dict(Oid) ->
 
 
 dict_getattr({doc, Store, Doc}) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
-			case store:stat(Store, Rev) of
+	case fuse_store:lookup(Store, Doc) of
+		{ok, Rev} ->
+			case fuse_store:stat(Store, Rev) of
 				{ok, #rev_stat{mtime=Mtime}} ->
 					{ok, #stat{
 						st_mode  = ?S_IFDIR bor 8#0777,
@@ -805,8 +863,25 @@ dict_create({doc, Store, Doc}, Name, Cache) ->
 				{ok, {dlink, ChildDoc, _Revs}} ->
 					{entry, {doc, Store, ChildDoc}, NewCache};
 
-				_ ->
-					{error, eacces, NewCache}
+				{ok, _} ->
+					{error, eacces, NewCache};
+
+				error ->
+					case create_empty_file(Store, Name) of
+						{ok, NewDoc, NewRev} ->
+							Update = fun(Dict) ->
+								dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
+							end,
+							case dict_update(Store, Doc, NewCache, Update) of
+								{ok, AddCache} ->
+									{entry, {doc, Store, NewDoc}, AddCache};
+								{error, _Reason, _AddCache} = Error ->
+									Error
+							end;
+
+						{error, Reason} ->
+							{error, Reason, NewCache}
+					end
 			end;
 
 		_ ->
@@ -851,11 +926,11 @@ dict_opendir_filter(_, _) ->
 
 
 dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
-	case store:lookup(Store, Doc) of
-		{ok, CacheRev, _PreRevs} ->
+	case fuse_store:lookup(Store, Doc) of
+		{ok, CacheRev} ->
 			{ok, CacheEntries, Cache};
 
-		{ok, Rev, _PreRevs} ->
+		{ok, Rev} ->
 			case util:read_rev_struct(Rev, <<"HPSD">>) of
 				{ok, Entries} when is_record(Entries, dict, 9) ->
 					{ok, Entries, {Rev, Entries}};
@@ -869,26 +944,14 @@ dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 	end.
 
 
-dict_write_entries(Store, Doc, Entries, Cache) ->
-	case write_struct(Store, Doc, <<"HPSD">>, Entries) of
-		{ok, Rev}      -> {ok, {Rev, Entries}};
-		{error, Error} -> {error, Error, Cache}
-	end.
-
-
 dict_link({doc, Store, Doc}, {doc, ChildStore, ChildDoc}, Name, Cache)
 	when Store =:= ChildStore ->
-	case store:lookup(Store, ChildDoc) of
-		{ok, ChildRev, _PreRevs} ->
-			case dict_read_entries(Store, Doc, Cache) of
-				{ok, Entries, NewCache} ->
-					NewEntries = dict:store(Name, {dlink, ChildDoc, [ChildRev]},
-						Entries),
-					dict_write_entries(Store, Doc, NewEntries, NewCache);
-
-				error ->
-					{error, enoent}
-			end;
+	case fuse_store:lookup(Store, ChildDoc) of
+		{ok, ChildRev} ->
+			Update = fun(Entries) ->
+				dict:store(Name, {dlink, ChildDoc, [ChildRev]}, Entries)
+			end,
+			dict_update(Store, Doc, Cache, Update);
 
 		error ->
 			{error, enoent}
@@ -899,15 +962,55 @@ dict_link(_, _, _, _) ->
 
 
 dict_unlink({doc, Store, Doc}, Name, Cache) ->
-	case dict_read_entries(Store, Doc, Cache) of
-		{ok, Entries, NewCache} ->
-			NewEntries = dict:erase(Name, Entries),
-			dict_write_entries(Store, Doc, NewEntries, NewCache);
+	Update = fun(Entries) -> dict:erase(Name, Entries) end,
+	dict_update(Store, Doc, Cache, Update).
 
-		error ->
-			{error, enoent}
+
+dict_update(Store, Doc, Cache, Fun) ->
+	case fuse_store:open_doc(Store, Doc, true) of
+		{ok, Rev, Handle} ->
+			case dict_update_cache(Handle, Rev, Cache) of
+				{ok, Entries, NewCache} ->
+					NewEntries = Fun(Entries),
+					dict_write_entries(Handle, NewEntries, NewCache);
+
+				Error ->
+					Error
+			end;
+
+		Error ->
+			Error
 	end.
 
+
+dict_update_cache(_Handle, Rev, {Rev, Struct} = Cache) ->
+	{ok, Struct, Cache};
+
+dict_update_cache(Handle, Rev, _Cache) ->
+	case read_struct(Handle, <<"HPSD">>) of
+		{ok, Struct} when is_record(Struct, dict, 9) ->
+			{ok, Struct, {Rev, Struct}};
+		{ok, _} ->
+			{error, einval};
+		Error ->
+			Error
+	end.
+
+
+dict_write_entries(Handle, Entries, Cache) ->
+	case write_struct(Handle, <<"HPSD">>, Entries) of
+		ok ->
+			case fuse_store:commit(Handle) of
+				{ok, Rev} ->
+					{ok, {Rev, Entries}};
+				{error, Reason} ->
+					{error, Reason, Cache}
+			end;
+
+		{error, Error} ->
+			fuse_store:abort(Handle),
+			{error, Error, Cache}
+	end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -929,9 +1032,9 @@ doc_make_node_set(Oid) ->
 
 
 set_getattr({doc, Store, Doc}) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
-			case store:stat(Store, Rev) of
+	case fuse_store:lookup(Store, Doc) of
+		{ok, Rev} ->
+			case fuse_store:stat(Store, Rev) of
 				{ok, #rev_stat{mtime=Mtime}} ->
 					{ok, #stat{
 						st_mode  = ?S_IFDIR bor 8#0555,
@@ -1005,11 +1108,11 @@ set_opendir_filter(_) ->
 
 
 set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
-	case store:lookup(Store, Doc) of
-		{ok, CacheRev, _PreRevs} ->
+	case fuse_store:lookup(Store, Doc) of
+		{ok, CacheRev} ->
 			{ok, CacheEntries, Cache};
 
-		{ok, Rev, _PreRevs} ->
+		{ok, Rev} ->
 			case util:read_rev_struct(Rev, <<"HPSD">>) of
 				{ok, Entries} when is_list(Entries) ->
 					RawList = map_filter(
@@ -1041,8 +1144,8 @@ set_read_title(Store, Doc) ->
 	end.
 
 set_read_title_meta(Store, Doc) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
+	case fuse_store:lookup(Store, Doc) of
+		{ok, Rev} ->
 			case util:read_rev_struct(Rev, <<"META">>) of
 				{ok, Meta} ->
 					case meta_read_entry(Meta, [<<"org.hotchpotch.annotation">>, <<"title">>]) of
@@ -1096,16 +1199,16 @@ doc_make_node_file(Oid) ->
 		timeout = 1000,
 		oid     = Oid,
 		ifc     = #ifc{
-			getattr = fun file_getattr/1,
-			setattr = fun file_setattr/4,
-			open    = fun file_open/2
+			getattr  = fun file_getattr/1,
+			truncate = fun file_truncate/2,
+			open     = fun file_open/2
 		}
 	}}.
 
 
 file_getattr({doc, Store, Doc}) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
+	case fuse_store:lookup(Store, Doc) of
+		{ok, Rev} ->
 			file_getattr_rev(Store, Rev);
 		error ->
 			{error, enoent}
@@ -1113,7 +1216,7 @@ file_getattr({doc, Store, Doc}) ->
 
 
 file_getattr_rev(Store, Rev) ->
-	case store:stat(Store, Rev) of
+	case fuse_store:stat(Store, Rev) of
 		{ok, #rev_stat{parts=Parts, mtime=Mtime}} ->
 			Size = case find_entry(
 				fun({FCC, Size, _Hash}) ->
@@ -1141,78 +1244,51 @@ file_getattr_rev(Store, Rev) ->
 	end.
 
 
-file_setattr({doc, Store, Doc}, Ino, Attr, ToSet) ->
-	if
-		(ToSet band ?FUSE_SET_ATTR_SIZE) =/= 0 ->
-			file_truncate(Store, Doc, Ino, Attr#stat.st_size);
-
-		true ->
-			{error, enosys}
-	end.
-
-
-file_truncate(Store, Doc, Ino, Size) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
-			case store:update(Store, Doc, Rev, ?FUSE_CC) of
-				{ok, Handle} ->
-					case store:truncate(Handle, <<"FILE">>, Size) of
-						ok ->
-							case file_release_commit(Store, Doc, Handle) of
-								{ok, CurRev} ->
-									file_getattr_rev(Store, CurRev);
-								Error ->
-									Error
-							end;
-
-						{error, _} = Error ->
-							store:abort(Handle),
+file_truncate({doc, Store, Doc}, Size) ->
+	case fuse_store:open_doc(Store, Doc, true) of
+		{ok, _Rev, Handle} ->
+			case fuse_store:truncate(Handle, <<"FILE">>, Size) of
+				ok ->
+					case fuse_store:commit(Handle) of
+						{ok, CurRev} ->
+							file_getattr_rev(Store, CurRev);
+						Error ->
 							Error
 					end;
 
-				{error, _} ->
-					{error, enoent}
+				{error, _} = Error ->
+					fuse_store:abort(Handle),
+					Error
 			end;
 
-		error ->
-			{error, enoent}
+		{error, _} = Error ->
+			Error
 	end.
 
 
 file_open({doc, Store, Doc}, Flags) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
-			Reply = if
-				(Flags band ?O_ACCMODE) =/= ?O_RDONLY ->
-					store:update(Store, Doc, Rev, ?FUSE_CC);
-				true ->
-					store:peek(Store, Rev)
-			end,
-			case Reply of
-				{ok, Handle} ->
-					{ok, #handler{
-						read = fun(Size, Offset) ->
-							file_read(Handle, Size, Offset)
-						end,
-						write = fun(Data, Offset) ->
-							file_write(Handle, Data, Offset)
-						end,
-						release = fun(Changed) ->
-							file_release(Store, Doc, Handle, Changed)
-						end
-					}};
+	Write = (Flags band ?O_ACCMODE) =/= ?O_RDONLY,
+	case fuse_store:open_doc(Store, Doc, Write) of
+		{ok, _Rev, Handle} ->
+			{ok, #handler{
+				read = fun(Size, Offset) ->
+					file_read(Handle, Size, Offset)
+				end,
+				write = fun(Data, Offset) ->
+					file_write(Handle, Data, Offset)
+				end,
+				release = fun(Changed) ->
+					file_release(Handle, Changed)
+				end
+			}};
 
-				{error, _} ->
-					{error, enoent}
-			end;
-
-		error ->
-			{error, enoent}
+		{error, _} = Error ->
+			Error
 	end.
 
 
 file_read(Handle, Size, Offset) ->
-	case store:read(Handle, <<"FILE">>, Offset, Size) of
+	case fuse_store:read(Handle, <<"FILE">>, Offset, Size) of
 		{ok, _Data} = R  -> R;
 		{error, enoent}  -> {ok, <<>>};
 		{error, _}       -> {error, eio}
@@ -1220,33 +1296,13 @@ file_read(Handle, Size, Offset) ->
 
 
 file_write(Handle, Data, Offset) ->
-	store:write(Handle, <<"FILE">>, Offset, Data).
+	fuse_store:write(Handle, <<"FILE">>, Offset, Data).
 
 
-file_release(Store, Doc, Handle, Changed) ->
+file_release(Handle, Changed) ->
 	case Changed of
-		false -> store:abort(Handle);
-		true  -> file_release_commit(Store, Doc, Handle)
-	end.
-
-
-file_release_commit(Store, Doc, Handle) ->
-	case store:commit(Handle, util:get_time()) of
-		{ok, _Rev} = Ok ->
-			Ok;
-
-		conflict ->
-			case store:lookup(Store, Doc) of
-				{ok, CurRev, _PreRevs} ->
-					store:set_parents(Handle, [CurRev]),
-					file_release_commit(Store, Doc, Handle);
-				error ->
-					store:abort(Handle),
-					{error, enoent}
-			end;
-
-		{error, _} = Error ->
-			Error
+		false -> fuse_store:abort(Handle);
+		true  -> fuse_store:commit(Handle)
 	end.
 
 
@@ -1309,62 +1365,77 @@ sanitize(S) ->
 	lists:filter(fun(C) -> (C /= $/) and (C >= 31) end, S).
 
 
-write_struct(Store, Doc, Part, Struct) ->
+read_struct(Handle, Part) ->
+	case read_struct_loop(Handle, Part, 0, <<>>) of
+		{ok, Data} ->
+			case catch struct:decode(Data) of
+				{'EXIT', _Reason} ->
+					{error, einval};
+				Struct ->
+					{ok, Struct}
+			end;
+
+		{error, Reason} ->
+			{error, Reason}
+	end.
+
+
+read_struct_loop(Handle, Part, Offset, Acc) ->
+	Length = 16#10000,
+	case fuse_store:read(Handle, Part, Offset, Length) of
+		{ok, _Error, <<>>} ->
+			{ok, Acc};
+		{ok, _Errors, Data} ->
+			read_struct_loop(Handle, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
+		{error, Reason, _Errors} ->
+			{error, Reason}
+	end.
+
+
+write_struct(Handle, Part, Struct) ->
 	Data = struct:encode(Struct),
-	case write_struct_open(Store, Doc) of
+	case fuse_store:truncate(Handle, Part, 0) of
+		ok ->
+			fuse_store:write(Handle, Part, 0, Data);
+		{error, _} = Error ->
+			Error
+	end.
+
+
+create_empty_file(Store, Name) ->
+	Doc = crypto:rand_bytes(16),
+	MetaData = dict:store(
+		<<"org.hotchpotch.annotation">>,
+		dict:store(
+			<<"title">>,
+			Name,
+			dict:store(
+				<<"comment">>,
+				<<"Created by FUSE interface">>,
+				dict:new())),
+		dict:new()),
+	case store:create(Store, Doc, <<"public.text">>, ?FUSE_CC) of
 		{ok, Handle} ->
-			case store:truncate(Handle, Part, 0) of
-				ok ->
-					case store:write(Handle, Part, 0, Data) of
-						ok ->
-							write_struct_close(Store, Doc, Handle);
-
-						{error, _} = Error ->
-							store:abort(Handle),
-							Error
-					end;
-
+			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+			store:write(Handle, <<"FILE">>, 0, <<>>),
+			case store:commit(Handle, util:get_time()) of
+				{ok, Rev} ->
+					{ok, Doc, Rev};
 				{error, _} = Error ->
-					store:abort(Handle),
 					Error
 			end;
 
-		{error, _} = Error ->
+		Error ->
 			Error
 	end.
 
 
-write_struct_open(Store, Doc) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, _PreRevs} ->
-			case store:update(Store, Doc, Rev, ?FUSE_CC) of
-				{ok, _} = Ok       -> Ok;
-				{error, conflict}  -> write_struct_open(Store, Doc);
-				{error, _} = Error -> Error
-			end;
-
-		error ->
-			{error, enoent}
-	end.
-
-
-write_struct_close(Store, Doc, Handle) ->
-	case store:commit(Handle, util:get_time()) of
-		{ok, _Rev} = Ok ->
-			Ok;
-
-		conflict ->
-			case store:lookup(Store, Doc) of
-				{ok, CurRev, _PreRevs} ->
-					store:set_parents(Handle, [CurRev]),
-					write_struct_close(Store, Doc, Handle);
-				error ->
-					store:abort(Handle),
-					{error, enoent}
-			end;
-
-		{error, _} = Error ->
-			Error
-	end.
+fixup_attr(Attr, Ino, #state{uid=Uid, gid=Gid, umask=Umask}) ->
+	Attr#stat{
+		st_ino  = Ino,
+		st_uid  = Uid,
+		st_gid  = Gid,
+		st_mode = Attr#stat.st_mode band Umask
+	}.
 
 -endif.
