@@ -2,18 +2,18 @@
 -ifndef(windows).
 -behaviour (fuserl).
 
--define(DEBUG(X), X).
-%-define(DEBUG(X), ok).
+%-define(DEBUG(X), X).
+-define(DEBUG(X), ok).
 
 -export([ start_link/3 ]).
 -export([ code_change/3, handle_info/2, init/1, terminate/2 ]).
 -export([ getattr/4, setattr/7, lookup/5, forget/5,
-           opendir/5, readdir/7, releasedir/5,
+           opendir/5, readdir/7, releasedir/5, mkdir/6, rmdir/5,
            create/7, open/5, read/7, write/7, release/5
 		 ]).
 -export([ access/5, flush/5, fsync/6, fsyncdir/6, getlk/6, getxattr/6, link/6,
-           listxattr/5, mkdir/6, mknod/7, readlink/4, removexattr/5, rename/7,
-           rmdir/5, setlk/7, setxattr/7, statfs/4, symlink/6, unlink/5 ]).
+           listxattr/5, mknod/7, readlink/4, removexattr/5, rename/7,
+           setlk/7, setxattr/7, statfs/4, symlink/6, unlink/5 ]).
 
 -include("store.hrl").
 -include_lib ("fuserl/include/fuserl.hrl").
@@ -52,7 +52,8 @@
 	open     = fun(_, _) -> {error, eisdir} end,
 	create   = fun(_, _) -> {error, eisdir} end,
 	link     = fun(_, _, _, _) -> {error, enotdir} end,
-	unlink   = fun(_, _, _) -> {error, enotdir} end
+	unlink   = fun(_, _, _) -> {error, enotdir} end,
+	mkdir    = fun(_, _, _) -> {error, enotdir} end
 }).
 
 -record(handler, {read, write, release, changed=false}).
@@ -133,10 +134,6 @@ listxattr(_, Ino, Size, _, S) ->
 	io:format("listxattr(~p, ~p)~n", [Ino, Size]),
 	{#fuse_reply_err{err = enosys}, S}.
 
-mkdir(_, Parent, Name, Mode, _, S) ->
-	io:format("mkdir(~p, ~s, ~p)~n", [Parent, Name, Mode]),
-	{#fuse_reply_err{err = enosys}, S}.
-
 mknod(_, Parent, Name, Mode, Dev, _, S) ->
 	io:format("mknod(~p, ~s, ~p, ~p)~n", [Parent, Name, Mode, Dev]),
 	{#fuse_reply_err{err = enosys}, S}.
@@ -147,10 +144,6 @@ readlink(_, Ino, _, S) ->
 
 removexattr(_, Ino, Name, _, S) ->
 	io:format("removexattr(~p, ~s)~n", [Ino, Name]),
-	{#fuse_reply_err{err = enosys}, S}.
-
-rmdir(_, Ino, Name, _, S) ->
-	io:format("rmdir(~p, ~s)~n", [Ino, Name]),
 	{#fuse_reply_err{err = enosys}, S}.
 
 setlk(_, Ino, Fi, Lock, Sleep, _, S) ->
@@ -515,6 +508,52 @@ link(_, Ino, NewParent, NewName, _, S) ->
 	Reply.
 
 
+mkdir(_, Parent, Name, _Mode, _, S) ->
+	Inodes = S#state.inodes,
+	#vnode{
+		oid     = ParentOid,
+		ifc     = #ifc{mkdir=MkDir, getnode=GetNode},
+		cache   = ParentCache,
+		timeout = Timeout
+	} = ParentNode = gb_trees:get(Parent, Inodes),
+	Reply = case catch MkDir(ParentOid, Name, ParentCache) of
+		{ok, ChildOid, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(Parent,
+				ParentNode#vnode{cache=NewCache}, Inodes)},
+			case do_lookup_new(Parent, ChildOid, GetNode, Timeout, S2) of
+				{ok, ChildIno, ChildNode, Timeout, S3} ->
+					case make_entry_param(ChildIno, ChildNode, Timeout, S3) of
+						{ok, EntryParam} ->
+							{#fuse_reply_entry{fuse_entry_param=EntryParam}, S3};
+
+						error ->
+							{
+								#fuse_reply_err{ err = enoent },
+								do_forget(ChildIno, 1, S3)
+							}
+					end;
+
+				{error, Error, S3} ->
+					{#fuse_reply_err{ err = Error }, S3}
+			end;
+
+		{error, Error, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(Parent,
+				ParentNode#vnode{cache=NewCache}, Inodes)},
+			{#fuse_reply_err{ err = Error }, S2};
+
+		{error, Error} ->
+			{#fuse_reply_err{ err = Error }, S}
+	end,
+	?DEBUG(io:format("mkdir(~p, ~s) -> ~p~n", [Parent, Name, element(1, Reply)])),
+	Reply.
+
+
+rmdir(_, Parent, Name, _, S) ->
+	Reply = do_unlink(Parent, Name, S),
+	?DEBUG(io:format("rmdir(~p, ~s) -> ~p~n", [Parent, Name, element(1, Reply)])),
+	Reply.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Common FUSE functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -692,8 +731,8 @@ do_setattr(Ino, VNode, NewAttr, ToSet, S) ->
 			throw({error, eperm});
 
 		% TODO: maybe not a good idea...
-		(ToSet band ?FUSE_SET_ATTR_MODE) =/= 0 ->
-			throw({error, eperm});
+		%(ToSet band ?FUSE_SET_ATTR_MODE) =/= 0 ->
+		%	throw({error, eperm});
 
 		true ->
 			ok
@@ -814,7 +853,8 @@ doc_make_node_dict(Oid) ->
 			opendir = fun dict_opendir/2,
 			create  = fun dict_create/3,
 			link    = fun dict_link/4,
-			unlink  = fun dict_unlink/3
+			unlink  = fun dict_unlink/3,
+			mkdir   = fun dict_mkdir/3
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -875,6 +915,36 @@ dict_create({doc, Store, Doc}, Name, Cache) ->
 							case dict_update(Store, Doc, NewCache, Update) of
 								{ok, AddCache} ->
 									{entry, {doc, Store, NewDoc}, AddCache};
+								{error, _Reason, _AddCache} = Error ->
+									Error
+							end;
+
+						{error, Reason} ->
+							{error, Reason, NewCache}
+					end
+			end;
+
+		_ ->
+			{error, eacces}
+	end.
+
+
+dict_mkdir({doc, Store, Doc}, Name, Cache) ->
+	case dict_read_entries(Store, Doc, Cache) of
+		{ok, Entries, NewCache} ->
+			case dict:find(Name, Entries) of
+				{ok, _} ->
+					{error, eexist, NewCache};
+
+				error ->
+					case create_empty_directory(Store, Name) of
+						{ok, NewDoc, NewRev} ->
+							Update = fun(Dict) ->
+								dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
+							end,
+							case dict_update(Store, Doc, NewCache, Update) of
+								{ok, AddCache} ->
+									{ok, {doc, Store, NewDoc}, AddCache};
 								{error, _Reason, _AddCache} = Error ->
 									Error
 							end;
@@ -1418,6 +1488,34 @@ create_empty_file(Store, Name) ->
 		{ok, Handle} ->
 			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
 			store:write(Handle, <<"FILE">>, 0, <<>>),
+			case store:commit(Handle, util:get_time()) of
+				{ok, Rev} ->
+					{ok, Doc, Rev};
+				{error, _} = Error ->
+					Error
+			end;
+
+		Error ->
+			Error
+	end.
+
+
+create_empty_directory(Store, Name) ->
+	Doc = crypto:rand_bytes(16),
+	MetaData = dict:store(
+		<<"org.hotchpotch.annotation">>,
+		dict:store(
+			<<"title">>,
+			Name,
+			dict:store(
+				<<"comment">>,
+				<<"Created by FUSE interface">>,
+				dict:new())),
+		dict:new()),
+	case store:create(Store, Doc, <<"org.hotchpotch.dict">>, ?FUSE_CC) of
+		{ok, Handle} ->
+			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+			store:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),
 			case store:commit(Handle, util:get_time()) of
 				{ok, Rev} ->
 					{ok, Doc, Rev};
