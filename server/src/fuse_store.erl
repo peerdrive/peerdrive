@@ -207,11 +207,11 @@ do_commit(FuseHandle, S) ->
 		{ok, Handle, Store, Doc} ->
 			case store:suspend(Handle, util:get_time()) of
 				{ok, Rev} = Ok ->
-					S2 = mark_closed(Store, Doc, Rev, S),
+					S2 = mark_closed(FuseHandle, Store, Doc, Rev, S),
 					{Ok, S2};
 
 				{error, _Reason} = Error ->
-					S2 = mark_closed(Store, Doc, S),
+					S2 = mark_closed(FuseHandle, Store, Doc, S),
 					{Error, S2}
 			end;
 
@@ -224,7 +224,7 @@ do_abort(FuseHandle, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle, Store, Doc} ->
 			store:abort(Handle),
-			S2 = mark_closed(Store, Doc, S),
+			S2 = mark_closed(FuseHandle, Store, Doc, S),
 			{ok, S2};
 
 		error ->
@@ -327,21 +327,28 @@ mark_open(Store, Doc, #state{known=Known}=S) ->
 	S#state{known=NewKnown}.
 
 
-mark_closed(Store, Doc, Rev, #state{known=Known}=S) ->
+mark_closed(Handle, Store, Doc, Rev, #state{handles=Handles, known=Known}=S) ->
 	Ts = ts(),
-	NewKnown = dict:store({Store, Doc}, {Rev, Ts, false}, Known),
-	check_timer_running(S#state{known=NewKnown}, Ts).
+	S2 = S#state{
+		known   = dict:store({Store, Doc}, {Rev, Ts, false}, Known),
+		handles = dict:erase(Handle, Handles)
+	},
+	check_timer_running(S2, Ts).
 
 
-mark_closed(Store, Doc, #state{known=Known}=S) ->
+mark_closed(Handle, Store, Doc, #state{handles=Handles, known=Known}=S) ->
 	Key = {Store, Doc},
+	NewHandles = dict:erase(Handle, Handles),
 	case dict:find(Key, Known) of
 		{ok, {Rev, _Ts, _Open}} ->
 			Ts = ts(),
-			S2 = S#state{known=dict:store(Key, {Rev, Ts, false}, Known)},
+			S2 = S#state{
+				known   = dict:store(Key, {Rev, Ts, false}, Known),
+				handles = NewHandles
+			},
 			check_timer_running(S2, Ts);
 		error ->
-			S
+			S#state{handles=NewHandles}
 	end.
 
 
@@ -391,7 +398,7 @@ check_expired(#state{known=Known}=S) ->
 		Known),
 	NewKnown = case Expired of
 		[] -> Known;
-		_  -> dict:filter(fun(_, {_Rev, Ts, _Open}) -> Ts =< Now end, Known)
+		_  -> dict:filter(fun(_, {_Rev, Ts, _Open}) -> Ts > Now end, Known)
 	end,
 	NewTimRef = case Timeout of
 		never -> undefined;
