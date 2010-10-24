@@ -16,7 +16,7 @@
 
 -module(store).
 
--export([guid/1, contains/2, lookup/2, stat/2]).
+-export([guid/1, statfs/1, contains/2, lookup/2, stat/2]).
 -export([put_doc/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
 -export([abort/1, commit/2, create/4, fork/4, get_parents/1, get_type/1,
@@ -32,6 +32,11 @@
 %% @spec guid(Store::#store{}) -> guid()
 guid(#store{this=Store, guid=Guid}) ->
 	Guid(Store).
+
+%% @doc Get file system statistics
+%% @spec statfs(Store::#store{}) -> {ok, #fs_stat{}} | {error, Reason}
+statfs(#store{this=Store, statfs=StatFs}) ->
+	StatFs(Store).
 
 %% @doc Lookup a document.
 %%

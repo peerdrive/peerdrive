@@ -101,6 +101,11 @@ fsck(Store) ->
 guid(Store) ->
 	gen_server:call(Store, guid).
 
+%% @doc Get file system statistics
+%% @see store:statfs/1
+statfs(Store) ->
+	gen_server:call(Store, statfs).
+
 %% @doc Lookup a document.
 %% @see store:lookup/2
 lookup(Store, Doc) ->
@@ -274,6 +279,9 @@ handle_info(Info, State) ->
 handle_call_internal(guid, _From, S) ->
 	{reply, S#state.guid, S};
 
+handle_call_internal(statfs, _From, S) ->
+	{reply, do_statfs(S), S};
+
 % returns `{ok, Rev} | error'
 handle_call_internal({lookup, Doc}, _From, S) ->
 	case dict:find(Doc, S#state.uuids) of
@@ -442,6 +450,7 @@ make_interface(Pid) ->
 	#store{
 		this               = Pid,
 		guid               = fun guid/1,
+		statfs             = fun statfs/1,
 		contains           = fun contains/2,
 		lookup             = fun lookup/2,
 		stat               = fun stat/2,
@@ -498,6 +507,16 @@ crd_write_part(S, RawContent) ->
 	file:write_file(Name, Content),
 	S2 = do_parts_ref_inc(S, [Hash]),
 	{S2, Hash}.
+
+
+do_statfs(_S) ->
+	% TODO: implement
+	{ok, #fs_stat{
+		bsize  = 4096,
+		blocks = 1024,
+		bfree  = 1024,
+		bavail = 1024
+	}}.
 
 
 % returns `{ok, #stat{}} | {error, Reason}'

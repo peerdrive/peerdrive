@@ -28,6 +28,7 @@
 	{
 		this,
 		guid,
+		statfs,
 		contains,
 		lookup,
 		stat,
@@ -43,6 +44,14 @@
 		put_rev_start,
 		sync_get_changes,
 		sync_set_anchor
+	}).
+
+-record(fs_stat,
+	{
+		bsize,  % size of each block (power of two, >=512)
+		blocks, % overall number of blocks in store
+		bfree,  % number of free blocks
+		bavail  % number of blocks available to user
 	}).
 
 -record(rev_stat,

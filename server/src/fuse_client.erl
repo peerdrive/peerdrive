@@ -5,15 +5,14 @@
 %-define(DEBUG(X), X).
 -define(DEBUG(X), ok).
 
--export([ start_link/3 ]).
--export([ code_change/3, handle_info/2, init/1, terminate/2 ]).
--export([ getattr/4, setattr/7, lookup/5, forget/5,
-           opendir/5, readdir/7, releasedir/5, mkdir/6, rmdir/5,
-           create/7, open/5, read/7, write/7, release/5
-		 ]).
--export([ access/5, flush/5, fsync/6, fsyncdir/6, getlk/6, getxattr/6, link/6,
-           listxattr/5, mknod/7, readlink/4, removexattr/5, rename/7,
-           setlk/7, setxattr/7, statfs/4, symlink/6, unlink/5 ]).
+-export([start_link/3]).
+-export([code_change/3, handle_info/2, init/1, terminate/2]).
+-export([create/7, forget/5, getattr/4, link/6, lookup/5, mkdir/6, open/5,
+         opendir/5, read/7, readdir/7, release/5, releasedir/5, rename/7,
+         rmdir/5, setattr/7, statfs/4, unlink/5, write/7]).
+-export([access/5, flush/5, fsync/6, fsyncdir/6, getlk/6, getxattr/6,
+         listxattr/5, mknod/7, readlink/4, removexattr/5, setlk/7, setxattr/7,
+         symlink/6]).
 
 -include("store.hrl").
 -include_lib ("fuserl/include/fuserl.hrl").
@@ -85,21 +84,8 @@ start_link(Dir, MountOpts, Options) ->
 	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Fuserl callbacks
+%% Fuserl callback stubs
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-init(Options) ->
-	State = #state{
-		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
-		cache  = gb_trees:empty(),
-		dirs   = gb_trees:empty(),
-		files  = gb_trees:empty(),
-		count  = 2, % 1 is the root inode
-		uid    = proplists:get_value(uid, Options, 0),
-		gid    = proplists:get_value(gid, Options, 0),
-		umask  = bnot proplists:get_value(umask, Options, 8#022)
-	},
-	{ok, State}.
 
 code_change (_OldVsn, State, _Extra) -> { ok, State }.
 handle_info (_Msg, State) -> { noreply, State }.
@@ -154,18 +140,27 @@ setxattr(_, Ino, Name, Value, Flags, _, S) ->
 	io:format("setxattr(~p, ~s, ~s, ~p)~n", [Ino, Name, Value, Flags]),
 	{#fuse_reply_err{err = enosys}, S}.
 
-statfs(_, Ino, _, S) ->
-	io:format("statfs(~p)~n", [Ino]),
-	{#fuse_reply_err{err = enosys}, S}.
-
 symlink(_, Link, Ino, Name, _, S) ->
 	io:format("symlink(~s, ~p, ~s)~n", [Link, Ino, Name]),
 	{#fuse_reply_err{err = enosys}, S}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% FUSE callbacks
+%% Fuserl callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+init(Options) ->
+	State = #state{
+		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
+		cache  = gb_trees:empty(),
+		dirs   = gb_trees:empty(),
+		files  = gb_trees:empty(),
+		count  = 2, % 1 is the root inode
+		uid    = proplists:get_value(uid, Options, 0),
+		gid    = proplists:get_value(gid, Options, 0),
+		umask  = bnot proplists:get_value(umask, Options, 8#022)
+	},
+	{ok, State}.
 
 getattr(_, Ino, _Cont, #state{inodes=Inodes} = S) ->
 	Reply = case gb_trees:lookup(Ino, Inodes) of
@@ -550,8 +545,43 @@ mkdir(_, Parent, Name, _Mode, _, S) ->
 
 
 rmdir(_, Parent, Name, _, S) ->
+	% FIXME: unlink only directory documents, not everything
 	Reply = do_unlink(Parent, Name, S),
 	?DEBUG(io:format("rmdir(~p, ~s) -> ~p~n", [Parent, Name, element(1, Reply)])),
+	Reply.
+
+
+statfs(_, Ino, _, #state{inodes=Inodes}=S) ->
+	#vnode{oid=Oid} = gb_trees:get(Ino, Inodes),
+	FsStat = case Oid of
+		{doc, Store, _Doc} ->
+			store:statfs(Store);
+		{rev, Store, _Rev} ->
+			store:statfs(Store);
+		_ ->
+			{ok, #fs_stat{
+				bsize  = 512,
+				blocks = 2048,
+				bfree  = 2048,
+				bavail = 2048
+			}}
+	end,
+	Reply = case FsStat of
+		{ok, Stat} ->
+			{
+				#fuse_reply_statfs{statvfs=#statvfs{
+					f_bsize  = Stat#fs_stat.bsize,
+					f_frsize = Stat#fs_stat.bsize,
+					f_blocks = Stat#fs_stat.blocks,
+					f_bfree  = Stat#fs_stat.bfree,
+					f_bavail = Stat#fs_stat.bavail
+				}},
+				S
+			};
+		{error, Reason} ->
+			{#fuse_reply_err{err=Reason}, S}
+	end,
+	?DEBUG(io:format("statfs(~p) -> ~w~n", [Ino, element(1, Reply)])),
 	Reply.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
