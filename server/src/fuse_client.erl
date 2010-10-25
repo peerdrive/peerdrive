@@ -162,20 +162,20 @@ init(Options) ->
 	},
 	{ok, State}.
 
+
 getattr(_, Ino, _Cont, #state{inodes=Inodes} = S) ->
-	Reply = case gb_trees:lookup(Ino, Inodes) of
-		{value, #vnode{oid=Oid, timeout=Timeout, ifc=#ifc{getattr=GetAttr}}} ->
-			case catch GetAttr(Oid) of
-				{ok, Attr1} ->
-					Attr2 = fixup_attr(Attr1, Ino, S),
-					{#fuse_reply_attr{attr=Attr2, attr_timeout_ms=Timeout}, S};
+	#vnode{
+		oid     = Oid,
+		timeout = Timeout,
+		ifc     = #ifc{getattr=GetAttr}
+	} = gb_trees:get(Ino, Inodes),
+	Reply = case catch GetAttr(Oid) of
+		{ok, Attr1} ->
+			Attr2 = fixup_attr(Attr1, Ino, S),
+			{#fuse_reply_attr{attr=Attr2, attr_timeout_ms=Timeout}, S};
 
-				{error, Error} ->
-					{#fuse_reply_err{err=Error}, S}
-			end;
-
-		none ->
-			{#fuse_reply_err{ err = enoent }, S}
+		{error, Error} ->
+			{#fuse_reply_err{err=Error}, S}
 	end,
 	?DEBUG(io:format("getattr(~p) -> ~p~n", [Ino, element(1, Reply)])),
 	Reply.
@@ -212,59 +212,59 @@ forget(_, Ino, N, _Cont, State) ->
 
 
 opendir(_, Ino, Fi, _Cont, #state{inodes=Inodes, dirs=Dirs} = S) ->
-	case gb_trees:lookup(Ino, Inodes) of
-		{value, #vnode{oid=Oid, parent=Parent, ifc=#ifc{opendir=OpenDir},
-		cache=Cache}=Node} ->
-			case catch OpenDir(Oid, Cache) of
-				{ok, Entries, NewCache} ->
-					Id = case gb_trees:is_empty(Dirs) of
-						true  -> 1;
-						false -> {Max, _} = gb_trees:largest(Dirs), Max+1
-					end,
-					{UpdatedEntries, _} = lists:mapfoldl(
-						fun(E, Acc) ->
-							{
-								E#direntry{
-									offset=Acc,
-									stat=#stat{st_ino=?UNKNOWN_INO}
-								},
-								Acc+1
-							}
-						end,
-						3,
-						Entries),
-					AllEntries = [
-						#direntry{ name = ".", offset = 1, stat = ?DIRATTR(Ino) },
-						#direntry{ name = "..", offset = 2, stat = ?DIRATTR(Parent) }
-					] ++ UpdatedEntries,
+	#vnode{
+		oid    = Oid,
+		parent = Parent,
+		ifc    = #ifc{opendir=OpenDir},
+		cache  = Cache
+	} = Node = gb_trees:get(Ino, Inodes),
+	Reply = case catch OpenDir(Oid, Cache) of
+		{ok, Entries, NewCache} ->
+			Id = case gb_trees:is_empty(Dirs) of
+				true  -> 1;
+				false -> {Max, _} = gb_trees:largest(Dirs), Max+1
+			end,
+			{UpdatedEntries, _} = lists:mapfoldl(
+				fun(E, Acc) ->
 					{
-						#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{fh = Id}},
-						S#state{
-							dirs   = gb_trees:enter(Id, AllEntries, Dirs),
-							inodes = gb_trees:update(Ino, Node#vnode{cache=NewCache},
-								Inodes)
-						}
-					};
+						E#direntry{
+							offset=Acc,
+							stat=#stat{st_ino=?UNKNOWN_INO}
+						},
+						Acc+1
+					}
+				end,
+				3,
+				Entries),
+			AllEntries = [
+				#direntry{ name = ".", offset = 1, stat = ?DIRATTR(Ino) },
+				#direntry{ name = "..", offset = 2, stat = ?DIRATTR(Parent) }
+			] ++ UpdatedEntries,
+			{
+				#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{fh = Id}},
+				S#state{
+					dirs   = gb_trees:enter(Id, AllEntries, Dirs),
+					inodes = gb_trees:update(Ino, Node#vnode{cache=NewCache},
+						Inodes)
+				}
+			};
 
-				{error, Error, NewCache} ->
-					{
-						#fuse_reply_err{ err = Error },
-						S#state{
-							inodes = gb_trees:update(Ino, Node#vnode{cache=NewCache},
-								Inodes)
-						}
-					};
+		{error, Error, NewCache} ->
+			{
+				#fuse_reply_err{ err = Error },
+				S#state{
+					inodes = gb_trees:update(Ino, Node#vnode{cache=NewCache},
+						Inodes)
+				}
+			};
 
-				{error, Error} ->
-					{#fuse_reply_err{ err = Error }, S}
-			end;
-
-		none ->
-			{#fuse_reply_err{ err = enoent }, S}
-	end.
+		{error, Error} ->
+			{#fuse_reply_err{ err = Error }, S}
+	end,
+	Reply.
 
 
-readdir(_Ctx, Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
+readdir(_Ctx, _Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
 	Id = Fi#fuse_file_info.fh,
 	Entries = gb_trees:get(Id, Dirs),
 	DirEntryList = take_while(
@@ -286,22 +286,17 @@ releasedir(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{dirs=Dirs} = S) ->
 
 
 open(_, Ino, Fi, _Cont, #state{inodes=Inodes} = S) ->
-	Reply = case gb_trees:lookup(Ino, Inodes) of
-		{value, #vnode{oid=Oid, ifc=#ifc{open=Open}}} ->
-			case catch Open(Oid, Fi#fuse_file_info.flags) of
-				{ok, Handler} ->
-					{Id, S2} = add_file_handler(Handler, S),
-					{
-						#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{fh = Id}},
-						S2
-					};
+	#vnode{oid=Oid, ifc=#ifc{open=Open}} = gb_trees:get(Ino, Inodes),
+	Reply = case catch Open(Oid, Fi#fuse_file_info.flags) of
+		{ok, Handler} ->
+			{Id, S2} = add_file_handler(Handler, S),
+			{
+				#fuse_reply_open{fuse_file_info=Fi#fuse_file_info{fh = Id}},
+				S2
+			};
 
-				{error, Error} ->
-					{#fuse_reply_err{ err = Error }, S}
-			end;
-
-		none ->
-			{#fuse_reply_err{ err = enoent }, S}
+		{error, Error} ->
+			{#fuse_reply_err{ err = Error }, S}
 	end,
 	?DEBUG(io:format("open(~p, ~p) -> ~p~n", [Ino, Fi, element(1, Reply)])),
 	Reply.
@@ -391,17 +386,13 @@ release(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{files=Files} = S) ->
 setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
 	Reply = case Fi of
 		null ->
-			case gb_trees:lookup(Ino, Inodes) of
-				{value, #vnode{timeout=Timeout}=VNode} ->
-					case catch do_setattr(Ino, VNode, Attr, ToSet, S) of
-						{ok, NewAttr} ->
-							{#fuse_reply_attr{attr=NewAttr, attr_timeout_ms=Timeout}, S};
+			#vnode{timeout=Timeout} = VNode = gb_trees:get(Ino, Inodes),
+			case catch do_setattr(Ino, VNode, Attr, ToSet, S) of
+				{ok, NewAttr} ->
+					{#fuse_reply_attr{attr=NewAttr, attr_timeout_ms=Timeout}, S};
 
-						{error, Error} ->
-							{#fuse_reply_err{err=Error}, S}
-					end;
-				none ->
-					{#fuse_reply_err{ err = enoent }, S}
+				{error, Error} ->
+					{#fuse_reply_err{err=Error}, S}
 			end;
 
 		#fuse_file_info{} ->
@@ -588,7 +579,6 @@ statfs(_, Ino, _, #state{inodes=Inodes}=S) ->
 %% Common FUSE functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
 do_unlink(Parent, Name, S) ->
 	Inodes = S#state.inodes,
 	#vnode{
@@ -614,35 +604,30 @@ do_unlink(Parent, Name, S) ->
 
 do_lookup(Parent, LookupOp, S) ->
 	#state{inodes=Inodes, cache=Cache} = S,
-	case gb_trees:lookup(Parent, Inodes) of
-		{value, ParentNode} ->
-			case catch LookupOp(ParentNode) of
-				{entry, ChildOid, NewParentCache} ->
-					S2 = S#state{inodes=gb_trees:update(Parent,
-						ParentNode#vnode{cache=NewParentCache}, Inodes)},
-					#vnode{timeout=Timeout, ifc=#ifc{getnode=GetNode}} = ParentNode,
-					case gb_trees:lookup({Parent, ChildOid}, Cache) of
-						{value, ChildIno} ->
-							do_lookup_cached(ChildIno, Timeout, S2);
+	ParentNode = gb_trees:get(Parent, Inodes),
+	case catch LookupOp(ParentNode) of
+		{entry, ChildOid, NewParentCache} ->
+			S2 = S#state{inodes=gb_trees:update(Parent,
+				ParentNode#vnode{cache=NewParentCache}, Inodes)},
+			#vnode{timeout=Timeout, ifc=#ifc{getnode=GetNode}} = ParentNode,
+			case gb_trees:lookup({Parent, ChildOid}, Cache) of
+				{value, ChildIno} ->
+					do_lookup_cached(ChildIno, Timeout, S2);
 
-						none ->
-							do_lookup_new(Parent, ChildOid, GetNode, Timeout, S2)
-					end;
-
-				{error, Error, NewParentCache} ->
-					{
-						error,
-						Error,
-						S#state{inodes=gb_trees:update(Parent,
-							ParentNode#vnode{cache=NewParentCache}, Inodes)}
-					};
-
-				{error, Error} ->
-					{error, Error, S}
+				none ->
+					do_lookup_new(Parent, ChildOid, GetNode, Timeout, S2)
 			end;
 
-		none ->
-			{error, enoent, S}
+		{error, Error, NewParentCache} ->
+			{
+				error,
+				Error,
+				S#state{inodes=gb_trees:update(Parent,
+					ParentNode#vnode{cache=NewParentCache}, Inodes)}
+			};
+
+		{error, Error} ->
+			{error, Error, S}
 	end.
 
 
@@ -703,25 +688,20 @@ make_entry_param(ChildIno, ChildNode, ParentTimeout, S) ->
 
 
 do_forget(Ino, N, #state{inodes=Inodes, cache=Cache} = State) ->
-	case gb_trees:lookup(Ino, Inodes) of
-		{value, #vnode{refcnt=RefCnt} = Node} ->
-			case RefCnt - N of
-				0 ->
-					?DEBUG(io:format("forget(~p)~n", [Ino])),
-					Key = {Node#vnode.parent, Node#vnode.oid},
-					State#state{
-						inodes = gb_trees:delete(Ino, Inodes),
-						cache  = gb_trees:delete(Key, Cache)
-					};
+	#vnode{refcnt=RefCnt} = Node = gb_trees:get(Ino, Inodes),
+	case RefCnt - N of
+		0 ->
+			?DEBUG(io:format("forget(~p)~n", [Ino])),
+			Key = {Node#vnode.parent, Node#vnode.oid},
+			State#state{
+				inodes = gb_trees:delete(Ino, Inodes),
+				cache  = gb_trees:delete(Key, Cache)
+			};
 
-				NewRef ->
-					State#state{
-						inodes = gb_trees:update(Ino, Node#vnode{refcnt=NewRef}, Inodes)
-					}
-			end;
-
-		none ->
-			State
+		NewRef ->
+			State#state{
+				inodes = gb_trees:update(Ino, Node#vnode{refcnt=NewRef}, Inodes)
+			}
 	end.
 
 
