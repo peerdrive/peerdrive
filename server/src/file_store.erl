@@ -17,7 +17,7 @@
 -module(file_store).
 -behaviour(gen_server).
 
--export([start_link/2, stop/1, dump/1, fsck/1]).
+-export([start_link/2, stop/1, dump/1, fsck/1, gc/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % Store interface
@@ -91,6 +91,9 @@ dump(Store) ->
 
 fsck(Store) ->
 	gen_server:cast(Store, fsck).
+
+gc(Store) ->
+	gen_server:cast(Store, gc).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Operations on file store...
@@ -407,13 +410,18 @@ handle_cast_internal(fsck, S) ->
 	do_fsck(S),
 	{noreply, S};
 
+handle_cast_internal(gc, S) ->
+	S2 = do_gc(S),
+	{noreply, S2};
+
 handle_cast_internal(stop, S) ->
 	{stop, normal, S}.
 
 
 handle_info_internal(timeout, S) ->
-	do_checkpoint(S),
-	{noreply, S#state{changed=false}};
+	S2 = do_gc(S),
+	do_checkpoint(S2),
+	{noreply, S2#state{changed=false}};
 
 handle_info_internal({'EXIT', _From, Reason}, S) ->
 	case Reason of
@@ -716,7 +724,7 @@ do_dump_revision(Revision, Path) ->
 				fun (Rev) ->
 					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
 				end,
-				get_references(Revision, Path))
+				get_rev_references(Revision, Path))
 	end.
 
 
@@ -1059,7 +1067,7 @@ add_revision(S, Rev, RefCountInc, Revision) ->
 	case dict:find(Rev, S#state.revisions) of
 		error when (RefCountInc > 0) ->
 			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
-			S2 = do_revisions_ref_inc(S, get_references(Revision, S#state.path)),
+			S2 = do_revisions_ref_inc(S, get_rev_references(Revision, S#state.path)),
 			S3 = do_parts_ref_inc(S2, Parts),
 			S3#state{
 				revisions=dict:store(Rev, {RefCountInc, Revision}, S3#state.revisions),
@@ -1067,7 +1075,7 @@ add_revision(S, Rev, RefCountInc, Revision) ->
 
 		{ok, {RefCount, stub}} ->
 			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
-			S2 = do_revisions_ref_inc(S, get_references(Revision, S#state.path)),
+			S2 = do_revisions_ref_inc(S, get_rev_references(Revision, S#state.path)),
 			S3 = do_parts_ref_inc(S2, Parts),
 			S3#state{
 				revisions=dict:store(Rev, {RefCount+RefCountInc, Revision}, S3#state.revisions),
@@ -1093,14 +1101,22 @@ dispose_revision(Revision, Path) ->
 		#revision{parts=Parts} ->
 			lists:foreach(
 				fun (Rev) -> revision_ref_dec(Rev) end,
-				get_references(Revision, Path)),
+				get_rev_references(Revision, Path)),
 			lists:foreach(
 				fun({_, Hash}) -> gen_server:cast(self(), {part_ref_dec, Hash}) end,
 				Parts)
 	end.
 
 
-get_references(#revision{parts=Parts, parents=Parents}, Path) ->
+get_rev_references(Rev, Path) ->
+	get_references(Rev, Path, false).
+
+
+get_doc_references(Rev, Path) ->
+	get_references(Rev, Path, true).
+
+
+get_references(#revision{parts=Parts, parents=Parents}, Path, PickDoc) ->
 	CheckParts = lists:filter(
 		fun ({FourCC, _Hash}) ->
 			case FourCC of
@@ -1113,7 +1129,7 @@ get_references(#revision{parts=Parts, parents=Parents}, Path) ->
 	lists:foldl(
 		fun ({_FourCC, Hash}, Acc) ->
 			case read_hpsd_part(Hash, Path) of
-				{ok, Value} -> Acc ++ extract_refs(Value);
+				{ok, Value} -> Acc ++ extract_refs(Value, PickDoc);
 				error       -> Acc % FIXME: really a good idea?
 			end
 		end,
@@ -1129,19 +1145,22 @@ read_hpsd_part(Hash, Path) ->
 			{ok, Struct}
 	end.
 
-extract_refs(Data) when is_record(Data, dict, 9) ->
-	dict:fold(fun(_Key, Value, Acc) -> extract_refs(Value)++Acc end, [], Data);
+extract_refs(Data, PickDoc) when is_record(Data, dict, 9) ->
+	dict:fold(fun(_Key, Value, Acc) -> extract_refs(Value, PickDoc)++Acc end, [], Data);
 
-extract_refs(Data) when is_list(Data) ->
-	lists:foldl(fun(Value, Acc) -> extract_refs(Value)++Acc end, [], Data);
+extract_refs(Data, PickDoc) when is_list(Data) ->
+	lists:foldl(fun(Value, Acc) -> extract_refs(Value, PickDoc)++Acc end, [], Data);
 
-extract_refs({dlink, _Doc, Revs}) ->
+extract_refs({dlink, _Doc, Revs}, false) ->
 	Revs;
 
-extract_refs({rlink, Rev}) ->
+extract_refs({dlink, Doc, _Revs}, true) ->
+	[Doc];
+
+extract_refs({rlink, Rev}, false) ->
 	[Rev];
 
-extract_refs(_) ->
+extract_refs(_, _) ->
 	[].
 
 
@@ -1336,7 +1355,7 @@ fsck_calc_rev_refcounts(Uuids, Revisions, Path) ->
 		Revisions).
 
 fsck_add_rev_refs(Obj, RevDict, Path) ->
-	Refs = get_references(Obj, Path),
+	Refs = get_rev_references(Obj, Path),
 	lists:foldl(
 		fun(Rev, Acc) -> dict:update_counter(Rev, 1, Acc) end,
 		RevDict,
@@ -1368,6 +1387,59 @@ fsck_check_rev_refcounts(Revisions, RevRefCounts) ->
 		end,
 		ok,
 		Remaining).
+
+%%% Garbage collection %%%%%%%%%%%%%%%%
+
+do_gc(#state{guid=Guid, uuids=Uuids, revisions=Revisions, path=Path} = S) ->
+	{RootRev, _RootPreRevs, _RootGen} = dict:fetch(Guid, Uuids),
+	WhiteSet = dict:map(
+		fun(_Doc, {Rev, _PreRevs, _Gen}) -> Rev end,
+		dict:erase(Guid, Uuids)),
+	DelDocs = gc_step([RootRev], WhiteSet, Revisions, Path),
+	NewUuids = lists:foldl(
+		fun(Doc, Acc) ->
+			{Rev, PreRevs, _Gen} = dict:fetch(Doc, Acc),
+			vol_monitor:trigger_rm_doc(Guid, Doc),
+			revision_ref_dec(Rev),
+			lists:foreach(fun(R) -> revision_ref_dec(R) end, PreRevs),
+			dict:erase(Doc, Acc)
+		end,
+		Uuids,
+		DelDocs),
+	error_logger:info_report([{store, util:bin_to_hexstr(Guid)},
+		{'garbage_collected', length(DelDocs)}]),
+	S#state{uuids=NewUuids, changed=true}.
+
+
+gc_step([], WhiteSet, _Revisions, _Path) ->
+	dict:fetch_keys(WhiteSet);
+
+gc_step([Rev | GreyList], WhiteSet, Revisions, Path) ->
+	case dict:find(Rev, Revisions) of
+		{ok, {_RefCnt, stub}} ->
+			gc_step(GreyList, WhiteSet, Revisions, Path);
+
+		{ok, {_RefCnt, Revision}} ->
+			Refs = get_doc_references(Revision, Path),
+			{NewGreyList, NewWhiteSet} = lists:foldl(
+				fun gc_step_eval/2,
+				{GreyList, WhiteSet},
+				Refs),
+			gc_step(NewGreyList, NewWhiteSet, Revisions, Path);
+
+		error ->
+			gc_step(GreyList, WhiteSet, Revisions, Path)
+	end.
+
+
+gc_step_eval(Doc, {GreyList, WhiteSet}=Acc) ->
+	case dict:find(Doc, WhiteSet) of
+		{ok, Rev} ->
+			{[Rev | GreyList], dict:erase(Doc, WhiteSet)};
+		error ->
+			Acc
+	end.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Low level file management...
