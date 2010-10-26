@@ -1391,11 +1391,9 @@ fsck_check_rev_refcounts(Revisions, RevRefCounts) ->
 %%% Garbage collection %%%%%%%%%%%%%%%%
 
 do_gc(#state{guid=Guid, uuids=Uuids, revisions=Revisions, path=Path} = S) ->
-	{RootRev, _RootPreRevs, _RootGen} = dict:fetch(Guid, Uuids),
-	WhiteSet = dict:map(
-		fun(_Doc, {Rev, _PreRevs, _Gen}) -> Rev end,
-		dict:erase(Guid, Uuids)),
-	DelDocs = gc_step([RootRev], WhiteSet, Revisions, Path),
+	{RootRev, RootPreRevs, _RootGen} = dict:fetch(Guid, Uuids),
+	WhiteSet = dict:erase(Guid, Uuids),
+	DelDocs = gc_step([RootRev | RootPreRevs], WhiteSet, Revisions, Path),
 	NewUuids = lists:foldl(
 		fun(Doc, Acc) ->
 			{Rev, PreRevs, _Gen} = dict:fetch(Doc, Acc),
@@ -1406,9 +1404,11 @@ do_gc(#state{guid=Guid, uuids=Uuids, revisions=Revisions, path=Path} = S) ->
 		end,
 		Uuids,
 		DelDocs),
+	NumCollected = length(DelDocs),
+	Changed = S#state.changed or (NumCollected > 0),
 	error_logger:info_report([{store, util:bin_to_hexstr(Guid)},
-		{'garbage_collected', length(DelDocs)}]),
-	S#state{uuids=NewUuids, changed=true}.
+		{'garbage_collected', NumCollected}]),
+	S#state{uuids=NewUuids, changed=Changed}.
 
 
 gc_step([], WhiteSet, _Revisions, _Path) ->
@@ -1434,8 +1434,8 @@ gc_step([Rev | GreyList], WhiteSet, Revisions, Path) ->
 
 gc_step_eval(Doc, {GreyList, WhiteSet}=Acc) ->
 	case dict:find(Doc, WhiteSet) of
-		{ok, Rev} ->
-			{[Rev | GreyList], dict:erase(Doc, WhiteSet)};
+		{ok, {Rev, PreRevs, _Gen}} ->
+			{[Rev | PreRevs] ++ GreyList, dict:erase(Doc, WhiteSet)};
 		error ->
 			Acc
 	end.
