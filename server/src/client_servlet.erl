@@ -59,8 +59,8 @@
 -define(COMMIT_CNF,         16#0111).
 -define(SUSPEND_REQ,        16#0120).
 -define(SUSPEND_CNF,        16#0121).
--define(ABORT_REQ,          16#0130).
--define(ABORT_CNF,          16#0131).
+-define(CLOSE_REQ,          16#0130).
+-define(CLOSE_CNF,          16#0131).
 -define(WATCH_ADD_REQ,      16#0140).
 -define(WATCH_ADD_CNF,      16#0141).
 -define(WATCH_REM_REQ,      16#0150).
@@ -580,9 +580,9 @@ io_loop(Handle) ->
 			send_reply(RetPath, ?TRUNC_CNF, encode_broker_result(Reply)),
 			io_loop(Handle);
 
-		{?ABORT_REQ, <<>>, RetPath} ->
-			Reply = broker:abort(Handle),
-			send_reply(RetPath, ?ABORT_CNF, encode_broker_result(Reply));
+		{?CLOSE_REQ, <<>>, RetPath} ->
+			Reply = broker:close(Handle),
+			send_reply(RetPath, ?CLOSE_CNF, encode_broker_result(Reply));
 
 		{?COMMIT_REQ, <<>>, RetPath} ->
 			case broker:commit(Handle) of
@@ -591,12 +591,12 @@ io_loop(Handle) ->
 						<<(encode_broker_result(Result))/binary, Rev/binary>>);
 
 				{retry, _, _} = Result->
-					send_reply(RetPath, ?COMMIT_CNF, encode_broker_result(Result)),
-					io_loop(Handle);
+					send_reply(RetPath, ?COMMIT_CNF, encode_broker_result(Result));
 
 				Error ->
 					send_reply(RetPath, ?COMMIT_CNF, encode_broker_result(Error))
-			end;
+			end,
+			io_loop(Handle);
 
 		{?SUSPEND_REQ, <<>>, RetPath} ->
 			Reply = case broker:suspend(Handle) of
@@ -605,7 +605,8 @@ io_loop(Handle) ->
 				Error ->
 					encode_broker_result(Error)
 			end,
-			send_reply(RetPath, ?SUSPEND_CNF, Reply);
+			send_reply(RetPath, ?SUSPEND_CNF, Reply),
+			io_loop(Handle);
 
 		{?SET_PARENTS_REQ, Body, RetPath} ->
 			{Parents, <<>>} = parse_uuid_list(Body),
@@ -642,7 +643,7 @@ io_loop(Handle) ->
 			io_loop(Handle);
 
 		closed ->
-			broker:abort(Handle);
+			broker:close(Handle);
 
 		Else ->
 			io:format("io_loop: Invalid request: ~w~n", [Else]),
@@ -715,21 +716,13 @@ encode_broker_result({ok, Errors}) ->
 		Errors),
 	<<1:8, ErrorList/binary>>;
 
-encode_broker_result({retry, Reason, Errors}) ->
-	ErrorList = encode_list(
-		fun({Store, Error}) ->
-			<<Store/binary, (encode_error_code(Error))/binary>>
-		end,
-		Errors),
-	<<2:8, (encode_error_code(Reason))/binary, ErrorList/binary>>;
-
 encode_broker_result({error, Reason, Errors}) ->
 	ErrorList = encode_list(
 		fun({Store, Error}) ->
 			<<Store/binary, (encode_error_code(Error))/binary>>
 		end,
 		Errors),
-	<<3:8, (encode_error_code(Reason))/binary, ErrorList/binary>>.
+	<<2:8, (encode_error_code(Reason))/binary, ErrorList/binary>>.
 
 
 encode_direct_result(ok) ->

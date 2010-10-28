@@ -46,8 +46,8 @@ Opcode ::=
 	COMMIT_CNF          0x0111
 	SUSPEND_REQ         0x0120
 	SUSPEND_CNF         0x0121
-	ABORT_REQ           0x0130
-	ABORT_CNF           0x0131
+	CLOSE_REQ           0x0130
+	CLOSE_CNF           0x0131
 
 	WATCH_ADD_REQ       0x0140
 	WATCH_ADD_CNF       0x0141
@@ -119,8 +119,8 @@ Body ::=
 	COMMIT_CNF          Result::BrokerCnf, (Rev::UUID)?
 	SUSPEND_REQ         Handle::UINT32
 	SUSPEND_CNF         Result::BrokerCnf, (Rev::UUID)?
-	ABORT_REQ           Handle::UINT32
-	ABORT_CNF           Result::BrokerCnf
+	CLOSE_REQ           Handle::UINT32
+	CLOSE_CNF           Result::BrokerCnf
 
 	WATCH_ADD_REQ       Type::WatchType, Element::UUID
 	WATCH_ADD_CNF       Result::DirectCnf
@@ -170,8 +170,7 @@ ErrorCode ::= UINT32
 BrokerResult ::= UINT8
 	0	= ok      (operation succeeded everywhere)
 	1	= partial (operation succeeded, but not on all stores)
-	2	= again   (operation failed, but may try again)
-	3	= fail    (operation failed)
+	2	= fail    (operation failed)
 
 DirectCnf ::= Result::ErrorCode
 
@@ -179,8 +178,8 @@ BrokerCnf ::= Result::BrokerResult, ErrInfo::ExtendedInfo
 
 ExtendedInfo ::=
 	Result=0:
-	Result=1:    ErrInfo::List(Store::UUID, Error::ErrorCode)
-	Result=[23]: Error::ErrorCode, ErrInfo::List(Store::UUID, Error::ErrorCode)
+	Result=1: ErrInfo::List(Store::UUID, Error::ErrorCode)
+	Result=2: Error::ErrorCode, ErrInfo::List(Store::UUID, Error::ErrorCode)
 
 WatchType ::= UINT8
 	0	= Doc

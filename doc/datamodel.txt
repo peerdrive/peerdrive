@@ -9,7 +9,6 @@ identified by the hash of its content.
 At the basic level each revision consists of the following:
 	- a set of flags
 		- the version of the revision data model (currently only version 0)
-		- final/preliminary revision
 		- possibly other flags in the future
 	- a type code, specifying the format of the document (encoded as a Uniform
 	  Type Identifier [UTI])
@@ -78,11 +77,23 @@ in the sense that they are independent of the target's location.
 
 == Garbage collection ==
 
-Even though documents and revisions can be deleted explicitly they can also be
+Even though documents and revisions can be deleted explicitly they are normally
 garbage collected implicitly. When there is no path from the root document of a
-store to the document then it is eligible for garbage collection. The path is
-formed by links in the 'HPSD' part and by the parent pointers of each revision.
+store to a certain document/revision then it is eligible for garbage
+collection. The path is formed by links in the 'HPSD' and 'META' parts and by
+the parent pointers of each revision.
 
+There is only one exception to the garbage collection rules above: newly
+created documents. It is guaranteed that new documents are exempted from
+garbage collection as long as the handle which committed the initial version is
+kept open.
+
+The rationale behind this exception is that new documents cannot be linked
+before they are committed for the first time, simply because they don't exist
+yet. This makes it impossible to satisfy the reachability criterion of the
+garbage collector. By keeping the creating handle open the creating application
+can safely add a document link to the new document after committing the initial
+version.
 
 == Hotchpotch Structured Data ==
 
@@ -249,7 +260,7 @@ commit(Handle) -- Commit changes as new revision of the document
 suspend(Handle) -- Suspend handle and enqueue as preliminary revision
 	Handle: as returned by create/fork/update/resume
 
-abort(Handle) -- Discard handle
+close(Handle) -- Discard handle
 	Handle: as returned by peek/create/fork/update/resume
 
 === Data distribution ===

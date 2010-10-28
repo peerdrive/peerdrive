@@ -970,7 +970,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				print "rev:%s" % self.__rev.encode("hex")
 		finally:
 			for r in mergeReaders:
-				r.abort()
+				r.close()
 
 		self.__loadFile()
 		self.emitChanged()

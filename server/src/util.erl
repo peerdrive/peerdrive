@@ -82,7 +82,7 @@ read_rev(Rev, Part) ->
 			try
 				read_rev_loop(Reader, Part, 0, <<>>)
 			after
-				broker:abort(Reader)
+				broker:close(Reader)
 			end;
 
 		{error, Reason, _Errors} ->

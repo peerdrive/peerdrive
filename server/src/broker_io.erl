@@ -19,7 +19,7 @@
 
 -export([start/1]).
 -export([read/4, write/4, truncate/3, get_parents/1, set_parents/2, get_type/1,
-	set_type/2, commit/1, suspend/1, abort/1]).
+	set_type/2, commit/1, suspend/1, close/1]).
 
 -export([init/1, init/2, handle_call/3, handle_cast/2, code_change/3,
 	handle_info/2, terminate/2]).
@@ -60,8 +60,8 @@ commit(Broker) ->
 suspend(Broker) ->
 	gen_server:call(Broker, suspend).
 
-abort(Broker) ->
-	gen_server:call(Broker, abort).
+close(Broker) ->
+	gen_server:call(Broker, close).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% gen_server callbacks...
@@ -119,13 +119,13 @@ handle_call({set_type, Type}, _From, S) ->
 	distribute_write(fun(Handle) -> store:set_type(Handle, Type) end, S);
 
 handle_call(commit, _From, S) ->
-	do_commit(S);
+	do_commit(fun store:commit/2, S);
 
 handle_call(suspend, _From, S) ->
-	do_suspend(S);
+	do_commit(fun store:suspend/2, S);
 
-handle_call(abort, _From, S) ->
-	do_abort(S#state.handles),
+handle_call(close, _From, S) ->
+	do_close(S#state.handles),
 	{stop, normal, {ok, []}, S}.
 
 
@@ -133,7 +133,7 @@ handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
 	case From of
 		User ->
 			% upstream process died
-			do_abort(S#state.handles),
+			do_close(S#state.handles),
 			{stop, orphaned, S};
 
 		_Handle ->
@@ -215,79 +215,49 @@ do_resume(Doc, PreRev, Creator, Stores) ->
 		Stores).
 
 
-do_commit(S) ->
+do_commit(Fun, S) ->
 	Mtime = util:get_time(),
-	{Revs, Conflicts, Errors} = lists:foldl(
-		fun({Store, Handle}, {AccRevs, AccConflicts, AccErrors}) ->
-			case store:commit(Handle, Mtime) of
+	{Revs, RWHandles, ROHandles, Errors} = lists:foldl(
+		fun({Store, StoreHandle}=Handle, {AccRevs, AccRW, AccRO, AccErrors}) ->
+			case Fun(StoreHandle, Mtime) of
 				{ok, Rev} ->
-					{[Rev|AccRevs], AccConflicts, AccErrors};
-				conflict ->
-					{AccRevs, [{Store, Handle}|AccConflicts], AccErrors};
+					{[Rev|AccRevs], AccRW, [Handle|AccRO], AccErrors};
 				{error, Reason} ->
-					{AccRevs, AccConflicts, [{Store, Reason}|AccErrors]}
+					{AccRevs, [Handle|AccRW], AccRO, [{Store, Reason}|AccErrors]}
 			end
 		end,
-		{[], [], []},
+		{[], [], [], []},
 		S#state.handles),
 	case lists:usort(Revs) of
 		[Rev] ->
 			% as expected
-			do_abort(Conflicts),
+			do_close(RWHandles),
 			vol_monitor:trigger_mod_doc(local, S#state.doc),
-			{stop, normal, broker:consolidate_success(Errors, Rev), S};
+			{reply, broker:consolidate_success(Errors, Rev),
+				S#state{handles=ROHandles}};
 
-		[] ->
+		[] when ROHandles =:= [] ->
 			% no writer commited...
-			case Conflicts of
-				[] ->
-					% all were hard errors...
-					{stop, normal, broker:consolidate_error(Errors), S};
+			{reply, broker:consolidate_error(Errors),
+				S#state{handles=RWHandles}};
 
-				Remaining ->
-					% we're still alive...
-					{reply, {retry, conflict, broker:consolidate_filter(Errors)},
-						S#state{handles=Remaining}}
-			end;
-
-		_ ->
+		RevList ->
 			% internal error: handles did not came to the same revision! WTF?
-			do_abort(Conflicts),
-			{stop, normal, {error, einternal, []}, S}
+			error_logger:error_report([
+				{module, ?MODULE},
+				{error, 'revision discrepancy'},
+				{doc, util:bin_to_hexstr(S#state.doc)},
+				{revs, lists:map(fun util:bin_to_hexstr/1, RevList)},
+				{committers, lists:map(fun({G,_}) -> util:bin_to_hexstr(G) end, ROHandles)}
+			]),
+			do_close(ROHandles),
+			do_close(RWHandles),
+			{reply, {error, einternal, []}, S#state{handles=[]}}
 	end.
 
 
-do_suspend(S) ->
-	Mtime = util:get_time(),
-	{Revs, Errors} = lists:foldl(
-		fun({Store, Handle}, {AccRevs, AccErrors}) ->
-			case store:suspend(Handle, Mtime) of
-				{ok, Rev} ->
-					{[Rev|AccRevs], AccErrors};
-				{error, Reason} ->
-					{AccRevs, [{Store, Reason}|AccErrors]}
-			end
-		end,
-		{[], []},
-		S#state.handles),
-	case lists:usort(Revs) of
-		[Rev] ->
-			% as expected
-			vol_monitor:trigger_mod_doc(local, S#state.doc),
-			{stop, normal, broker:consolidate_success(Errors, Rev), S};
-
-		[] ->
-			% all were hard errors...
-			{stop, normal, broker:consolidate_error(Errors), S};
-
-		_ ->
-			% internal error: handles did not came to the same revision! WTF?
-			{stop, normal, {error, einternal, []}, S}
-	end.
-
-
-do_abort(Handles) ->
-	lists:foreach(fun({_Guid, Handle}) -> store:abort(Handle) end, Handles).
+do_close(Handles) ->
+	lists:foreach(fun({_Guid, Handle}) -> store:close(Handle) end, Handles).
 
 
 start_handles(Fun, Doc, Stores) ->
@@ -357,7 +327,7 @@ distribute_write(Fun, S) ->
 			% at least someone did what he was told
 			ErrInfo = lists:map(
 				fun({Store, Reason, Handle}) ->
-					store:abort(Handle),
+					store:close(Handle),
 					{Store, Reason}
 				end,
 				Fail),

@@ -20,7 +20,7 @@
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
-	commit/1, abort/1]).
+	commit/1, close/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
 	terminate/2]).
 
@@ -68,8 +68,8 @@ write(Handle, Part, Offset, Data) ->
 commit(Handle) ->
 	gen_server:call(?MODULE, {commit, Handle}).
 
-abort(Handle) ->
-	gen_server:call(?MODULE, {abort, Handle}).
+close(Handle) ->
+	gen_server:call(?MODULE, {close, Handle}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -102,8 +102,8 @@ handle_call(Request, _From, S) ->
 			do_open_doc(Store, Doc, Write, S);
 		{commit, Handle} ->
 			do_commit(Handle, S);
-		{abort, Handle} ->
-			do_abort(Handle, S)
+		{close, Handle} ->
+			do_close(Handle, S)
 	end,
 	{reply, Reply, S2}.
 
@@ -207,12 +207,11 @@ do_commit(FuseHandle, S) ->
 		{ok, Handle, Store, Doc} ->
 			case store:suspend(Handle, util:get_time()) of
 				{ok, Rev} = Ok ->
-					S2 = mark_closed(FuseHandle, Store, Doc, Rev, S),
+					S2 = mark_committed(Store, Doc, Rev, S),
 					{Ok, S2};
 
 				{error, _Reason} = Error ->
-					S2 = mark_closed(FuseHandle, Store, Doc, S),
-					{Error, S2}
+					{Error, S}
 			end;
 
 		error ->
@@ -220,10 +219,10 @@ do_commit(FuseHandle, S) ->
 	end.
 
 
-do_abort(FuseHandle, S) ->
+do_close(FuseHandle, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle, Store, Doc} ->
-			store:abort(Handle),
+			store:close(Handle),
 			S2 = mark_closed(FuseHandle, Store, Doc, S),
 			{ok, S2};
 
@@ -327,12 +326,9 @@ mark_open(Store, Doc, #state{known=Known}=S) ->
 	S#state{known=NewKnown}.
 
 
-mark_closed(Handle, Store, Doc, Rev, #state{handles=Handles, known=Known}=S) ->
+mark_committed(Store, Doc, Rev, #state{known=Known}=S) ->
 	Ts = ts(),
-	S2 = S#state{
-		known   = dict:store({Store, Doc}, {Rev, Ts, false}, Known),
-		handles = dict:erase(Handle, Handles)
-	},
+	S2 = S#state{known = dict:store({Store, Doc}, {Rev, Ts, false}, Known)},
 	check_timer_running(S2, Ts).
 
 
@@ -416,7 +412,11 @@ commit_prerevs(Expired) ->
 commit_prerev(Store, Doc, Rev) ->
 	case store:resume(Store, Doc, Rev, keep) of
 		{ok, Handle} ->
-			commit_prerev_loop(Store, Doc, Handle);
+			try
+				commit_prerev_loop(Store, Doc, Handle)
+			after
+				store:close(Handle)
+			end;
 
 		{error, enoent} ->
 			% has been deleted in between
@@ -433,14 +433,14 @@ commit_prerev_loop(Store, Doc, Handle) ->
 			vol_monitor:trigger_mod_doc(local, Doc),
 			ok;
 
-		conflict ->
+		{error, conflict} ->
 			case store:lookup(Store, Doc) of
 				{ok, CurRev, _PreRevs} ->
 					store:set_parents(Handle, [CurRev]),
 					commit_prerev_loop(Store, Doc, Handle);
 				error ->
 					% doesn't exist anymore
-					store:abort(Handle)
+					ok
 			end;
 
 		{error, Reason} ->

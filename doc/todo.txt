@@ -1,6 +1,5 @@
 - Server
 	- File store improvements
-		- garbage collection
 		- automatically delete old revisions when disk full
 	- add search engine
 		- lucene

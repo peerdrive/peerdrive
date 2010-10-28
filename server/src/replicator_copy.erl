@@ -76,11 +76,11 @@ copy_parts(Rev, SourceStore, Importer, Parts) ->
 		{ok, Reader} ->
 			case copy_parts_loop(Parts, Reader, Importer) of
 				ok ->
-					store:abort(Reader),
+					store:close(Reader),
 					store:put_rev_commit(Importer);
 
 				{error, Reason} ->
-					store:abort(Reader),
+					store:close(Reader),
 					store:put_rev_abort(Importer),
 					{error, Reason}
 			end;

@@ -1,4 +1,5 @@
 import unittest
+import time
 from hotchpotch import HpConnector
 
 
@@ -12,23 +13,24 @@ class CommonParts(unittest.TestCase):
 			HpConnector().mount('rem2')
 		self.store2 = HpConnector().enum().doc('rem2')
 
-		self._disposeDocs = []
-		self._disposeRevs = []
+		self._disposeHandles = []
 
 	def tearDown(self):
-		for doc in self._disposeDocs:
-			lookup = HpConnector().lookup_doc(doc)
-			for rev in lookup.revs():
-				HpConnector().deleteDoc(doc, rev)
+		for handle in self._disposeHandles:
+			handle.close()
 
-		for rev in self._disposeRevs:
-			HpConnector().deleteRev(rev)
+	def disposeHandle(self, handle):
+		self._disposeHandles.append(handle)
 
-	def disposeDoc(self, doc):
-		self._disposeDocs.append(doc)
+	def create(self, type, creator, stores):
+		w = HpConnector().create(type, creator, stores)
+		self.disposeHandle(w)
+		return w
 
-	def disposeRev(self, rev):
-		self._disposeRevs.append(rev)
+	def fork(self, rev, creator, stores=[]):
+		w = HpConnector().fork(rev, "test.bar", stores)
+		self.disposeHandle(w)
+		return w
 
 	def assertRevContent(self, rev, content):
 		with HpConnector().peek(rev) as r:
@@ -45,29 +47,25 @@ class CommonParts(unittest.TestCase):
 class TestCreatorCode(CommonParts):
 
 	def test_create(self):
-		c = HpConnector()
-		with c.create("public.data", "test.foo", [self.store1]) as w:
-			w.commit()
-			doc = w.getDoc()
-			rev = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("public.data", "test.foo", [self.store1])
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
 
-		s = c.stat(rev)
+		s = HpConnector().stat(rev)
 		self.assertEqual(s.creator(), "test.foo")
 
 	def test_fork(self):
 		c = HpConnector()
-		with c.create("public.data", "test.foo", [self.store1]) as w:
-			w.commit()
-			doc1 = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc1)
+		w = self.create("public.data", "test.foo", [self.store1])
+		w.commit()
+		doc1 = w.getDoc()
+		rev1 = w.getRev()
 
-		with c.fork(rev1, "test.bar") as w:
-			w.commit()
-			doc2 = w.getDoc()
-			rev2 = w.getRev()
-			self.disposeDoc(doc2)
+		w = self.fork(rev1, "test.bar")
+		w.commit()
+		doc2 = w.getDoc()
+		rev2 = w.getRev()
 
 		s = c.stat(rev1)
 		self.assertEqual(s.creator(), "test.foo")
@@ -76,11 +74,10 @@ class TestCreatorCode(CommonParts):
 
 	def test_update_change(self):
 		c = HpConnector()
-		with c.create("public.data", "test.foo", [self.store1]) as w:
-			w.commit()
-			doc = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("public.data", "test.foo", [self.store1])
+		w.commit()
+		doc = w.getDoc()
+		rev1 = w.getRev()
 
 		with c.update(doc, rev1, "test.baz") as w:
 			w.commit()
@@ -93,11 +90,10 @@ class TestCreatorCode(CommonParts):
 
 	def test_update_keep(self):
 		c = HpConnector()
-		with c.create("public.data", "test.foo", [self.store1]) as w:
-			w.commit()
-			doc = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("public.data", "test.foo", [self.store1])
+		w.commit()
+		doc = w.getDoc()
+		rev1 = w.getRev()
 
 		with c.update(doc, rev1) as w:
 			w.write('FILE', 'update')
@@ -114,32 +110,29 @@ class TestTypeCode(CommonParts):
 
 	def test_create(self):
 		c = HpConnector()
-		with c.create("test.format", "test.ignore", [self.store1]) as w:
-			self.assertEqual(w.getType(), "test.format")
-			w.commit()
-			doc = w.getDoc()
-			rev = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("test.format", "test.ignore", [self.store1])
+		self.assertEqual(w.getType(), "test.format")
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
 
 		s = c.stat(rev)
 		self.assertEqual(s.type(), "test.format")
 
 	def test_fork_keep(self):
 		c = HpConnector()
-		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
-			self.assertEqual(w.getType(), "test.format.foo")
-			w.commit()
-			doc1 = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc1)
+		w = self.create("test.format.foo", "test.ignore", [self.store1])
+		self.assertEqual(w.getType(), "test.format.foo")
+		w.commit()
+		doc1 = w.getDoc()
+		rev1 = w.getRev()
 
-		with c.fork(rev1, "test.ignore") as w:
-			self.assertEqual(w.getType(), "test.format.foo")
-			w.write('FILE', 'update')
-			w.commit()
-			doc2 = w.getDoc()
-			rev2 = w.getRev()
-			self.disposeDoc(doc2)
+		w = self.fork(rev1, "test.ignore")
+		self.assertEqual(w.getType(), "test.format.foo")
+		w.write('FILE', 'update')
+		w.commit()
+		doc2 = w.getDoc()
+		rev2 = w.getRev()
 
 		s = c.stat(rev1)
 		self.assertEqual(s.type(), "test.format.foo")
@@ -148,22 +141,20 @@ class TestTypeCode(CommonParts):
 
 	def test_fork_change(self):
 		c = HpConnector()
-		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
-			self.assertEqual(w.getType(), "test.format.foo")
-			w.commit()
-			doc1 = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc1)
+		w = self.create("test.format.foo", "test.ignore", [self.store1])
+		self.assertEqual(w.getType(), "test.format.foo")
+		w.commit()
+		doc1 = w.getDoc()
+		rev1 = w.getRev()
 
-		with c.fork(rev1, "test.ignore") as w:
-			w.write('FILE', 'update')
-			self.assertEqual(w.getType(), "test.format.foo")
-			w.setType("test.format.bar")
-			self.assertEqual(w.getType(), "test.format.bar")
-			w.commit()
-			doc2 = w.getDoc()
-			rev2 = w.getRev()
-			self.disposeDoc(doc2)
+		w = self.fork(rev1, "test.ignore")
+		w.write('FILE', 'update')
+		self.assertEqual(w.getType(), "test.format.foo")
+		w.setType("test.format.bar")
+		self.assertEqual(w.getType(), "test.format.bar")
+		w.commit()
+		doc2 = w.getDoc()
+		rev2 = w.getRev()
 
 		s = c.stat(rev1)
 		self.assertEqual(s.type(), "test.format.foo")
@@ -172,12 +163,11 @@ class TestTypeCode(CommonParts):
 
 	def test_update_keep(self):
 		c = HpConnector()
-		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
-			self.assertEqual(w.getType(), "test.format.foo")
-			w.commit()
-			doc = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("test.format.foo", "test.ignore", [self.store1])
+		self.assertEqual(w.getType(), "test.format.foo")
+		w.commit()
+		doc = w.getDoc()
+		rev1 = w.getRev()
 
 		with c.update(doc, rev1, "test.ignore") as w:
 			self.assertEqual(w.getType(), "test.format.foo")
@@ -192,12 +182,11 @@ class TestTypeCode(CommonParts):
 
 	def test_update_change(self):
 		c = HpConnector()
-		with c.create("test.format.foo", "test.ignore", [self.store1]) as w:
-			self.assertEqual(w.getType(), "test.format.foo")
-			w.commit()
-			doc = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("test.format.foo", "test.ignore", [self.store1])
+		self.assertEqual(w.getType(), "test.format.foo")
+		w.commit()
+		doc = w.getDoc()
+		rev1 = w.getRev()
 
 		with c.update(doc, rev1, "test.ignore") as w:
 			self.assertEqual(w.getType(), "test.format.foo")
@@ -218,24 +207,21 @@ class TestSync(CommonParts):
 	def test_already_same(self):
 		c = HpConnector()
 		stores = [self.store1, self.store2]
-		with c.create("public.data", "test.ignore", stores) as w:
-			w.commit()
-			doc = w.getDoc()
-			rev = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("public.data", "test.ignore", stores)
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
 
 		self.assertTrue(c.sync(doc) == rev)
 		self.assertTrue(c.sync(doc, stores=stores) == rev)
 
-
 	def test_good(self):
 		c = HpConnector()
 		stores = [self.store1, self.store2]
-		with c.create("public.data", "test.ignore", stores) as w:
-			w.commit()
-			doc = w.getDoc()
-			rev = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("public.data", "test.ignore", stores)
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
 
 		with c.update(doc, rev, stores=[self.store1]) as w:
 			w.write('FILE', 'update')
@@ -252,11 +238,10 @@ class TestSync(CommonParts):
 	def test_bad(self):
 		c = HpConnector()
 		stores = [self.store1, self.store2]
-		with c.create("public.data", "test.ignore", stores) as w:
-			w.commit()
-			doc = w.getDoc()
-			rev = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("public.data", "test.ignore", stores)
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
 
 		with c.update(doc, rev, stores=[self.store1]) as w:
 			w.write('FILE', 'first')
@@ -282,11 +267,10 @@ class TestSync(CommonParts):
 	def test_merge(self):
 		c = HpConnector()
 		stores = [self.store1, self.store2]
-		with c.create("public.data", "test.ignore", stores) as w:
-			w.commit()
-			doc = w.getDoc()
-			rev = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("public.data", "test.ignore", stores)
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
 
 		with c.update(doc, rev, stores=[self.store1]) as w:
 			w.write('FILE', 'first')
@@ -318,12 +302,11 @@ class TestPreRevs(CommonParts):
 
 	def createSuspendDoc(self):
 		c = HpConnector()
-		with c.create("test.format", "test.ignore", [self.store1]) as w:
-			w.writeAll('FILE', 'ok')
-			w.commit()
-			doc = w.getDoc()
-			rev1 = w.getRev()
-			self.disposeDoc(doc)
+		w = self.create("test.format", "test.ignore", [self.store1])
+		w.writeAll('FILE', 'ok')
+		w.commit()
+		doc = w.getDoc()
+		rev1 = w.getRev()
 
 		with c.update(doc, rev1) as w:
 			w.writeAll('FILE', 'update')
@@ -394,7 +377,7 @@ class TestPreRevs(CommonParts):
 			self.assertEqual(l.revs(), [rev1])
 			self.assertEqual(l.preRevs(), [rev2])
 
-			w.abort()
+			w.close()
 
 		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev1])
@@ -477,6 +460,66 @@ class TestPreRevs(CommonParts):
 		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [rev2])
 		self.assertEqual(l.preRevs(), [rev_s2])
+
+
+class TestGarbageCollector(CommonParts):
+
+	def test_collect(self):
+		c = HpConnector()
+
+		# deliberately close handle after creating!
+		with c.create("public.data", "test.foo", [self.store1]) as w:
+			w.commit()
+			doc = w.getDoc()
+			rev = w.getRev()
+
+		# give the GC some time
+		time.sleep(7)
+
+		l = c.lookup_doc(doc)
+		self.assertEqual(l.revs(), [])
+		self.assertEqual(l.preRevs(), [])
+		self.assertRaises(IOError, c.stat, rev)
+
+	def test_create_keep_handle(self):
+		c = HpConnector()
+
+		with c.create("public.data", "test.foo", [self.store1]) as w:
+			w.commit()
+			doc = w.getDoc()
+			rev = w.getRev()
+
+			# give the GC some time
+			time.sleep(7)
+
+			l = c.lookup_doc(doc)
+			self.assertEqual(l.revs(), [rev])
+			self.assertEqual(l.preRevs(), [])
+
+			c.stat(rev)
+
+	def test_fork_keep_handle(self):
+		c = HpConnector()
+
+		w = self.create("test.format.foo", "test.ignore", [self.store1])
+		self.assertEqual(w.getType(), "test.format.foo")
+		w.commit()
+		doc1 = w.getDoc()
+		rev1 = w.getRev()
+
+		with c.fork(rev1, "test.ignore") as w:
+			w.write('FILE', 'update')
+			w.commit()
+			doc2 = w.getDoc()
+			rev2 = w.getRev()
+
+			# give the GC some time
+			time.sleep(7)
+
+			l = c.lookup_doc(doc2)
+			self.assertEqual(l.revs(), [rev2])
+			self.assertEqual(l.preRevs(), [])
+			c.stat(rev2)
 
 
 if __name__ == '__main__':

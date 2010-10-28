@@ -70,7 +70,7 @@
 		read,
 		write,
 		truncate,
-		abort,
+		close,
 		commit,
 		suspend,
 		get_type,

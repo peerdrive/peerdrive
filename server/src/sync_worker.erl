@@ -397,11 +397,11 @@ merge_hpsd_read_loop([Rev|Revs], FCCs, Acc) ->
 		{ok, _Errors, Reader} ->
 			case merge_hpsd_read_loop_part_loop(Reader, FCCs, []) of
 				{ok, Data} ->
-					broker:abort(Reader),
+					broker:close(Reader),
 					merge_hpsd_read_loop(Revs, FCCs, [Data | Acc]);
 
 				{error, _} = Error ->
-					broker:abort(Reader),
+					broker:close(Reader),
 					Error
 			end;
 
@@ -473,32 +473,35 @@ merge_hpsd_parts(
 merge_hpsd_write(Store, Doc, FromRev, ToRev, Type, NewData) ->
 	case store:update(Store, Doc, FromRev, <<"org.hotchpotch.syncer">>) of
 		{ok, Writer} ->
-			store:set_parents(Writer, [FromRev, ToRev]),
-			store:set_type(Writer, Type),
-			Written = lists:foldl(
-				fun({Part, Data}, Result) ->
-					FinalData = if
-						Part == <<"META">> -> merge_hpsd_update_meta(Data);
-						true               -> merge_hpsd_update_dlinks(Data)
+			try
+				store:set_parents(Writer, [FromRev, ToRev]),
+				store:set_type(Writer, Type),
+				Written = lists:foldl(
+					fun({Part, Data}, Result) ->
+						FinalData = if
+							Part == <<"META">> -> merge_hpsd_update_meta(Data);
+							true               -> merge_hpsd_update_dlinks(Data)
+						end,
+						store:truncate(Writer, Part, 0),
+						case store:write(Writer, Part, 0, struct:encode(FinalData)) of
+							ok                 -> Result;
+							{error, _} = Error -> Error
+						end
 					end,
-					store:truncate(Writer, Part, 0),
-					case store:write(Writer, Part, 0, struct:encode(FinalData)) of
-						ok                 -> Result;
-						{error, _} = Error -> Error
-					end
-				end,
-				ok,
-				NewData),
-			case Written of
-				ok ->
-					case store:commit(Writer, util:get_time()) of
-						{ok, _Rev} -> ok;
-						{error, _} = Error -> Error
-					end;
+					ok,
+					NewData),
+				case Written of
+					ok ->
+						case store:commit(Writer, util:get_time()) of
+							{ok, _Rev} -> ok;
+							{error, _} = Error -> Error
+						end;
 
-				{error, _} = Error ->
-					store:abort(Writer),
-					Error
+					{error, _} = Error ->
+						Error
+				end
+			after
+				store:close(Writer)
 			end;
 
 		{error, _} = Error ->

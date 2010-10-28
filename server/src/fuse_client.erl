@@ -1078,18 +1078,21 @@ dict_update_cache(Handle, Rev, _Cache) ->
 
 
 dict_write_entries(Handle, Entries, Cache) ->
-	case write_struct(Handle, <<"HPSD">>, Entries) of
-		ok ->
-			case fuse_store:commit(Handle) of
-				{ok, Rev} ->
-					{ok, {Rev, Entries}};
-				{error, Reason} ->
-					{error, Reason, Cache}
-			end;
+	try
+		case write_struct(Handle, <<"HPSD">>, Entries) of
+			ok ->
+				case fuse_store:commit(Handle) of
+					{ok, Rev} ->
+						{ok, {Rev, Entries}};
+					{error, Reason} ->
+						{error, Reason, Cache}
+				end;
 
-		{error, Error} ->
-			fuse_store:abort(Handle),
-			{error, Error, Cache}
+			{error, Error} ->
+				{error, Error, Cache}
+		end
+	after
+		fuse_store:close(Handle)
 	end.
 
 
@@ -1327,18 +1330,21 @@ file_getattr_rev(Store, Rev) ->
 file_truncate({doc, Store, Doc}, Size) ->
 	case fuse_store:open_doc(Store, Doc, true) of
 		{ok, _Rev, Handle} ->
-			case fuse_store:truncate(Handle, <<"FILE">>, Size) of
-				ok ->
-					case fuse_store:commit(Handle) of
-						{ok, CurRev} ->
-							file_getattr_rev(Store, CurRev);
-						Error ->
-							Error
-					end;
+			try
+				case fuse_store:truncate(Handle, <<"FILE">>, Size) of
+					ok ->
+						case fuse_store:commit(Handle) of
+							{ok, CurRev} ->
+								file_getattr_rev(Store, CurRev);
+							Error ->
+								Error
+						end;
 
-				{error, _} = Error ->
-					fuse_store:abort(Handle),
-					Error
+					{error, _} = Error ->
+						Error
+				end
+			after
+				fuse_store:close(Handle)
 			end;
 
 		{error, _} = Error ->
@@ -1380,10 +1386,12 @@ file_write(Handle, Data, Offset) ->
 
 
 file_release(Handle, Changed) ->
-	case Changed of
-		false -> fuse_store:abort(Handle);
+	Reply = case Changed of
+		false -> ok;
 		true  -> fuse_store:commit(Handle)
-	end.
+	end,
+	fuse_store:close(Handle),
+	Reply.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1496,13 +1504,17 @@ create_empty_file(Store, Name) ->
 		dict:new()),
 	case store:create(Store, Doc, <<"public.text">>, ?FUSE_CC) of
 		{ok, Handle} ->
-			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
-			store:write(Handle, <<"FILE">>, 0, <<>>),
-			case store:commit(Handle, util:get_time()) of
-				{ok, Rev} ->
-					{ok, Doc, Rev};
-				{error, _} = Error ->
-					Error
+			try
+				store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+				store:write(Handle, <<"FILE">>, 0, <<>>),
+				case store:commit(Handle, util:get_time()) of
+					{ok, Rev} ->
+						{ok, Doc, Rev};
+					{error, _} = Error ->
+						Error
+				end
+			after
+				store:close(Handle)
 			end;
 
 		Error ->
@@ -1524,13 +1536,17 @@ create_empty_directory(Store, Name) ->
 		dict:new()),
 	case store:create(Store, Doc, <<"org.hotchpotch.dict">>, ?FUSE_CC) of
 		{ok, Handle} ->
-			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
-			store:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),
-			case store:commit(Handle, util:get_time()) of
-				{ok, Rev} ->
-					{ok, Doc, Rev};
-				{error, _} = Error ->
-					Error
+			try
+				store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+				store:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),
+				case store:commit(Handle, util:get_time()) of
+					{ok, Rev} ->
+						{ok, Doc, Rev};
+					{error, _} = Error ->
+						Error
+				end
+			after
+				store:close(Handle)
 			end;
 
 		Error ->

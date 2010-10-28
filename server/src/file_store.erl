@@ -26,21 +26,24 @@
 	delete_rev/2, delete_doc/3, sync_get_changes/2, sync_set_anchor/3]).
 
 % Functions used by helper processes (reader/writer/...)
--export([commit/4, suspend/4, insert_rev/3, lock/2, unlock/2]).
+-export([commit/4, suspend/4, insert_rev/3, lock/2, unlock/2, unhide/2]).
 
 -include("store.hrl").
 -include("file_store.hrl").
 -include_lib("kernel/include/file.hrl").
 
-% path:      string,  base directory
-% guid:      binary,  GUID of the store
-% gen:       integer, Generation of the store
-% uuids:     dict: Document --> {Revision, PreRevs, Generation}
-% revisions: dict: Revision --> {refcount, #revision{} | stub}
-% parts:     dict: PartHash --> refcount
-% peers:     dict: GUID --> Generation
-% changed:   Bool
--record(state, {path, guid, gen, uuids, revisions, parts, peers, locks, changed=false}).
+-record(state, {
+	path,       % string,  base directory
+	guid,       % binary,  GUID of the store
+	gen,        % integer, Generation of the store
+	uuids,      % dict: Document --> {Revision, PreRevs, Generation}
+	revisions,  % dict: Revision --> {refcount, #revision{} | stub}
+	parts,      % dict: PartHash --> refcount
+	peers,      % dict: GUID --> Generation
+	locks,      % orddict: PartHash --> LockCount
+	hidden=[],  % list, documents exempted from garbage collection
+	changed=false
+}).
 
 -define(SYNC_INTERVAL, 5000).
 
@@ -196,7 +199,7 @@ sync_set_anchor(Store, PeerGuid, SeqNum) ->
 %%       Store = pid()
 %%       Doc, PreRev = guid()
 %%       Revision = #revision
-%%       Result = {ok, Rev::guid()} | conflict | {error, Error::ecode()}
+%%       Result = {ok, Rev::guid()} | {error, Error::ecode()}
 commit(Store, Doc, PreRev, Revision) ->
 	gen_server:call(Store, {commit, Doc, PreRev, Revision}).
 
@@ -229,6 +232,10 @@ lock(Store, Hash) ->
 %%      revision it will be deleted.
 unlock(Store, Hash) ->
 	gen_server:cast(Store, {unlock, Hash}).
+
+%% @doc Expose a document to garbage collection
+unhide(Store, Doc) ->
+	gen_server:cast(Store, {unhide, Doc}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -395,6 +402,11 @@ handle_cast_internal({part_ref_dec, PartHash}, S) ->
 % internal: unlock a part
 handle_cast_internal({unlock, Hash}, S) ->
 	S2 = do_unlock(S, Hash),
+	{noreply, S2};
+
+% internal: expose to gc
+handle_cast_internal({unhide, Doc}, S) ->
+	S2 = do_unhide(S, Doc),
 	{noreply, S2};
 
 % internal: decrease refcount of a revision
@@ -567,7 +579,9 @@ do_peek(#state{revisions=Revisions, path=Path}, Rev, User) ->
 			{error, enoent};
 
 		{ok, {_, Revision}} ->
-			file_store_reader:start_link(Path, Revision#revision.parts, User);
+			% TODO: lock parts
+			file_store_reader:start_link(Path, Revision#revision.parts,
+				Revision#revision.parents, Revision#revision.type, User);
 
 		error ->
 			{error, enoent}
@@ -745,7 +759,7 @@ do_write_start_create(S, Doc, Type, Creator, User) ->
 		readers   = dict:new(),
 		locks     = []},
 	{S2, Writer} = start_writer(S, State, User),
-	{S2, {ok, Writer}}.
+	{do_hide(S2, Doc), {ok, Writer}}.
 
 
 % returns `{S2, {ok, Writer} | {error, Reason}}'
@@ -773,7 +787,7 @@ do_write_start_fork(S, Doc, StartRev, Creator, User) ->
 				readers   = dict:new(),
 				locks     = []},
 			{S2, Writer} = start_writer(S, State, User),
-			{S2, {ok, Writer}}
+			{do_hide(S2, Doc), {ok, Writer}}
 	end.
 
 
@@ -966,7 +980,7 @@ do_commit(S, Doc, OldPreRev, Revision) ->
 						CurrentPreRevs),
 					{ok, NewRev, NewPreRevs};
 				false ->
-					conflict
+					{error, conflict}
 			end;
 		error ->
 			{ok, NewRev, []}
@@ -982,8 +996,8 @@ do_commit(S, Doc, OldPreRev, Revision) ->
 			S3 = add_revision(S2, Rev, 1, Revision),
 			{S3, {ok, Rev}};
 
-		conflict ->
-			{S, conflict}
+		Error ->
+			{S, Error}
 	end.
 
 
@@ -1390,29 +1404,44 @@ fsck_check_rev_refcounts(Revisions, RevRefCounts) ->
 
 %%% Garbage collection %%%%%%%%%%%%%%%%
 
-do_gc(#state{guid=Guid, uuids=Uuids, revisions=Revisions, path=Path} = S) ->
+do_gc(S) ->
+	#state{
+		guid      = Guid,
+		uuids     = Uuids,
+		revisions = Revisions,
+		path      = Path,
+		hidden    = Hidden
+	} = S,
 	{RootRev, RootPreRevs, _RootGen} = dict:fetch(Guid, Uuids),
 	WhiteSet = dict:erase(Guid, Uuids),
-	DelDocs = gc_step([RootRev | RootPreRevs], WhiteSet, Revisions, Path),
-	NewUuids = lists:foldl(
-		fun(Doc, Acc) ->
-			{Rev, PreRevs, _Gen} = dict:fetch(Doc, Acc),
-			vol_monitor:trigger_rm_doc(Guid, Doc),
-			revision_ref_dec(Rev),
-			lists:foreach(fun(R) -> revision_ref_dec(R) end, PreRevs),
-			dict:erase(Doc, Acc)
-		end,
-		Uuids,
-		DelDocs),
+	DelDocs = dict:fetch_keys(
+		lists:foldl(
+			fun(HiddenDoc, Acc) -> dict:erase(HiddenDoc, Acc) end,
+			gc_step([RootRev | RootPreRevs], WhiteSet, Revisions, Path),
+			Hidden)),
 	NumCollected = length(DelDocs),
-	Changed = S#state.changed or (NumCollected > 0),
-	error_logger:info_report([{store, util:bin_to_hexstr(Guid)},
-		{'garbage_collected', NumCollected}]),
-	S#state{uuids=NewUuids, changed=Changed}.
+	if
+		NumCollected > 0 ->
+			NewUuids = lists:foldl(
+				fun(Doc, Acc) ->
+					{Rev, PreRevs, _Gen} = dict:fetch(Doc, Acc),
+					vol_monitor:trigger_rm_doc(Guid, Doc),
+					revision_ref_dec(Rev),
+					lists:foreach(fun(R) -> revision_ref_dec(R) end, PreRevs),
+					dict:erase(Doc, Acc)
+				end,
+				Uuids,
+				DelDocs),
+			error_logger:info_report([{store, util:bin_to_hexstr(Guid)},
+				{'garbage_collected', NumCollected}]),
+			S#state{uuids=NewUuids, changed=true};
+		true ->
+			S
+	end.
 
 
 gc_step([], WhiteSet, _Revisions, _Path) ->
-	dict:fetch_keys(WhiteSet);
+	WhiteSet;
 
 gc_step([Rev | GreyList], WhiteSet, Revisions, Path) ->
 	case dict:find(Rev, Revisions) of
@@ -1439,6 +1468,16 @@ gc_step_eval(Doc, {GreyList, WhiteSet}=Acc) ->
 		error ->
 			Acc
 	end.
+
+
+do_hide(#state{hidden=Hidden} = S, Doc) ->
+	NewHidden = [Doc | Hidden],
+	S#state{hidden=NewHidden}.
+
+
+do_unhide(#state{hidden=Hidden} = S, Doc) ->
+	NewHidden = lists:delete(Doc, Hidden),
+	S#state{hidden=NewHidden}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

@@ -20,7 +20,7 @@
 	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_parents/1,
 	get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2, replicate_rev/4,
 	replicate_doc/4, resume/4, set_parents/2, set_type/2, stat/2, suspend/1,
-	update/4, abort/1, commit/1, write/4, truncate/3, sync/3]).
+	update/4, close/1, commit/1, write/4, truncate/3, sync/3]).
 
 -export([consolidate_error/1, consolidate_success/2, consolidate_success/1,
 	consolidate_filter/1]).
@@ -36,7 +36,6 @@
 %% the following form:
 %%
 %%   {ok, ErrInfo} | {ok, ErrInfo, Result} -- (partial) success
-%%   {retry, Error, ErrInfo}               -- failed, but retry (commit)
 %%   {error, Error, ErrInfo}               -- failed
 %%
 %% Error is the primary error which caused the operation to fail. `ErrInfo' is
@@ -165,8 +164,8 @@ peek(Rev, Stores) ->
 %% revision identifier will be returned by commit/1 which will always succeed
 %% for newly created documents (despite IO errors).
 %%
-%% The handle can only be commited or aborted but not suspended because the new
-%% document will not show up in the store until a successful commit.
+%% The handle can only be commited but not suspended because the new document
+%% will not show up in the store until a successful commit.
 %%
 %% @spec create(Type, Creator, Stores) -> Result
 %%       Result = {ok, ErrInfo, {Doc, Handle}} | {error, Reason, ErrInfo}
@@ -192,8 +191,8 @@ create(Type, Creator, Stores) ->
 %% handle for the subsequent write calls to update the revision. The initial
 %% content will be taken from StartRev.
 %%
-%% The handle can only be commited or aborted but not suspended because the new
-%% document will not show up in the store until a successful commit.
+%% The handle can only be commited but not suspended because the new document
+%% will not show up in the store until a successful commit.
 %%
 %% @spec fork(StartRev, Creator, Stores) -> Result
 %%       Result = {ok, ErrInfo, {Doc, Handle}} | {error, Reason, ErrInfo}
@@ -312,22 +311,20 @@ set_parents(Handle, Parents) ->
 %% @doc Commit a new revision
 %%
 %% One of the parents of this new revision must point to the current revision
-%% of the document, otherwise the function will fail with `conflict'. The handle
-%% is still valid in this case and the caller may either rebase the revision
-%% and try again or suspend the handle to keep the changes.
+%% of the document, otherwise the function will fail with a `conflict' error
+%% code. The handle remains writable in this case and the caller may either
+%% rebase the revision and try again or suspend the handle to keep the changes.
 %%
 %% If the new revision could be committed then its identifier will be returned.
 %% If the handle was resumed from a preliminary revision then this preliminary
 %% revision will be removed from the list of pending preliminary revisions. In
 %% case of severe errors the function will fail with an apropriate error code.
 %%
-%% The handle will be invalid after the call if the commit succeeds or fails
-%% with a hard error. In case it fails due to a conflict the handle will still
-%% be valid.
+%% The handle will be read only after the call if the commit succeeds. In case
+%% the commit fails, e.g. due to a conflict the handle will still be writable.
 %%
 %% @spec commit(Handle) -> Result
-%%       Result = {ok, ErrInfo, Rev} | {retry, conflict, ErrInfo} |
-%%                {error, Reason, ErrInfo}
+%%       Result = {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
 %%       Handle = handle()
 %%       Rev = guid()
 %%       Reason = ecode()
@@ -347,7 +344,8 @@ commit(Handle) ->
 %% revision is removed from the document. The preliminary revision can also be
 %% removed explicitly by calling forget/3.
 %%
-%% The handle will be invalid after the call regardless of the result.
+%% The handle will be read only after the call if the operation succeeds. In
+%% case the operation fails the handle will still be writable.
 %%
 %% @spec suspend(Handle) -> Result
 %%       Result = {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
@@ -358,15 +356,15 @@ suspend(Handle) ->
 	broker_io:suspend(Handle).
 
 
-%% @doc Abort the creation of a new revision
+%% @doc Close a handle
 %%
 %% Discards the handle and throws away any changes. The handle will be invalid
 %% after the call.
 %%
-%% @spec abort(Handle) -> {ok, ErrInfo}
+%% @spec close(Handle) -> {ok, ErrInfo}
 %%       Handle = #handle{}
-abort(Handle) ->
-	broker_io:abort(Handle).
+close(Handle) ->
+	broker_io:close(Handle).
 
 
 %% @doc Remove a pending preliminary revision from a document.

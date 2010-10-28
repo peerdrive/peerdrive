@@ -18,7 +18,7 @@
 -behaviour(gen_server).
 
 -export([start/2]).
--export([read/4, write/4, truncate/3, commit/2, abort/1, get_type/1,
+-export([read/4, write/4, truncate/3, commit/2, close/1, get_type/1,
 	set_type/2, get_parents/1, set_parents/2, suspend/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
@@ -37,7 +37,7 @@ start(State, User) ->
 				read        = fun read/4,
 				write       = fun write/4,
 				truncate    = fun truncate/3,
-				abort       = fun abort/1,
+				close       = fun close/1,
 				commit      = fun commit/2,
 				suspend     = fun suspend/2,
 				get_type    = fun get_type/1,
@@ -64,8 +64,8 @@ commit(Writer, Mtime) ->
 suspend(Writer, Mtime) ->
 	gen_server:call(Writer, {suspend, Mtime}).
 
-abort(Writer) ->
-	gen_server:call(Writer, abort).
+close(Writer) ->
+	gen_server:call(Writer, close).
 
 get_type(Writer) ->
 	gen_server:call(Writer, get_type).
@@ -105,6 +105,20 @@ handle_call({read, Part, Offset, Length}, _From, S) ->
 	end,
 	{reply, Reply, S2};
 
+% returns nothing
+handle_call(close, _From, S) ->
+	{stop, normal, ok, S};
+
+handle_call(get_type, _From, S) ->
+	{reply, {ok, S#ws.type}, S};
+
+handle_call(get_parents, _From, S) ->
+	{reply, {ok, S#ws.baserevs}, S};
+
+% the following calls are only allowed when still writable
+handle_call(_Request, _From, S = #ws{readonly=true}) ->
+	{reply, {error, ebadf}, S};
+
 % returns `ok | {error, Reason}'
 handle_call({write, Part, Offset, Data}, _From, S) ->
 	{S2, File} = get_file_write(S, Part),
@@ -130,24 +144,14 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 
 % returns `{ok, Hash} | conflict | {error, Reason}'
 handle_call({commit, Mtime}, _From, S) ->
-	do_commit(S, Mtime);
-
-% returns nothing
-handle_call(abort, _From, S) ->
-	{stop, normal, ok, S};
+	do_commit(fun file_store:commit/4, S, Mtime);
 
 % returns `{ok, Hash} | {error, Reason}'
 handle_call({suspend, Mtime}, _From, S) ->
-	do_suspend(S, Mtime);
-
-handle_call(get_type, _From, S) ->
-	{reply, {ok, S#ws.type}, S};
+	do_commit(fun file_store:suspend/4, S, Mtime);
 
 handle_call({set_type, Type}, _From, S) ->
 	{reply, ok, S#ws{type=Type}};
-
-handle_call(get_parents, _From, S) ->
-	{reply, {ok, S#ws.baserevs}, S};
 
 handle_call({set_parents, Parents}, _From, S) ->
 	{reply, ok, S#ws{baserevs=Parents}}.
@@ -157,9 +161,11 @@ handle_info({'EXIT', _From, _Reason}, S) ->
 	{stop, orphaned, S}.
 
 
-terminate(_Reason, #ws{locks=Locks, server=Server} = S) ->
+terminate(_Reason, #ws{doc=Doc, locks=Locks, server=Server} = S) ->
 	% unlock hashes
 	lists:foreach(fun(Lock) -> file_store:unlock(Server, Lock) end, Locks),
+	% expose document to garbage collector
+	file_store:unhide(Server, Doc),
 	% delete temporary files
 	dict:fold(
 		fun (_, {FileName, IODevice}, _) ->
@@ -280,27 +286,8 @@ close_reader(ClosePart, Readers) ->
 
 
 % calculate hashes, close&move to correct dir, update document
-% returns {ok, Hash} | conflict | {error, Reason}
-do_commit(S, Mtime) ->
-	S2 = close_and_move(S),
-	Revision = #revision{
-		flags   = S2#ws.flags,
-		parts   = lists:usort(dict:to_list(S2#ws.orig)),
-		parents = lists:usort(S2#ws.baserevs),
-		mtime   = Mtime,
-		type    = S2#ws.type,
-		creator = S2#ws.creator},
-	case file_store:commit(S2#ws.server, S2#ws.doc, S2#ws.prerev, Revision) of
-		conflict ->
-			{reply, conflict, S2};
-		Reply ->
-			{stop, normal, Reply, S2}
-	end.
-
-
-% calculate hashes, close&move to correct dir, update document
 % returns {ok, Hash} | {error, Reason}
-do_suspend(S, Mtime) ->
+do_commit(Fun, S, Mtime) ->
 	S2 = close_and_move(S),
 	Revision = #revision{
 		flags   = S2#ws.flags,
@@ -309,8 +296,12 @@ do_suspend(S, Mtime) ->
 		mtime   = Mtime,
 		type    = S2#ws.type,
 		creator = S2#ws.creator},
-	Reply = file_store:suspend(S2#ws.server, S2#ws.doc, S2#ws.prerev, Revision),
-	{stop, normal, Reply, S2}.
+	case Fun(S2#ws.server, S2#ws.doc, S2#ws.prerev, Revision) of
+		{ok, _Rev} = Reply ->
+			{reply, Reply, S2#ws{readonly=true}};
+		Reply ->
+			{reply, Reply, S2}
+	end.
 
 
 close_and_move(S) ->

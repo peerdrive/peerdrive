@@ -27,6 +27,7 @@
 	orig,       % dict: FourCC --> Hash
 	new,        % dict: FourCC --> {FileName, IODevice}
 	readers,    % dict: FourcC --> IODevice
-	locks       % list of locked part hashes
+	locks,      % list of locked part hashes
+	readonly=false % true after commit
 	}).
 

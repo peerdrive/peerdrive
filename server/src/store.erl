@@ -19,7 +19,7 @@
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2]).
 -export([put_doc/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
--export([abort/1, commit/2, create/4, fork/4, get_parents/1, get_type/1,
+-export([close/1, commit/2, create/4, fork/4, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
 	write/4, suspend/2]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
@@ -211,20 +211,19 @@ set_parents(#handle{this=Handle, set_parents=SetParents}, Parents) ->
 %% @doc Commit a new revision
 %%
 %% One of the parents of this new revision must point to the current revision
-%% of the document, otherwise the function will fail with `conflict'. The handle
-%% is still valid in this case and the caller may either rebase the revision
-%% and try again or suspend the handle to keep the changes.
+%% of the document, otherwise the function will fail with a `conflict' error
+%% code. The handle remains writable in this case and the caller may either
+%% rebase the revision and try again or suspend the handle to keep the changes.
 %%
 %% If the new revision could be committed then its identifier will be returned.
 %% If the handle was resumed from a preliminary revision then this preliminary
 %% revision will be removed from the list of pending preliminary revisions. In
 %% case of severe errors the function will fail with an apropriate error code.
 %%
-%% The handle will be invalid after the call if the commit succeeds or fails
-%% with a hard error. In case it fails due to a conflict the handle will still
-%% be valid.
+%% The handle will be read only after the call if the commit succeeds. In case
+%% the commit fails, e.g. due to a conflict the handle will still be writable.
 %%
-%% @spec commit(Handle, Mtime) -> {ok, Rev} | conflict | {error, Reason}
+%% @spec commit(Handle, Mtime) -> {ok, Rev} | {error, Reason}
 %%       Handle = #handle{}
 %%       Mtime = integer()
 %%       Rev = guid()
@@ -244,7 +243,8 @@ commit(#handle{this=Handle, commit=Commit}, Mtime) ->
 %% revision is removed from the document. The preliminary revision can also be
 %% removed explicitly by calling forget/3.
 %%
-%% The handle will be invalid after the call regardless of the result.
+%% The handle will be read only after the call if the operation succeeds. In
+%% case the operation fails the handle will still be writable.
 %%
 %% @spec suspend(Handle, Mtime) -> {ok, Rev} | {error, Reason}
 %%       Handle = #handle{}
@@ -254,15 +254,15 @@ commit(#handle{this=Handle, commit=Commit}, Mtime) ->
 suspend(#handle{this=Handle, suspend=Suspend}, Mtime) ->
 	Suspend(Handle, Mtime).
 
-%% @doc Abort the creation of a new revision
+%% @doc Close a handle
 %%
 %% Discards the handle and throws away any changes. The handle will be invalid
 %% after the call.
 %%
-%% @spec abort(Handle) -> ok
+%% @spec close(Handle) -> ok
 %%       Handle = #handle{}
-abort(#handle{this=Handle, abort=Abort}) ->
-	Abort(Handle).
+close(#handle{this=Handle, close=Close}) ->
+	Close(Handle).
 
 %% @doc Remove a pending preliminary revision from a document.
 %%
