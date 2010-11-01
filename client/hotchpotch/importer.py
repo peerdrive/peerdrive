@@ -94,28 +94,33 @@ def importFile(store, path, name=""):
 
 		#print 'META: ', repr(meta)
 		with open(path, "rb") as file:
-			with HpConnector().create(uti, "", [store]) as writer:
+			writer = HpConnector().create(uti, "", [store])
+			try:
 				writer.write('FILE', file.read())
 				writer.write('META', hpstruct.dumps(meta))
 				writer.commit()
-				link = hpstruct.DocLink(writer.getDoc())
-				return link
+				return writer
+			except:
+				writer.close()
+				raise
 	else:
 		return None
 
 
 # returns a DocLink or None
 def importObject(store, uti, spec):
-	link = None
 	try:
-		with HpConnector().create(uti, "", [store]) as writer:
+		writer = HpConnector().create(uti, "", [store])
+		try:
 			for (fourcc, data) in spec:
 				writer.writeAll(fourcc, data)
 			writer.commit()
-			link = hpstruct.DocLink(writer.getDoc())
+			return writer
+		except:
+			writer.close()
 	except IOError:
 		pass
-	return link
+	return None
 
 
 def importObjectByPath(path, uti, spec, overwrite=False):
@@ -126,9 +131,13 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 			return False
 
 		# create the object and add to dict
-		container[name] = importObject(store, uti, spec)
-		container.save()
-		return True
+		handle = importObject(store, uti, spec)
+		try:
+			container[name] = hpstruct.DocLink(handle.getDoc())
+			container.save()
+			return True
+		finally:
+			handle.close()
 
 	except IOError:
 		return False
@@ -141,27 +150,36 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 	# create the object and add to dict
 	if isinstance(impFile, list):
 		counter = 0
+		handles = []
 		nn = "%s%d" % (name, counter)
-		for f in impFile:
-			while nn in container:
-				counter += 1
-				nn = "%s%d" % (name, counter)
-			if progress:
-				progress(f, nn)
-			link = importFile(store, f)
-			if link:
-				container[nn] = link
-			elif error:
-				error(f, nn)
-		container.save()
+		try:
+			for f in impFile:
+				while nn in container:
+					counter += 1
+					nn = "%s%d" % (name, counter)
+				if progress:
+					progress(f, nn)
+				handle = importFile(store, f)
+				if handle:
+					handles.append(handle)
+					container[nn] = hpstruct.DocLink(handle.getDoc())
+				elif error:
+					error(f, nn)
+			container.save()
+		finally:
+			for handle in handles:
+				handle.close()
 	else:
 		if (name in container) and (not overwrite):
 			raise ImporterError("Duplicate item name")
 
-		link = importFile(store, impFile, name)
-		if link:
-			container[name] = link
-			container.save()
-		else:
-			raise ImporterError("Invalid file")
+		handle = importFile(store, impFile, name)
+		try:
+			if handle:
+				container[name] = hpstruct.DocLink(handle.getDoc())
+				container.save()
+			else:
+				raise ImporterError("Invalid file")
+		finally:
+			handle.close()
 

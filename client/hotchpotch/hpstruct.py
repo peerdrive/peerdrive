@@ -524,13 +524,17 @@ class HpDict(object):
 				"comment" : "<<Created by import>>"
 			}
 		}
-		with hpconnector.HpConnector().create("org.hotchpotch.dict", "", stores) as w:
+		w = hpconnector.HpConnector().create("org.hotchpotch.dict", "", stores)
+		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(self.__content))
 			w.commit()
 			self.__rev = w.getRev()
 			self.__doc = w.getDoc()
-		return DocLink(self.__doc)
+			return w
+		except:
+			w.close()
+			raise
 
 	def save(self):
 		self.__meta["org.hotchpotch.annotation"]["comment"] = "<<Changed by import>>"
@@ -613,13 +617,17 @@ class HpSet(object):
 		content = [ link for (descr, link) in self.__content ]
 		for link in content:
 			link.update()
-		with hpconnector.HpConnector().create("org.hotchpotch.set", "", stores) as w:
+		w = hpconnector.HpConnector().create("org.hotchpotch.set", "", stores)
+		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(content))
 			w.commit()
-			self.__rev = w.regRev()
+			self.__rev = w.getRev()
 			self.__doc = w.getDoc()
-		return DocLink(self.__doc)
+			return w
+		except:
+			w.close()
+			raise
 
 	def save(self):
 		if self.__rev and self.__doc:
@@ -731,11 +739,16 @@ def walkPath(path, create=False):
 		elif create:
 			name = step.split(':')[-1]
 			if ':' in nextStep:
-				next = HpDict().create(name, [storeDoc])
+				handle = HpDict().create(name, [storeDoc])
 			else:
-				next = HpSet().create(name, [storeDoc])
-			curContainer[step] = next
-			curContainer.save()
+				handle = HpSet().create(name, [storeDoc])
+
+			try:
+				next = DocLink(handle.getDoc())
+				curContainer[step] = next
+				curContainer.save()
+			finally:
+				handle.close()
 			curContainer = HpContainer(next)
 		else:
 			raise StructError("Invalid path")

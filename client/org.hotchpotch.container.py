@@ -468,8 +468,10 @@ class CollectionTreeView(QtGui.QTreeView):
 						w.write(part, r.readAll(part))
 				w.commit()
 				destDoc = w.getDoc()
-			# add link
-			self.model().insertLink(hpstruct.DocLink(destDoc))
+				# add link
+				self.model().insertLink(hpstruct.DocLink(destDoc))
+				# save immediately
+				self.__parent.save()
 		elif choice in openRevActions:
 			rev = openRevActions[choice]
 			hpgui.showDocument(hpstruct.RevLink(rev))
@@ -874,9 +876,13 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		for url in urlList:
 			try:
 				path = str(url.toLocalFile().toUtf8())
-				link = importer.importFile(store, path)
-				if link:
-					self.insertLink(link)
+				handle = importer.importFile(store, path)
+				if handle:
+					try:
+						self.insertLink(hpstruct.DocLink(handle.getDoc()))
+						self.__parent.save()
+					finally:
+						handle.close()
 			except IOError:
 				pass
 		return True

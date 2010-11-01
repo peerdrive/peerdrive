@@ -411,6 +411,9 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.resize(settings["resx"], settings["resy"])
 		self.move(settings["posx"], settings["posy"])
 
+	def save(self):
+		self.__saveFile("<<Periodic checkpoint>>")
+
 	def checkpoint(self, comment, forceComment=False):
 		# explicitly set comment, the user expects it's comment to be applied
 		if forceComment:

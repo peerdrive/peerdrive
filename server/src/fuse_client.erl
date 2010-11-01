@@ -918,15 +918,19 @@ dict_create({doc, Store, Doc}, Name, Cache) ->
 
 				error ->
 					case create_empty_file(Store, Name) of
-						{ok, NewDoc, NewRev} ->
-							Update = fun(Dict) ->
-								dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
-							end,
-							case dict_update(Store, Doc, NewCache, Update) of
-								{ok, AddCache} ->
-									{entry, {doc, Store, NewDoc}, AddCache};
-								{error, _Reason, _AddCache} = Error ->
-									Error
+						{ok, Handle, NewDoc, NewRev} ->
+							try
+								Update = fun(Dict) ->
+									dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
+								end,
+								case dict_update(Store, Doc, NewCache, Update) of
+									{ok, AddCache} ->
+										{entry, {doc, Store, NewDoc}, AddCache};
+									{error, _Reason, _AddCache} = Error ->
+										Error
+								end
+							after
+								store:close(Handle)
 							end;
 
 						{error, Reason} ->
@@ -948,15 +952,19 @@ dict_mkdir({doc, Store, Doc}, Name, Cache) ->
 
 				error ->
 					case create_empty_directory(Store, Name) of
-						{ok, NewDoc, NewRev} ->
-							Update = fun(Dict) ->
-								dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
-							end,
-							case dict_update(Store, Doc, NewCache, Update) of
-								{ok, AddCache} ->
-									{ok, {doc, Store, NewDoc}, AddCache};
-								{error, _Reason, _AddCache} = Error ->
-									Error
+						{ok, Handle, NewDoc, NewRev} ->
+							try
+								Update = fun(Dict) ->
+									dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
+								end,
+								case dict_update(Store, Doc, NewCache, Update) of
+									{ok, AddCache} ->
+										{ok, {doc, Store, NewDoc}, AddCache};
+									{error, _Reason, _AddCache} = Error ->
+										Error
+								end
+							after
+								store:close(Handle)
 							end;
 
 						{error, Reason} ->
@@ -1504,17 +1512,14 @@ create_empty_file(Store, Name) ->
 		dict:new()),
 	case store:create(Store, Doc, <<"public.text">>, ?FUSE_CC) of
 		{ok, Handle} ->
-			try
-				store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
-				store:write(Handle, <<"FILE">>, 0, <<>>),
-				case store:commit(Handle, util:get_time()) of
-					{ok, Rev} ->
-						{ok, Doc, Rev};
-					{error, _} = Error ->
-						Error
-				end
-			after
-				store:close(Handle)
+			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+			store:write(Handle, <<"FILE">>, 0, <<>>),
+			case store:commit(Handle, util:get_time()) of
+				{ok, Rev} ->
+					{ok, Handle, Doc, Rev};
+				{error, _} = Error ->
+					store:close(Handle),
+					Error
 			end;
 
 		Error ->
@@ -1536,17 +1541,14 @@ create_empty_directory(Store, Name) ->
 		dict:new()),
 	case store:create(Store, Doc, <<"org.hotchpotch.dict">>, ?FUSE_CC) of
 		{ok, Handle} ->
-			try
-				store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
-				store:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),
-				case store:commit(Handle, util:get_time()) of
-					{ok, Rev} ->
-						{ok, Doc, Rev};
-					{error, _} = Error ->
-						Error
-				end
-			after
-				store:close(Handle)
+			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+			store:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),
+			case store:commit(Handle, util:get_time()) of
+				{ok, Rev} ->
+					{ok, Handle, Doc, Rev};
+				{error, _} = Error ->
+					store:close(Handle),
+					Error
 			end;
 
 		Error ->
