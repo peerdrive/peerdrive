@@ -19,7 +19,8 @@
 
 -export([start/2]).
 -export([read/4, write/4, truncate/3, commit/2, close/1, get_type/1,
-	set_type/2, get_parents/1, set_parents/2, suspend/2]).
+	set_type/2, get_parents/1, set_parents/2, suspend/2, get_links/1,
+	set_links/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
@@ -43,7 +44,9 @@ start(State, User) ->
 				get_type    = fun get_type/1,
 				set_type    = fun set_type/2,
 				get_parents = fun get_parents/1,
-				set_parents = fun set_parents/2
+				set_parents = fun set_parents/2,
+				get_links   = fun get_links/1,
+				set_links   = fun set_links/2
 			}};
 		Else ->
 			Else
@@ -78,6 +81,12 @@ get_parents(Writer) ->
 
 set_parents(Writer, Parents) ->
 	gen_server:call(Writer, {set_parents, Parents}).
+
+get_links(Writer) ->
+	gen_server:call(Writer, get_links).
+
+set_links(Writer, Links) ->
+	gen_server:call(Writer, {set_links, Links}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -114,6 +123,9 @@ handle_call(get_type, _From, S) ->
 
 handle_call(get_parents, _From, S) ->
 	{reply, {ok, S#ws.baserevs}, S};
+
+handle_call(get_links, _From, S) ->
+	{reply, {ok, S#ws.links}, S};
 
 % the following calls are only allowed when still writable
 handle_call(_Request, _From, S = #ws{readonly=true}) ->
@@ -152,6 +164,9 @@ handle_call({suspend, Mtime}, _From, S) ->
 
 handle_call({set_type, Type}, _From, S) ->
 	{reply, ok, S#ws{type=Type}};
+
+handle_call({set_links, Links}, _From, S) ->
+	{reply, ok, S#ws{links=Links}};
 
 handle_call({set_parents, Parents}, _From, S) ->
 	{reply, ok, S#ws{baserevs=Parents}}.
@@ -295,7 +310,8 @@ do_commit(Fun, S, Mtime) ->
 		parents = lists:usort(S2#ws.baserevs),
 		mtime   = Mtime,
 		type    = S2#ws.type,
-		creator = S2#ws.creator},
+		creator = S2#ws.creator,
+		links   = S2#ws.links},
 	case Fun(S2#ws.server, S2#ws.doc, S2#ws.prerev, Revision) of
 		{ok, _Rev} = Reply ->
 			{reply, Reply, S2#ws{readonly=true}};

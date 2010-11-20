@@ -102,15 +102,8 @@ decode_rlink(<<Rev:16/binary, Rest/binary>>) ->
 	{{rlink, Rev}, Rest}.
 
 
-decode_dlink(<<Doc:16/binary, RevCount:8, Body/binary>>) ->
-	{Revs, Rest} = decode_dlink_loop(RevCount, Body),
-	{{dlink, Doc, Revs}, Rest}.
-
-decode_dlink_loop(0, Rest) ->
-	{[], Rest};
-decode_dlink_loop(Count, <<Rev:16/binary, Body/binary>>) ->
-	{Revs, Rest} = decode_dlink_loop(Count-1, Body),
-	{[Rev | Revs], Rest}.
+decode_dlink(<<Doc:16/binary, Rest/binary>>) ->
+	{{dlink, Doc}, Rest}.
 
 
 decode_float(<<Value:32/little-float, Rest/binary>>) ->
@@ -167,11 +160,8 @@ encode(Bool) when is_boolean(Bool) ->
 encode({rlink, Rev}) ->
 	<<?RLINK, Rev/binary>>;
 
-encode({dlink, Doc, Revs}) ->
-	lists:foldl(
-		fun(Rev, Acc) -> <<Acc/binary, Rev/binary>> end,
-		<<?DLINK, Doc/binary, (length(Revs)):8>>,
-		Revs);
+encode({dlink, Doc}) ->
+	<<?DLINK, Doc/binary>>;
 
 encode(Float) when is_float(Float) ->
 	<<?DOUBLE, Float:64/little-float>>;
@@ -352,7 +342,7 @@ cmp(X1, X2) when is_record(X1, dict, 9) ->
 cmp({rlink, R1}, {rlink, R2}) ->
 	R1 =:= R2;
 
-cmp({dlink, Doc1, _Revs1}, {dlink, Doc2, _Revs2}) ->
+cmp({dlink, Doc1}, {dlink, Doc2}) ->
 	Doc1 =:= Doc2;
 
 cmp(_, _) ->
@@ -404,8 +394,8 @@ check_type(Base, Versions) when is_record(Base, rlink, 2) ->
 		false -> conflict
 	end;
 
-check_type(Base, Versions) when is_record(Base, dlink, 3) ->
-	case lists:all(fun(V) -> is_record(V, dlink, 3) end, Versions) of
+check_type(Base, Versions) when is_record(Base, dlink, 2) ->
+	case lists:all(fun(V) -> is_record(V, dlink, 2) end, Versions) of
 		true  -> literal;
 		false -> conflict
 	end;

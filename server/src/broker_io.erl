@@ -24,7 +24,7 @@
 -export([init/1, init/2, handle_call/3, handle_cast/2, code_change/3,
 	handle_info/2, terminate/2]).
 
--record(state, {handles, user, doc}).
+-record(state, {handles, user, doc, links, stores}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public broker operations...
@@ -98,25 +98,37 @@ init_operation({resume, Doc, PreRev, Creator, Stores}) ->
 
 
 handle_call({read, Part, Offset, Length}, _From, S) ->
-	distribute_read(fun(Handle) -> store:read(Handle, Part, Offset, Length) end, S);
+	make_reply(distribute_read(
+		fun(Handle) -> store:read(Handle, Part, Offset, Length) end,
+		S));
 
 handle_call({write, Part, Offset, Data}, _From, S) ->
-	distribute_write(fun(Handle) -> store:write(Handle, Part, Offset, Data) end, S);
+	make_reply(distribute_write(
+		fun(Handle) -> store:write(Handle, Part, Offset, Data) end,
+		S));
 
 handle_call({truncate, Part, Offset}, _From, S) ->
-	distribute_write(fun(Handle) -> store:truncate(Handle, Part, Offset) end, S);
+	make_reply(distribute_write(
+		fun(Handle) -> store:truncate(Handle, Part, Offset) end,
+		S));
 
 handle_call(get_parents, _From, S) ->
-	distribute_read(fun(Handle) -> store:get_parents(Handle) end, S);
+	make_reply(distribute_read(
+		fun(Handle) -> store:get_parents(Handle) end,
+		S));
 
 handle_call({set_parents, Parents}, _From, S) ->
-	distribute_write(fun(Handle) -> store:set_parents(Handle, Parents) end, S);
+	do_set_parents(Parents, S);
 
 handle_call(get_type, _From, S) ->
-	distribute_read(fun(Handle) -> store:get_type(Handle) end, S);
+	make_reply(distribute_read(
+		fun(Handle) -> store:get_type(Handle) end,
+		S));
 
 handle_call({set_type, Type}, _From, S) ->
-	distribute_write(fun(Handle) -> store:set_type(Handle, Type) end, S);
+	make_reply(distribute_write(
+		fun(Handle) -> store:set_type(Handle, Type) end,
+		S));
 
 handle_call(commit, _From, S) ->
 	do_commit(fun store:commit/2, S);
@@ -180,7 +192,10 @@ do_peek_loop(_Rev, [], Errors) ->
 do_peek_loop(Rev, [{Guid, Ifc} | Stores], Errors) ->
 	case store:peek(Ifc, Rev) of
 		{ok, Handle} ->
-			State = #state{ handles=[{Guid, Handle}] },
+			State = #state{
+				handles=[{Guid, Handle}],
+				links={sets:new(), sets:new()}
+			},
 			broker:consolidate_success(Errors, State);
 		{error, Reason} ->
 			do_peek_loop(Rev, Stores, [{Guid, Reason} | Errors])
@@ -195,27 +210,147 @@ do_create(Doc, Type, Creator, Stores) ->
 
 
 do_fork(Doc, StartRev, Creator, Stores) ->
-	start_handles(
+	Startup = start_handles(
 		fun(Ifc) -> store:fork(Ifc, Doc, StartRev, Creator) end,
 		Doc,
-		Stores).
+		Stores),
+	case Startup of
+		{ok, ErrInfo1, S} ->
+			case distribute_read(fun(H) -> store:get_links(H) end, S) of
+				{ok, ErrInfo2, {SDL, _WDL, _SRL, _WRL, _DocMap}, S2} ->
+					{
+						ok,
+						ErrInfo1++ErrInfo2,
+						S2#state{links={sets:from_list(SDL), sets:new()}}
+					};
+
+				{error, ErrInfo2, S2} ->
+					do_close(S2#state.handles),
+					broker:consolidate_error(ErrInfo1++ErrInfo2)
+			end;
+
+		Error ->
+			Error
+	end.
 
 
 do_update(Doc, StartRev, Creator, Stores) ->
-	start_handles(
+	Startup = start_handles(
 		fun(Ifc) -> store:update(Ifc, Doc, StartRev, Creator) end,
 		Doc,
-		Stores).
+		Stores),
+	case Startup of
+		{ok, ErrInfo1, S} ->
+			case distribute_read(fun(H) -> store:get_links(H) end, S) of
+				{ok, ErrInfo2, {SDL, _WDL, _SRL, _WRL, _DocMap}, S2} ->
+					{
+						ok,
+						ErrInfo1++ErrInfo2,
+						S2#state{links={sets:from_list(SDL), sets:new()}}
+					};
+
+				{error, ErrInfo2, S2} ->
+					do_close(S2#state.handles),
+					broker:consolidate_error(ErrInfo1++ErrInfo2)
+			end;
+
+		Error ->
+			Error
+	end.
 
 
 do_resume(Doc, PreRev, Creator, Stores) ->
-	start_handles(
+	Startup = start_handles(
 		fun(Ifc) -> store:resume(Ifc, Doc, PreRev, Creator) end,
 		Doc,
-		Stores).
+		Stores),
+	case Startup of
+		{ok, ErrInfo1, S} ->
+			case distribute_read(fun(H) -> store:get_links(H) end, S) of
+				{ok, ErrInfo2, {SDL, WDL, _SRL, _WRL, _DocMap}, S2} ->
+					{
+						ok,
+						ErrInfo1++ErrInfo2,
+						S2#state{
+							links={sets:from_list(SDL), sets:from_list(WDL)}
+						}
+					};
+
+				{error, ErrInfo2, S2} ->
+					do_close(S2#state.handles),
+					broker:consolidate_error(ErrInfo1++ErrInfo2)
+			end;
+
+		Error ->
+			Error
+	end.
 
 
 do_commit(Fun, S) ->
+	Reply = case do_commit_prepare(S) of
+		{ok, ErrInfo, S2} ->
+			merge_errors(do_commit_store(Fun, S2), ErrInfo);
+
+		Error ->
+			Error
+	end,
+	make_reply(Reply).
+
+
+do_commit_prepare(S) ->
+	case distribute_read(fun read_rev_refs/1, S) of
+		{ok, ErrInfo, {DocRefs, RevRefs}, S2} ->
+			Links = do_commit_prepare_get_links(DocRefs, RevRefs, S2),
+			merge_errors(
+				distribute_write(fun(H) -> store:set_links(H, Links) end, S2),
+				ErrInfo);
+
+		Error ->
+			Error
+	end.
+
+
+do_commit_prepare_get_links(DocRefs, RevRefs, S) ->
+	#state{links={OldStrongRefs, OldWeakRefs}, stores=Stores} = S,
+	% Strong Document Links
+	SDL = DocRefs,
+	% Weak Document Links
+	WDL = sets:union(sets:subtract(OldStrongRefs, DocRefs), OldWeakRefs),
+	% Doc -> [Rev] map of all strong/weak documents
+	DocMap = sets:fold(
+		fun(Doc, MapAcc) ->
+			Revs = lists:foldl(
+				fun({_Guid, Store}, DocAcc) ->
+					case store:lookup(Store, Doc) of
+						{ok, Rev, _PreRevs} ->
+							sets:add_element(Rev, DocAcc);
+						error ->
+							DocAcc
+					end
+				end,
+				sets:new(),
+				Stores),
+			dict:store(Doc, Revs, MapAcc)
+		end,
+		dict:new(),
+		sets:union(SDL, WDL)),
+	WeakDocRevRefs = sets:fold(
+		fun(Doc, AccRevs) ->
+			sets:union(dict:fetch(Doc, DocMap), AccRevs)
+		end,
+		sets:new(),
+		sets:union(SDL, WDL)),
+	SRL = sets:union(RevRefs, WeakDocRevRefs),
+	{
+		sets:to_list(SDL),
+		sets:to_list(WDL),
+		sets:to_list(SRL),
+		[], % WRL
+		dict:to_list(dict:map(fun(_, Revs) -> sets:to_list(Revs) end, DocMap))
+	}.
+
+
+do_commit_store(Fun, S) ->
 	Mtime = util:get_time(),
 	{Revs, RWHandles, ROHandles, Errors} = lists:foldl(
 		fun({Store, StoreHandle}=Handle, {AccRevs, AccRW, AccRO, AccErrors}) ->
@@ -233,13 +368,11 @@ do_commit(Fun, S) ->
 			% as expected
 			do_close(RWHandles),
 			vol_monitor:trigger_mod_doc(local, S#state.doc),
-			{reply, broker:consolidate_success(Errors, Rev),
-				S#state{handles=ROHandles}};
+			{ok, Errors, Rev, S#state{handles=ROHandles}};
 
 		[] when ROHandles =:= [] ->
 			% no writer commited...
-			{reply, broker:consolidate_error(Errors),
-				S#state{handles=RWHandles}};
+			{error, Errors, S#state{handles=RWHandles}};
 
 		RevList ->
 			% internal error: handles did not came to the same revision! WTF?
@@ -252,7 +385,11 @@ do_commit(Fun, S) ->
 			]),
 			do_close(ROHandles),
 			do_close(RWHandles),
-			{reply, {error, einternal, []}, S#state{handles=[]}}
+			{
+				error,
+				lists:map(fun({Store, _}) -> {Store, einternal} end, ROHandles),
+				S#state{handles=[]}
+			}
 	end.
 
 
@@ -260,10 +397,31 @@ do_close(Handles) ->
 	lists:foreach(fun({_Guid, Handle}) -> store:close(Handle) end, Handles).
 
 
+do_set_parents(Parents, S) ->
+	case read_references(Parents, S#state.stores) of
+		{DocSet, _RevSet} ->
+			S2 = S#state{links={DocSet, sets:new()}},
+			make_reply(distribute_write(
+				fun(Handle) -> store:set_parents(Handle, Parents) end,
+				S2));
+		error ->
+			{reply, {error, einval}, S}
+	end.
+
+
 start_handles(Fun, Doc, Stores) ->
 	case start_handles_loop(Fun, Stores, [], []) of
 		{ok, ErrInfo, Handles} ->
-			{ok, ErrInfo, #state{doc=Doc, handles=Handles}};
+			{
+				ok,
+				ErrInfo,
+				#state{
+					doc     = Doc,
+					handles = Handles,
+					stores  = Stores,
+					links   = {sets:new(), sets:new()}
+				}
+			};
 		Error ->
 			Error
 	end.
@@ -285,18 +443,17 @@ start_handles_loop(Fun, [{Guid, Ifc} | Stores], Handles, Errors) ->
 
 
 distribute_read(Fun, S) ->
-	Reply = case S#state.handles of
+	case S#state.handles of
 		[] ->
 			{error, enoent, []};
 
 		[{Guid, Handle} | _] ->
 			% TODO: ask more than just the first store if it fails...
 			case Fun(Handle) of
-				{ok, Result}    -> {ok, [], Result};
-				{error, Reason} -> {error, Reason, [{Guid, Reason}]}
+				{ok, Result}    -> {ok, [], Result, S};
+				{error, Reason} -> {error, [{Guid, Reason}], S}
 			end
-	end,
-	{reply, Reply, S}.
+	end.
 
 
 distribute_write(Fun, S) ->
@@ -321,7 +478,7 @@ distribute_write(Fun, S) ->
 			ErrInfo = lists:map(
 				fun({Store, Reason, _}) -> {Store, Reason} end,
 				Fail),
-			{reply, broker:consolidate_error(ErrInfo), S};
+			{error, ErrInfo, S};
 
 		_ ->
 			% at least someone did what he was told
@@ -331,6 +488,125 @@ distribute_write(Fun, S) ->
 					{Store, Reason}
 				end,
 				Fail),
-			{reply, broker:consolidate_success(ErrInfo), S#state{handles=Success}}
+			{ok, ErrInfo, S#state{handles=Success}}
 	end.
+
+
+make_reply(Result) ->
+	case Result of
+		{ok, ErrInfo, State} ->
+			{reply, broker:consolidate_success(ErrInfo), State};
+
+		{ok, ErrInfo, Reply, State} ->
+			{reply, broker:consolidate_success(ErrInfo, Reply), State};
+
+		{error, ErrInfo, State} ->
+			{reply, broker:consolidate_error(ErrInfo), State}
+	end.
+
+
+merge_errors(Result, AddErrors) ->
+	case Result of
+		{ok, ErrInfo, State} ->
+			{ok, AddErrors++ErrInfo, State};
+
+		{ok, ErrInfo, Reply, State} ->
+			{ok, AddErrors++ErrInfo, Reply, State};
+
+		{error, ErrInfo, State} ->
+			{error, AddErrors++ErrInfo, State}
+	end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Reference reading
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% {DocRefs::set(), RevRefs::set()} | error
+read_references(Revs, Stores) ->
+	catch lists:foldl(
+		fun(Rev, {AccDocs, AccRevs}) ->
+			{Docs, Revs} = read_references_step(Rev, Stores),
+			{sets:union(Docs, AccDocs), sets:union(Revs, AccRevs)}
+		end,
+		{sets:new(), sets:new()},
+		Revs).
+
+
+read_references_step(_Rev, []) ->
+	throw(error);
+
+read_references_step(Rev, [{_Guid, Ifc} | Stores]) ->
+	case store:peek(Ifc, Rev) of
+		{ok, Handle} ->
+			case read_rev_refs(Handle) of
+				{ok, Result} ->
+					store:close(Handle),
+					Result;
+
+				{error, _} ->
+					store:close(Handle),
+					read_references_step(Rev, Stores)
+			end;
+
+		{error, _Reason} ->
+			read_references_step(Rev, Stores)
+	end.
+
+
+read_rev_refs(Handle) ->
+	catch {ok, lists:foldl(
+		fun(FourCC, {AccDocRefs, AccRevRefs}) ->
+			{NewDR, NewRR} = read_rev_extract(read_rev_part(Handle,
+				FourCC)),
+			{sets:union(NewDR, AccDocRefs), sets:union(NewRR, AccRevRefs)}
+		end,
+		{sets:new(), sets:new()},
+		[<<"HPSD">>, <<"META">>])
+	}.
+
+
+read_rev_part(Handle, Part) ->
+	case store:read(Handle, Part, 0, 16#1000000) of
+		{ok, Binary} ->
+			case catch struct:decode(Binary) of
+				{'EXIT', _Reason} ->
+					[];
+				Struct ->
+					Struct
+			end;
+
+		{error, enoent} ->
+			[];
+
+		Error ->
+			throw(Error)
+	end.
+
+
+read_rev_extract(Data) when is_record(Data, dict, 9) ->
+	dict:fold(
+		fun(_Key, Value, {AccDocs, AccRevs}) ->
+			{Docs, Revs} = read_rev_extract(Value),
+			{sets:union(Docs, AccDocs), sets:union(Revs, AccRevs)}
+		end,
+		{sets:new(), sets:new()},
+		Data);
+
+read_rev_extract(Data) when is_list(Data) ->
+	lists:foldl(
+		fun(Value, {AccDocs, AccRevs}) ->
+			{Docs, Revs} = read_rev_extract(Value),
+			{sets:union(Docs, AccDocs), sets:union(Revs, AccRevs)}
+		end,
+		{sets:new(), sets:new()},
+		Data);
+
+read_rev_extract({dlink, Doc}) ->
+	{sets:from_list([Doc]), sets:new()};
+
+read_rev_extract({rlink, Rev}) ->
+	{sets:new(), sets:from_list([Rev])};
+
+read_rev_extract(_) ->
+	{sets:new(), sets:new()}.
 

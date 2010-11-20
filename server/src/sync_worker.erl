@@ -480,7 +480,7 @@ merge_hpsd_write(Store, Doc, FromRev, ToRev, Type, NewData) ->
 					fun({Part, Data}, Result) ->
 						FinalData = if
 							Part == <<"META">> -> merge_hpsd_update_meta(Data);
-							true               -> merge_hpsd_update_dlinks(Data)
+							true               -> Data
 						end,
 						store:truncate(Writer, Part, 0),
 						case store:write(Writer, Part, 0, struct:encode(FinalData)) of
@@ -514,23 +514,7 @@ merge_hpsd_update_meta(Data) ->
 	update_meta_field(
 		[<<"org.hotchpotch.annotation">>, <<"comment">>],
 		<<"<<Synchronized by system>>">>,
-		merge_hpsd_update_dlinks(Data)). % update revs in dlinks
-
-
-%% update Revs in dlink's as they are seen now
-merge_hpsd_update_dlinks(Data) when is_record(Data, dict, 9) ->
-	dict:map(fun(_Key, Value) -> merge_hpsd_update_dlinks(Value) end, Data);
-
-merge_hpsd_update_dlinks(Data) when is_list(Data) ->
-	lists:map(fun(Value) -> merge_hpsd_update_dlinks(Value) end, Data);
-
-merge_hpsd_update_dlinks({dlink, Doc, _Revs}) ->
-	{CurRevs, _PreRevs} = broker:lookup_doc(Doc, []),
-	Revs = lists:map(fun({Rev, _StoreList}) -> Rev end, CurRevs),
-	{dlink, Doc, Revs};
-
-merge_hpsd_update_dlinks(Data) ->
-	Data.
+		Data).
 
 
 update_meta_field([Key], Value, Meta) when is_record(Meta, dict, 9) ->

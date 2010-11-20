@@ -53,7 +53,8 @@ replicate(Rev, SourceStore, DestStore) ->
 				parents = lists:sort(Stat#rev_stat.parents),
 				mtime   = Stat#rev_stat.mtime,
 				type    = Stat#rev_stat.type,
-				creator = Stat#rev_stat.creator
+				creator = Stat#rev_stat.creator,
+				links   = Stat#rev_stat.links
 			},
 			case store:put_rev_start(DestStore, Rev, Revision) of
 				ok ->

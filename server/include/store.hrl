@@ -14,15 +14,22 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+-record(revision,
+	{
+		flags=0,  % integer(): reserved (0)
+		parts,    % [{FourCC::binary(), Hash::guid()}]
+		parents,  % [Rev::guid()]: Parent revisions
+		mtime,    % interger(): Seconds since epoch (unix date, UTC)
+		type,     % binary()
+		creator,  % binary()
+		links     % {SDL, WDL, SRL, WRL, DocMap}
+		          %  SDL = [Doc::guid()]: Strong document links
+		          %  WDL = [Doc::guid()]: Weak document links
+		          %  SRL = [Rev::guid()]: Strong revision links
+		          %  WRL = [Rev::guid()]: Weak revision links
+		          %  DocMap = orddict(Doc->[Rev]): Document map snapshot
+	}).
 
-% parts:   [{PartFourCC, Hash}]
-% parents: [Revision]
-% mitme:   UTC, Seconds since epoch (unix date)
-% type:    Binary
-% creator: Binary
--record(revision, {flags=0, parts, parents, mtime, type, creator}).
-
--define(REV_FLAG_PRELIMINARY, 16#100).
 
 -record(store,
 	{
@@ -61,7 +68,8 @@
 		parents,
 		mtime,
 		type,
-		creator
+		creator,
+		links
 	}).
 
 -record(handle,
@@ -76,7 +84,9 @@
 		get_type,
 		set_type,
 		get_parents,
-		set_parents
+		set_parents,
+		get_links,
+		set_links
 	}).
 
 -record(importer,

@@ -55,7 +55,7 @@
 	mkdir    = fun(_, _, _) -> {error, enotdir} end
 }).
 
--record(handler, {read, write, release, changed=false}).
+-record(handler, {read, write, release, changed=false, rewritten=false}).
 
 -define(UNKNOWN_INO, 16#ffffffff).
 -define(DIRATTR, #stat{st_mode=?S_IFDIR bor 8#0555, st_nlink=1}).
@@ -359,14 +359,21 @@ read(_, _Ino, Size, Offset, Fi, _Cont, #state{files=Files} = S) ->
 
 write(_, _Ino, Data, Offset, Fi, _Cont, #state{files=Files} = S) ->
 	Id = Fi#fuse_file_info.fh,
-	#handler{write=Write, changed=Changed} = Handler = gb_trees:get(Id, Files),
+	#handler{
+		write     = Write,
+		changed   = Changed,
+		rewritten = Rewritten
+	} = Handler = gb_trees:get(Id, Files),
 	case catch Write(Data, Offset) of
 		ok ->
 			S2 = if
-				Changed ->
+				Changed and (Rewritten or (Offset > 0)) ->
 					S;
 				true ->
-					H2 = Handler#handler{changed=true},
+					H2 = Handler#handler{
+						changed   = true,
+						rewritten = Rewritten or (Offset == 0)
+					},
 					S#state{files = gb_trees:update(Id, H2, Files)}
 			end,
 			{#fuse_reply_write{count=erlang:size(Data)}, S2};
@@ -377,9 +384,14 @@ write(_, _Ino, Data, Offset, Fi, _Cont, #state{files=Files} = S) ->
 
 
 release(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{files=Files} = S) ->
-	#handler{release=Release, changed=Changed} = gb_trees:get(Id, Files),
-	Release(Changed),
+	#handler{
+		release   = Release,
+		changed   = Changed,
+		rewritten = Rewritten
+	} = gb_trees:get(Id, Files),
+	Release(Changed, Rewritten),
 	?DEBUG(io:format("release(~p)~n", [Id])),
+	erlang:garbage_collect(),
 	{#fuse_reply_err{err=ok}, S#state{files=gb_trees:delete(Id, Files)}}.
 
 
@@ -546,9 +558,15 @@ statfs(_, Ino, _, #state{inodes=Inodes}=S) ->
 	#vnode{oid=Oid} = gb_trees:get(Ino, Inodes),
 	FsStat = case Oid of
 		{doc, Store, _Doc} ->
-			store:statfs(Store);
+			case volman:store(Store) of
+				{ok, Ifc} -> store:statfs(Ifc);
+				error     -> {error, enoent}
+			end;
 		{rev, Store, _Rev} ->
-			store:statfs(Store);
+			case volman:store(Store) of
+				{ok, Ifc} -> store:statfs(Ifc);
+				error     -> {error, enoent}
+			end;
 		_ ->
 			{ok, #fs_stat{
 				bsize  = 512,
@@ -787,10 +805,7 @@ stores_lookup(stores, Name, Cache) ->
 			BinId = list_to_binary(atom_to_list(Id)),
 			if
 				BinId == Name ->
-					case volman:store(Guid) of
-						{ok, Store} -> {ok, {doc, Store, Guid}};
-						error       -> error
-					end;
+					{ok, {doc, Guid, Guid}};
 
 				true ->
 					error
@@ -894,7 +909,7 @@ dict_lookup({doc, Store, Doc}, Name, Cache) ->
 	case dict_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			case dict:find(Name, Entries) of
-				{ok, {dlink, ChildDoc, _Revs}} ->
+				{ok, {dlink, ChildDoc}} ->
 					{entry, {doc, Store, ChildDoc}, NewCache};
 
 				_ ->
@@ -910,7 +925,7 @@ dict_create({doc, Store, Doc}, Name, Cache) ->
 	case dict_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			case dict:find(Name, Entries) of
-				{ok, {dlink, ChildDoc, _Revs}} ->
+				{ok, {dlink, ChildDoc}} ->
 					{entry, {doc, Store, ChildDoc}, NewCache};
 
 				{ok, _} ->
@@ -918,10 +933,10 @@ dict_create({doc, Store, Doc}, Name, Cache) ->
 
 				error ->
 					case create_empty_file(Store, Name) of
-						{ok, Handle, NewDoc, NewRev} ->
+						{ok, Handle, NewDoc, _NewRev} ->
 							try
 								Update = fun(Dict) ->
-									dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
+									dict:store(Name, {dlink, NewDoc}, Dict)
 								end,
 								case dict_update(Store, Doc, NewCache, Update) of
 									{ok, AddCache} ->
@@ -930,7 +945,7 @@ dict_create({doc, Store, Doc}, Name, Cache) ->
 										Error
 								end
 							after
-								store:close(Handle)
+								broker:close(Handle)
 							end;
 
 						{error, Reason} ->
@@ -952,10 +967,10 @@ dict_mkdir({doc, Store, Doc}, Name, Cache) ->
 
 				error ->
 					case create_empty_directory(Store, Name) of
-						{ok, Handle, NewDoc, NewRev} ->
+						{ok, Handle, NewDoc, _NewRev} ->
 							try
 								Update = fun(Dict) ->
-									dict:store(Name, {dlink, NewDoc, [NewRev]}, Dict)
+									dict:store(Name, {dlink, NewDoc}, Dict)
 								end,
 								case dict_update(Store, Doc, NewCache, Update) of
 									{ok, AddCache} ->
@@ -964,7 +979,7 @@ dict_mkdir({doc, Store, Doc}, Name, Cache) ->
 										Error
 								end
 							after
-								store:close(Handle)
+								broker:close(Handle)
 							end;
 
 						{error, Reason} ->
@@ -996,7 +1011,7 @@ dict_opendir({doc, Store, Doc}, Cache) ->
 	end.
 
 
-dict_opendir_filter(Store, {Name, {dlink, Child, _Revs}}) ->
+dict_opendir_filter(Store, {Name, {dlink, Child}}) ->
 	Oid = {doc, Store, Child},
 	case doc_make_node(Oid) of
 		{ok, #vnode{ifc=#ifc{getattr=GetAttr}}} ->
@@ -1035,9 +1050,9 @@ dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 dict_link({doc, Store, Doc}, {doc, ChildStore, ChildDoc}, Name, Cache)
 	when Store =:= ChildStore ->
 	case fuse_store:lookup(Store, ChildDoc) of
-		{ok, ChildRev} ->
+		{ok, _ChildRev} ->
 			Update = fun(Entries) ->
-				dict:store(Name, {dlink, ChildDoc, [ChildRev]}, Entries)
+				dict:store(Name, {dlink, ChildDoc}, Entries)
 			end,
 			dict_update(Store, Doc, Cache, Update);
 
@@ -1221,7 +1236,7 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 	end.
 
 
-set_read_entries_filter(Store, {dlink, Child, _Revs}) ->
+set_read_entries_filter(Store, {dlink, Child}) ->
 	{ok, {{set_read_title(Store, Child), ""}, {doc, Store, Child}}};
 set_read_entries_filter(_, _) ->
 	skip.
@@ -1371,8 +1386,8 @@ file_open({doc, Store, Doc}, Flags) ->
 				write = fun(Data, Offset) ->
 					file_write(Handle, Data, Offset)
 				end,
-				release = fun(Changed) ->
-					file_release(Handle, Changed)
+				release = fun(Changed, Rewritten) ->
+					file_release(Handle, Changed, Rewritten)
 				end
 			}};
 
@@ -1393,10 +1408,22 @@ file_write(Handle, Data, Offset) ->
 	fuse_store:write(Handle, <<"FILE">>, Offset, Data).
 
 
-file_release(Handle, Changed) ->
+file_release(Handle, Changed, _Rewritten) ->
 	Reply = case Changed of
 		false -> ok;
-		true  -> fuse_store:commit(Handle)
+		true  ->
+			%if
+			%	Rewritten ->
+			%		case fuse_store:read(Handle, <<"FILE">>, 0, 4096) of
+			%			{ok, Data} ->
+			%				fuse_store:set_type(Handle, registry:guess(Data));
+			%			_Else ->
+			%				ok
+			%		end;
+			%	true ->
+			%		ok
+			%end,
+			fuse_store:commit(Handle)
 	end,
 	fuse_store:close(Handle),
 	Reply.
@@ -1499,7 +1526,6 @@ write_struct(Handle, Part, Struct) ->
 
 
 create_empty_file(Store, Name) ->
-	Doc = crypto:rand_bytes(16),
 	MetaData = dict:store(
 		<<"org.hotchpotch.annotation">>,
 		dict:store(
@@ -1510,25 +1536,25 @@ create_empty_file(Store, Name) ->
 				<<"Created by FUSE interface">>,
 				dict:new())),
 		dict:new()),
-	case store:create(Store, Doc, <<"public.text">>, ?FUSE_CC) of
-		{ok, Handle} ->
-			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
-			store:write(Handle, <<"FILE">>, 0, <<>>),
-			case store:commit(Handle, util:get_time()) of
-				{ok, Rev} ->
+	case broker:create(<<"public.text">>, ?FUSE_CC, [Store]) of
+		{ok, _ErrInfo, {Doc, Handle}} ->
+			broker:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+			broker:write(Handle, <<"FILE">>, 0, <<>>),
+			case broker:commit(Handle) of
+				{ok, _ErrInfo, Rev} ->
+					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};
-				{error, _} = Error ->
-					store:close(Handle),
-					Error
+				{error, Reason, _ErrInfo} ->
+					broker:close(Handle),
+					{error, Reason}
 			end;
 
-		Error ->
-			Error
+		{error, Reason, _ErrInfo} ->
+			{error, Reason}
 	end.
 
 
 create_empty_directory(Store, Name) ->
-	Doc = crypto:rand_bytes(16),
 	MetaData = dict:store(
 		<<"org.hotchpotch.annotation">>,
 		dict:store(
@@ -1539,20 +1565,21 @@ create_empty_directory(Store, Name) ->
 				<<"Created by FUSE interface">>,
 				dict:new())),
 		dict:new()),
-	case store:create(Store, Doc, <<"org.hotchpotch.dict">>, ?FUSE_CC) of
-		{ok, Handle} ->
-			store:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
-			store:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),
-			case store:commit(Handle, util:get_time()) of
-				{ok, Rev} ->
+	case broker:create(<<"org.hotchpotch.dict">>, ?FUSE_CC, [Store]) of
+		{ok, _ErrInfo, {Doc, Handle}} ->
+			broker:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
+			broker:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),
+			case broker:commit(Handle) of
+				{ok, _ErrInfo, Rev} ->
+					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};
-				{error, _} = Error ->
-					store:close(Handle),
-					Error
+				{error, Reason, _ErrInfo} ->
+					broker:close(Handle),
+					{error, Reason}
 			end;
 
-		Error ->
-			Error
+		{error, Reason, _ErrInfo} ->
+			{error, Reason}
 	end.
 
 

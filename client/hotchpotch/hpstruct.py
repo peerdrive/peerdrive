@@ -114,25 +114,18 @@ class DocLink(object):
 	def _fromStruct(self, decoder):
 		self.__doc = decoder._getStr(16)
 		self.__revs = []
-		revCount = decoder._getInt('B')
-		for i in xrange(revCount):
-			self.__revs.append(decoder._getStr(16))
 
 	def _toStruct(self):
-		data = struct.pack('<B16sB', 0x41, self.__doc, len(self.__revs))
-		for rev in self.__revs:
-			data = data + rev
-		return data
+		return struct.pack('<B16s', 0x41, self.__doc)
 
 	def _fromDict(self, dct):
 		self.__doc = dct['doc'].decode('hex')
-		self.__revs = [ rev.decode('hex') for rev in dct['revs'] ]
+		self.__revs = []
 
 	def _toDict(self):
 		return {
 			"__dlink__" : True,
-			"doc" : self.__doc.encode('hex'),
-			"revs" : [ rev.encode('hex') for rev in self.__revs ] }
+			"doc" : self.__doc.encode('hex') }
 
 	def _fromMime(self, mimeData):
 		self.__doc = str(mimeData.data(DocLink.MIME_TYPE)).decode('hex')

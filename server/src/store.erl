@@ -21,7 +21,7 @@
 	put_rev_commit/1]).
 -export([close/1, commit/2, create/4, fork/4, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
-	write/4, suspend/2]).
+	write/4, suspend/2, get_links/1, set_links/2]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/2, sync_set_anchor/3]).
 -export([hash_revision/1]).
@@ -208,6 +208,14 @@ get_parents(#handle{this=Handle, get_parents=GetParents}) ->
 set_parents(#handle{this=Handle, set_parents=SetParents}, Parents) ->
 	SetParents(Handle, Parents).
 
+% {ok, {SDL, WDL, SRL, WRL, DocMap}} | {error, Reason}
+get_links(#handle{this=Handle, get_links=GetLinks}) ->
+	GetLinks(Handle).
+
+% ok | {error, Reason}
+set_links(#handle{this=Handle, set_links=SetLinks}, Links) ->
+	SetLinks(Handle, Links).
+
 %% @doc Commit a new revision
 %%
 %% One of the parents of this new revision must point to the current revision
@@ -256,8 +264,8 @@ suspend(#handle{this=Handle, suspend=Suspend}, Mtime) ->
 
 %% @doc Close a handle
 %%
-%% Discards the handle and throws away any changes. The handle will be invalid
-%% after the call.
+%% Discards the handle. Throws away any changes which have not been committed
+%% yet. The handle will be invalid after the call.
 %%
 %% @spec close(Handle) -> ok
 %%       Handle = #handle{}
@@ -374,22 +382,35 @@ hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
 		fun ({FourCC, Hash}, AccIn) ->
 			<<AccIn/binary, FourCC/binary, Hash/binary>>
 		end,
-		<<(length(Parts)):8>>,
+		<<(length(Parts)):32/little>>,
 		Parts),
-	Parents = Revision#revision.parents,
-	BinParents = lists:foldl(
-		fun (Parent, AccIn) ->
-			<<AccIn/binary, Parent/binary>>
+	BinParents = hash_revision_list(Revision#revision.parents),
+	BinType = hash_revision_string(Revision#revision.type),
+	BinCreator = hash_revision_string(Revision#revision.creator),
+	{SDL, WDL, SRL, WRL, DocMap} = Revision#revision.links,
+	BinSDL = hash_revision_list(SDL),
+	BinWDL = hash_revision_list(WDL),
+	BinSRL = hash_revision_list(SRL),
+	BinWRL = hash_revision_list(WRL),
+	BinDocMap = lists:foldl(
+		fun({Doc, RevList}, Acc) ->
+			<<Acc/binary, Doc/binary, (hash_revision_list(RevList))/binary>>
 		end,
-		<<(length(Parents)):8>>,
-		Parents),
-	Type = Revision#revision.type,
-	BinType = <<(size(Type)):32/little, Type/binary>>,
-	Creator = Revision#revision.creator,
-	BinCreator = <<(size(Creator)):32/little, Creator/binary>>,
+		<<(length(DocMap)):32/little>>,
+		DocMap),
 	binary_part(
 		crypto:sha(<<Flags:32/little, BinParts/binary, BinParents/binary,
-			Mtime:64/little, BinType/binary, BinCreator/binary>>),
+			Mtime:64/little, BinType/binary, BinCreator/binary, BinSDL/binary,
+			BinWDL/binary, BinSRL/binary, BinWRL/binary, BinDocMap/binary>>),
 		0,
 		16).
+
+hash_revision_list(List) ->
+	lists:foldl(
+		fun (Guid, AccIn) -> <<AccIn/binary, Guid/binary>> end,
+		<<(length(List)):32/little>>,
+		List).
+
+hash_revision_string(String) ->
+	<<(size(String)):32/little, String/binary>>.
 

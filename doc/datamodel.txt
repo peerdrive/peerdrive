@@ -1,47 +1,64 @@
 
 In Hotchpotch the documents are stored in so called "stores". Each document is
-uniquely identified by a (random) UUID, where the document/UUID can
-simultaniously live in more than one store. Each store maintains a mapping of
-UUIDs to the latest revision of the document (plus zero or more preliminary
-revisions). The actual content is stored in revisions and each revision is
-identified by the hash of its content.
+uniquely identified by a (random) GUID, where the document/GUID can
+simultaneously live in more than one store. Each store maintains a mapping of
+document GUIDs to the latest revision of the document (plus zero or more
+preliminary revisions). The actual content is stored in revisions and each
+revision is identified by the hash of its content.
 
 At the basic level each revision consists of the following:
+
 	- a set of flags
 		- the version of the revision data model (currently only version 0)
 		- possibly other flags in the future
+	- one or more "parts", each identified by a FourCC and containing a blob
 	- a type code, specifying the format of the document (encoded as a Uniform
 	  Type Identifier [UTI])
 	- a creator code, denoting the application which created the revision
 	  (encoded as a reverse-DNS string)
 	- the modification time (seconds since epoch, UTC)
-	- a list of it's preceeding revision(s) (parents),
-	- one or more "parts", each identified by a FourCC and containing a blob.
+	- a list of it's preceding revision(s) (parents),
+	- all document/revision links, extracted from all parts
+		- list of strong document links
+		- list of weak document links
+		- list of strong revision links
+		- list of weak revision links
+		- map of relevant document-to-revisions mappings
 
 This basic level is sufficient to store and retrieve arbitrary data, preserve
 the history of changes to a document and also replicate and synchronize
-documents between multiple stores.
+documents between multiple stores. It also stores all necessary information to
+link to other documents/revisions, independent of the actual link encoding in
+one of the parts, and to follow the linking in the history.
 
 == Binary object representation ==
 
 To compute the hash of a revision a common binary representation is needed.
-All values as little endian...
+All values are encoded as little endian...
 
-L       .. Flags (0..7: Version, 8:Preliminary)
-B       .. PartsCount
-{
-	4s  .. FourCC
-	16s .. MD5 hash of part content
-}
-B       .. ParentsCount
-{
-	16s .. Parent object
-}
-Q       .. Mtime (unix time)
-L       .. Type code UTI string length
-{s}     .. Type code
-L       .. Creator code string length
-{s}     .. Creator code
+uint32           .. Flags (0..7: Version, 8..31: Reserved)
+uint32           .. PartsCount
+	char[4]      .. FourCC
+	uint128      .. SHA1 hash of part content (initial 16 bytes)
+uint32           .. ParentsCount
+	uint128      .. Parent object
+uint64           .. Mtime (unix time)
+uint32           .. Type code string length
+	char[]       .. Type code
+uint32           .. Creator code string length
+	char[]       .. Creator code
+uint32           .. StrongDocLinkCount
+	uint128      .. Strong document link
+uint32           .. WeakDocLinkCount
+	uint128      .. Weak document link
+uint32           .. StrongRevLinkCount
+	uint128      .. Strong revision link
+uint32           .. WeakRevLinkCount
+	uint128      .. Weak revision links
+uint32           .. DocMapEntries
+	uint128      .. Document GUID
+	uint32       .. Revision count
+		uint128  .. Revision GUID
 
 
 == Well known part FourCCs ==
@@ -58,22 +75,40 @@ its definition and binary representation.
 == Document linking ==
 
 Each document is treated completely independent of any other document. For
-navigational access of the documents there can be directed links between them.
-As entry point to the link chain there is a root document in each store, just
-like the root directory in file systems.
+navigational access there can be directed links between them. As entry point to
+the link chain there is a root document in each store, just like the root
+directory in file systems.
 
 There are two types of links in Hotchpotch:
-	- Document link: points to a document (which points to the latest revision)
+
+	- Document link: points to a document
 	- Revision link: points to a revision
 
-A document link additionally contains a list of all known revisions of the
-document which it refers to at the time the link was created/updated. This is
-used when navigating in the history, that is when examining an old revision of
-a document.
-
 In essence Hotchpotch links are like symbolic links in the meaning that they
-symbolically refer to another document/revision. But they are also like hard links
-in the sense that they are independent of the target's location.
+symbolically refer to another document/revision. But they are also like hard
+links in the sense that they are independent of the target's location, even
+across stores.
+
+To make the document linking independent from the actual encoding the links are
+stored as meta data in each revision. There are four types of links:
+
+	- Strong document links: all document links, extracted from all parts
+	- Weak document links: all document links which have been deleted compared
+	                       to the parent revision(s)
+	- Strong revision links: all revision links and all known revisions of all
+	                         document links
+	- Weak revision links: currently not used
+
+The distinction between strong and weak links is made in regards to garbage
+collection in the store (see next chapter). A strong link makes sure that the
+referenced document/revision is not garbage collected while a weak link has no
+influence on garbage collection.
+
+To make the links also browsable in the history there is another information in
+each revision: the document map. This map contains a mapping of all document
+links (strong and weak) to their known revisions when the document revision was
+created. In other words it is a snapshot of all relevant document-to-revision
+mappings when the revision was written.
 
 == Garbage collection ==
 
@@ -140,7 +175,7 @@ string = 0x20, StringLength:32/little, ?UTF-8 encoded string?
 bool = 0x30, (0x00 | 0x01)
 
 rev_link = 0x40, Rev:128
-doc_link = 0x41, Uuid:128, RevCount:8, { Rev:128 }
+doc_link = 0x41, Doc:128
 
 float  = 0x50, ?32 bit IEEE float?
 double = 0x51, ?64 bit IEEE double?

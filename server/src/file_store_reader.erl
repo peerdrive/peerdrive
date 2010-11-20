@@ -17,7 +17,7 @@
 -module(file_store_reader).
 -behaviour(gen_server).
 
--export([start_link/5]).
+-export([start_link/3]).
 -export([read/4, done/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
@@ -27,7 +27,13 @@
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Path, Parts, Parents, Type, User) ->
+start_link(Path, Revision, User) ->
+	#revision{
+		parts   = Parts,
+		parents = Parents,
+		type    = Type,
+		links   = Links
+	} = Revision,
 	case gen_server:start_link(?MODULE, {Path, Parts, User}, []) of
 		{ok, Pid} ->
 			{ok, #handle{
@@ -41,7 +47,9 @@ start_link(Path, Parts, Parents, Type, User) ->
 				get_type    = fun(_) -> {ok, Type} end,
 				set_type    = fun(_, _) -> {error, ebadf} end,
 				get_parents = fun(_) -> {ok, Parents} end,
-				set_parents = fun(_, _) -> {error, ebadf} end
+				set_parents = fun(_, _) -> {error, ebadf} end,
+				get_links   = fun(_) -> {ok, Links} end,
+				set_links   = fun(_, _) -> {error, ebadf} end
 			}};
 		Else ->
 			Else

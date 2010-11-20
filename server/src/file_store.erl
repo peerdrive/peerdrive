@@ -508,7 +508,8 @@ check_root_doc(S, Name) ->
 				parents = [],
 				mtime   = util:get_time(),
 				type    = <<"org.hotchpotch.store">>,
-				creator = <<"org.hotchpotch.file-store">>},
+				creator = <<"org.hotchpotch.file-store">>,
+				links   = {[], [], [], [], []}},
 			Rev = store:hash_revision(Revision),
 			S4 = S3#state{revisions=dict:store(Rev, {1, Revision}, S3#state.revisions)},
 			Gen = S4#state.gen,
@@ -565,7 +566,8 @@ do_stat(Rev, #state{revisions=Revisions, path=Path}) ->
 				parents = Revision#revision.parents,
 				mtime   = Revision#revision.mtime,
 				type    = Revision#revision.type,
-				creator = Revision#revision.creator
+				creator = Revision#revision.creator,
+				links   = Revision#revision.links
 			}};
 
 		% completely unknown...
@@ -580,8 +582,7 @@ do_peek(#state{revisions=Revisions, path=Path}, Rev, User) ->
 
 		{ok, {_, Revision}} ->
 			% TODO: lock parts
-			file_store_reader:start_link(Path, Revision#revision.parts,
-				Revision#revision.parents, Revision#revision.type, User);
+			file_store_reader:start_link(Path, Revision, User);
 
 		error ->
 			{error, enoent}
@@ -616,14 +617,14 @@ do_forget(#state{guid=Guid, uuids=Uuids} = S, Doc, PreRev) ->
 	end.
 
 
-do_delete_rev(#state{guid=Guid, revisions=Revisions, path=Path} = S, Rev) ->
+do_delete_rev(#state{guid=Guid, revisions=Revisions} = S, Rev) ->
 	case dict:find(Rev, Revisions) of
 		{ok, {_, stub}} ->
 			{S, {error, enoent}};
 
 		{ok, {RefCount, Revision}} ->
 			vol_monitor:trigger_rm_rev(Guid, Rev),
-			dispose_revision(Revision, Path),
+			dispose_revision(Revision),
 			{
 				S#state{
 					revisions=dict:store(Rev, {RefCount, stub}, Revisions),
@@ -670,7 +671,7 @@ do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
 %   peers:   dict: GUID --> Generation
 %   changed: Bool
 % }
-do_dump(#state{path=Path} = S) ->
+do_dump(S) ->
 	io:format("Guid: ~s~n", [util:bin_to_hexstr(S#state.guid)]),
 	io:format("Gen:  ~p~n", [S#state.gen]),
 	io:format("Path: ~s~n", [S#state.path]),
@@ -690,7 +691,7 @@ do_dump(#state{path=Path} = S) ->
 	dict:fold(
 		fun (Rev, {RefCount, Revision}, _) ->
 			io:format("    ~s #~w~n", [util:bin_to_hexstr(Rev), RefCount]),
-			do_dump_revision(Revision, Path)
+			do_dump_revision(Revision)
 		end,
 		ok, S#state.revisions),
 	io:format("Parts:~n"),
@@ -714,13 +715,14 @@ do_dump(#state{path=Path} = S) ->
 %   mitme:   {MegaSecs, Secs, MicroSecs}
 %   type:    Binary
 %   creator: Binary
+%   links:   {SDL, WDL, SRL, WRL, DocMap}
 % }
-do_dump_revision(Revision, Path) ->
+do_dump_revision(Revision) ->
 	if
 		Revision == stub ->
 			ok;
 		true ->
-			io:format("        Flags:~w~n", [Revision#revision.flags]),
+			%io:format("        Flags:~w~n", [Revision#revision.flags]),
 			io:format("        Parts:~n"),
 			lists:foreach(
 				fun ({FourCC, Hash}) ->
@@ -733,12 +735,33 @@ do_dump_revision(Revision, Path) ->
 					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
 				end,
 				Revision#revision.parents),
-			io:format("        References:~n"),
+			{SDL, WDL, SRL, _WRL, DocMap} = Revision#revision.links,
+			io:format("        Strong Doc Links:~n"),
 			lists:foreach(
 				fun (Rev) ->
 					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
 				end,
-				get_rev_references(Revision, Path))
+				SDL),
+			io:format("        Weak Doc Links:~n"),
+			lists:foreach(
+				fun (Rev) ->
+					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
+				end,
+				WDL),
+			io:format("        Strong Rev Links:~n"),
+			lists:foreach(
+				fun (Rev) ->
+					io:format("            ~s~n", [util:bin_to_hexstr(Rev)])
+				end,
+				SRL),
+			io:format("        Document -> Revs map:~n"),
+			HexDocMap = lists:map(
+				fun({Doc, Revs}) ->
+					{util:bin_to_hexstr(Doc),
+					lists:map(fun(R) -> util:bin_to_hexstr(R) end, Revs)}
+				end,
+				DocMap),
+			io:format("            ~p~n", [HexDocMap])
 	end.
 
 
@@ -757,6 +780,7 @@ do_write_start_create(S, Doc, Type, Creator, User) ->
 		orig      = dict:new(),
 		new       = dict:new(),
 		readers   = dict:new(),
+		links     = {[], [], [], [], []},
 		locks     = []},
 	{S2, Writer} = start_writer(S, State, User),
 	{do_hide(S2, Doc), {ok, Writer}}.
@@ -785,6 +809,7 @@ do_write_start_fork(S, Doc, StartRev, Creator, User) ->
 				orig      = Parts,
 				new       = dict:new(),
 				readers   = dict:new(),
+				links     = Revision#revision.links,
 				locks     = []},
 			{S2, Writer} = start_writer(S, State, User),
 			{do_hide(S2, Doc), {ok, Writer}}
@@ -818,6 +843,7 @@ do_write_start_update(S, Doc, StartRev, Creator, User) ->
 						orig      = Parts,
 						new       = dict:new(),
 						readers   = dict:new(),
+						links     = Revision#revision.links,
 						locks     = []},
 					{S2, Writer} = start_writer(S, State, User),
 					{S2, {ok, Writer}}
@@ -857,6 +883,7 @@ do_write_start_resume(S, Doc, PreRev, Creator, User) ->
 								orig      = Parts,
 								new       = dict:new(),
 								readers   = dict:new(),
+								links     = Revision#revision.links,
 								locks     = []},
 							{S2, Writer} = start_writer(S, State, User),
 							{S2, {ok, Writer}}
@@ -1081,7 +1108,7 @@ add_revision(S, Rev, RefCountInc, Revision) ->
 	case dict:find(Rev, S#state.revisions) of
 		error when (RefCountInc > 0) ->
 			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
-			S2 = do_revisions_ref_inc(S, get_rev_references(Revision, S#state.path)),
+			S2 = do_revisions_ref_inc(S, get_rev_references(Revision)),
 			S3 = do_parts_ref_inc(S2, Parts),
 			S3#state{
 				revisions=dict:store(Rev, {RefCountInc, Revision}, S3#state.revisions),
@@ -1089,7 +1116,7 @@ add_revision(S, Rev, RefCountInc, Revision) ->
 
 		{ok, {RefCount, stub}} ->
 			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
-			S2 = do_revisions_ref_inc(S, get_rev_references(Revision, S#state.path)),
+			S2 = do_revisions_ref_inc(S, get_rev_references(Revision)),
 			S3 = do_parts_ref_inc(S2, Parts),
 			S3#state{
 				revisions=dict:store(Rev, {RefCount+RefCountInc, Revision}, S3#state.revisions),
@@ -1107,7 +1134,7 @@ revision_ref_dec(Rev) ->
 	gen_server:cast(self(), {revision_ref_dec, Rev}).
 
 
-dispose_revision(Revision, Path) ->
+dispose_revision(Revision) ->
 	case Revision of
 		stub ->
 			ok;
@@ -1115,67 +1142,21 @@ dispose_revision(Revision, Path) ->
 		#revision{parts=Parts} ->
 			lists:foreach(
 				fun (Rev) -> revision_ref_dec(Rev) end,
-				get_rev_references(Revision, Path)),
+				get_rev_references(Revision)),
 			lists:foreach(
 				fun({_, Hash}) -> gen_server:cast(self(), {part_ref_dec, Hash}) end,
 				Parts)
 	end.
 
 
-get_rev_references(Rev, Path) ->
-	get_references(Rev, Path, false).
+get_rev_references(#revision{parents=Parents, links=Links}) ->
+	ParentSet = sets:from_list(Parents),
+	LinkSet = sets:from_list(element(3, Links)), % Strong Rev Links
+	sets:to_list(sets:union(ParentSet, LinkSet)).
 
 
-get_doc_references(Rev, Path) ->
-	get_references(Rev, Path, true).
-
-
-get_references(#revision{parts=Parts, parents=Parents}, Path, PickDoc) ->
-	CheckParts = lists:filter(
-		fun ({FourCC, _Hash}) ->
-			case FourCC of
-				<<"HPSD">> -> true;
-				<<"META">> -> true;
-				_          -> false
-			end
-		end,
-		Parts),
-	lists:foldl(
-		fun ({_FourCC, Hash}, Acc) ->
-			case read_hpsd_part(Hash, Path) of
-				{ok, Value} -> Acc ++ extract_refs(Value, PickDoc);
-				error       -> Acc % FIXME: really a good idea?
-			end
-		end,
-		Parents,
-		CheckParts).
-
-read_hpsd_part(Hash, Path) ->
-	{ok, Binary} = file:read_file(util:build_path(Path, Hash)),
-	case catch struct:decode(Binary) of
-		{'EXIT', _Reason} ->
-			error;
-		Struct ->
-			{ok, Struct}
-	end.
-
-extract_refs(Data, PickDoc) when is_record(Data, dict, 9) ->
-	dict:fold(fun(_Key, Value, Acc) -> extract_refs(Value, PickDoc)++Acc end, [], Data);
-
-extract_refs(Data, PickDoc) when is_list(Data) ->
-	lists:foldl(fun(Value, Acc) -> extract_refs(Value, PickDoc)++Acc end, [], Data);
-
-extract_refs({dlink, _Doc, Revs}, false) ->
-	Revs;
-
-extract_refs({dlink, Doc, _Revs}, true) ->
-	[Doc];
-
-extract_refs({rlink, Rev}, false) ->
-	[Rev];
-
-extract_refs(_, _) ->
-	[].
+get_doc_references(#revision{links=Links}) ->
+	element(1, Links).
 
 
 do_part_ref_dec(S, PartHash) ->
@@ -1222,7 +1203,7 @@ do_revision_ref_dec(S, Rev) ->
 	{RefCount, Revision} = dict:fetch(Rev, S#state.revisions),
 	Revisions = if
 		RefCount == 1 ->
-			dispose_revision(Revision, S#state.path),
+			dispose_revision(Revision),
 			case Revision of
 				stub  -> ok;
 				_Else -> vol_monitor:trigger_rm_rev(S#state.guid, Rev)
@@ -1273,7 +1254,7 @@ do_fsck(#state{uuids=Uuids, revisions=Revisions, parts=Parts, path=Path}) ->
 	fsc_check_part_refcounts(Parts, PartRefCounts),
 	% calculate Rev refcounts and check if correct
 	io:format("Check rev refcounts...~n"),
-	RevRefCounts = fsck_calc_rev_refcounts(Uuids, Revisions, Path),
+	RevRefCounts = fsck_calc_rev_refcounts(Uuids, Revisions),
 	fsck_check_rev_refcounts(Revisions, RevRefCounts),
 	io:format("Done.~n").
 
@@ -1349,7 +1330,7 @@ fsc_check_part_refcounts(Parts, PartRefCounts) ->
 		ok,
 		Remaining).
 
-fsck_calc_rev_refcounts(Uuids, Revisions, Path) ->
+fsck_calc_rev_refcounts(Uuids, Revisions) ->
 	UCount = dict:fold(
 		fun(_Doc, {Rev, PreRevs, _Gen}, Acc1) ->
 			Acc2 = lists:foldl(
@@ -1363,13 +1344,13 @@ fsck_calc_rev_refcounts(Uuids, Revisions, Path) ->
 	dict:fold(
 		fun
 			(_Rev, {_RefCount, stub}, Acc) -> Acc;
-			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_rev_refs(Obj, Acc, Path)
+			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_rev_refs(Obj, Acc)
 		end,
 		UCount,
 		Revisions).
 
-fsck_add_rev_refs(Obj, RevDict, Path) ->
-	Refs = get_rev_references(Obj, Path),
+fsck_add_rev_refs(Obj, RevDict) ->
+	Refs = get_rev_references(Obj),
 	lists:foldl(
 		fun(Rev, Acc) -> dict:update_counter(Rev, 1, Acc) end,
 		RevDict,
@@ -1449,7 +1430,7 @@ gc_step([Rev | GreyList], WhiteSet, Revisions, Path) ->
 			gc_step(GreyList, WhiteSet, Revisions, Path);
 
 		{ok, {_RefCnt, Revision}} ->
-			Refs = get_doc_references(Revision, Path),
+			Refs = get_doc_references(Revision),
 			{NewGreyList, NewWhiteSet} = lists:foldl(
 				fun gc_step_eval/2,
 				{GreyList, WhiteSet},

@@ -1,4 +1,8 @@
 - Server
+	- fix sync
+		- stop sync in case of error
+		- let user pause/resume
+		- support overwrite merge
 	- File store improvements
 		- automatically delete old revisions when disk full
 	- add search engine
@@ -15,6 +19,8 @@
 		- network stores (bonjour)
 
 - user interface
+	- pass referrer when opening document
+		- used for delete menu
 	- Additional file types
 		- contacts
 		- audio
@@ -29,9 +35,6 @@
 	- possibility to cancel ongoing replication/synchronzation
 
 - Libs
-	- client side caching
-		- revs
-		- stat info
 	- command line interface
 
 - Security

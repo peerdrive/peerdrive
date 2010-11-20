@@ -65,7 +65,7 @@ def __merge(old, new):
 			old[key] = newValue
 
 
-# returns a DocLink or None
+# returns a commited writer or None
 def importFile(store, path, name=""):
 	if os.path.isfile(path):
 		# determine file type
@@ -107,7 +107,7 @@ def importFile(store, path, name=""):
 		return None
 
 
-# returns a DocLink or None
+# returns a commited writer or None
 def importObject(store, uti, spec):
 	try:
 		writer = HpConnector().create(uti, "", [store])
@@ -132,6 +132,8 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 
 		# create the object and add to dict
 		handle = importObject(store, uti, spec)
+		if not handle:
+			return False
 		try:
 			container[name] = hpstruct.DocLink(handle.getDoc())
 			container.save()

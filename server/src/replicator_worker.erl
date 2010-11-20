@@ -282,19 +282,23 @@ sticky_handling(Backlog, Rev, SrcStores, DstStores, Latest) ->
 						true  -> 0;
 						false -> 16#7FFFFFFFFFFFFFFF
 					end,
-					{RevRefs, DocRefs} = read_references(Rev, Latest),
-					NewBacklog = lists:foldl(
-						fun(Reference, BackAcc) ->
-							push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)
-						end,
-						Backlog,
-						DocRefs),
-					lists:foldl(
-						fun(Reference, BackAcc) ->
-							push_rev(BackAcc, Reference, Depth, SrcStores, DstStores)
-						end,
-						NewBacklog,
-						RevRefs);
+					if
+						Latest ->
+							lists:foldl(
+								fun(Reference, BackAcc) ->
+									push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)
+								end,
+								Backlog,
+								read_doc_references(Rev, SrcStores));
+
+						not Latest ->
+							lists:foldl(
+								fun(Reference, BackAcc) ->
+									push_rev(BackAcc, Reference, Depth, SrcStores, DstStores)
+								end,
+								Backlog,
+								read_rev_references(Rev, SrcStores))
+					end;
 
 				false ->
 					Backlog
@@ -355,38 +359,24 @@ meta_read_bool(_Meta, _Path) ->
 	false.
 
 
-read_references(Rev, Latest) ->
-	case util:read_rev_struct(Rev, <<"HPSD">>) of
-		{ok, Data}       -> read_references_loop(Data, Latest);
-		{error, _Reason} -> {[], []}
+read_doc_references(Rev, SearchStores) ->
+	case stat(Rev, SearchStores) of
+		{ok, #rev_stat{links=Links}} ->
+			element(1, Links);
+
+		{error, _} ->
+			[]
 	end.
 
 
-read_references_loop(Dict, Latest) when is_record(Dict, dict, 9) ->
-	dict:fold(
-		fun(_Key, Value, {AccRev, AccDoc}) ->
-			{Revs, Docs} = read_references_loop(Value, Latest),
-			{Revs++AccRev, Docs++AccDoc}
-		end,
-		{[], []},
-		Dict);
-read_references_loop(List, Latest) when is_list(List) ->
-	lists:foldl(
-		fun(Element, {AccRev, AccDoc}) ->
-			{Revs, Docs} = read_references_loop(Element, Latest),
-			{Revs++AccRev, Docs++AccDoc}
-		end,
-		{[], []},
-		List);
-read_references_loop({rlink, Rev}, _Latest) ->
-	{[Rev], []};
-read_references_loop({dlink, Doc, Revs}, Latest) ->
-	case Latest of
-		true  -> {[], [Doc]};
-		false -> {Revs, []}
-	end;
-read_references_loop(_, _) ->
-	{[], []}.
+read_rev_references(Rev, SearchStores) ->
+	case stat(Rev, SearchStores) of
+		{ok, #rev_stat{links=Links}} ->
+			element(3, Links);
+
+		{error, _} ->
+			[]
+	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...

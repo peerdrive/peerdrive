@@ -116,7 +116,7 @@ load_sync_rules() ->
 	{ok, SysStoreIfc} = volman:store(SysStoreGuid),
 	{ok, Root} = read_doc(SysStoreIfc, SysStoreGuid),
 	case dict:find(<<"syncrules">>, Root) of
-		{ok, {dlink, Doc, _Revs}} ->
+		{ok, {dlink, Doc}} ->
 			case read_doc(SysStoreIfc, Doc) of
 				{ok, Rules}      -> Rules;
 				{error, _Reason} -> []

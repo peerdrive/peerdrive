@@ -20,7 +20,7 @@
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
-	commit/1, close/1]).
+	commit/1, close/1, get_type/1, set_type/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
 	terminate/2]).
 
@@ -48,7 +48,7 @@ lookup(Store, Doc) ->
 	gen_server:call(?MODULE, {lookup, Store, Doc}).
 
 stat(Store, Rev) ->
-	store:stat(Store, Rev).
+	make_reply(broker:stat(Rev, [Store])).
 
 open_rev(Store, Rev) ->
 	gen_server:call(?MODULE, {open_rev, Store, Rev}).
@@ -64,6 +64,12 @@ read(Handle, Part, Offset, Length) ->
 
 write(Handle, Part, Offset, Data) ->
 	gen_server:call(?MODULE, {write, Handle, Part, Offset, Data}).
+
+get_type(Handle) ->
+	gen_server:call(?MODULE, {get_type, Handle}).
+
+set_type(Handle, Uti) ->
+	gen_server:call(?MODULE, {set_type, Handle, Uti}).
 
 commit(Handle) ->
 	gen_server:call(?MODULE, {commit, Handle}).
@@ -90,6 +96,14 @@ handle_call({truncate, Handle, Part, Offset}, _From, S) ->
 
 handle_call({write, Handle, Part, Offset, Data}, _From, S) ->
 	Reply = do_write(Handle, Part, Offset, Data, S),
+	{reply, Reply, S};
+
+handle_call({get_type, Handle}, _From, S) ->
+	Reply = do_get_type(Handle, S),
+	{reply, Reply, S};
+
+handle_call({set_type, Handle, Uti}, _From, S) ->
+	Reply = do_set_type(Handle, Uti, S),
 	{reply, Reply, S};
 
 handle_call(Request, _From, S) ->
@@ -133,13 +147,13 @@ do_lookup(Store, Doc, S) ->
 
 
 do_open_rev(Store, Rev, S) ->
-	case store:peek(Store, Rev) of
-		{ok, Handle} ->
+	case broker:peek(Rev, [Store]) of
+		{ok, _ErrInfo, Handle} ->
 			{FuseHandle, S2} = alloc_handle(Handle, Store, undefined, S),
 			{{ok, Rev, FuseHandle}, S2};
 
-		{error, _Reason} = Error ->
-			{Error, S}
+		{error, Reason, _ErrInfo} ->
+			{{error, Reason}, S}
 	end.
 
 
@@ -148,14 +162,14 @@ do_open_doc(Store, Doc, Write, S) ->
 		{ok, Rev, IsPre, false, S2} ->
 			StoreReply = if
 				Write and IsPre ->
-					store:resume(Store, Doc, Rev, keep);
+					broker:resume(Doc, Rev, keep, [Store]);
 				Write ->
-					store:update(Store, Doc, Rev, ?FUSE_CC);
+					broker:update(Doc, Rev, ?FUSE_CC, [Store]);
 				true ->
-					store:peek(Store, Rev)
+					broker:peek(Rev, [Store])
 			end,
 			case StoreReply of
-				{ok, Handle} ->
+				{ok, _ErrInfo, Handle} ->
 					{FuseHandle, S3} = alloc_handle(Handle, Store, Doc, S2),
 					S4 = if
 						Write and IsPre -> mark_open(Store, Doc, S3);
@@ -163,8 +177,8 @@ do_open_doc(Store, Doc, Write, S) ->
 					end,
 					{{ok, Rev, FuseHandle}, S4};
 
-				{error, _Reason} = Error ->
-					{Error, S2}
+				{error, Reason, _ErrInfo} ->
+					{{error, Reason}, S2}
 			end;
 
 		{ok, _Rev, _IsPre, true, S2} ->
@@ -178,7 +192,25 @@ do_open_doc(Store, Doc, Write, S) ->
 do_truncate(FuseHandle, Part, Offset, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle, _Store, _Doc} ->
-			store:truncate(Handle, Part, Offset);
+			make_reply(broker:truncate(Handle, Part, Offset));
+		error ->
+			{error, ebadf}
+	end.
+
+
+do_get_type(FuseHandle, S) ->
+	case lookup_handle(FuseHandle, S) of
+		{ok, Handle, _Store, _Doc} ->
+			make_reply(broker:get_type(Handle));
+		error ->
+			{error, ebadf}
+	end.
+
+
+do_set_type(FuseHandle, Uti, S) ->
+	case lookup_handle(FuseHandle, S) of
+		{ok, Handle, _Store, _Doc} ->
+			make_reply(broker:set_type(Handle, Uti));
 		error ->
 			{error, ebadf}
 	end.
@@ -187,7 +219,7 @@ do_truncate(FuseHandle, Part, Offset, S) ->
 do_read(FuseHandle, Part, Offset, Length, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle, _Store, _Doc} ->
-			store:read(Handle, Part, Offset, Length);
+			make_reply(broker:read(Handle, Part, Offset, Length));
 		error ->
 			{error, ebadf}
 	end.
@@ -196,7 +228,7 @@ do_read(FuseHandle, Part, Offset, Length, S) ->
 do_write(FuseHandle, Part, Offset, Data, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle, _Store, _Doc} ->
-			store:write(Handle, Part, Offset, Data);
+			make_reply(broker:write(Handle, Part, Offset, Data));
 		error ->
 			{error, ebadf}
 	end.
@@ -205,13 +237,13 @@ do_write(FuseHandle, Part, Offset, Data, S) ->
 do_commit(FuseHandle, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle, Store, Doc} ->
-			case store:suspend(Handle, util:get_time()) of
-				{ok, Rev} = Ok ->
+			case broker:suspend(Handle) of
+				{ok, _ErrInfo, Rev} ->
 					S2 = mark_committed(Store, Doc, Rev, S),
-					{Ok, S2};
+					{{ok, Rev}, S2};
 
-				{error, _Reason} = Error ->
-					{Error, S}
+				{error, Reason, _ErrInfo} ->
+					{{error, Reason}, S}
 			end;
 
 		error ->
@@ -222,7 +254,7 @@ do_commit(FuseHandle, S) ->
 do_close(FuseHandle, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle, Store, Doc} ->
-			store:close(Handle),
+			broker:close(Handle),
 			S2 = mark_closed(FuseHandle, Store, Doc, S),
 			{ok, S2};
 
@@ -236,8 +268,9 @@ do_close(FuseHandle, S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 lookup_internal(Store, Doc, S) ->
-	case store:lookup(Store, Doc) of
-		{ok, Rev, PreRevs} ->
+	case broker:lookup_doc(Doc, [Store]) of
+		{[{Rev, _}], BrokerPreRevs} ->
+			PreRevs = lists:map(fun({PreRev, _}) -> PreRev end, BrokerPreRevs),
 			case check_known(Store, Doc, Rev, PreRevs, S) of
 				{ok, _KnownRev, _IsPre, _IsOpen, _S2} = Ok ->
 					Ok;
@@ -246,7 +279,7 @@ lookup_internal(Store, Doc, S) ->
 					{ok, Rev, false, false, S2}
 			end;
 
-		error ->
+		{[], []} ->
 			{error, forget(Store, Doc, S)}
 	end.
 
@@ -286,13 +319,13 @@ check_prerevs(_Store, _Doc, _Rev, []) ->
 	none;
 
 check_prerevs(Store, Doc, Rev, [PreRev | PreRevs]) ->
-	case store:stat(Store, PreRev) of
-		{ok, #rev_stat{creator=?FUSE_CC, parents=Parents}} ->
+	case broker:stat(PreRev, [Store]) of
+		{ok, _ErrInfo, #rev_stat{creator=?FUSE_CC, parents=Parents}} ->
 			case lists:member(Rev, Parents) of
 				true ->
 					{ok, PreRev};
 				false ->
-					store:forget(Store, Doc, PreRev),
+					broker:forget(Doc, PreRev, [Store]),
 					check_prerevs(Store, Doc, Rev, PreRevs)
 			end;
 
@@ -410,40 +443,47 @@ commit_prerevs(Expired) ->
 
 
 commit_prerev(Store, Doc, Rev) ->
-	case store:resume(Store, Doc, Rev, keep) of
-		{ok, Handle} ->
+	case broker:resume(Doc, Rev, keep, [Store]) of
+		{ok, _ErrInfo, Handle} ->
 			try
 				commit_prerev_loop(Store, Doc, Handle)
 			after
-				store:close(Handle)
+				broker:close(Handle)
 			end;
 
-		{error, enoent} ->
+		{error, enoent, _ErrInfo} ->
 			% has been deleted in between
 			ok;
 
-		{error, Reason} ->
+		{error, Reason, _ErrInfo} ->
 			error_logger:warning_msg("FUSE: Could not resume: ~w~n", [Reason])
 	end.
 
 
 commit_prerev_loop(Store, Doc, Handle) ->
-	case store:commit(Handle, util:get_time()) of
-		{ok, _Rev} ->
-			vol_monitor:trigger_mod_doc(local, Doc),
+	case broker:commit(Handle) of
+		{ok, _ErrInfo, _Rev} ->
 			ok;
 
-		{error, conflict} ->
-			case store:lookup(Store, Doc) of
-				{ok, CurRev, _PreRevs} ->
-					store:set_parents(Handle, [CurRev]),
+		{error, conflict, _ErrInfo} ->
+			case broker:lookup_doc(Doc, [Store]) of
+				{[{CurRev, _}], _PreRevs} ->
+					broker:set_parents(Handle, [CurRev]),
 					commit_prerev_loop(Store, Doc, Handle);
-				error ->
+				{[], []} ->
 					% doesn't exist anymore
 					ok
 			end;
 
-		{error, Reason} ->
+		{error, Reason, _ErrInfo} ->
 			error_logger:warning_msg("FUSE: Could not commit: ~w~n", [Reason])
+	end.
+
+
+make_reply(Reply) ->
+	case Reply of
+		{ok, _ErrInfo}            -> ok;
+		{ok, _ErrInfo, Result}    -> {ok, Result};
+		{error, Reason, _ErrInfo} -> {error, Reason}
 	end.
 

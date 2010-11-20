@@ -1,31 +1,32 @@
 == POSIX file system interface to Hotchpotch ==
 
-FUSE, single mount point
-
-/docs -- virtual directory for all documents (rw)
-/revs -- virtual directory to access all revisions (read only)
-/stores -- directory with all stores (rw)
+- FUSE, single mount point
+- Root directory shows all stores
+- Under each store directory only the documents on that store -> per store access
+- Synchronization/replication handled by external rules
+- direct access to doc/rev by special '.docs' resp. '.revs' directory
 
 examples:
-/.revs/00112233445566778899aabbccddeeff/MyFileTitle
-/usr/...
+/sys/.revs/00112233445566778899aabbccddeeff/MyFileTitle
+/usr/foo/bar.txt
+  |   |    |
+  |   |    \-- "public.text" document
+  |   \------- "org.hotchpotch.container" document
+  \----------- store name
 
-Problem cases
-	- /docs/UUID doc on multiple stores
-		- single revision
-			- open the first rev when opened ro
-			- update everywhere when opened rw
-		- multiple revisions
-			- priority list
-			- fail
-	- write on close when changed in between
-		- can only happen if changed in hotchpotch _and_ FUSE simultaniously
-		- application expects that all data has been written
-		- cannot commit because of wrong revision
-		- retry commit as merge ('FILE' part only)
+== Access to legacy file system from Hotchpotch ==
 
-== POSIX store from Hotchpotch ==
+- not provided, too many problems
+	- user should see break instead of relying on not provided features
 
-- file:
-- dir:
+- cannot guarantee semantics
+	- transactinal features (commit/close)
+	- extended meta data
+		- could be stored in hidden files
+		- would break if file is moved/edited/replaced/... in legacy app
+		- will lead to meta data loss -> real data loss in users view
+	- revision history (could only keep last revision)
+		- breaks sync/replication features
+
+- howto remember doc-id's on read only file systems?
 
