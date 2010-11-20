@@ -87,7 +87,7 @@ decode_list_loop(Count, List, Body1) ->
 
 decode_string(<<StrLen:32/little, Body/binary>>) ->
 	<<String:StrLen/binary, Rest/binary>> = Body,
-	{String, Rest}.
+	{binary:copy(String), Rest}.
 
 
 decode_bool(<<Bool:8, Rest/binary>>) ->
@@ -99,11 +99,11 @@ decode_bool(<<Bool:8, Rest/binary>>) ->
 
 
 decode_rlink(<<Rev:16/binary, Rest/binary>>) ->
-	{{rlink, Rev}, Rest}.
+	{{rlink, binary:copy(Rev)}, Rest}.
 
 
 decode_dlink(<<Doc:16/binary, Rest/binary>>) ->
-	{{dlink, Doc}, Rest}.
+	{{dlink, binary:copy(Doc)}, Rest}.
 
 
 decode_float(<<Value:32/little-float, Rest/binary>>) ->
