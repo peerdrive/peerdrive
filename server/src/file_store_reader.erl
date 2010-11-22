@@ -23,6 +23,8 @@
 
 -include("store.hrl").
 
+-record(state, {handles, parts, path, user}).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -68,65 +70,74 @@ done(Reader) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({Path, Parts, User}) ->
-	case open_part_list(Path, Parts) of
-		{error, Reason} ->
-			{stop, Reason};
-		Handles ->
-			process_flag(trap_exit, true),
-			link(User),
-			{ok, Handles}
-	end.
+	process_flag(trap_exit, true),
+	link(User),
+	{ok, #state{
+		handles = dict:new(),
+		parts   = dict:from_list(Parts),
+		path    = Path,
+		user    = User}}.
 
-% returns: {ok, Data} | {error, Reason}
-handle_call({read, Part, Offset, Length}, _From, Handles) ->
-	Reply = case dict:find(Part, Handles) of
-		{ok, Handle} ->
+
+handle_call({read, Part, Offset, Length}, _From, S) ->
+	Reply = case open_part(Part, S) of
+		{ok, Handle, S2} ->
 			case file:pread(Handle, Offset, Length) of
 				eof -> {ok, <<>>};
 				Else -> Else
 			end;
 
-		error ->
-			{error, enoent}
+		{error, Reason, S2} ->
+			{error, Reason}
 	end,
-	{reply, Reply, Handles}.
+	{reply, Reply, S2}.
+
 
 handle_cast(done, Handles) ->
 	{stop, normal, Handles}.
 
-terminate(_Reason, Handles) ->
-	close_part_list(Handles).
 
-handle_info({'EXIT', _From, _Reason}, S) ->
-	{stop, orphaned, S}.
+handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
+	case From of
+		User    -> {stop, normal, S};
+		_Server -> {stop, {orphaned, Reason}, S}
+	end.
+
+
+terminate(_Reason, S) ->
+	close_parts(S).
+
 
 code_change(_, State, _) -> {ok, State}.
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Open all parts.
-%
-% `Parts' is a list of `{FourCC, Hash}' pairs. The function either returns a dict
-% which maps FourCC's to open IODevice's or `{error, Reason}' when a error happens.
-% TODO: defer opening the parts until they are accessed
-open_part_list(Path, Parts) ->
-	open_part_list_loop(Path, Parts, dict:new()).
-open_part_list_loop(_, [], Handles) ->
-	Handles;
-open_part_list_loop(Path, [{Id, Hash} | Parts], Handles1) ->
-	case file:open(util:build_path(Path, Hash), [read, binary]) of
-		{ok, IoDevice} ->
-			Handles2 = dict:store(Id, IoDevice, Handles1),
-			open_part_list_loop(Path, Parts, Handles2);
-		{error, Reason} ->
-			close_part_list(Handles1), % close what was opened so far
-			{error, Reason}            % and return the error
+open_part(Part, #state{handles=Handles, parts=Parts, path=Path} = S) ->
+	case dict:find(Part, Handles) of
+		{ok, Handle} ->
+			{ok, Handle, S};
+
+		error ->
+			case dict:find(Part, Parts) of
+				{ok, Hash} ->
+					case file:open(util:build_path(Path, Hash), [read, binary]) of
+						{ok, IoDevice} ->
+							NewHandles = dict:store(Part, IoDevice, Handles),
+							{ok, IoDevice, S#state{handles=NewHandles}};
+
+						{error, Reason} ->
+							{error, Reason, S}
+					end;
+
+				error ->
+					{error, enoent, S}
+			end
 	end.
 
-close_part_list(Handles1) ->
+
+close_parts(#state{handles = Handles1}) ->
 	Handles2 = dict:to_list(Handles1),
 	lists:foreach(fun({_, File}) -> file:close(File) end, Handles2).
 

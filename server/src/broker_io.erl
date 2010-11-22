@@ -146,7 +146,7 @@ handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
 		User ->
 			% upstream process died
 			do_close(S#state.handles),
-			{stop, orphaned, S};
+			{stop, normal, S};
 
 		_Handle ->
 			% one of the handles died, abnormally?

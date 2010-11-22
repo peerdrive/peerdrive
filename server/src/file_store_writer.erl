@@ -172,8 +172,11 @@ handle_call({set_parents, Parents}, _From, S) ->
 	{reply, ok, S#ws{baserevs=Parents}}.
 
 
-handle_info({'EXIT', _From, _Reason}, S) ->
-	{stop, orphaned, S}.
+handle_info({'EXIT', From, Reason}, #ws{server=Server}=S) ->
+	case From of
+		Server -> {stop, {orphaned, Reason}, S};
+		_User  -> {stop, normal, S}
+	end.
 
 
 terminate(_Reason, #ws{doc=Doc, locks=Locks, server=Server} = S) ->

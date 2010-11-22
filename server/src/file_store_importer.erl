@@ -102,9 +102,12 @@ handle_call(abort, _From, S) ->
 	{stop, normal, ok, S}.
 
 
-handle_info({'EXIT', _From, _Reason}, S) ->
+handle_info({'EXIT', From, Reason}, #state{storepid=Store} = S) ->
 	do_abort(S),
-	{stop, orphaned, S}.
+	case From of
+		Store -> {stop, {orphaned, Reason}, S};
+		_User -> {stop, normal, S}
+	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...

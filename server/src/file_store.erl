@@ -439,8 +439,6 @@ handle_info_internal({'EXIT', _From, Reason}, S) ->
 	case Reason of
 		normal   -> {noreply, S};
 		shutdown -> {noreply, S};
-		% special reason when reader/writer/importer user died
-		orphaned -> {noreply, S};
 		_ ->        {stop, {eunexpected, Reason}, S}
 	end.
 
@@ -863,7 +861,7 @@ do_write_start_resume(S, Doc, PreRev, Creator, User) ->
 				true ->
 					case dict:fetch(PreRev, S#state.revisions) of
 						{_, stub} ->
-							{S, {error, orphaned}};
+							{S, {error, enoent}};
 
 						{_, Revision} ->
 							Parts = dict:from_list(Revision#revision.parts),
