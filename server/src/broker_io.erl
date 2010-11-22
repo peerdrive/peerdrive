@@ -523,13 +523,17 @@ merge_errors(Result, AddErrors) ->
 
 % {DocRefs::set(), RevRefs::set()} | error
 read_references(Revs, Stores) ->
-	catch lists:foldl(
-		fun(Rev, {AccDocs, AccRevs}) ->
-			{Docs, Revs} = read_references_step(Rev, Stores),
-			{sets:union(Docs, AccDocs), sets:union(Revs, AccRevs)}
-		end,
-		{sets:new(), sets:new()},
-		Revs).
+	try
+		lists:foldl(
+			fun(Rev, {AccDocs, AccRevs}) ->
+				{DocRefs, RevRefs} = read_references_step(Rev, Stores),
+				{sets:union(DocRefs, AccDocs), sets:union(RevRefs, AccRevs)}
+			end,
+			{sets:new(), sets:new()},
+			Revs)
+	catch
+		throw:Term -> Term
+	end.
 
 
 read_references_step(_Rev, []) ->
@@ -554,15 +558,19 @@ read_references_step(Rev, [{_Guid, Ifc} | Stores]) ->
 
 
 read_rev_refs(Handle) ->
-	catch {ok, lists:foldl(
-		fun(FourCC, {AccDocRefs, AccRevRefs}) ->
-			{NewDR, NewRR} = read_rev_extract(read_rev_part(Handle,
-				FourCC)),
-			{sets:union(NewDR, AccDocRefs), sets:union(NewRR, AccRevRefs)}
-		end,
-		{sets:new(), sets:new()},
-		[<<"HPSD">>, <<"META">>])
-	}.
+	try
+		{ok, lists:foldl(
+			fun(FourCC, {AccDocRefs, AccRevRefs}) ->
+				{NewDR, NewRR} = read_rev_extract(read_rev_part(Handle,
+					FourCC)),
+				{sets:union(NewDR, AccDocRefs), sets:union(NewRR, AccRevRefs)}
+			end,
+			{sets:new(), sets:new()},
+			[<<"HPSD">>, <<"META">>])
+		}
+	catch
+		throw:Term -> Term
+	end.
 
 
 read_rev_part(Handle, Part) ->
