@@ -264,7 +264,7 @@ opendir(_, Ino, Fi, _Cont, #state{inodes=Inodes, dirs=Dirs} = S) ->
 	Reply.
 
 
-readdir(_Ctx, _Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
+readdir(_Ctx, Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
 	Id = Fi#fuse_file_info.fh,
 	Entries = gb_trees:get(Id, Dirs),
 	DirEntryList = take_while(
@@ -1101,21 +1101,18 @@ dict_update_cache(Handle, Rev, _Cache) ->
 
 
 dict_write_entries(Handle, Entries, Cache) ->
-	try
-		case write_struct(Handle, <<"HPSD">>, Entries) of
-			ok ->
-				case fuse_store:commit(Handle) of
-					{ok, Rev} ->
-						{ok, {Rev, Entries}};
-					{error, Reason} ->
-						{error, Reason, Cache}
-				end;
+	case write_struct(Handle, <<"HPSD">>, Entries) of
+		ok ->
+			case fuse_store:close(Handle) of
+				{ok, Rev} ->
+					{ok, {Rev, Entries}};
+				{error, Reason} ->
+					{error, Reason, Cache}
+			end;
 
-			{error, Error} ->
-				{error, Error, Cache}
-		end
-	after
-		fuse_store:close(Handle)
+		{error, Error} ->
+			fuse_store:abort(Handle),
+			{error, Error, Cache}
 	end.
 
 
@@ -1353,21 +1350,18 @@ file_getattr_rev(Store, Rev) ->
 file_truncate({doc, Store, Doc}, Size) ->
 	case fuse_store:open_doc(Store, Doc, true) of
 		{ok, _Rev, Handle} ->
-			try
-				case fuse_store:truncate(Handle, <<"FILE">>, Size) of
-					ok ->
-						case fuse_store:commit(Handle) of
-							{ok, CurRev} ->
-								file_getattr_rev(Store, CurRev);
-							Error ->
-								Error
-						end;
+			case fuse_store:truncate(Handle, <<"FILE">>, Size) of
+				ok ->
+					case fuse_store:close(Handle) of
+						{ok, CurRev} ->
+							file_getattr_rev(Store, CurRev);
+						Error ->
+							Error
+					end;
 
-					{error, _} = Error ->
-						Error
-				end
-			after
-				fuse_store:close(Handle)
+				{error, _} = Error ->
+					fuse_store:close(Handle),
+					Error
 			end;
 
 		{error, _} = Error ->
@@ -1409,24 +1403,22 @@ file_write(Handle, Data, Offset) ->
 
 
 file_release(Handle, Changed, _Rewritten) ->
-	Reply = case Changed of
-		false -> ok;
-		true  ->
-			%if
-			%	Rewritten ->
-			%		case fuse_store:read(Handle, <<"FILE">>, 0, 4096) of
-			%			{ok, Data} ->
-			%				fuse_store:set_type(Handle, registry:guess(Data));
-			%			_Else ->
-			%				ok
-			%		end;
-			%	true ->
-			%		ok
-			%end,
-			fuse_store:commit(Handle)
-	end,
-	fuse_store:close(Handle),
-	Reply.
+	%case Changed of
+	%	false -> ok;
+	%	true  ->
+	%		if
+	%			Rewritten ->
+	%				case fuse_store:read(Handle, <<"FILE">>, 0, 4096) of
+	%					{ok, Data} ->
+	%						fuse_store:set_type(Handle, registry:guess(Data));
+	%					_Else ->
+	%						ok
+	%				end;
+	%			true ->
+	%				ok
+	%		end
+	%end,
+	fuse_store:close(Handle).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

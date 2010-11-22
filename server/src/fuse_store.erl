@@ -20,7 +20,7 @@
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
-	commit/1, close/1, get_type/1, set_type/2]).
+	abort/1, close/1, get_type/1, set_type/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
 	terminate/2]).
 
@@ -30,11 +30,10 @@
 -define(FUSE_CC, <<"org.hotchpotch.fuse">>).  % FUSE creator code
 -define(FUSE_WB_TIMEOUT, 5).                  % write back timeout in seconds
 
-% next:    Next free handle
-% handles: dict: Handle -> {Handle, Store, Doc}
+% handles: dict: {wr, Store, Doc} | {ro, Store, Rev} -> {Rev, BrokerHandle, RefCnt}
 % known:   dict: {Store, Doc} -> {PreRev, Timestamp, Open}
 % timref:  Timer handle
--record(state, {next, handles, known, timref}).
+-record(state, {handles, known, timref}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -71,11 +70,11 @@ get_type(Handle) ->
 set_type(Handle, Uti) ->
 	gen_server:call(?MODULE, {set_type, Handle, Uti}).
 
-commit(Handle) ->
-	gen_server:call(?MODULE, {commit, Handle}).
-
 close(Handle) ->
 	gen_server:call(?MODULE, {close, Handle}).
+
+abort(Handle) ->
+	gen_server:call(?MODULE, {abort, Handle}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -83,7 +82,7 @@ close(Handle) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([]) ->
-	{ok, #state{next=0, handles=dict:new(), known=dict:new(), timref=undefined}}.
+	{ok, #state{handles=dict:new(), known=dict:new(), timref=undefined}}.
 
 
 handle_call({read, Handle, Part, Offset, Length}, _From, S) ->
@@ -114,10 +113,10 @@ handle_call(Request, _From, S) ->
 			do_open_rev(Store, Rev, S);
 		{open_doc, Store, Doc, Write} ->
 			do_open_doc(Store, Doc, Write, S);
-		{commit, Handle} ->
-			do_commit(Handle, S);
 		{close, Handle} ->
-			do_close(Handle, S)
+			do_close(Handle, S);
+		{abort, Handle} ->
+			do_abort(Handle, S)
 	end,
 	{reply, Reply, S2}.
 
@@ -146,52 +145,77 @@ do_lookup(Store, Doc, S) ->
 	end.
 
 
+% open revision (always read only)
 do_open_rev(Store, Rev, S) ->
-	case broker:peek(Rev, [Store]) of
-		{ok, _ErrInfo, Handle} ->
-			{FuseHandle, S2} = alloc_handle(Handle, Store, undefined, S),
+	FuseHandle = {ro, Store, Rev},
+	case open_handle(FuseHandle, S) of
+		{ok, Rev, S2} ->
 			{{ok, Rev, FuseHandle}, S2};
 
-		{error, Reason, _ErrInfo} ->
-			{{error, Reason}, S}
+		error ->
+			case broker:peek(Rev, [Store]) of
+				{ok, _ErrInfo, Handle} ->
+					S2 = create_handle(FuseHandle, Rev, Handle, S),
+					{{ok, Rev, FuseHandle}, S2};
+
+				{error, Reason, _ErrInfo} ->
+					{{error, Reason}, S}
+			end
 	end.
 
 
-do_open_doc(Store, Doc, Write, S) ->
+% open document read only
+do_open_doc(Store, Doc, false, S) ->
 	case lookup_internal(Store, Doc, S) of
-		{ok, Rev, IsPre, false, S2} ->
-			StoreReply = if
-				Write and IsPre ->
-					broker:resume(Doc, Rev, keep, [Store]);
-				Write ->
-					broker:update(Doc, Rev, ?FUSE_CC, [Store]);
-				true ->
-					broker:peek(Rev, [Store])
-			end,
-			case StoreReply of
-				{ok, _ErrInfo, Handle} ->
-					{FuseHandle, S3} = alloc_handle(Handle, Store, Doc, S2),
-					S4 = if
-						Write and IsPre -> mark_open(Store, Doc, S3);
-						true -> S3
-					end,
-					{{ok, Rev, FuseHandle}, S4};
-
-				{error, Reason, _ErrInfo} ->
-					{{error, Reason}, S2}
-			end;
-
-		{ok, _Rev, _IsPre, true, S2} ->
-			{{error, eacces}, S2};
+		{ok, Rev, _IsPre, _IsOpen, S2} ->
+			do_open_rev(Store, Rev, S2);
 
 		{error, S2} ->
 			{{error, enoent}, S2}
+	end;
+
+% open document read-write
+do_open_doc(Store, Doc, true, S) ->
+	FuseHandle = {rw, Store, Doc},
+	case open_handle(FuseHandle, S) of
+		{ok, Rev, S2} ->
+			{{ok, Rev, FuseHandle}, S2};
+
+		error ->
+			case lookup_internal(Store, Doc, S) of
+				{ok, Rev, IsPre, false, S2} ->
+					StoreReply = if
+						IsPre ->
+							broker:resume(Doc, Rev, keep, [Store]);
+						true ->
+							broker:update(Doc, Rev, ?FUSE_CC, [Store])
+					end,
+					case StoreReply of
+						{ok, _ErrInfo, Handle} ->
+							S3 = create_handle(FuseHandle, Rev, Handle, S2),
+							S4 = if
+								IsPre -> mark_open(Store, Doc, S3);
+								true  -> S3
+							end,
+							{{ok, Rev, FuseHandle}, S4};
+
+						{error, Reason, _ErrInfo} ->
+							{{error, Reason}, S2}
+					end;
+
+				{ok, _Rev, _IsPre, true, S2} ->
+					error_logger:error_msg("fuse_store: Open document but no handle found!~n"),
+					{{error, eacces}, S2};
+
+				{error, S2} ->
+					{{error, enoent}, S2}
+			end
 	end.
 
 
 do_truncate(FuseHandle, Part, Offset, S) ->
 	case lookup_handle(FuseHandle, S) of
-		{ok, Handle, _Store, _Doc} ->
+		{ok, Handle} ->
 			make_reply(broker:truncate(Handle, Part, Offset));
 		error ->
 			{error, ebadf}
@@ -200,7 +224,7 @@ do_truncate(FuseHandle, Part, Offset, S) ->
 
 do_get_type(FuseHandle, S) ->
 	case lookup_handle(FuseHandle, S) of
-		{ok, Handle, _Store, _Doc} ->
+		{ok, Handle} ->
 			make_reply(broker:get_type(Handle));
 		error ->
 			{error, ebadf}
@@ -209,7 +233,7 @@ do_get_type(FuseHandle, S) ->
 
 do_set_type(FuseHandle, Uti, S) ->
 	case lookup_handle(FuseHandle, S) of
-		{ok, Handle, _Store, _Doc} ->
+		{ok, Handle} ->
 			make_reply(broker:set_type(Handle, Uti));
 		error ->
 			{error, ebadf}
@@ -218,7 +242,7 @@ do_set_type(FuseHandle, Uti, S) ->
 
 do_read(FuseHandle, Part, Offset, Length, S) ->
 	case lookup_handle(FuseHandle, S) of
-		{ok, Handle, _Store, _Doc} ->
+		{ok, Handle} ->
 			make_reply(broker:read(Handle, Part, Offset, Length));
 		error ->
 			{error, ebadf}
@@ -227,35 +251,77 @@ do_read(FuseHandle, Part, Offset, Length, S) ->
 
 do_write(FuseHandle, Part, Offset, Data, S) ->
 	case lookup_handle(FuseHandle, S) of
-		{ok, Handle, _Store, _Doc} ->
+		{ok, Handle} ->
 			make_reply(broker:write(Handle, Part, Offset, Data));
 		error ->
 			{error, ebadf}
 	end.
 
 
-do_commit(FuseHandle, S) ->
-	case lookup_handle(FuseHandle, S) of
-		{ok, Handle, Store, Doc} ->
-			case broker:suspend(Handle) of
+do_close({rw, Store, Doc}=FuseHandle, S) ->
+	case close_handle(FuseHandle, S) of
+		{State, Handle, S2} ->
+			Result = broker:suspend(Handle),
+			broker:close(Handle),
+			case Result of
 				{ok, _ErrInfo, Rev} ->
-					S2 = mark_committed(Store, Doc, Rev, S),
-					{{ok, Rev}, S2};
+					S3 = mark_committed(Store, Doc, Rev, S2),
+					case State of
+						closed ->
+							{{ok, Rev}, S3};
+
+						keep ->
+							case broker:resume(Doc, Rev, keep, [Store]) of
+								{ok, _, NewHandle} ->
+									S4 = reopen_handle(FuseHandle, Rev, NewHandle, S3),
+									{{ok, Rev}, mark_open(Store, Doc, S4)};
+
+								{error, _Reason, _} ->
+									% Could create the checkpoint but not
+									% reopen the broker handle.  This means the
+									% 'close' has succeeded but all other
+									% references to the handle are now invalid.
+									{{ok, Rev}, forget_handle(FuseHandle, S3)}
+							end
+					end;
 
 				{error, Reason, _ErrInfo} ->
-					{{error, Reason}, S}
+					% close failed, mark internal state as closed and forget
+					S3 = mark_closed(Store, Doc, S2),
+					S4 = forget_handle(FuseHandle, S3),
+					{{error, Reason}, S4}
 			end;
+
+		error ->
+			{{error, ebadf}, S}
+	end;
+
+do_close({ro, _Store, Rev}=FuseHandle, S) ->
+	case close_handle(FuseHandle, S) of
+		{closed, Handle, S2} ->
+			broker:close(Handle),
+			{{ok, Rev}, S2};
+
+		{keep, _Handle, S2} ->
+			{{ok, Rev}, S2};
 
 		error ->
 			{{error, ebadf}, S}
 	end.
 
 
-do_close(FuseHandle, S) ->
-	case lookup_handle(FuseHandle, S) of
-		{ok, Handle, Store, Doc} ->
+do_abort(FuseHandle, S) ->
+	case close_handle(FuseHandle, S) of
+		{closed, Handle, S2} ->
+			S3 = case FuseHandle of
+				{rw, Store, Doc}   -> mark_closed(Store, Doc, S2);
+				{ro, _Store, _Rev} -> S2
+			end,
 			broker:close(Handle),
-			S2 = mark_closed(FuseHandle, Store, Doc, S),
+			{ok, S3};
+
+		{keep, _Handle, S2} ->
+			error_logger:error_msg("fuse_store: Tried to abort shared handle!~n"),
 			{ok, S2};
 
 		error ->
@@ -334,21 +400,55 @@ check_prerevs(Store, Doc, Rev, [PreRev | PreRevs]) ->
 	end.
 
 
-alloc_handle(Handle, Store, Doc, #state{next=Next, handles=Handles}=S) ->
-	S2 = S#state{
-		next    = Next+1,
-		handles = dict:store(Next, {Handle, Store, Doc}, Handles)
-	},
-	{Next, S2}.
+create_handle(FuseHandle, Rev, BrokerHandle, #state{handles=Handles}=S) ->
+	S#state{handles = dict:store(FuseHandle, {Rev, BrokerHandle, 1}, Handles)}.
+
+
+open_handle(FuseHandle, #state{handles=Handles}=S) ->
+	case dict:find(FuseHandle, Handles) of
+		{ok, {Rev, Handle, RefCnt}} ->
+			S2 = S#state{handles=dict:store(FuseHandle, {Rev, Handle, RefCnt+1}, Handles)},
+			{ok, Rev, S2};
+
+		error ->
+			error
+	end.
 
 
 lookup_handle(FuseHandle, #state{handles=Handles}) ->
 	case dict:find(FuseHandle, Handles) of
-		{ok, {Handle, Store, Doc}} ->
-			{ok, Handle, Store, Doc};
+		{ok, {_Rev, Handle, _RefCnt}} ->
+			{ok, Handle};
 		error ->
 			error
 	end.
+
+
+close_handle(FuseHandle, #state{handles=Handles}=S) ->
+	case dict:find(FuseHandle, Handles) of
+		{ok, {_Rev, Handle, 1}} ->
+			S2 = S#state{handles=dict:erase(FuseHandle, Handles)},
+			{closed, Handle, S2};
+
+		{ok, {Rev, Handle, RefCnt}} ->
+			S2 = S#state{handles=dict:store(FuseHandle, {Rev, Handle, RefCnt-1}, Handles)},
+			{keep, Handle, S2};
+
+		error ->
+			error
+	end.
+
+
+reopen_handle(FuseHandle, NewRev, NewHandle, #state{handles=Handles} = S) ->
+	NewHandles = dict:update(
+		FuseHandle,
+		fun({_Rev, _Handle, RefCnt}) -> {NewRev, NewHandle, RefCnt} end,
+		Handles),
+	S#state{handles=NewHandles}.
+
+
+forget_handle(FuseHandle, #state{handles=Handles} = S) ->
+	S#state{handles=dict:erase(FuseHandle, Handles)}.
 
 
 mark_open(Store, Doc, #state{known=Known}=S) ->
@@ -365,19 +465,18 @@ mark_committed(Store, Doc, Rev, #state{known=Known}=S) ->
 	check_timer_running(S2, Ts).
 
 
-mark_closed(Handle, Store, Doc, #state{handles=Handles, known=Known}=S) ->
+mark_closed(Store, Doc, #state{known=Known}=S) ->
 	Key = {Store, Doc},
-	NewHandles = dict:erase(Handle, Handles),
 	case dict:find(Key, Known) of
 		{ok, {Rev, _Ts, _Open}} ->
 			Ts = ts(),
 			S2 = S#state{
-				known   = dict:store(Key, {Rev, Ts, false}, Known),
-				handles = NewHandles
+				known   = dict:store(Key, {Rev, Ts, false}, Known)
 			},
 			check_timer_running(S2, Ts);
+
 		error ->
-			S#state{handles=NewHandles}
+			S
 	end.
 
 
