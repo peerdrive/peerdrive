@@ -182,7 +182,7 @@ class HpDecoder(object):
 		elif tag == 0x10:
 			res = self._decodeList()
 		elif tag == 0x20:
-			res = self._decodeString().decode('utf-8')
+			res = self._decodeString()
 		elif tag == 0x30:
 			res = (self._getInt('B') != 0)
 		elif tag == 0x40:
@@ -234,7 +234,7 @@ class HpDecoder(object):
 
 	def _decodeString(self):
 		length = self._getInt('L')
-		value = self._getStr(length)
+		value = self._getStr(length).decode('utf-8')
 		return value
 
 
