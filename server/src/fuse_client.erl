@@ -1528,7 +1528,7 @@ create_empty_file(Store, Name) ->
 				<<"Created by FUSE interface">>,
 				dict:new())),
 		dict:new()),
-	case broker:create(<<"public.text">>, ?FUSE_CC, [Store]) of
+	case broker:create(<<"public.text">>, ?FUSE_CC, broker:get_stores([Store])) of
 		{ok, _ErrInfo, {Doc, Handle}} ->
 			broker:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
 			broker:write(Handle, <<"FILE">>, 0, <<>>),
@@ -1557,7 +1557,7 @@ create_empty_directory(Store, Name) ->
 				<<"Created by FUSE interface">>,
 				dict:new())),
 		dict:new()),
-	case broker:create(<<"org.hotchpotch.dict">>, ?FUSE_CC, [Store]) of
+	case broker:create(<<"org.hotchpotch.dict">>, ?FUSE_CC, broker:get_stores([Store])) of
 		{ok, _ErrInfo, {Doc, Handle}} ->
 			broker:write(Handle, <<"META">>, 0, struct:encode(MetaData)),
 			broker:write(Handle, <<"HPSD">>, 0, struct:encode(dict:new())),

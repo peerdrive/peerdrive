@@ -77,7 +77,7 @@ gen_tmp_name(RootPath) ->
 
 % returns {ok, Data} | {error, Reason}
 read_rev(Rev, Part) ->
-	case broker:peek(Rev, []) of
+	case broker:peek(Rev, broker:get_stores([])) of
 		{ok, _Errors, Reader} ->
 			try
 				read_rev_loop(Reader, Part, 0, <<>>)

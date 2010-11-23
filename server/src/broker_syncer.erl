@@ -37,7 +37,7 @@ sync(Doc, Depth, Stores) ->
 			{error, enoent, []};
 
 		_ ->
-			case calc_dest_rev(AllRevs) of
+			case calc_dest_rev(AllRevs, AllStores) of
 				{ok, DestRev} ->
 					do_sync(Doc, Depth, DestRev, lists:zip(AllStores, AllRevs));
 				error ->
@@ -54,15 +54,15 @@ sync(Doc, Depth, Stores) ->
 %%
 %% The algorithm ends with an error when no such revision was found yet and the
 %% ends of all revision histories were reached.
-calc_dest_rev(Revs) ->
+calc_dest_rev(Revs, Stores) ->
 	% State :: [ {BaseRev::guid(), Heads::[guid()], Path::set()} ]
 	State = [ {Rev, [Rev], sets:from_list([Rev])} || Rev <- Revs ],
-	calc_dest_loop(Revs, State).
+	calc_dest_loop(Revs, State, Stores).
 
 
-calc_dest_loop(BaseRevs, State) ->
+calc_dest_loop(BaseRevs, State, Stores) ->
 	% go back in history another step
-	{NewState, AddedSth} = calc_dest_step(State),
+	{NewState, AddedSth} = calc_dest_step(State, Stores),
 	% fast-forward head found?
 	case find_ff_head(BaseRevs, NewState) of
 		{ok, _Rev} = Result ->
@@ -70,7 +70,7 @@ calc_dest_loop(BaseRevs, State) ->
 		error ->
 			% try another round, but only if we have some unknown heads left
 			if
-				AddedSth -> calc_dest_loop(BaseRevs, NewState);
+				AddedSth -> calc_dest_loop(BaseRevs, NewState, Stores);
 				true     -> error
 			end
 	end.
@@ -86,20 +86,20 @@ find_ff_head(BaseRevs, [{Candidate, _Heads, Path} | Paths]) ->
 	end.
 
 
-calc_dest_step(State) ->
+calc_dest_step(State, Stores) ->
 	lists:foldl(
 		fun(RevInfo, {AccState, AccAddedSth}) ->
-			{_BaseRev, Heads, _Path} = NewRevInfo = follow(RevInfo),
+			{_BaseRev, Heads, _Path} = NewRevInfo = follow(RevInfo, Stores),
 			{[NewRevInfo|AccState], (Heads =/= []) or AccAddedSth}
 		end,
 		{[], false},
 		State).
 
 
-follow({BaseRev, Heads, Path}) ->
+follow({BaseRev, Heads, Path}, Stores) ->
 	lists:foldl(
 		fun(Head, {AccBase, AccHeads, AccPath} = Acc) ->
-			case broker:stat(Head, []) of
+			case broker:stat(Head, Stores) of
 				{ok, _ErrInfo, #rev_stat{parents=Parents}} ->
 					{
 						AccBase,

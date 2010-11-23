@@ -313,7 +313,7 @@ do_loopup_doc(Body, RetPath) ->
 	{Stores, <<>>} = parse_uuid_list(Body1),
 
 	% execute
-	{Revs, PreRevs} = broker:lookup_doc(Doc, Stores),
+	{Revs, PreRevs} = broker:lookup_doc(Doc, broker:get_stores(Stores)),
 	RevsBin = do_lookup_encode(Revs),
 	PreRevsBin = do_lookup_encode(PreRevs),
 	send_reply(RetPath, ?LOOKUP_DOC_CNF, <<RevsBin/binary, PreRevsBin/binary>>).
@@ -331,7 +331,7 @@ do_lookup_encode(Revs) ->
 do_loopup_rev(Body, RetPath) ->
 	<<Rev:16/binary, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
-	Found = broker:lookup_rev(Rev, Stores),
+	Found = broker:lookup_rev(Rev, broker:get_stores(Stores)),
 	FoundBin = encode_list(fun(Store) -> Store end, Found),
 	send_reply(RetPath, ?LOOKUP_REV_CNF, FoundBin).
 
@@ -342,7 +342,7 @@ do_stat(Body, RetPath) ->
 	{Stores, <<>>} = parse_uuid_list(Body1),
 
 	% execute
-	Reply = case broker:stat(Rev, Stores) of
+	Reply = case broker:stat(Rev, broker:get_stores(Stores)) of
 		{ok, _Errors, Stat} = Result ->
 			#rev_stat{
 				flags   = Flags,
@@ -377,7 +377,7 @@ do_stat(Body, RetPath) ->
 do_peek(Cookie, RetPath, Body) ->
 	{Rev, Body1} = parse_uuid(Body),
 	{Stores, <<>>} = parse_uuid_list(Body1),
-	case broker:peek(Rev, Stores) of
+	case broker:peek(Rev, broker:get_stores(Stores)) of
 		{ok, _Errors, Handle} = Result ->
 			Reply = <<(encode_broker_result(Result))/binary, Cookie:32>>,
 			send_reply(RetPath, ?PEEK_CNF, Reply),
@@ -392,7 +392,7 @@ do_create(Cookie, RetPath, Body) ->
 	{Type, Body1} = parse_string(Body),
 	{Creator, Body2} = parse_string(Body1),
 	{Stores, <<>>} = parse_uuid_list(Body2),
-	case broker:create(Type, Creator, Stores) of
+	case broker:create(Type, Creator, broker:get_stores(Stores)) of
 		{ok, _Errors, {Doc, Handle}} = Result ->
 			Reply = <<(encode_broker_result(Result))/binary, Cookie:32, Doc/binary>>,
 			send_reply(RetPath, ?CREATE_CNF, Reply),
@@ -407,7 +407,7 @@ do_fork(Cookie, RetPath, Body) ->
 	{Rev, Body1} = parse_uuid(Body),
 	{Creator, Body2} = parse_string(Body1),
 	{Stores, <<>>} = parse_uuid_list(Body2),
-	case broker:fork(Rev, Creator, Stores) of
+	case broker:fork(Rev, Creator, broker:get_stores(Stores)) of
 		{ok, _Errors, {Doc, Handle}} = Result ->
 			Reply = <<(encode_broker_result(Result))/binary, Cookie:32, Doc/binary>>,
 			send_reply(RetPath, ?FORK_CNF, Reply),
@@ -427,7 +427,7 @@ do_update(Cookie, RetPath, Body) ->
 		<<>> -> keep;
 		_    -> Creator
 	end,
-	case broker:update(Doc, Rev, RealCreator, Stores) of
+	case broker:update(Doc, Rev, RealCreator, broker:get_stores(Stores)) of
 		{ok, _Errors, Handle} = Result ->
 			Reply = <<(encode_broker_result(Result))/binary, Cookie:32>>,
 			send_reply(RetPath, ?UPDATE_CNF, Reply),
@@ -447,7 +447,7 @@ do_resume(Cookie, RetPath, Body) ->
 		<<>> -> keep;
 		_    -> Creator
 	end,
-	case broker:resume(Doc, Rev, RealCreator, Stores) of
+	case broker:resume(Doc, Rev, RealCreator, broker:get_stores(Stores)) of
 		{ok, _Errors, Handle} = Result ->
 			Reply = <<(encode_broker_result(Result))/binary, Cookie:32>>,
 			send_reply(RetPath, ?RESUME_CNF, Reply),
@@ -462,7 +462,7 @@ do_forget(Body, RetPath) ->
 	{Doc, Body1} = parse_uuid(Body),
 	{Rev, Body2} = parse_uuid(Body1),
 	{Stores, <<>>} = parse_uuid_list(Body2),
-	Reply = broker:forget(Doc, Rev, Stores),
+	Reply = broker:forget(Doc, Rev, broker:get_stores(Stores)),
 	send_reply(RetPath, ?FORGET_CNF, encode_broker_result(Reply)).
 
 
@@ -470,21 +470,21 @@ do_delete_doc(Body, RetPath) ->
 	{Doc, Body1} = parse_uuid(Body),
 	{Rev, Body2} = parse_uuid(Body1),
 	{Stores, <<>>} = parse_uuid_list(Body2),
-	Reply = broker:delete_doc(Doc, Rev, Stores),
+	Reply = broker:delete_doc(Doc, Rev, broker:get_stores(Stores)),
 	send_reply(RetPath, ?DELETE_DOC_CNF, encode_broker_result(Reply)).
 
 
 do_delete_rev(Body, RetPath) ->
 	{Rev, Body1} = parse_uuid(Body),
 	{Stores, <<>>} = parse_uuid_list(Body1),
-	Reply = broker:delete_rev(Rev, Stores),
+	Reply = broker:delete_rev(Rev, broker:get_stores(Stores)),
 	send_reply(RetPath, ?DELETE_REV_CNF, encode_broker_result(Reply)).
 
 
 do_sync(Body, RetPath) ->
 	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
-	Reply = case broker:sync(Doc, Depth, Stores) of
+	Reply = case broker:sync(Doc, Depth, broker:get_stores(Stores)) of
 		{ok, _ErrInfo, Rev} = Ok ->
 			<<(encode_broker_result(Ok))/binary, Rev/binary>>;
 		Error ->
@@ -497,7 +497,8 @@ do_replicate_doc(Body, RetPath) ->
 	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
 	{SrcStores, Body2} = parse_uuid_list(Body1),
 	{DstStores, <<>>} = parse_uuid_list(Body2),
-	Reply = broker:replicate_doc(Doc, Depth, SrcStores, DstStores),
+	Reply = broker:replicate_doc(Doc, Depth, broker:get_stores(SrcStores),
+		broker:get_stores(DstStores)),
 	send_reply(RetPath, ?REPLICATE_DOC_CNF, encode_broker_result(Reply)).
 
 
@@ -505,7 +506,8 @@ do_replicate_rev(Body, RetPath) ->
 	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
 	{SrcStores, Body2} = parse_uuid_list(Body1),
 	{DstStores, <<>>} = parse_uuid_list(Body2),
-	Reply = broker:replicate_rev(Doc, Depth, SrcStores, DstStores),
+	Reply = broker:replicate_rev(Doc, Depth, broker:get_stores(SrcStores),
+		broker:get_stores(DstStores)),
 	send_reply(RetPath, ?REPLICATE_REV_CNF, encode_broker_result(Reply)).
 
 

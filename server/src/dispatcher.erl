@@ -92,9 +92,9 @@ parse_rule(Rule) when is_record(Rule, dict, 9) ->
 				{ok, PeerHex} ->
 					Peer = util:hexstr_to_bin(binary_to_list(PeerHex)),
 					case dict:find(<<"mode">>, Rule) of
-						{ok, <<"ff">>}        -> {ff, Store, Peer};
-						{ok, <<"automerge">>} -> {automerge, Store, Peer};
-						{ok, <<"savemerge">>} -> {savemerge, Store, Peer};
+						{ok, <<"ff">>}     -> {ff, Store, Peer};
+						{ok, <<"latest">>} -> {latest, Store, Peer};
+						{ok, <<"merge">>}  -> {merge, Store, Peer};
 						{ok, _} -> error;
 						error -> error
 					end;

@@ -23,7 +23,7 @@
 	update/4, close/1, commit/1, write/4, truncate/3, sync/3]).
 
 -export([consolidate_error/1, consolidate_success/2, consolidate_success/1,
-	consolidate_filter/1]).
+	consolidate_filter/1, get_stores/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Hotchpotch operations...
@@ -76,7 +76,7 @@ lookup_doc(Doc, Stores) ->
 			end
 		end,
 		{dict:new(), dict:new()},
-		get_stores(Stores)),
+		Stores),
 	{dict:to_list(RevDict), dict:to_list(PreRevDict)}.
 
 
@@ -97,7 +97,7 @@ lookup_rev(Rev, Stores) ->
 			end
 		end,
 		[],
-		get_stores(Stores)).
+		Stores).
 
 
 %% @doc Get status information about a revision.
@@ -139,7 +139,7 @@ stat(Rev, SearchStores) ->
 			end
 		end,
 		{undef, []},
-		get_stores(SearchStores)),
+		SearchStores),
 	case Stat of
 		undef -> consolidate_error(ErrInfo);
 		_     -> consolidate_success(ErrInfo, Stat)
@@ -154,7 +154,7 @@ stat(Rev, SearchStores) ->
 %%       Handle = handle()
 %%       Reason = ecode()
 peek(Rev, Stores) ->
-	broker_io:start({peek, Rev, get_stores(Stores)}).
+	broker_io:start({peek, Rev, Stores}).
 
 
 %% @doc Create a new, empty document.
@@ -176,8 +176,7 @@ peek(Rev, Stores) ->
 %%       Reason = ecode()
 create(Type, Creator, Stores) ->
 	Doc = crypto:rand_bytes(16),
-	StoreIfcs = get_stores(Stores),
-	case broker_io:start({create, Doc, Type, Creator, StoreIfcs}) of
+	case broker_io:start({create, Doc, Type, Creator, Stores}) of
 		{ok, ErrInfo, Handle} ->
 			{ok, ErrInfo, {Doc, Handle}};
 		{error, _, _} = Error ->
@@ -203,8 +202,7 @@ create(Type, Creator, Stores) ->
 %%       Reason = ecode()
 fork(StartRev, Creator, Stores) ->
 	Doc = crypto:rand_bytes(16),
-	StoreIfcs = get_stores(Stores),
-	case broker_io:start({fork, Doc, StartRev, Creator, StoreIfcs}) of
+	case broker_io:start({fork, Doc, StartRev, Creator, Stores}) of
 		{ok, ErrInfo, Handle} ->
 			{ok, ErrInfo, {Doc, Handle}};
 		{error, _} = Error ->
@@ -226,8 +224,7 @@ fork(StartRev, Creator, Stores) ->
 %%       Handle = handle()
 %%       Reason = ecode()
 update(Doc, StartRev, Creator, Stores) ->
-	StoreIfcs = get_stores(Stores),
-	broker_io:start({update, Doc, StartRev, Creator, StoreIfcs}).
+	broker_io:start({update, Doc, StartRev, Creator, Stores}).
 
 
 %% @doc Resume writing to a document
@@ -246,8 +243,7 @@ update(Doc, StartRev, Creator, Stores) ->
 %%       Handle = handle()
 %%       Reason = ecode()
 resume(Doc, PreRev, Creator, Stores) ->
-	StoreIfcs = get_stores(Stores),
-	broker_io:start({resume, Doc, PreRev, Creator, StoreIfcs}).
+	broker_io:start({resume, Doc, PreRev, Creator, Stores}).
 
 
 %% @doc Read a part of a document
@@ -383,7 +379,7 @@ forget(Doc, PreRev, Stores) ->
 			end
 		end,
 		{error, []},
-		get_stores(Stores)),
+		Stores),
 	case Result of
 		ok -> consolidate_success(ErrInfo);
 		error -> consolidate_error(ErrInfo)
@@ -410,7 +406,7 @@ delete_doc(Doc, Rev, Stores) ->
 			end
 		end,
 		{error, []},
-		get_stores(Stores)),
+		Stores),
 	case Result of
 		ok -> consolidate_success(ErrInfo);
 		error -> consolidate_error(ErrInfo)
@@ -436,7 +432,7 @@ delete_rev(Rev, Stores) ->
 			end
 		end,
 		{error, []},
-		get_stores(Stores)),
+		Stores),
 	case Result of
 		ok -> consolidate_success(ErrInfo);
 		error -> consolidate_error(ErrInfo)
@@ -456,8 +452,7 @@ delete_rev(Rev, Stores) ->
 %%       Stores = [guid()]
 %%       Reason = ecode()
 sync(Doc, Depth, Stores) ->
-	StoreIfcs = get_stores(Stores),
-	broker_syncer:sync(Doc, Depth, StoreIfcs).
+	broker_syncer:sync(Doc, Depth, Stores).
 
 
 %% @doc Replicate a document to new stores.
@@ -472,9 +467,7 @@ sync(Doc, Depth, Stores) ->
 %%       SrcStores, DstStores = [guid()]
 %%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
 replicate_doc(Doc, Depth, SrcStores, DstStores) ->
-	SrcStoreIfcs = get_stores(SrcStores),
-	DstStoreIfcs = get_stores(DstStores),
-	replicator:replicate_doc_sync(Doc, Depth, SrcStoreIfcs, DstStoreIfcs).
+	replicator:replicate_doc_sync(Doc, Depth, SrcStores, DstStores).
 
 
 %% @doc Replicate a revision to another store.
@@ -489,13 +482,11 @@ replicate_doc(Doc, Depth, SrcStores, DstStores) ->
 %%       SrcStores, DstStores = [guid()]
 %%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
 replicate_rev(Doc, Depth, SrcStores, DstStores) ->
-	SrcStoreIfcs = get_stores(SrcStores),
-	DstStoreIfcs = get_stores(DstStores),
-	replicator:replicate_rev_sync(Doc, Depth, SrcStoreIfcs, DstStoreIfcs).
+	replicator:replicate_rev_sync(Doc, Depth, SrcStores, DstStores).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Local functions...
+%% Utility functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 get_stores(StoreList) ->

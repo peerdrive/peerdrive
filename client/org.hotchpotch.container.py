@@ -245,7 +245,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 		self.statusBar().showMessage("Ready")
 
 	def __unmountStore(self):
-		self.saveFile("Automatically saved before unmounting")
+		self.checkpoint("Automatically saved before unmounting")
 		enum = HpConnector().enum()
 		HpConnector().unmount(enum.store(self.doc()))
 
@@ -284,12 +284,12 @@ class CollectionWindow(hpgui.HpMainWindow):
 			action.setChecked(rules.mode(this, uuid) == "ff")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, this, uuid, "savemerge")
-			action.setChecked(rules.mode(this, uuid) == "savemerge")
+			action = RuleAction(menu, this, uuid, "latest")
+			action.setChecked(rules.mode(this, uuid) == "latest")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, this, uuid, "automerge")
-			action.setChecked(rules.mode(this, uuid) == "automerge")
+			action = RuleAction(menu, this, uuid, "merge")
+			action.setChecked(rules.mode(this, uuid) == "merge")
 			group.addAction(action)
 			menu.addAction(action)
 			menu.addSeparator().setText("Peer changes")
@@ -302,12 +302,12 @@ class CollectionWindow(hpgui.HpMainWindow):
 			action.setChecked(rules.mode(uuid, this) == "ff")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, uuid, this, "savemerge")
-			action.setChecked(rules.mode(uuid, this) == "savemerge")
+			action = RuleAction(menu, uuid, this, "latest")
+			action.setChecked(rules.mode(uuid, this) == "latest")
 			group.addAction(action)
 			menu.addAction(action)
-			action = RuleAction(menu, uuid, this, "automerge")
-			action.setChecked(rules.mode(uuid, this) == "automerge")
+			action = RuleAction(menu, uuid, this, "merge")
+			action.setChecked(rules.mode(uuid, this) == "merge")
 			group.addAction(action)
 			menu.addAction(action)
 
@@ -360,13 +360,13 @@ class RuleAction(QtGui.QAction):
 
 		if mode == "ff":
 			self.setText("Fast-forward")
-		elif mode == "savemerge":
-			self.setText("Merge (non-conflicting)")
-		elif mode == "automerge":
-			self.setText("Merge always")
+		elif mode == "latest":
+			self.setText("Take latest revision")
+		elif mode == "merge":
+			self.setText("3-way merge")
 		else:
 			self.setText("No sync")
-			
+
 		self.setCheckable(True)
 		self.setChecked(False)
 		QtCore.QObject.connect(self, QtCore.SIGNAL("triggered(bool)"), self.__triggered)

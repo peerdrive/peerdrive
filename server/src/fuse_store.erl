@@ -47,7 +47,7 @@ lookup(Store, Doc) ->
 	gen_server:call(?MODULE, {lookup, Store, Doc}).
 
 stat(Store, Rev) ->
-	make_reply(broker:stat(Rev, [Store])).
+	make_reply(broker:stat(Rev, broker:get_stores([Store]))).
 
 open_rev(Store, Rev) ->
 	gen_server:call(?MODULE, {open_rev, Store, Rev}).
@@ -153,7 +153,7 @@ do_open_rev(Store, Rev, S) ->
 			{{ok, Rev, FuseHandle}, S2};
 
 		error ->
-			case broker:peek(Rev, [Store]) of
+			case broker:peek(Rev, broker:get_stores([Store])) of
 				{ok, _ErrInfo, Handle} ->
 					S2 = create_handle(FuseHandle, Rev, Handle, S),
 					{{ok, Rev, FuseHandle}, S2};
@@ -186,9 +186,9 @@ do_open_doc(Store, Doc, true, S) ->
 				{ok, Rev, IsPre, false, S2} ->
 					StoreReply = if
 						IsPre ->
-							broker:resume(Doc, Rev, keep, [Store]);
+							broker:resume(Doc, Rev, keep, broker:get_stores([Store]));
 						true ->
-							broker:update(Doc, Rev, ?FUSE_CC, [Store])
+							broker:update(Doc, Rev, ?FUSE_CC, broker:get_stores([Store]))
 					end,
 					case StoreReply of
 						{ok, _ErrInfo, Handle} ->
@@ -271,7 +271,7 @@ do_close({rw, Store, Doc}=FuseHandle, S) ->
 							{{ok, Rev}, S3};
 
 						keep ->
-							case broker:resume(Doc, Rev, keep, [Store]) of
+							case broker:resume(Doc, Rev, keep, broker:get_stores([Store])) of
 								{ok, _, NewHandle} ->
 									S4 = reopen_handle(FuseHandle, Rev, NewHandle, S3),
 									{{ok, Rev}, mark_open(Store, Doc, S4)};
@@ -334,7 +334,7 @@ do_abort(FuseHandle, S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 lookup_internal(Store, Doc, S) ->
-	case broker:lookup_doc(Doc, [Store]) of
+	case broker:lookup_doc(Doc, broker:get_stores([Store])) of
 		{[{Rev, _}], BrokerPreRevs} ->
 			PreRevs = lists:map(fun({PreRev, _}) -> PreRev end, BrokerPreRevs),
 			case check_known(Store, Doc, Rev, PreRevs, S) of
@@ -385,13 +385,13 @@ check_prerevs(_Store, _Doc, _Rev, []) ->
 	none;
 
 check_prerevs(Store, Doc, Rev, [PreRev | PreRevs]) ->
-	case broker:stat(PreRev, [Store]) of
+	case broker:stat(PreRev, broker:get_stores([Store])) of
 		{ok, _ErrInfo, #rev_stat{creator=?FUSE_CC, parents=Parents}} ->
 			case lists:member(Rev, Parents) of
 				true ->
 					{ok, PreRev};
 				false ->
-					broker:forget(Doc, PreRev, [Store]),
+					broker:forget(Doc, PreRev, broker:get_stores([Store])),
 					check_prerevs(Store, Doc, Rev, PreRevs)
 			end;
 
@@ -542,7 +542,7 @@ commit_prerevs(Expired) ->
 
 
 commit_prerev(Store, Doc, Rev) ->
-	case broker:resume(Doc, Rev, keep, [Store]) of
+	case broker:resume(Doc, Rev, keep, broker:get_stores([Store])) of
 		{ok, _ErrInfo, Handle} ->
 			try
 				commit_prerev_loop(Store, Doc, Handle)
@@ -565,7 +565,7 @@ commit_prerev_loop(Store, Doc, Handle) ->
 			ok;
 
 		{error, conflict, _ErrInfo} ->
-			case broker:lookup_doc(Doc, [Store]) of
+			case broker:lookup_doc(Doc, broker:get_stores([Store])) of
 				{[{CurRev, _}], _PreRevs} ->
 					broker:set_parents(Handle, [CurRev]),
 					commit_prerev_loop(Store, Doc, Handle);
