@@ -17,8 +17,7 @@
 -module(file_store_importer).
 -behaviour(gen_server).
 
--export([start/7]).
--export([write/3, commit/1, abort/1]).
+-export([start_link/7]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
@@ -36,7 +35,7 @@
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start(Store, Path, Rev, Revision, PartsDone, PartsNeeded, User) ->
+start_link(Store, Path, Rev, Revision, PartsDone, PartsNeeded, User) ->
 	% immediately open temp files for needed parts
 	NeededDict = lists:foldl(
 		fun({FourCC, Hash}, Acc) ->
@@ -53,41 +52,20 @@ start(Store, Path, Rev, Revision, PartsDone, PartsNeeded, User) ->
 		revision = Revision,
 		done = PartsDone,
 		needed = NeededDict},
-	case gen_server:start(?MODULE, {self(), State, User}, []) of
-		{ok, Pid} ->
-			{ok, #importer{
-				this     = Pid,
-				put_part = fun write/3,
-				abort    = fun abort/1,
-				commit   = fun commit/1
-			}};
-		Else ->
-			Else
-	end.
-
-write(Importer, Part, Data) ->
-	gen_server:call(Importer, {write, Part, Data}).
-
-commit(Importer) ->
-	gen_server:call(Importer, commit).
-
-abort(Importer) ->
-	gen_server:call(Importer, abort).
-
+	gen_server:start_link(?MODULE, {State, User}, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({StorePid, State, User}) ->
+init({State, User}) ->
 	process_flag(trap_exit, true),
-	link(StorePid),
 	link(User),
 	{ok, State}.
 
 
 % returns `ok | {error, Reason}'
-handle_call({write, Part, Data}, _From, S) ->
+handle_call({put_part, Part, Data}, _From, S) ->
 	{S2, Reply} = do_write(S, Part, Data),
 	{reply, Reply, S2};
 

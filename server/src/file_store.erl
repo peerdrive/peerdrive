@@ -854,7 +854,7 @@ do_put_rev(S, Rev, Revision, User) ->
 					do_put_rev_commit(S, Rev, Revision);
 
 				_ ->
-					{ok, Importer} = file_store_importer:start(self(),
+					{ok, Importer} = file_store_importer:start_link(self(),
 						S#state.path, Rev, Revision, PartsDone, PartsNeeded,
 						User),
 					NeededFourCCs = lists:map(fun({FCC, _Hash}) -> FCC end, PartsNeeded),

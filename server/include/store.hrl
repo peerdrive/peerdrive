@@ -50,11 +50,3 @@
 		links
 	}).
 
--record(importer,
-	{
-		this,
-		put_part,
-		abort,
-		commit
-	}).
-

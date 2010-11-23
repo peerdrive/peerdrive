@@ -332,7 +332,7 @@ put_doc(Store, Doc, OldRev, NewRev) ->
 %%       Revision = #revision
 %%       Result = ok | {ok, MissingParts, Importer} | {error, Reason}
 %%       MissingParts = [FourCC]
-%%       Importer = #importer
+%%       Importer = pid()
 %%       Reason = ecode()
 put_rev_start(Store, Rev, Revision) ->
 	gen_server:call(Store, {put_rev, Rev, Revision}).
@@ -340,23 +340,23 @@ put_rev_start(Store, Rev, Revision) ->
 %% @doc Add data to a revision that's imported
 %%
 %% @spec put_rev_part(Importer, Part, Data) -> ok | {error, Reason}
-%%       Importer = #importer
+%%       Importer = pid()
 %%       Part = Data = binary()
 %%       Reason = ecode()
-put_rev_part(#importer{this=Importer, put_part=PutPart}, Part, Data) ->
-	PutPart(Importer, Part, Data).
+put_rev_part(Importer, Part, Data) ->
+	gen_server:call(Importer, {put_part, Part, Data}).
 
 %% @doc Abort importing a revision
-%% @spec put_rev_abort(Importer::#importer) -> none()
-put_rev_abort(#importer{this=Importer, abort=Abort}) ->
-	Abort(Importer).
+%% @spec put_rev_abort(Importer::pid()) -> none()
+put_rev_abort(Importer) ->
+	gen_server:call(Importer, abort).
 
 %% @doc Finish importing a revision
 %% @spec put_rev_commit(Importer::pid()) -> ok | {error, Reason}
-%%       Importer = #importer
+%%       Importer = pid()
 %%       Reason = ecode()
-put_rev_commit(#importer{this=Importer, commit=Commit}) ->
-	Commit(Importer).
+put_rev_commit(Importer) ->
+	gen_server:call(Importer, commit).
 
 
 %% @doc Get changes since the last sync point of peer store
