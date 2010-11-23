@@ -50,23 +50,6 @@
 		links
 	}).
 
--record(handle,
-	{
-		this,
-		read,
-		write,
-		truncate,
-		close,
-		commit,
-		suspend,
-		get_type,
-		set_type,
-		get_parents,
-		set_parents,
-		get_links,
-		set_links
-	}).
-
 -record(importer,
 	{
 		this,

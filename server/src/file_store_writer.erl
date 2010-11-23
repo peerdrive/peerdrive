@@ -17,10 +17,7 @@
 -module(file_store_writer).
 -behaviour(gen_server).
 
--export([start/2]).
--export([read/4, write/4, truncate/3, commit/2, close/1, get_type/1,
-	set_type/2, get_parents/1, set_parents/2, suspend/2, get_links/1,
-	set_links/2]).
+-export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
@@ -30,64 +27,8 @@
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start(State, User) ->
-	case gen_server:start(?MODULE, {State, User}, []) of
-		{ok, Pid} ->
-			{ok, #handle{
-				this        = Pid,
-				read        = fun read/4,
-				write       = fun write/4,
-				truncate    = fun truncate/3,
-				close       = fun close/1,
-				commit      = fun commit/2,
-				suspend     = fun suspend/2,
-				get_type    = fun get_type/1,
-				set_type    = fun set_type/2,
-				get_parents = fun get_parents/1,
-				set_parents = fun set_parents/2,
-				get_links   = fun get_links/1,
-				set_links   = fun set_links/2
-			}};
-		Else ->
-			Else
-	end.
-
-read(Writer, Part, Offset, Length) ->
-	gen_server:call(Writer, {read, Part, Offset, Length}).
-
-write(Writer, Part, Offset, Data) ->
-	gen_server:call(Writer, {write, Part, Offset, Data}).
-
-truncate(Writer, Part, Offset) ->
-	gen_server:call(Writer, {truncate, Part, Offset}).
-
-commit(Writer, Mtime) ->
-	gen_server:call(Writer, {commit, Mtime}).
-
-suspend(Writer, Mtime) ->
-	gen_server:call(Writer, {suspend, Mtime}).
-
-close(Writer) ->
-	gen_server:call(Writer, close).
-
-get_type(Writer) ->
-	gen_server:call(Writer, get_type).
-
-set_type(Writer, Type) ->
-	gen_server:call(Writer, {set_type, Type}).
-
-get_parents(Writer) ->
-	gen_server:call(Writer, get_parents).
-
-set_parents(Writer, Parents) ->
-	gen_server:call(Writer, {set_parents, Parents}).
-
-get_links(Writer) ->
-	gen_server:call(Writer, get_links).
-
-set_links(Writer, Links) ->
-	gen_server:call(Writer, {set_links, Links}).
-
+start_link(State, User) ->
+	gen_server:start_link(?MODULE, {State, User}, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callbacks...
@@ -95,7 +36,6 @@ set_links(Writer, Links) ->
 
 init({State, User}) ->
 	process_flag(trap_exit, true),
-	link(State#ws.server),
 	link(User),
 	{ok, State}.
 
@@ -205,7 +145,7 @@ terminate(_Reason, #ws{doc=Doc, locks=Locks, server=Server} = S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-handle_cast(_, State)    -> {stop, enotsup, State}.
+handle_cast(_, State)    -> {noreply, State}.
 code_change(_, State, _) -> {ok, State}.
 
 

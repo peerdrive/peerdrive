@@ -84,7 +84,7 @@ stat(Store, Rev) ->
 %%
 %% @spec peek(Store, Rev) -> {ok, Handle} | {error, Reason}
 %%       Store = pid()
-%%       Handle = #handle{}
+%%       Handle = pid()
 %%       Rev = guid()
 %%       Reason = ecode()
 peek(Store, Rev) ->
@@ -98,7 +98,7 @@ peek(Store, Rev) ->
 %%
 %% @spec create(Store, Doc, Type, Creator) -> {ok, Handle} | {error, Reason}
 %%         Store = pid()
-%%         Handle = #handle{}
+%%         Handle = pid()
 %%         Doc = guid()
 %%         Type, Creator = binary()
 %%         Reason = ecode()
@@ -115,7 +115,7 @@ create(Store, Doc, Type, Creator) ->
 %%
 %% @spec fork(Store, Doc, StartRev, Creator) -> {ok, Handle} | {error, Reason}
 %%         Store = pid()
-%%         Handle = #handle{}
+%%         Handle = pid()
 %%         StartRev, Doc = guid()
 %%         Creator = binary()
 %%         Reason = ecode()
@@ -130,7 +130,7 @@ fork(Store, Doc, StartRev, Creator) ->
 %%
 %% @spec update(Store, Doc, StartRev, Creator) -> {ok, Handle} | {error, Reason}
 %%        Store = pid()
-%%        Handle = #handle{}
+%%        Handle = pid()
 %%        Doc, StartRev = guid()
 %%        Creator = keep | binary()
 %%        Reason = ecode()
@@ -146,7 +146,7 @@ update(Store, Doc, StartRev, Creator) ->
 %%
 %% @spec resume(Store, Doc, PreRev, Creator) -> {ok, Handle} | {error, Reason}
 %%        Store = pid()
-%%        Handle = #handle{}
+%%        Handle = pid()
 %%        Doc, PreRev = guid()
 %%        Creator = keep | binary()
 %%        Reason = ecode()
@@ -159,12 +159,12 @@ resume(Store, Doc, PreRev, Creator) ->
 %% {error, enoent}. May return less data if the end of the part was hit.
 %%
 %% @spec read(Handle, Part, Offset, Length) -> {ok, Data} | {error, Reason}
-%%       Handle = #handle{}
+%%       Handle = pid()
 %%       Part = Data = binary()
 %%       Offset = Length = integer()
 %%       Reason = ecode()
-read(#handle{this=Handle, read=Read}, Part, Offset, Length) ->
-	Read(Handle, Part, Offset, Length).
+read(Handle, Part, Offset, Length) ->
+	gen_server:call(Handle, {read, Part, Offset, Length}).
 
 %% @doc Write a part of a document
 %%
@@ -172,12 +172,12 @@ read(#handle{this=Handle, read=Read}, Part, Offset, Length) ->
 %% not exist yet it will be created.
 %%
 %% @spec write(Handle, Part, Offset, Data) -> ok | {error, Reason}
-%%       Handle = #handle
+%%       Handle = pid()
 %%       Part = Data = binary()
 %%       Offset = integer()
 %%       Reason = ecode()
-write(#handle{this=Handle, write=Write}, Part, Offset, Data) ->
-	Write(Handle, Part, Offset, Data).
+write(Handle, Part, Offset, Data) ->
+	gen_server:call(Handle, {write, Part, Offset, Data}).
 
 %% @doc Truncate part
 %%
@@ -185,36 +185,36 @@ write(#handle{this=Handle, write=Write}, Part, Offset, Data) ->
 %% be created.
 %%
 %% @spec truncate(Handle, Part, Offset) -> ok | {error, Reason}
-%%       Handle = #handle
+%%       Handle = pid()
 %%       Part = binary()
 %%       Offset = integer()
 %%       Reason = ecode()
-truncate(#handle{this=Handle, truncate=Truncate}, Part, Offset) ->
-	Truncate(Handle, Part, Offset).
+truncate(Handle, Part, Offset) ->
+	gen_server:call(Handle, {truncate, Part, Offset}).
 
 % {ok, binary()} | {error, Reason}
-get_type(#handle{this=Handle, get_type=GetType}) ->
-	GetType(Handle).
+get_type(Handle) ->
+	gen_server:call(Handle, get_type).
 
 % ok | {error, Reason}
-set_type(#handle{this=Handle, set_type=SetType}, Uti) ->
-	SetType(Handle, Uti).
+set_type(Handle, Type) ->
+	gen_server:call(Handle, {set_type, Type}).
 
 % {ok, [guid()]} | {error, Reason}
-get_parents(#handle{this=Handle, get_parents=GetParents}) ->
-	GetParents(Handle).
+get_parents(Handle) ->
+	gen_server:call(Handle, get_parents).
 
 % ok | {error, Reason}
-set_parents(#handle{this=Handle, set_parents=SetParents}, Parents) ->
-	SetParents(Handle, Parents).
+set_parents(Handle, Parents) ->
+	gen_server:call(Handle, {set_parents, Parents}).
 
 % {ok, {SDL, WDL, SRL, WRL, DocMap}} | {error, Reason}
-get_links(#handle{this=Handle, get_links=GetLinks}) ->
-	GetLinks(Handle).
+get_links(Handle) ->
+	gen_server:call(Handle, get_links).
 
 % ok | {error, Reason}
-set_links(#handle{this=Handle, set_links=SetLinks}, Links) ->
-	SetLinks(Handle, Links).
+set_links(Handle, Links) ->
+	gen_server:call(Handle, {set_links, Links}).
 
 %% @doc Commit a new revision
 %%
@@ -232,12 +232,12 @@ set_links(#handle{this=Handle, set_links=SetLinks}, Links) ->
 %% the commit fails, e.g. due to a conflict the handle will still be writable.
 %%
 %% @spec commit(Handle, Mtime) -> {ok, Rev} | {error, Reason}
-%%       Handle = #handle{}
+%%       Handle = pid()
 %%       Mtime = integer()
 %%       Rev = guid()
 %%       Reason = ecode()
-commit(#handle{this=Handle, commit=Commit}, Mtime) ->
-	Commit(Handle, Mtime).
+commit(Handle, Mtime) ->
+	gen_server:call(Handle, {commit, Mtime}).
 
 %% @doc Suspend a handle
 %%
@@ -255,12 +255,12 @@ commit(#handle{this=Handle, commit=Commit}, Mtime) ->
 %% case the operation fails the handle will still be writable.
 %%
 %% @spec suspend(Handle, Mtime) -> {ok, Rev} | {error, Reason}
-%%       Handle = #handle{}
+%%       Handle = pid()
 %%       Mtime = integer()
 %%       Rev = guid()
 %%       Reason = ecode()
-suspend(#handle{this=Handle, suspend=Suspend}, Mtime) ->
-	Suspend(Handle, Mtime).
+suspend(Handle, Mtime) ->
+	gen_server:call(Handle, {suspend, Mtime}).
 
 %% @doc Close a handle
 %%
@@ -268,9 +268,9 @@ suspend(#handle{this=Handle, suspend=Suspend}, Mtime) ->
 %% yet. The handle will be invalid after the call.
 %%
 %% @spec close(Handle) -> ok
-%%       Handle = #handle{}
-close(#handle{this=Handle, close=Close}) ->
-	Close(Handle).
+%%       Handle = pid()
+close(Handle) ->
+	gen_server:call(Handle, close).
 
 %% @doc Remove a pending preliminary revision from a document.
 %%

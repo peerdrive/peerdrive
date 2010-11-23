@@ -18,12 +18,11 @@
 -behaviour(gen_server).
 
 -export([start_link/3]).
--export([read/4, done/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
 
--record(state, {handles, parts, path, user}).
+-record(state, {handles, parts, path, user, type, parents, links}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -36,47 +35,26 @@ start_link(Path, Revision, User) ->
 		type    = Type,
 		links   = Links
 	} = Revision,
-	case gen_server:start_link(?MODULE, {Path, Parts, User}, []) of
-		{ok, Pid} ->
-			{ok, #handle{
-				this        = Pid,
-				read        = fun read/4,
-				write       = fun(_, _, _, _) -> {error, ebadf} end,
-				truncate    = fun(_, _, _) -> {error, ebadf} end,
-				close       = fun done/1,
-				commit      = fun(_, _) -> {error, ebadf} end,
-				suspend     = fun(_, _) -> {error, ebadf} end,
-				get_type    = fun(_) -> {ok, Type} end,
-				set_type    = fun(_, _) -> {error, ebadf} end,
-				get_parents = fun(_) -> {ok, Parents} end,
-				set_parents = fun(_, _) -> {error, ebadf} end,
-				get_links   = fun(_) -> {ok, Links} end,
-				set_links   = fun(_, _) -> {error, ebadf} end
-			}};
-		Else ->
-			Else
-	end.
-
-
-read(Reader, Part, Offset, Length) ->
-	gen_server:call(Reader, {read, Part, Offset, Length}).
-
-done(Reader) ->
-	gen_server:cast(Reader, done).
+	State = #state{
+		handles = dict:new(),
+		parts   = dict:from_list(Parts),
+		path    = Path,
+		user    = User,
+		type    = Type,
+		parents = Parents,
+		links   = Links
+	},
+	gen_server:start_link(?MODULE, State, []).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Path, Parts, User}) ->
+init(State) ->
 	process_flag(trap_exit, true),
-	link(User),
-	{ok, #state{
-		handles = dict:new(),
-		parts   = dict:from_list(Parts),
-		path    = Path,
-		user    = User}}.
+	link(State#state.user),
+	{ok, State}.
 
 
 handle_call({read, Part, Offset, Length}, _From, S) ->
@@ -90,11 +68,23 @@ handle_call({read, Part, Offset, Length}, _From, S) ->
 		{error, Reason, S2} ->
 			{error, Reason}
 	end,
-	{reply, Reply, S2}.
+	{reply, Reply, S2};
 
+handle_call(close, _From, S) ->
+	{stop, normal, ok, S};
 
-handle_cast(done, Handles) ->
-	{stop, normal, Handles}.
+handle_call(get_type, _From, S) ->
+	{reply, {ok, S#state.type}, S};
+
+handle_call(get_parents, _From, S) ->
+	{reply, {ok, S#state.parents}, S};
+
+handle_call(get_links, _From, S) ->
+	{reply, {ok, S#state.links}, S};
+
+% the following calls are only allowed when still writable
+handle_call(_Request, _From, S) ->
+	{reply, {error, ebadf}, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
@@ -108,6 +98,7 @@ terminate(_Reason, S) ->
 	close_parts(S).
 
 
+handle_cast(_, State) -> {noreply, State}.
 code_change(_, State, _) -> {ok, State}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

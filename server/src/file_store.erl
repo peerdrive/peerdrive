@@ -786,7 +786,7 @@ start_writer(S, State, User) ->
 		fun(Hash, Acc) -> orddict:update_counter(Hash, 1, Acc) end,
 		S#state.locks,
 		WriterLocks),
-	{ok, Writer} = file_store_writer:start(State#ws{locks=WriterLocks}, User),
+	{ok, Writer} = file_store_writer:start_link(State#ws{locks=WriterLocks}, User),
 	{S#state{locks=ServerLocks}, Writer}.
 
 
