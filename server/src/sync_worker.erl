@@ -42,17 +42,17 @@ init(Parent, Mode, FromGuid, ToGuid) ->
 		merge  -> fun sync_doc_merge/3
 	end,
 	case volman:store(FromGuid) of
-		{ok, FromIfc} ->
+		{ok, FromPid} ->
 			case volman:store(ToGuid) of
-				{ok, ToIfc} ->
+				{ok, ToPid} ->
 					Id = {FromGuid, ToGuid},
 					{ok, Monitor} = hysteresis:start({sync, FromGuid, ToGuid}),
 					vol_monitor:register_proc(Id),
 					proc_lib:init_ack(Parent, {ok, self()}),
 					State = #state{
 						syncfun   = SyncFun,
-						from      = {FromGuid, FromIfc},
-						to        = {ToGuid, ToIfc},
+						from      = {FromGuid, FromPid},
+						to        = {ToGuid, ToPid},
 						monitor   = Monitor,
 						numdone   = 0,
 						numremain = 0
@@ -73,7 +73,7 @@ init(Parent, Mode, FromGuid, ToGuid) ->
 
 loop(State, OldBacklog) ->
 	#state{
-		from      = {_, FromIfc},
+		from      = {_, FromPid},
 		to        = {ToGuid, _},
 		monitor   = Monitor,
 		numdone   = OldDone,
@@ -82,7 +82,7 @@ loop(State, OldBacklog) ->
 	case OldBacklog of
 		[] ->
 			NewDone = 1,
-			Backlog = store:sync_get_changes(FromIfc, ToGuid),
+			Backlog = store:sync_get_changes(FromPid, ToGuid),
 			NewRemain = length(Backlog),
 			case NewRemain of
 				0 -> ok;
@@ -130,11 +130,11 @@ loop_check_msg(State, Backlog, Timeout) ->
 sync_step({Doc, SeqNum}, S) ->
 	#state{
 		syncfun  = SyncFun,
-		from     = {_, FromIfc} = From,
+		from     = {_, FromPid} = From,
 		to       = {ToGuid, _}  = To
 	} = S,
 	sync_doc(Doc, From, To, SyncFun),
-	store:sync_set_anchor(FromIfc, ToGuid, SeqNum).
+	store:sync_set_anchor(FromPid, ToGuid, SeqNum).
 
 
 sync_doc(Doc, From, To, SyncFun) ->

@@ -184,8 +184,8 @@ run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = State) ->
 
 
 do_modified(Backlog, Doc, Store) ->
-	{_Guid, Ifc} = Store,
-	case store:lookup(Ifc, Doc) of
+	{_Guid, Pid} = Store,
+	case store:lookup(Pid, Doc) of
 		{ok, Rev, _PreRevs} ->
 			SrcStores = volman:stores(),
 			sticky_handling(Backlog, Rev, SrcStores, [Store], true);
@@ -203,8 +203,8 @@ do_replicate_doc(Backlog, Doc, Depth, SrcStores, DstStores, Important) ->
 		[Rev] ->
 			% replicate doc to all stores, queue errors when failed
 			{NewBacklog, RepStores} = lists:foldl(
-				fun({DestGuid, DestIfc}=Store, {AccBacklog, AccRepStores}) ->
-					case store:put_doc(DestIfc, Doc, Rev, Rev) of
+				fun({DestGuid, DestPid}=Store, {AccBacklog, AccRepStores}) ->
+					case store:put_doc(DestPid, Doc, Rev, Rev) of
 						ok ->
 							{AccBacklog, [Store|AccRepStores]};
 						{error, Reason} ->
@@ -234,8 +234,8 @@ do_replicate_rev(Backlog, Rev, Depth, SrcStores, DstStores, Important, Latest) -
 			if
 				Mtime >= Depth ->
 					{NewBacklog1, RepStores} = lists:foldl(
-						fun({DstGuid, DstIfc}=Store, {AccBack, AccRep}) ->
-							case replicator_copy:put_rev(SrcStores, DstIfc, Rev) of
+						fun({DstGuid, DstPid}=Store, {AccBack, AccRep}) ->
+							case replicator_copy:put_rev(SrcStores, DstPid, Rev) of
 								ok ->
 									{
 										push_success(AccBack, Important),
@@ -311,8 +311,8 @@ sticky_handling(Backlog, Rev, SrcStores, DstStores, Latest) ->
 
 lookup(Doc, Stores) ->
 	RevSet = lists:foldl(
-		fun({_StoreGuid, StoreIfc}, AccRev) ->
-			case store:lookup(StoreIfc, Doc) of
+		fun({_StoreGuid, StorePid}, AccRev) ->
+			case store:lookup(StorePid, Doc) of
 				{ok, Rev, _PreRevs} -> sets:add_element(Rev, AccRev);
 				error               -> AccRev
 			end
@@ -324,10 +324,10 @@ lookup(Doc, Stores) ->
 
 stat(Rev, SearchStores) ->
 	{Stat, ErrInfo} = lists:foldl(
-		fun({Guid, Ifc}, {SoFar, ErrInfo} = Acc) ->
+		fun({Guid, Pid}, {SoFar, ErrInfo} = Acc) ->
 			case SoFar of
 				undef ->
-					case store:stat(Ifc, Rev) of
+					case store:stat(Pid, Rev) of
 						{ok, Stat} ->
 							{Stat, ErrInfo};
 						{error, Reason} ->

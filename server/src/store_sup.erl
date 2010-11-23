@@ -40,17 +40,11 @@ spawn_store(Id, Disposition, Module, Arg) ->
 		worker,
 		[Module]
 	},
-	Status = case supervisor:start_child(store_sup, ChildSpec) of
+	case supervisor:start_child(store_sup, ChildSpec) of
 		{error, already_present} ->
 			supervisor:restart_child(store_sup, Id);
 		Else ->
 			Else
-	end,
-	case Status of
-		{ok, _Pid, Interface} ->
-			{ok, Interface};
-		{error, Error} ->
-			{error, Error}
 	end.
 
 stop_store(Id) ->

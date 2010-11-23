@@ -61,8 +61,8 @@
 %%       Stores = [guid()]
 lookup_doc(Doc, Stores) ->
 	{RevDict, PreRevDict} = lists:foldl(
-		fun({StoreGuid, StoreIfc}, {AccRev, AccPreRev}) ->
-			case store:lookup(StoreIfc, Doc) of
+		fun({StoreGuid, StorePid}, {AccRev, AccPreRev}) ->
+			case store:lookup(StorePid, Doc) of
 				{ok, Rev, PreRevs} ->
 					NewAccPreRev = lists:foldl(
 						fun(PreRev, Acc) -> dict:append(PreRev, StoreGuid, Acc) end,
@@ -90,8 +90,8 @@ lookup_doc(Doc, Stores) ->
 %%       Stores = [guid]
 lookup_rev(Rev, Stores) ->
 	lists:foldl(
-		fun({StoreGuid, StoreIfc}, Acc) ->
-			case store:contains(StoreIfc, Rev) of
+		fun({StoreGuid, StorePid}, Acc) ->
+			case store:contains(StorePid, Rev) of
 				true  -> [StoreGuid | Acc];
 				false -> Acc
 			end
@@ -124,10 +124,10 @@ lookup_rev(Rev, Stores) ->
 %%       Reason = ecode()
 stat(Rev, SearchStores) ->
 	{Stat, ErrInfo} = lists:foldl(
-		fun({Guid, Ifc}, {SoFar, ErrInfo} = Acc) ->
+		fun({Guid, Pid}, {SoFar, ErrInfo} = Acc) ->
 			case SoFar of
 				undef ->
-					case store:stat(Ifc, Rev) of
+					case store:stat(Pid, Rev) of
 						{ok, Stat} ->
 							{Stat, ErrInfo};
 						{error, Reason} ->
@@ -498,7 +498,7 @@ get_stores(StoreList) ->
 			lists:foldl(
 				fun(Guid, Acc) ->
 					case volman:store(Guid) of
-						{ok, Ifc} -> [{Guid, Ifc} | Acc];
+						{ok, Pid} -> [{Guid, Pid} | Acc];
 						error     -> Acc
 					end
 				end,

@@ -66,13 +66,13 @@ get_sync_rules(Store) ->
 
 				{Mode, Store, To} ->
 					case volman:store(To) of
-						{ok, _Ifc} -> [{Mode, Store, To} | Acc];
+						{ok, _Pid} -> [{Mode, Store, To} | Acc];
 						error      -> Acc
 					end;
 
 				{Mode, From, Store} ->
 					case volman:store(From) of
-						{ok, _Ifc} -> [{Mode, From, Store} | Acc];
+						{ok, _Pid} -> [{Mode, From, Store} | Acc];
 						error      -> Acc
 					end;
 
@@ -113,11 +113,11 @@ parse_rule(_) ->
 
 load_sync_rules() ->
 	{ok, SysStoreGuid} = find_sys_store(volman:enum()),
-	{ok, SysStoreIfc} = volman:store(SysStoreGuid),
-	{ok, Root} = read_doc(SysStoreIfc, SysStoreGuid),
+	{ok, SysStorePid} = volman:store(SysStoreGuid),
+	{ok, Root} = read_doc(SysStorePid, SysStoreGuid),
 	case dict:find(<<"syncrules">>, Root) of
 		{ok, {dlink, Doc}} ->
-			case read_doc(SysStoreIfc, Doc) of
+			case read_doc(SysStorePid, Doc) of
 				{ok, Rules}      -> Rules;
 				{error, _Reason} -> []
 			end;
@@ -136,8 +136,8 @@ find_sys_store([{_Id, _Descr, Guid, Tags} | Remaining]) ->
 	end.
 
 
-read_doc(StoreIfc, Doc) ->
-	case store:lookup(StoreIfc, Doc) of
+read_doc(StorePid, Doc) ->
+	case store:lookup(StorePid, Doc) of
 		{ok, Rev, _} -> util:read_rev_struct(Rev, <<"HPSD">>);
 		error        -> {error, enoent}
 	end.

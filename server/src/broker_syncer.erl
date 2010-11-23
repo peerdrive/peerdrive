@@ -22,8 +22,8 @@
 % Reply: {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
 sync(Doc, Depth, Stores) ->
 	{AllRevs, AllStores} = lists:foldl(
-		fun({_, Ifc} = Store, {AccRevs, AccStores} = Acc) ->
-			case store:lookup(Ifc, Doc) of
+		fun({_, Pid} = Store, {AccRevs, AccStores} = Acc) ->
+			case store:lookup(Pid, Doc) of
 				{ok, SomeRev, _PreRevs} ->
 					{[SomeRev|AccRevs], [Store|AccStores]};
 				error ->
@@ -116,10 +116,10 @@ follow({BaseRev, Heads, Path}, Stores) ->
 
 
 do_sync(Doc, Depth, DestRev, AllStores) ->
-	{value, {{LeadStoreGuid, LeadStoreIfc}, DestRev}, _FollowStores} =
+	{value, {{LeadStoreGuid, LeadStorePid}, DestRev}, _FollowStores} =
 		lists:keytake(DestRev, 2, AllStores),
 	% create/set temporary doc on lead store
-	case create_tmp(LeadStoreIfc, DestRev) of
+	case create_tmp(LeadStorePid, DestRev) of
 		{ok, TmpDoc} ->
 			% replicate temporary doc (with all parent revs) to all stores
 			Reply = case replicate_tmp_doc(TmpDoc, Depth, AllStores) of

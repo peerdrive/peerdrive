@@ -34,9 +34,9 @@ put_rev(SourceStores, DestStore, Rev) ->
 get_source(_Rev, []) ->
 	error;
 
-get_source(Rev, [{_Guid, Ifc} | Remaining]) ->
-	case store:contains(Ifc, Rev) of
-		true -> {ok, Ifc};
+get_source(Rev, [{_Guid, Pid} | Remaining]) ->
+	case store:contains(Pid, Rev) of
+		true -> {ok, Pid};
 		false -> get_source(Rev, Remaining)
 	end.
 

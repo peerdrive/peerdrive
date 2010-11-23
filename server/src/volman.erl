@@ -18,7 +18,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0]).
--export([reg_store/3, enum/0, stores/0, store/1, mount/1, unmount/1]).
+-export([reg_store/2, enum/0, stores/0, store/1, mount/1, unmount/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % specs:  [{Id, Disposition, Module, Args}]
@@ -27,11 +27,10 @@
 %           Module = atom()
 %           Path = string()
 %           Name = string()
-% stores: [{Pid, Id, Guid, Interface}]
+% stores: [{Pid, Id, Guid}]
 %           Pid = pid()
 %           Id = atom()
 %           Guid = guid()
-%           Interface = #store
 -record(state, {specs, stores}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -47,8 +46,8 @@ start_link() ->
 %% the process to trap its exit. No explicit unregistration is needed.
 %%
 %% @spec reg_store(Id, Guid, Interface) -> none()
-reg_store(Id, Guid, Interface) ->
-	gen_server:cast(volman, {reg, {self(), Id, Guid, Interface}}).
+reg_store(Id, Guid) ->
+	gen_server:cast(volman, {reg, {self(), Id, Guid}}).
 
 %% @doc Enumerate all known stores
 %%
@@ -65,12 +64,12 @@ enum() ->
 	gen_server:call(volman, enum).
 
 %% @doc Get Guids/interfaces of all currently mounted stores
-%% @spec stores() -> [{guid(), #store}]
+%% @spec stores() -> [{guid(), pid()}]
 stores() ->
 	gen_server:call(volman, stores).
 
 %% @doc Get interface of a specific store
-%% @spec store(Guid) -> {ok, #store} | error
+%% @spec store(Guid) -> {ok, pid()} | error
 %%       Guid = guid()
 store(Guid) ->
 	gen_server:call(volman, {store, Guid}).
@@ -111,23 +110,23 @@ init([]) ->
 	end.
 
 handle_cast({reg, Info}, #state{stores=Stores, specs=Specs} = S) ->
-	{Pid, _Id, Guid, _Interface} = Info,
+	{Pid, _Id, Guid} = Info,
 	link(Pid),
 	vol_monitor:trigger_add_store(Guid),
 	NewStores = lists:sort(
-		fun({_, IdA, _, _}, {_, IdB, _, _}) ->
+		fun({_, IdA, _}, {_, IdB, _}) ->
 			rank(IdA, Specs) =< rank(IdB, Specs)
 		end,
 		[Info|Stores]),
 	{noreply, S#state{stores=NewStores}}.
 
 
-% returns [{Id, Descr, Interface, [Tag]}]
+% returns [{Id, Descr, Guid, [Tag]}]
 handle_call(enum, _From, #state{specs=Specs, stores=Stores} = S) ->
 	Reply = lists:map(
 		fun({Id, Descr, Disposition, _Module, _Args}) ->
 			case lists:keysearch(Id, 2, Stores) of
-				{value, {_Pid, _Id, Guid, _Interface}} ->
+				{value, {_Pid, _Id, Guid}} ->
 					{Id, Descr, Guid, [mounted|Disposition]};
 				false ->
 					{Id, Descr, <<0:128>>, Disposition}
@@ -138,13 +137,13 @@ handle_call(enum, _From, #state{specs=Specs, stores=Stores} = S) ->
 
 handle_call(stores, _From, #state{stores=Stores} = S) ->
 	Reply = lists:map(
-		fun({_Pid, _Id, Guid, Interface}) -> {Guid, Interface} end,
+		fun({Pid, _Id, Guid}) -> {Guid, Pid} end,
 		Stores),
 	{reply, Reply, S};
 
 handle_call({store, Guid}, _From, #state{stores=Stores} = S) ->
 	Reply = case lists:keysearch(Guid, 3, Stores) of
-		{value, {_Pid, _Id, _Guid, Interface}} -> {ok, Interface};
+		{value, {Pid, _Id, _Guid}} -> {ok, Pid};
 		false -> error
 	end,
 	{reply, Reply, S};
@@ -153,8 +152,8 @@ handle_call({mount, StoreId}, _From, #state{specs=Specs} = S) ->
 	Reply = case lists:keysearch(StoreId, 1, Specs) of
 		{value, {Id, _Descr, Disposition, Module, Args}} ->
 			case store_sup:spawn_store(Id, Disposition, Module, Args) of
-				{ok, Interface} ->
-					Guid = store:guid(Interface),
+				{ok, Pid} ->
+					Guid = store:guid(Pid),
 					{ok, Guid};
 				Else ->
 					Else
@@ -166,7 +165,7 @@ handle_call({mount, StoreId}, _From, #state{specs=Specs} = S) ->
 	
 handle_call({unmount, StoreId}, _From, #state{stores=Stores} = S) ->
 	Reply = case lists:keysearch(StoreId, 2, Stores) of
-		{value, {_Pid, Id, _Guid, _Interface}} ->
+		{value, {_Pid, Id, _Guid}} ->
 			store_sup:stop_store(Id);
 		false ->
 			{error, enoent}
@@ -176,7 +175,7 @@ handle_call({unmount, StoreId}, _From, #state{stores=Stores} = S) ->
 
 handle_info({'EXIT', Pid, _Reason}, #state{stores=Stores1} = S) ->
 	case lists:keytake(Pid, 1, Stores1) of
-		{value, {_Pid, _Id, Guid, _Interface}, Stores2} ->
+		{value, {_Pid, _Id, Guid}, Stores2} ->
 			vol_monitor:trigger_rem_store(Guid),
 			{noreply, S#state{stores=Stores2}};
 		false ->
@@ -231,7 +230,7 @@ start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs]) ->
 	case proplists:is_defined(removable, Disposition) of
 		false ->
 			case store_sup:spawn_store(Id, Disposition, Module, Args) of
-				{ok, _Interface} ->
+				{ok, _Pid} ->
 					start_permanent_stores(Specs);
 
 				{error, Error} ->
@@ -266,6 +265,7 @@ check_store_spec({Id, Descr, Disposition, Module, _Args}) when
 		end,
 		true,
 		Disposition);
+
 check_store_spec(_) ->
 	false.
 

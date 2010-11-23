@@ -31,28 +31,6 @@
 	}).
 
 
--record(store,
-	{
-		this,
-		guid,
-		statfs,
-		contains,
-		lookup,
-		stat,
-		peek,
-		create,
-		fork,
-		update,
-		resume,
-		forget,
-		delete_rev,
-		delete_doc,
-		put_doc,
-		put_rev_start,
-		sync_get_changes,
-		sync_set_anchor
-	}).
-
 -record(fs_stat,
 	{
 		bsize,  % size of each block (power of two, >=512)

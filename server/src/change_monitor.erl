@@ -185,8 +185,8 @@ terminate(_, _)          -> ok.
 doc_population(Doc) ->
 	Stores = volman:stores(),
 	lists:foldl(
-		fun({StoreGuid, StoreIfc}, Acc) ->
-			case store:lookup(StoreIfc, Doc) of
+		fun({StoreGuid, StorePid}, Acc) ->
+			case store:lookup(StorePid, Doc) of
 				{ok, _Rev, _PreRevs} -> sets:add_element(StoreGuid, Acc);
 				error -> Acc
 			end
@@ -199,8 +199,8 @@ doc_population(Doc) ->
 rev_population(Rev) ->
 	Stores = volman:stores(),
 	lists:foldl(
-		fun({StoreGuid, StoreIfc}, Acc) ->
-			case store:contains(StoreIfc, Rev) of
+		fun({StoreGuid, StorePid}, Acc) ->
+			case store:contains(StorePid, Rev) of
 				true  -> sets:add_element(StoreGuid, Acc);
 				false -> Acc
 			end
@@ -243,12 +243,12 @@ trigger_dec(Type, Store, Uuid, Watches) ->
 
 trigger_add_store(StoreGuid, Watches) ->
 	case volman:store(StoreGuid) of
-		{ok, StoreIfc} ->
+		{ok, StorePid} ->
 			dict:map(
 				fun({Type, Hash}, {StoreSet, PidSet}) ->
 					case Type of
 						doc ->
-							case store:lookup(StoreIfc, Hash) of
+							case store:lookup(StorePid, Hash) of
 								{ok, _Rev, _PreRevs} ->
 									case sets:size(StoreSet) of
 										0 -> fire_trigger(appeared, doc, Hash, PidSet);
@@ -261,7 +261,7 @@ trigger_add_store(StoreGuid, Watches) ->
 							end;
 
 						rev ->
-							case store:contains(StoreIfc, Hash) of
+							case store:contains(StorePid, Hash) of
 								true ->
 									case sets:size(StoreSet) of
 										0 -> fire_trigger(appeared, rev, Hash, PidSet);

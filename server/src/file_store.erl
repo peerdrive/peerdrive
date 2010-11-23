@@ -20,11 +20,6 @@
 -export([start_link/2, stop/1, dump/1, fsck/1, gc/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
-% Store interface
--export([guid/1, contains/2, stat/2, lookup/2, put_doc/4, put_rev_start/3,
-	peek/2, create/4, fork/4, update/4, resume/4, forget/3,
-	delete_rev/2, delete_doc/3, sync_get_changes/2, sync_set_anchor/3]).
-
 % Functions used by helper processes (reader/writer/...)
 -export([commit/4, suspend/4, insert_rev/3, lock/2, unlock/2, unhide/2]).
 
@@ -52,12 +47,8 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(Id, {Path, Name}) ->
-	case gen_server:start_link({local, Id}, ?MODULE, {Id, Path, Name}, []) of
-		{ok, Pid} ->
-			{ok, Pid, make_interface(Pid)};
-		Else ->
-			Else
-	end.
+	gen_server:start_link({local, Id}, ?MODULE, {Id, Path, Name}, []).
+
 
 init({Id, Path, Name}) ->
 	case filelib:is_dir(Path) of
@@ -78,7 +69,7 @@ init({Id, Path, Name}) ->
 				peers     = Peers,
 				locks     = orddict:new()
 			},
-			volman:reg_store(Id, Guid, make_interface(self())),
+			volman:reg_store(Id, Guid),
 			process_flag(trap_exit, true),
 			{ok, check_root_doc(State, Name)};
 			
@@ -97,96 +88,6 @@ fsck(Store) ->
 
 gc(Store) ->
 	gen_server:cast(Store, gc).
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Operations on file store...
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%% @doc Get GUID of a store
-%% @see store:guid/1
-guid(Store) ->
-	gen_server:call(Store, guid).
-
-%% @doc Get file system statistics
-%% @see store:statfs/1
-statfs(Store) ->
-	gen_server:call(Store, statfs).
-
-%% @doc Lookup a document.
-%% @see store:lookup/2
-lookup(Store, Doc) ->
-	gen_server:call(Store, {lookup, Doc}).
-
-%% @doc Check if a revision exists in the store
-%% @see store:contains/2
-contains(Store, Rev) ->
-	gen_server:call(Store, {contains, Rev}).
-
-%% @doc Stat a revision.
-%% @see store:stat/2
-stat(Store, Rev) ->
-	gen_server:call(Store, {stat, Rev}).
-
-%% @doc Start reading a document revision.
-%% @see store:peek/2
-peek(Store, Rev) ->
-	gen_server:call(Store, {peek, Rev}).
-
-%% @doc Create a new document
-%% @see store:create/4
-create(Store, Doc, Type, Creator) ->
-	gen_server:call(Store, {create, Doc, Type, Creator}).
-
-%% @doc Fork a new document
-%% @see store:fork/4
-fork(Store, Doc, StartRev, Creator) ->
-	gen_server:call(Store, {fork, Doc, StartRev, Creator}).
-
-%% @doc Write to an existing document
-%% @see store:update/4
-update(Store, Doc, StartRev, Creator) ->
-	gen_server:call(Store, {update, Doc, StartRev, Creator}).
-
-%% @doc Resume writing to a document
-%% @see store:resume/4
-resume(Store, Doc, PreRev, Creator) ->
-	gen_server:call(Store, {resume, Doc, PreRev, Creator}).
-
-%% @doc Remove a pending preliminary revision from a document.
-%% @see store:forget/3
-forget(Store, Doc, PreRev) ->
-	gen_server:call(Store, {forget, Doc, PreRev}).
-
-%% @doc Delete a document
-%% @see store:delete_doc/3
-delete_doc(Store, Doc, Rev) ->
-	gen_server:call(Store, {delete_doc, Doc, Rev}).
-
-%% @doc Delete a revision
-%% @see store:delete_rev/2
-delete_rev(Store, Rev) ->
-	gen_server:call(Store, {delete_rev, Rev}).
-
-%% @doc Put/update a document in the store
-%% @see store:put_doc/4
-put_doc(Store, Doc, OldRev, NewRev) ->
-	gen_server:call(Store, {put_doc, Doc, OldRev, NewRev}).
-
-%% @doc Put/import a revision into the store.
-%% @see store:put_rev_start/3
-put_rev_start(Store, Rev, Revision) ->
-	gen_server:call(Store, {put_rev, Rev, Revision}).
-
-%% @doc Get changes since the last sync point of peer store
-%% @see store:sync_get_changes/2
-sync_get_changes(Store, PeerGuid) ->
-	gen_server:call(Store, {sync_get_changes, PeerGuid}).
-
-%% @doc Set sync point of peer store to new generation
-%% @see store:sync_set_anchor/3
-sync_set_anchor(Store, PeerGuid, SeqNum) ->
-	gen_server:call(Store, {sync_set_anchor, PeerGuid, SeqNum}).
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Functions used by helper processes...
@@ -463,28 +364,6 @@ code_change(_, State, _) -> {ok, State}.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-make_interface(Pid) ->
-	#store{
-		this               = Pid,
-		guid               = fun guid/1,
-		statfs             = fun statfs/1,
-		contains           = fun contains/2,
-		lookup             = fun lookup/2,
-		stat               = fun stat/2,
-		put_doc            = fun put_doc/4,
-		put_rev_start      = fun put_rev_start/3,
-		peek               = fun peek/2,
-		create             = fun create/4,
-		fork               = fun fork/4,
-		update             = fun update/4,
-		resume             = fun resume/4,
-		forget             = fun forget/3,
-		delete_rev         = fun delete_rev/2,
-		delete_doc         = fun delete_doc/3,
-		sync_get_changes   = fun sync_get_changes/2,
-		sync_set_anchor    = fun sync_set_anchor/3
-	}.
 
 check_root_doc(S, Name) ->
 	case dict:is_key(S#state.guid, S#state.uuids) of

@@ -559,12 +559,12 @@ statfs(_, Ino, _, #state{inodes=Inodes}=S) ->
 	FsStat = case Oid of
 		{doc, Store, _Doc} ->
 			case volman:store(Store) of
-				{ok, Ifc} -> store:statfs(Ifc);
+				{ok, Pid} -> store:statfs(Pid);
 				error     -> {error, enoent}
 			end;
 		{rev, Store, _Rev} ->
 			case volman:store(Store) of
-				{ok, Ifc} -> store:statfs(Ifc);
+				{ok, Pid} -> store:statfs(Pid);
 				error     -> {error, enoent}
 			end;
 		_ ->

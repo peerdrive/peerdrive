@@ -33,8 +33,8 @@ start_link() ->
 
 event_modified(Doc, StoreGuid) ->
 	case volman:store(StoreGuid) of
-		{ok, StoreIfc} ->
-			start_child([{modified, Doc, {StoreGuid, StoreIfc}}]);
+		{ok, StorePid} ->
+			start_child([{modified, Doc, {StoreGuid, StorePid}}]);
 
 		error ->
 			ok

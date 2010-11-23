@@ -29,14 +29,14 @@
 -include("store.hrl").
 
 %% @doc Get GUID of a store
-%% @spec guid(Store::#store{}) -> guid()
-guid(#store{this=Store, guid=Guid}) ->
-	Guid(Store).
+%% @spec guid(Store::pid()) -> guid()
+guid(Store) ->
+	gen_server:call(Store, guid).
 
 %% @doc Get file system statistics
-%% @spec statfs(Store::#store{}) -> {ok, #fs_stat{}} | {error, Reason}
-statfs(#store{this=Store, statfs=StatFs}) ->
-	StatFs(Store).
+%% @spec statfs(Store::pid()) -> {ok, #fs_stat{}} | {error, Reason}
+statfs(Store) ->
+	gen_server:call(Store, statfs).
 
 %% @doc Lookup a document.
 %%
@@ -44,18 +44,18 @@ statfs(#store{this=Store, statfs=StatFs}) ->
 %% document is found in the store, or `error' if no such document exists.
 %%
 %% @spec lookup(Store, Doc) -> {ok, Rev, PreRevs} | error
-%%       Store = #store{}
+%%       Store = pid()
 %%       Doc = Rev = guid()
 %%       PreRevs = [guid()]
-lookup(#store{this=Store, lookup=Lookup}, Doc) ->
-	Lookup(Store, Doc).
+lookup(Store, Doc) ->
+	gen_server:call(Store, {lookup, Doc}).
 
 %% @doc Check if a revision exists in the store
 %% @spec contains(Store, Rev) -> bool()
-%%       Store = #store{}
+%%       Store = pid()
 %%       Rev = guid()
-contains(#store{this=Store, contains=Contains}, Rev) ->
-	Contains(Store, Rev).
+contains(Store, Rev) ->
+	gen_server:call(Store, {contains, Rev}).
 
 %% @doc Stat a revision.
 %%
@@ -71,24 +71,24 @@ contains(#store{this=Store, contains=Contains}, Rev) ->
 %%   creator = binary()
 %%
 %% @spec stat(Store, Rev) -> {ok, Stat} | {error, Reason}
-%%       Store = #store{}
+%%       Store = pid()
 %%       Rev = guid()
 %%       Stat = #stat{}
 %%       Reason = ecode()
-stat(#store{this=Store, stat=Stat}, Rev) ->
-	Stat(Store, Rev).
+stat(Store, Rev) ->
+	gen_server:call(Store, {stat, Rev}).
 
 %% @doc Start reading a revision.
 %%
 %% Returns the handle when ready, or an error code.
 %%
 %% @spec peek(Store, Rev) -> {ok, Handle} | {error, Reason}
-%%       Store = #store{}
+%%       Store = pid()
 %%       Handle = #handle{}
 %%       Rev = guid()
 %%       Reason = ecode()
-peek(#store{this=Store, peek=Peek}, Rev) ->
-	Peek(Store, Rev).
+peek(Store, Rev) ->
+	gen_server:call(Store, {peek, Rev}).
 
 %% @doc Create a new, empty document.
 %%
@@ -97,13 +97,13 @@ peek(#store{this=Store, peek=Peek}, Rev) ->
 %% document will not show up in the store until a sucsessful commit.
 %%
 %% @spec create(Store, Doc, Type, Creator) -> {ok, Handle} | {error, Reason}
-%%         Store = #store{}
+%%         Store = pid()
 %%         Handle = #handle{}
 %%         Doc = guid()
 %%         Type, Creator = binary()
 %%         Reason = ecode()
-create(#store{this=Store, create=Create}, Doc, Type, Creator) ->
-	Create(Store, Doc, Type, Creator).
+create(Store, Doc, Type, Creator) ->
+	gen_server:call(Store, {create, Doc, Type, Creator}).
 
 %% @doc Derive a new document from an existing revision
 %%
@@ -114,13 +114,13 @@ create(#store{this=Store, create=Create}, Doc, Type, Creator) ->
 %% commit.
 %%
 %% @spec fork(Store, Doc, StartRev, Creator) -> {ok, Handle} | {error, Reason}
-%%         Store = #store{}
+%%         Store = pid()
 %%         Handle = #handle{}
 %%         StartRev, Doc = guid()
 %%         Creator = binary()
 %%         Reason = ecode()
-fork(#store{this=Store, fork=Fork}, Doc, StartRev, Creator) ->
-	Fork(Store, Doc, StartRev, Creator).
+fork(Store, Doc, StartRev, Creator) ->
+	gen_server:call(Store, {fork, Doc, StartRev, Creator}).
 
 %% @doc Update an existing document
 %%
@@ -129,13 +129,13 @@ fork(#store{this=Store, fork=Fork}, Doc, StartRev, Creator) ->
 %% revision then the call will fail.
 %%
 %% @spec update(Store, Doc, StartRev, Creator) -> {ok, Handle} | {error, Reason}
-%%        Store = #store{}
+%%        Store = pid()
 %%        Handle = #handle{}
 %%        Doc, StartRev = guid()
 %%        Creator = keep | binary()
 %%        Reason = ecode()
-update(#store{this=Store, update=Update}, Doc, StartRev, Creator) ->
-	Update(Store, Doc, StartRev, Creator).
+update(Store, Doc, StartRev, Creator) ->
+	gen_server:call(Store, {update, Doc, StartRev, Creator}).
 
 %% @doc Resume writing to a document
 %%
@@ -145,13 +145,13 @@ update(#store{this=Store, update=Update}, Doc, StartRev, Creator) ->
 %% overwritten by either commit/2 or suspend/1).
 %%
 %% @spec resume(Store, Doc, PreRev, Creator) -> {ok, Handle} | {error, Reason}
-%%        Store = #store{}
+%%        Store = pid()
 %%        Handle = #handle{}
 %%        Doc, PreRev = guid()
 %%        Creator = keep | binary()
 %%        Reason = ecode()
-resume(#store{this=Store, resume=Resume}, Doc, StartRev, Creator) ->
-	Resume(Store, Doc, StartRev, Creator).
+resume(Store, Doc, PreRev, Creator) ->
+	gen_server:call(Store, {resume, Doc, PreRev, Creator}).
 
 %% @doc Read a part of a document
 %%
@@ -275,11 +275,11 @@ close(#handle{this=Handle, close=Close}) ->
 %% @doc Remove a pending preliminary revision from a document.
 %%
 %% @spec forget(Store, Doc, PreRev) -> ok | {error, Reason}
-%%       Store = #store{}
+%%       Store = pid()
 %%       Doc, PreRev = guid()
 %%       Reason = ecode()
-forget(#store{this=Store, forget=Forget}, Doc, PreRev) ->
-	Forget(Store, Doc, PreRev).
+forget(Store, Doc, PreRev) ->
+	gen_server:call(Store, {forget, Doc, PreRev}).
 
 %% @doc Delete a document and release any referenced revisions.
 %%
@@ -288,11 +288,11 @@ forget(#store{this=Store, forget=Forget}, Doc, PreRev) ->
 %% store.
 %%
 %% @spec delete_doc(Store, Doc, Rev) -> ok | {error, Reason}
-%%       Store = #store{}
+%%       Store = pid()
 %%       Doc, Rev = guid()
 %%       Reason = ecode()
-delete_doc(#store{this=Store, delete_doc=DeleteDoc}, Doc, Rev) ->
-	DeleteDoc(Store, Doc, Rev).
+delete_doc(Store, Doc, Rev) ->
+	gen_server:call(Store, {delete_doc, Doc, Rev}).
 
 %% @doc Delete a revision and release any referenced parent revisions
 %%
@@ -300,11 +300,11 @@ delete_doc(#store{this=Store, delete_doc=DeleteDoc}, Doc, Rev) ->
 %% document.
 %%
 %% @spec delete_rev(Store, Rev) -> ok | {error, Reason}
-%%       Store = #store{}
+%%       Store = pid()
 %%       Rev = guid()
 %%       Reason = ecode()
-delete_rev(#store{this=Store, delete_rev=DeleteRev}, Rev) ->
-	DeleteRev(Store, Rev).
+delete_rev(Store, Rev) ->
+	gen_server:call(Store, {delete_rev, Rev}).
 
 %% @doc Put/update a document in the store
 %%
@@ -313,11 +313,11 @@ delete_rev(#store{this=Store, delete_rev=DeleteRev}, Rev) ->
 %% OldRev or NewRev, otherwise the call will fail.
 %%
 %% @spec put_doc(Store, Doc, OldRev, NewRev) -> ok | {error, Reason}
-%%       Store = #store{}
+%%       Store = pid()
 %%       Doc = OldRev = NewRev = guid()
 %%       Reason = ecode()
-put_doc(#store{this=Store, put_doc=PutDoc}, Doc, OldRev, NewRev) ->
-	PutDoc(Store, Doc, OldRev, NewRev).
+put_doc(Store, Doc, OldRev, NewRev) ->
+	gen_server:call(Store, {put_doc, Doc, OldRev, NewRev}).
 
 %% @doc Put/import a revision into the store.
 %%
@@ -327,15 +327,15 @@ put_doc(#store{this=Store, put_doc=PutDoc}, Doc, OldRev, NewRev) ->
 %% the function just returns `ok'.
 %%
 %% @spec put_rev_start(Store, Rev, Revision) -> Result
-%%       Store = #store{}
+%%       Store = pid()
 %%       Rev = guid()
 %%       Revision = #revision
 %%       Result = ok | {ok, MissingParts, Importer} | {error, Reason}
 %%       MissingParts = [FourCC]
 %%       Importer = #importer
 %%       Reason = ecode()
-put_rev_start(#store{this=Store, put_rev_start=PutRevStart}, Rev, Revision) ->
-	PutRevStart(Store, Rev, Revision).
+put_rev_start(Store, Rev, Revision) ->
+	gen_server:call(Store, {put_rev, Rev, Revision}).
 
 %% @doc Add data to a revision that's imported
 %%
@@ -361,19 +361,19 @@ put_rev_commit(#importer{this=Importer, commit=Commit}) ->
 
 %% @doc Get changes since the last sync point of peer store
 %% @spec sync_get_changes(Store, PeerGuid) ->
-%%       Store = #store
+%%       Store = pid()
 %%       PeerGuid = guid()
-sync_get_changes(#store{this=Store, sync_get_changes=SyncGetChanges}, PeerGuid) ->
-	SyncGetChanges(Store, PeerGuid).
+sync_get_changes(Store, PeerGuid) ->
+	gen_server:call(Store, {sync_get_changes, PeerGuid}).
 
 
 %% @doc Set sync point of peer store to new generation
 %% @spec sync_set_anchor(Store, PeerGuid, SeqNum) ->
-%%       Store = #store
+%%       Store = pid()
 %%       PeerGuid = guid()
 %%       SeqNum = integer()
-sync_set_anchor(#store{this=Store, sync_set_anchor=SyncSetAnchor}, PeerGuid, SeqNum) ->
-	SyncSetAnchor(Store, PeerGuid, SeqNum).
+sync_set_anchor(Store, PeerGuid, SeqNum) ->
+	gen_server:call(Store, {sync_set_anchor, PeerGuid, SeqNum}).
 
 
 hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->

@@ -189,8 +189,8 @@ do_peek(Rev, Stores) ->
 do_peek_loop(_Rev, [], Errors) ->
 	broker:consolidate_error(Errors);
 
-do_peek_loop(Rev, [{Guid, Ifc} | Stores], Errors) ->
-	case store:peek(Ifc, Rev) of
+do_peek_loop(Rev, [{Guid, Pid} | Stores], Errors) ->
+	case store:peek(Pid, Rev) of
 		{ok, Handle} ->
 			State = #state{
 				handles=[{Guid, Handle}],
@@ -204,14 +204,14 @@ do_peek_loop(Rev, [{Guid, Ifc} | Stores], Errors) ->
 
 do_create(Doc, Type, Creator, Stores) ->
 	start_handles(
-		fun(Ifc) -> store:create(Ifc, Doc, Type, Creator) end,
+		fun(Pid) -> store:create(Pid, Doc, Type, Creator) end,
 		Doc,
 		Stores).
 
 
 do_fork(Doc, StartRev, Creator, Stores) ->
 	Startup = start_handles(
-		fun(Ifc) -> store:fork(Ifc, Doc, StartRev, Creator) end,
+		fun(Pid) -> store:fork(Pid, Doc, StartRev, Creator) end,
 		Doc,
 		Stores),
 	case Startup of
@@ -236,7 +236,7 @@ do_fork(Doc, StartRev, Creator, Stores) ->
 
 do_update(Doc, StartRev, Creator, Stores) ->
 	Startup = start_handles(
-		fun(Ifc) -> store:update(Ifc, Doc, StartRev, Creator) end,
+		fun(Pid) -> store:update(Pid, Doc, StartRev, Creator) end,
 		Doc,
 		Stores),
 	case Startup of
@@ -261,7 +261,7 @@ do_update(Doc, StartRev, Creator, Stores) ->
 
 do_resume(Doc, PreRev, Creator, Stores) ->
 	Startup = start_handles(
-		fun(Ifc) -> store:resume(Ifc, Doc, PreRev, Creator) end,
+		fun(Pid) -> store:resume(Pid, Doc, PreRev, Creator) end,
 		Doc,
 		Stores),
 	case Startup of
@@ -433,8 +433,8 @@ start_handles_loop(_Fun, [], Handles, Errors) ->
 		_  -> broker:consolidate_success(Errors, Handles)
 	end;
 
-start_handles_loop(Fun, [{Guid, Ifc} | Stores], Handles, Errors) ->
-	case Fun(Ifc) of
+start_handles_loop(Fun, [{Guid, Pid} | Stores], Handles, Errors) ->
+	case Fun(Pid) of
 		{ok, Handle} ->
 			start_handles_loop(Fun, Stores, [{Guid, Handle} | Handles], Errors);
 		{error, Reason} ->
@@ -539,8 +539,8 @@ read_references(Revs, Stores) ->
 read_references_step(_Rev, []) ->
 	throw(error);
 
-read_references_step(Rev, [{_Guid, Ifc} | Stores]) ->
-	case store:peek(Ifc, Rev) of
+read_references_step(Rev, [{_Guid, Pid} | Stores]) ->
+	case store:peek(Pid, Rev) of
 		{ok, Handle} ->
 			case read_rev_refs(Handle) of
 				{ok, Result} ->
