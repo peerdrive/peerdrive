@@ -81,6 +81,8 @@
 -define(MOUNT_CNF,          16#01C1).
 -define(UNMOUNT_REQ,        16#01D0).
 -define(UNMOUNT_CNF,        16#01D1).
+-define(GC_REQ,             16#01E0).
+-define(GC_CNF,             16#01E1).
 -define(WATCH_IND,          16#0002).
 -define(PROGRESS_IND,       16#0012).
 
@@ -261,6 +263,10 @@ handle_packet(Packet, S) ->
 
 		?UNMOUNT_REQ ->
 			spawn_link(fun () -> do_unmount(Body, RetPath) end),
+			{ok, S};
+
+		?GC_REQ ->
+			spawn_link(fun () -> do_gc(Body, RetPath) end),
 			{ok, S};
 
 		_ ->
@@ -512,45 +518,45 @@ do_replicate_rev(Body, RetPath) ->
 
 
 do_mount(Body, RetPath) ->
-	{Store, <<>>} = parse_string(Body),
-	Reply = case (catch binary_to_existing_atom(Store, utf8)) of
-		Id when is_atom(Id) ->
-			case lists:keysearch(Id, 1, volman:enum()) of
-				{value, {Id, _Descr, _Guid, Tags}} ->
-					case proplists:is_defined(removable, Tags) of
-						true  -> volman:mount(Id);
-						false -> {error, einval}
-					end;
-
-				false ->
-					{error, einval}
+	Reply = case parse_store(Body) of
+		{ok, {Id, _Descr, _Guid, Tags}} ->
+			case proplists:is_defined(removable, Tags) of
+				true  -> volman:mount(Id);
+				false -> {error, einval}
 			end;
 
-		{'EXIT', _} ->
-			{error, enoent}
+		{error, _Reason} = Error ->
+			Error
 	end,
 	send_reply(RetPath, ?MOUNT_CNF, encode_direct_result(Reply)).
 
 
 do_unmount(Body, RetPath) ->
-	{Store, <<>>} = parse_string(Body),
-	Reply = case (catch binary_to_existing_atom(Store, utf8)) of
-		Id when is_atom(Id) ->
-			case lists:keysearch(Id, 1, volman:enum()) of
-				{value, {Id, _Descr, _Guid, Tags}} ->
-					case proplists:is_defined(removable, Tags) of
-						true  -> volman:unmount(Id);
-						false -> {error, einval}
-					end;
-
-				false ->
-					{error, einval}
+	Reply = case parse_store(Body) of
+		{ok, {Id, _Descr, _Guid, Tags}} ->
+			case proplists:is_defined(removable, Tags) of
+				true  -> volman:unmount(Id);
+				false -> {error, einval}
 			end;
 
-		{'EXIT', _} ->
-			{error, enoent}
+		{error, _Reason} = Error ->
+			Error
 	end,
 	send_reply(RetPath, ?UNMOUNT_CNF, encode_direct_result(Reply)).
+
+
+do_gc(Body, RetPath) ->
+	Reply = case parse_store(Body) of
+		{ok, {_Id, _Descr, Guid, _Tags}} ->
+			case volman:store(Guid) of
+				{ok, Pid} -> store:gc(Pid);
+				error     -> {error, enoent}
+			end;
+
+		{error, _Reason} = Error ->
+			Error
+	end,
+	send_reply(RetPath, ?GC_CNF, encode_direct_result(Reply)).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -680,6 +686,22 @@ parse_list_loop(Count, Body, List, ParseElement) ->
 
 parse_uuid_list(Packet) ->
 	parse_list(fun(Body) -> parse_uuid(Body) end, Packet).
+
+
+parse_store(Packet) ->
+	{Store, <<>>} = parse_string(Packet),
+	case (catch binary_to_existing_atom(Store, utf8)) of
+		Id when is_atom(Id) ->
+			case lists:keysearch(Id, 1, volman:enum()) of
+				{value, StoreSpec} ->
+					{ok, StoreSpec};
+				false ->
+					{error, enoent}
+			end;
+
+		{'EXIT', _} ->
+			{error, enoent}
+	end.
 
 
 encode_list(EncodeElement, List) ->

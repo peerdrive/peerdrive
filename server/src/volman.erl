@@ -63,12 +63,12 @@ reg_store(Id, Guid) ->
 enum() ->
 	gen_server:call(volman, enum).
 
-%% @doc Get Guids/interfaces of all currently mounted stores
+%% @doc Get Guids/pid's of all currently mounted stores
 %% @spec stores() -> [{guid(), pid()}]
 stores() ->
 	gen_server:call(volman, stores).
 
-%% @doc Get interface of a specific store
+%% @doc Get pid of a specific store
 %% @spec store(Guid) -> {ok, pid()} | error
 %%       Guid = guid()
 store(Guid) ->
@@ -82,9 +82,9 @@ store(Guid) ->
 mount(StoreId) ->
 	gen_server:call(volman, {mount, StoreId}).
 
-%% @doc Unmount store by its GUID
-%% @spec unmount(StoreGuid) -> ok | {error, Reason}
-%%       StoreGuid = guid()
+%% @doc Unmount store by ID
+%% @spec unmount(StoreId) -> ok | {error, Reason}
+%%       StoreId = atom()
 unmount(StoreGuid) ->
 	gen_server:call(volman, {unmount, StoreGuid}).
 

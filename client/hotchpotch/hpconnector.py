@@ -128,6 +128,8 @@ class _HpConnector(object):
 	MOUNT_CNF           = 0x01C1
 	UNMOUNT_REQ         = 0x01D0
 	UNMOUNT_CNF         = 0x01D1
+	GC_REQ              = 0x01E0
+	GC_CNF              = 0x01E1
 	WATCH_IND           = 0x0002
 	PROGRESS_IND        = 0x0012
 
@@ -308,6 +310,12 @@ class _HpConnector(object):
 
 	def unmount(self, store):
 		reply = self._rpc(_HpConnector.UNMOUNT_REQ, _HpConnector.UNMOUNT_CNF,
+			encodeString(store))
+		self._parseDirectResult(reply)
+		return True
+
+	def gc(self, store):
+		reply = self._rpc(_HpConnector.GC_REQ, _HpConnector.GC_CNF,
 			encodeString(store))
 		self._parseDirectResult(reply)
 		return True

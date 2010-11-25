@@ -24,6 +24,7 @@
 	write/4, suspend/2, get_links/1, set_links/2]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/2, sync_set_anchor/3]).
+-export([gc/1]).
 -export([hash_revision/1]).
 
 -include("store.hrl").
@@ -374,6 +375,12 @@ sync_get_changes(Store, PeerGuid) ->
 %%       SeqNum = integer()
 sync_set_anchor(Store, PeerGuid, SeqNum) ->
 	gen_server:call(Store, {sync_set_anchor, PeerGuid, SeqNum}).
+
+
+%% @doc Perform a garbage collection cycle on the store
+%% @spec gc(Store::pid()) -> ok
+gc(Store) ->
+	gen_server:call(Store, gc).
 
 
 hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->

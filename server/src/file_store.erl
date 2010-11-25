@@ -17,7 +17,7 @@
 -module(file_store).
 -behaviour(gen_server).
 
--export([start_link/2, stop/1, dump/1, fsck/1, gc/1]).
+-export([start_link/2, stop/1, dump/1, fsck/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % Functions used by helper processes (reader/writer/...)
@@ -85,9 +85,6 @@ dump(Store) ->
 
 fsck(Store) ->
 	gen_server:cast(Store, fsck).
-
-gc(Store) ->
-	gen_server:cast(Store, gc).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Functions used by helper processes...
@@ -269,6 +266,10 @@ handle_call_internal({sync_set_anchor, PeerGuid, SeqNum}, _From, S) ->
 	S2 = do_sync_set_anchor(S, PeerGuid, SeqNum),
 	{reply, ok, S2};
 
+handle_call_internal(gc, _From, S) ->
+	S2 = do_gc(S),
+	{reply, ok, S2};
+
 % internal
 handle_call_internal({lock, Hash}, _From, S) ->
 	S2 = S#state{locks = orddict:update_counter(Hash, 1, S#state.locks)},
@@ -322,10 +323,6 @@ handle_cast_internal(dump, S) ->
 handle_cast_internal(fsck, S) ->
 	do_fsck(S),
 	{noreply, S};
-
-handle_cast_internal(gc, S) ->
-	S2 = do_gc(S),
-	{noreply, S2};
 
 handle_cast_internal(stop, S) ->
 	{stop, normal, S}.

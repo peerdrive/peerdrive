@@ -9,9 +9,11 @@ class CommonParts(unittest.TestCase):
 		if not HpConnector().enum().isMounted('rem1'):
 			HpConnector().mount('rem1')
 		self.store1 = HpConnector().enum().doc('rem1')
+		self.store1Id = 'rem1'
 		if not HpConnector().enum().isMounted('rem2'):
 			HpConnector().mount('rem2')
 		self.store2 = HpConnector().enum().doc('rem2')
+		self.store2Id = 'rem2'
 
 		self._disposeHandles = []
 
@@ -473,8 +475,8 @@ class TestGarbageCollector(CommonParts):
 			doc = w.getDoc()
 			rev = w.getRev()
 
-		# give the GC some time
-		time.sleep(7)
+		# perform a GC cycle
+		c.gc(self.store1Id)
 
 		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [])
@@ -489,8 +491,8 @@ class TestGarbageCollector(CommonParts):
 			doc = w.getDoc()
 			rev = w.getRev()
 
-			# give the GC some time
-			time.sleep(7)
+			# perform a GC cycle
+			c.gc(self.store1Id)
 
 			l = c.lookup_doc(doc)
 			self.assertEqual(l.revs(), [rev])
@@ -513,8 +515,8 @@ class TestGarbageCollector(CommonParts):
 			doc2 = w.getDoc()
 			rev2 = w.getRev()
 
-			# give the GC some time
-			time.sleep(7)
+			# perform a GC cycle
+			c.gc(self.store1Id)
 
 			l = c.lookup_doc(doc2)
 			self.assertEqual(l.revs(), [rev2])
