@@ -272,7 +272,10 @@ do_replicate_rev(Backlog, Rev, Depth, SrcStores, DstStores, Important, Latest) -
 	end.
 
 
-sticky_handling(Backlog, Rev, SrcStores, DstStores, Latest) ->
+sticky_handling(Backlog, _Rev, _SrcStores, _DstStores, false) ->
+	Backlog;
+
+sticky_handling(Backlog, Rev, SrcStores, DstStores, true) ->
 	case util:read_rev_struct(Rev, <<"META">>) of
 		{ok, MetaData} ->
 			case meta_read_bool(MetaData, ?SYNC_STICKY) of
@@ -282,23 +285,18 @@ sticky_handling(Backlog, Rev, SrcStores, DstStores, Latest) ->
 						true  -> 0;
 						false -> 16#7FFFFFFFFFFFFFFF
 					end,
-					if
-						Latest ->
-							lists:foldl(
-								fun(Reference, BackAcc) ->
-									push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)
-								end,
-								Backlog,
-								read_doc_references(Rev, SrcStores));
-
-						not Latest ->
-							lists:foldl(
-								fun(Reference, BackAcc) ->
-									push_rev(BackAcc, Reference, Depth, SrcStores, DstStores)
-								end,
-								Backlog,
-								read_rev_references(Rev, SrcStores))
-					end;
+					NewBacklog = lists:foldl(
+						fun(Reference, BackAcc) ->
+							push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)
+						end,
+						Backlog,
+						read_doc_references(Rev, SrcStores)),
+					lists:foldl(
+						fun(Reference, BackAcc) ->
+							push_rev(BackAcc, Reference, Depth, SrcStores, DstStores)
+						end,
+						NewBacklog,
+						read_rev_references(Rev, SrcStores));
 
 				false ->
 					Backlog
@@ -359,6 +357,7 @@ meta_read_bool(_Meta, _Path) ->
 	false.
 
 
+% extract all document links
 read_doc_references(Rev, SearchStores) ->
 	case stat(Rev, SearchStores) of
 		{ok, #rev_stat{links=Links}} ->
@@ -369,10 +368,22 @@ read_doc_references(Rev, SearchStores) ->
 	end.
 
 
+% extract all revision links
 read_rev_references(Rev, SearchStores) ->
 	case stat(Rev, SearchStores) of
 		{ok, #rev_stat{links=Links}} ->
-			element(3, Links);
+			DocLinks = element(1, Links) ++ element(2, Links),
+			SRL = sets:from_list(element(3, Links)),
+			DocMap = dict:from_list(element(5, Links)),
+			sets:to_list(lists:foldl(
+				fun(Doc, Acc) ->
+					case dict:find(Doc, DocMap) of
+						{ok, Revs} -> sets:subtract(Acc, sets:from_list(Revs));
+						error      -> Acc
+					end
+				end,
+				SRL,
+				DocLinks));
 
 		{error, _} ->
 			[]
