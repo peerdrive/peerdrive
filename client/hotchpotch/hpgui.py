@@ -274,11 +274,15 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			self.__stickyAct.setCheckable(True)
 			QtCore.QObject.connect(self.__stickyAct, QtCore.SIGNAL("triggered(bool)"), self.__toggleSticky)
 
-			self.__histroyAct = QtGui.QAction("Replicate histroy", self)
-			self.__histroyAct.setStatusTip("Replicate whole history")
-			self.__histroyAct.setCheckable(True)
-			self.__histroyAct.setEnabled(False)
-			QtCore.QObject.connect(self.__histroyAct, QtCore.SIGNAL("triggered(bool)"), self.__toggleHistroy)
+			self.__historySpin = QtGui.QSpinBox(self)
+			self.__historySpin.setMaximum(365)
+			self.__historySpin.setSuffix(" days")
+			self.__historySpin.setStatusTip("Maximum depth (in days) of the replicated documents histories")
+			QtCore.QObject.connect(self.__historySpin, QtCore.SIGNAL("valueChanged(int)"), self.__toggleHistroy)
+
+			self.__historyAct = QtGui.QWidgetAction(self)
+			self.__historyAct.setDefaultWidget(self.__historySpin)
+			self.__historyAct.setEnabled(False)
 
 		self.__nameEdit = QtGui.QLineEdit()
 		self.__tagsEdit = QtGui.QLineEdit()
@@ -333,7 +337,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		if isEditor:
 			self.repMenu = self.fileMenu.addMenu("Replication")
 			self.repMenu.addAction(self.__stickyAct)
-			self.repMenu.addAction(self.__histroyAct)
+			self.repMenu.addAction(self.__historyAct)
 		self.fileMenu.addAction(self.__propertiesAct)
 
 		# standard tool bars
@@ -735,8 +739,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		if self.__isEditor:
 			self.__stickyAct.setEnabled(self.__isMutable())
 			self.__stickyAct.setChecked(self.metaDataGetField(HpMainWindow.SYNC_STICKY, False))
-			self.__histroyAct.setEnabled(self.__isMutable() and self.__stickyAct.isChecked())
-			self.__histroyAct.setChecked(self.metaDataGetField(HpMainWindow.SYNC_HISTROY, False))
+			self.__historyAct.setEnabled(self.__isMutable() and self.__stickyAct.isChecked())
+			self.__historySpin.setValue(self.metaDataGetField(HpMainWindow.SYNC_HISTROY, 0) / (24*60*60))
 
 	def __showProperties(self):
 		if self.__isMutable():
@@ -808,10 +812,10 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	def __toggleSticky(self, checked):
 		self.metaDataSetField(HpMainWindow.SYNC_STICKY, checked)
-		self.__histroyAct.setEnabled(checked)
+		self.__historyAct.setEnabled(checked)
 
-	def __toggleHistroy(self, checked):
-		self.metaDataSetField(HpMainWindow.SYNC_HISTROY, checked)
+	def __toggleHistroy(self, value):
+		self.metaDataSetField(HpMainWindow.SYNC_HISTROY, value*24*60*60)
 
 	def __checkpointFile(self):
 		self.__commentPopup.popup(self.metaDataGetField(HpMainWindow.HPA_COMMENT, "Enter comment"))

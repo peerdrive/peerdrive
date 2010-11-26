@@ -280,11 +280,7 @@ sticky_handling(Backlog, Rev, SrcStores, DstStores, true) ->
 		{ok, MetaData} ->
 			case meta_read_bool(MetaData, ?SYNC_STICKY) of
 				true ->
-					% FIXME: history property should be an integer
-					Depth = case meta_read_bool(MetaData, ?SYNC_HISTORY) of
-						true  -> 0;
-						false -> 16#7FFFFFFFFFFFFFFF
-					end,
+					Depth = util:get_time() - meta_read_int(MetaData, ?SYNC_HISTORY),
 					NewBacklog = lists:foldl(
 						fun(Reference, BackAcc) ->
 							push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)
@@ -355,6 +351,19 @@ meta_read_bool(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
 	end;
 meta_read_bool(_Meta, _Path) ->
 	false.
+
+
+meta_read_int(Meta, []) when is_integer(Meta) ->
+	Meta;
+meta_read_int(_Meta, []) ->
+	0;
+meta_read_int(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
+	case dict:find(Step, Meta) of
+		{ok, Value} -> meta_read_int(Value, Path);
+		error       -> false
+	end;
+meta_read_int(_Meta, _Path) ->
+	0.
 
 
 % extract all document links
