@@ -515,6 +515,9 @@ class HpDict(object):
 			"org.hotchpotch.annotation" : {
 				"title" : name,
 				"comment" : "<<Created by import>>"
+			},
+			"org.hotchpotch.sync" : {
+				"sticky" : True
 			}
 		}
 		w = hpconnector.HpConnector().create("org.hotchpotch.dict", "", stores)
@@ -605,6 +608,9 @@ class HpSet(object):
 			"org.hotchpotch.annotation" : {
 				"title" : name,
 				"comment" : "<<Created by import>>"
+			},
+			"org.hotchpotch.sync" : {
+				"sticky" : True
 			}
 		}
 		content = [ link for (descr, link) in self.__content ]

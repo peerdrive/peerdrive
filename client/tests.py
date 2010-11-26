@@ -1,9 +1,31 @@
 import unittest
 import time
 from hotchpotch import HpConnector
+from hotchpotch import hpconnector
+from hotchpotch import hpstruct
 
 
 class CommonParts(unittest.TestCase):
+
+	class Watch(hpconnector.HpWatch):
+		def __init__(self, typ, doc, event):
+			hpconnector.HpWatch.__init__(self, typ, doc)
+			self.__event = event
+			self.__received = False
+			HpConnector().watch(self)
+
+		def close(self):
+			HpConnector().unwatch(self)
+
+		def triggered(self, cause):
+			if self.__event == cause:
+				self.__received = True
+
+		def waitForWatch(self, maxSec=3):
+			latest = time.time() + maxSec
+			while not self.__received and not (time.time() > latest):
+				HpConnector().process(100)
+			return self.__received
 
 	def setUp(self):
 		if not HpConnector().enum().isMounted('rem1'):
@@ -16,13 +38,19 @@ class CommonParts(unittest.TestCase):
 		self.store2Id = 'rem2'
 
 		self._disposeHandles = []
+		self._disposeWatches = []
 
 	def tearDown(self):
 		for handle in self._disposeHandles:
 			handle.close()
+		for watch in self._disposeWatches:
+			watch.close()
 
 	def disposeHandle(self, handle):
 		self._disposeHandles.append(handle)
+
+	def disposeWatch(self, watch):
+		self._disposeWatches.append(watch)
 
 	def create(self, type, creator, stores):
 		w = HpConnector().create(type, creator, stores)
@@ -44,6 +72,15 @@ class CommonParts(unittest.TestCase):
 		for part in s.parts():
 			self.assertTrue(part in content)
 
+	def watchDoc(self, doc, event):
+		w = CommonParts.Watch(hpconnector.HpWatch.TYPE_DOC, doc, event)
+		self.disposeWatch(w)
+		return w
+
+	def watchRev(self, rev, event):
+		w = CommonParts.Watch(hpconnector.HpWatch.TYPE_REV, rev, event)
+		self.disposeWatch(w)
+		return w
 
 
 class TestCreatorCode(CommonParts):
@@ -522,6 +559,42 @@ class TestGarbageCollector(CommonParts):
 			self.assertEqual(l.revs(), [rev2])
 			self.assertEqual(l.preRevs(), [])
 			c.stat(rev2)
+
+
+class TestReplicator(CommonParts):
+
+	def test_sticky(self):
+		s = hpstruct.HpSet()
+		# create sticky contianer on two stores
+		with s.create("foo", [self.store1, self.store2]) as dummy:
+			# create document on first store
+			with HpConnector().create("test.format.foo", "test.ignore", [self.store1]) as w:
+				w.commit()
+				doc = w.getDoc()
+				rev = w.getRev()
+
+				watch1 = self.watchDoc(doc, hpconnector.HpWatch.CAUSE_REPLICATED)
+				watch2 = self.watchRev(rev, hpconnector.HpWatch.CAUSE_REPLICATED)
+
+				# add to sticky container
+				s['dummy'] = hpstruct.DocLink(doc)
+				s.save()
+
+			# wait for sticky replicatin to happen
+			self.assertTrue(watch1.waitForWatch())
+			self.assertTrue(watch2.waitForWatch())
+
+			# check doc (with rev) to exist on all stores
+			l = HpConnector().lookup_doc(doc)
+			self.assertEqual(l.revs(), [rev])
+			self.assertEqual(len(l.stores(rev)), 2)
+			self.assertTrue(self.store1 in l.stores(rev))
+			self.assertTrue(self.store2 in l.stores(rev))
+
+			l = HpConnector().lookup_rev(rev)
+			self.assertEqual(len(l), 2)
+			self.assertTrue(self.store1 in l)
+			self.assertTrue(self.store2 in l)
 
 
 if __name__ == '__main__':

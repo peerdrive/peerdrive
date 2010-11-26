@@ -232,7 +232,7 @@ do_replicate_rev(Backlog, Rev, Depth, SrcStores, DstStores, Important, Latest) -
 	case stat(Rev, SrcStores) of
 		{ok, #rev_stat{parents=Parents, mtime=Mtime}} ->
 			if
-				Mtime >= Depth ->
+				(Mtime >= Depth) or Latest ->
 					{NewBacklog1, RepStores} = lists:foldl(
 						fun({DstGuid, DstPid}=Store, {AccBack, AccRep}) ->
 							case replicator_copy:put_rev(SrcStores, DstPid, Rev) of

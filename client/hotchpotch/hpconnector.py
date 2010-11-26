@@ -324,6 +324,10 @@ class _HpConnector(object):
 		while self.socket.flush():
 			self.socket.waitForBytesWritten(10000)
 
+	def process(self, timeout=1):
+		if self.socket.waitForReadyRead(timeout):
+			self.__readReady()
+
 	def regProgressHandler(self, handler):
 		self.progressHandlers.append(handler)
 
