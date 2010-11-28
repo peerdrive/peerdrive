@@ -50,5 +50,5 @@ mkdir -p $STORES
 mkdir -p /tmp/hotchpotch
 
 # start erlang
-$ERL +A 4 +W w -boot start_sasl -s crypto -s hotchpotch
+$ERL +A 4 +W w -boot start_sasl -s crypto -s hotchpotch -name hotchpotch@127.0.0.1
 

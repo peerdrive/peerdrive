@@ -1,5 +1,6 @@
 import unittest
 import time
+import subprocess
 from hotchpotch import HpConnector
 from hotchpotch import hpconnector
 from hotchpotch import hpstruct
@@ -20,6 +21,9 @@ class CommonParts(unittest.TestCase):
 		def triggered(self, cause):
 			if self.__event == cause:
 				self.__received = True
+
+		def reset(self):
+			self.__received = False
 
 		def waitForWatch(self, maxSec=3):
 			latest = time.time() + maxSec
@@ -81,6 +85,14 @@ class CommonParts(unittest.TestCase):
 		w = CommonParts.Watch(hpconnector.HpWatch.TYPE_REV, rev, event)
 		self.disposeWatch(w)
 		return w
+
+	def erlCall(self, command):
+		proc = subprocess.Popen(['erl_call', '-e', '-n', 'hotchpotch'],
+			stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+		proc.stdin.write(command+'\n')
+		proc.stdin.close()
+		proc.wait()
+		return proc.stdout.read()
 
 
 class TestCreatorCode(CommonParts):
@@ -596,6 +608,171 @@ class TestReplicator(CommonParts):
 			self.assertTrue(self.store1 in l)
 			self.assertTrue(self.store2 in l)
 
+
+class TestSynchronization(CommonParts):
+
+	def setUp(self):
+		# make sure stores are unmounted to kill sync
+		if HpConnector().enum().isMounted('rem1'):
+			HpConnector().unmount('rem1')
+		if HpConnector().enum().isMounted('rem2'):
+			HpConnector().unmount('rem2')
+		CommonParts.setUp(self)
+
+	def tearDown(self):
+		CommonParts.tearDown(self)
+		# make sure stores are unmounted to kill sync
+		if HpConnector().enum().isMounted('rem1'):
+			HpConnector().unmount('rem1')
+		if HpConnector().enum().isMounted('rem2'):
+			HpConnector().unmount('rem2')
+
+	def startSync(self, mode, fromStore, toStore):
+		fromGuid = fromStore.encode('hex')
+		toGuid = toStore.encode('hex')
+		result = self.erlCall("synchronizer:sync(" + mode +
+			", <<16#"+fromGuid+":128>>, <<16#"+toGuid+":128>>).")
+		self.assertTrue(result.startswith('{ok, {ok,'))
+
+	def createFastForward(self):
+		w = self.create("public.data", "test.foo", [self.store1, self.store2])
+		w.commit()
+		doc = w.getDoc()
+		rev1 = w.getRev()
+
+		with HpConnector().update(doc, rev1, stores=[self.store1]) as w:
+			w.writeAll('FILE', 'forward')
+			w.commit()
+			rev2 = w.getRev()
+
+		return (doc, rev2)
+
+	def createMerge(self, type, base, left, right):
+		w = self.create(type, "test.foo", [self.store1, self.store2])
+		for (part, data) in base.items():
+			w.writeAll(part, data)
+		w.commit()
+		doc = w.getDoc()
+		rev1 = w.getRev()
+
+		with HpConnector().update(doc, rev1, stores=[self.store1]) as w:
+			for (part, data) in left.items():
+				w.writeAll(part, data)
+			w.commit()
+			rev2 = w.getRev()
+
+		with HpConnector().update(doc, rev1, stores=[self.store2]) as w:
+			for (part, data) in right.items():
+				w.writeAll(part, data)
+			w.commit()
+			rev3 = w.getRev()
+
+		return (doc, rev2, rev3)
+
+	def performSync(self, doc, strategy):
+		watch = self.watchDoc(doc, hpconnector.HpWatch.CAUSE_MODIFIED)
+
+		self.startSync(strategy, self.store1, self.store2)
+
+		while True:
+			watch.reset()
+			self.assertTrue(watch.waitForWatch())
+			l = HpConnector().lookup_doc(doc)
+			if len(l.revs()) == 1:
+				break
+
+		self.assertEqual(len(l.stores()), 2)
+		self.assertTrue(self.store1 in l.stores())
+		self.assertTrue(self.store2 in l.stores())
+		return l
+
+	# Checks if a document is synchronized via fast-forward
+	def test_sync_ff_ok(self):
+		(doc, rev) = self.createFastForward()
+		l = self.performSync(doc, 'ff')
+		self.assertEqual(l.rev(self.store1), rev)
+		self.assertEqual(l.rev(self.store2), rev)
+
+	# Checks that the fast-forward sync does not synchronize documents which
+	# need a real merge
+	def test_sync_ff_err(self):
+		(doc, rev1, rev2) = self.createMerge("public.data", {}, {'FILE' : "left"},
+			{'FILE' : "right"})
+
+		watch = self.watchDoc(doc, hpconnector.HpWatch.CAUSE_MODIFIED)
+
+		self.startSync('ff', self.store1, self.store2)
+		self.startSync('ff', self.store2, self.store1)
+
+		self.assertFalse(watch.waitForWatch(1))
+
+		# check that doc is not synced
+		l = HpConnector().lookup_doc(doc)
+		self.assertEqual(len(l.revs()), 2)
+		self.assertEqual(l.rev(self.store1), rev1)
+		self.assertEqual(l.rev(self.store2), rev2)
+
+	# Checks if the 'latest' strategy makes an 'ours' merge and replicates that
+	# to both stores
+	def test_sync_latest(self):
+		(doc, rev1, rev2) = self.createMerge("public.data", {}, {'FILE' : "left"},
+			{'FILE' : "right"})
+		l = self.performSync(doc, 'latest')
+
+		rev = l.revs()[0]
+		s = HpConnector().stat(rev)
+		self.assertEqual(len(s.parents()), 2)
+		self.assertTrue(rev1 in s.parents())
+		self.assertTrue(rev2 in s.parents())
+		self.assertRevContent(rev, {'FILE' : 'left'})
+
+	# Check that 'latest' recognizes a fast-forward contition correctly
+	def test_sync_latest_fallback(self):
+		(doc, rev) = self.createFastForward()
+		l = self.performSync(doc, 'latest')
+		self.assertEqual(l.rev(self.store1), rev)
+		self.assertEqual(l.rev(self.store2), rev)
+
+	# Checks that the 'merge' strategy falls back to 'latest' in case of an
+	# unknown document
+	def test_sync_merge_fallback(self):
+		(doc, rev1, rev2) = self.createMerge("public.data", {}, {'FILE' : "left"},
+			{'FILE' : "right"})
+		l = self.performSync(doc, 'merge')
+
+		rev = l.revs()[0]
+		s = HpConnector().stat(rev)
+		self.assertEqual(len(s.parents()), 2)
+		self.assertTrue(rev1 in s.parents())
+		self.assertTrue(rev2 in s.parents())
+		self.assertRevContent(rev, {'FILE' : 'left'})
+
+	# Checks that the 'merge' strategy really merges
+	def test_sync_merge(self):
+		(doc, rev1, rev2) = self.createMerge("org.hotchpotch.dict",
+			{'HPSD' : hpstruct.dumps({"a":1}) },
+			{'HPSD' : hpstruct.dumps({"a":1, "b":2}) },
+			{'HPSD' : hpstruct.dumps({"a":1, "c":3}) })
+		l = self.performSync(doc, 'merge')
+
+		rev = l.revs()[0]
+		s = HpConnector().stat(rev)
+		self.assertEqual(len(s.parents()), 2)
+		self.assertTrue(rev1 in s.parents())
+		self.assertTrue(rev2 in s.parents())
+
+		# all revs on all stores?
+		l = HpConnector().lookup_rev(rev1)
+		self.assertTrue(self.store1 in l)
+		self.assertTrue(self.store2 in l)
+		l = HpConnector().lookup_rev(rev2)
+		self.assertTrue(self.store1 in l)
+		self.assertTrue(self.store2 in l)
+
+		# see if merge was ok
+		with HpConnector().peek(rev) as r:
+			hpsd = hpstruct.loads(r.readAll('HPSD'))
+			self.assertEqual(hpsd, {"a":1, "b":2, "c":3})
 
 if __name__ == '__main__':
 	unittest.main()

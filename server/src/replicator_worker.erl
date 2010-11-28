@@ -360,7 +360,7 @@ meta_read_int(_Meta, []) ->
 meta_read_int(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
 	case dict:find(Step, Meta) of
 		{ok, Value} -> meta_read_int(Value, Path);
-		error       -> false
+		error       -> 0
 	end;
 meta_read_int(_Meta, _Path) ->
 	0.

@@ -789,7 +789,6 @@ class HpHandle(object):
 	def suspend(self):
 		if not self.active:
 			raise IOError('Handle expired')
-		self.active = False
 		reply = self.connector._rpc(_HpConnector.SUSPEND_REQ,
 			_HpConnector.SUSPEND_CNF, self.handle)
 		rev = self.connector._parseBrokerResult(reply)

@@ -151,15 +151,14 @@ handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
 		_Handle ->
 			% one of the handles died, abnormally?
 			case Reason of
-				normal ->
-					% don't care
-					{noreply, S};
+				% don't care
+				normal   -> {noreply, S};
+				shutdown -> {noreply, S};
 
 				Abnormal ->
 					% well, this one was unexpected...
 					error_logger:warning_msg("broker_io: handle died: ~p~n",
 						[Abnormal]),
-					% FIXME: N is a #handle{}
 					Handles = lists:filter(
 						fun({_, N}) -> is_process_alive(N) end,
 						S#state.handles),
@@ -398,14 +397,15 @@ do_close(Handles) ->
 
 
 do_set_parents(Parents, S) ->
-	case read_references(Parents, S#state.stores) of
+	case read_references(Parents) of
+		{error, Reason} ->
+			{reply, {error, Reason, []}, S};
+
 		{DocSet, _RevSet} ->
 			S2 = S#state{links={DocSet, sets:new()}},
 			make_reply(distribute_write(
 				fun(Handle) -> store:set_parents(Handle, Parents) end,
-				S2));
-		error ->
-			{reply, {error, einval}, S}
+				S2))
 	end.
 
 
@@ -522,11 +522,11 @@ merge_errors(Result, AddErrors) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % {DocRefs::set(), RevRefs::set()} | error
-read_references(Revs, Stores) ->
+read_references(Revs) ->
 	try
 		lists:foldl(
 			fun(Rev, {AccDocs, AccRevs}) ->
-				{DocRefs, RevRefs} = read_references_step(Rev, Stores),
+				{DocRefs, RevRefs} = read_references_step(Rev, volman:stores()),
 				{sets:union(DocRefs, AccDocs), sets:union(RevRefs, AccRevs)}
 			end,
 			{sets:new(), sets:new()},
@@ -537,7 +537,7 @@ read_references(Revs, Stores) ->
 
 
 read_references_step(_Rev, []) ->
-	throw(error);
+	throw({error, einval});
 
 read_references_step(Rev, [{_Guid, Pid} | Stores]) ->
 	case store:peek(Pid, Rev) of

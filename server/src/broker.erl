@@ -219,7 +219,7 @@ fork(StartRev, Creator, Stores) ->
 %% @spec update(Doc, StartRev, Creator, Stores) -> Result
 %%       Result = {ok, ErrInfo, Handle} | {error, Reason, ErrInfo}
 %%       Doc, StartRev = guid()
-%%       Creator = binary()
+%%       Creator = keep | binary()
 %%       Stores = [guid()]
 %%       Handle = handle()
 %%       Reason = ecode()
@@ -238,7 +238,7 @@ update(Doc, StartRev, Creator, Stores) ->
 %% @spec resume(Doc, PreRev, Creator, Stores) -> Result
 %%       Result = {ok, ErrInfo, Handle} | {error, Reason, ErrInfo}
 %%       Doc, PreRev = guid()
-%%       Creator = binary()
+%%       Creator = keep | binary()
 %%       Stores = [guid()]
 %%       Handle = handle()
 %%       Reason = ecode()

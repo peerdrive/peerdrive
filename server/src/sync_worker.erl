@@ -187,8 +187,8 @@ sync_doc_merge(Doc, {FromGuid, _} = From, {ToGuid, _} = To, Strategy) ->
 					ok;
 
 				{error, conflict, _ErrInfo} ->
-					{FromRev, _} = lists:keyfind(FromGuid, 2, Revs),
-					{ToRev, _} = lists:keyfind(ToGuid, 2, Revs),
+					{FromRev, _} = lists:keyfind([FromGuid], 2, Revs),
+					{ToRev, _} = lists:keyfind([ToGuid], 2, Revs),
 					FromStat = throws(broker:stat(FromRev, [From])),
 					ToStat = throws(broker:stat(ToRev, [To])),
 					%% The strategy handler will create a merge commit in
