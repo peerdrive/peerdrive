@@ -20,9 +20,11 @@ main_sup
 			replicator_worker
 			...
 		synchronizer
-			sync_worker
-			sync_worker
-			...
+			sync_locks
+			sync_sup
+				sync_worker
+				sync_worker
+				...
 		dispatcher
 	interfaces_sup
 		server_sup

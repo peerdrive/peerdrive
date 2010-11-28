@@ -138,11 +138,13 @@ sync_step({Doc, SeqNum}, S) ->
 
 
 sync_doc(Doc, From, To, SyncFun) ->
+	sync_locks:lock(Doc),
 	try
 		SyncFun(Doc, From, To)
 	catch
 		throw:Term -> Term
-	%end,
+	end,
+	sync_locks:unlock(Doc).
 	%case Result of
 	%	ok ->
 	%		ok;
@@ -151,7 +153,7 @@ sync_doc(Doc, From, To, SyncFun) ->
 	%	{error, _Reason} ->
 	%		% TODO: log error? where? inform user?
 	%		ok
-	end.
+	%end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

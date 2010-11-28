@@ -14,7 +14,7 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(synchronizer).
+-module(sync_sup).
 -behaviour(supervisor).
 
 -export([start_link/0]).
@@ -26,36 +26,25 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link() ->
-	supervisor:start_link({local, synchronizer}, ?MODULE, []).
+	supervisor:start_link({local, sync_sup}, ?MODULE, []).
 
 sync(Mode, Store, Peer) ->
-	sync_sup:sync(Mode, Store, Peer).
+	supervisor:start_child(sync_sup, [Mode, Store, Peer]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([]) ->
-	RestartStrategy    = one_for_all,
-	MaxRestarts        = 1,
-	MaxTimeBetRestarts = 60,
-	ChildSpecs = [
-		{
-			sync_locks,
-			{sync_locks, start_link, []},
-			permanent,
-			1000,
+	{ok, {
+		{simple_one_for_one, 1, 10},
+		[{
+			synchronizer,
+			{sync_worker, start_link, []},
+			transient,
+			10000,
 			worker,
-			[sync_locks]
-		},
-		{
-			sync_sup,
-			{sync_sup, start_link, []},
-			permanent,
-			infinity,
-			supervisor,
-			[sync_sup]
-		}
-	],
-	{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}}.
+			[]
+		}]
+	}}.
 
