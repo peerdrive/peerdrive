@@ -23,7 +23,7 @@
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
 	write/4, suspend/2, get_links/1, set_links/2]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
--export([sync_get_changes/2, sync_set_anchor/3]).
+-export([sync_get_changes/2, sync_set_anchor/3, sync_finish/2]).
 -export([gc/1]).
 -export([hash_revision/1]).
 
@@ -361,20 +361,34 @@ put_rev_commit(Importer) ->
 
 
 %% @doc Get changes since the last sync point of peer store
-%% @spec sync_get_changes(Store, PeerGuid) ->
+%%
+%% The caller is also recorded as the synchronizing process. Only one sync
+%% process is allowed per peer store. The store will trap the exit of the
+%% caller but the caller may also release the lock by calling sync_finish/2.
+%%
+%% @spec sync_get_changes(Store, PeerGuid) -> Result
 %%       Store = pid()
 %%       PeerGuid = guid()
+%%       Result = {ok, Backlog} | {error, Reason}
+%%       Backlog = [{Doc::guid(), SeqNum::integer()}]
 sync_get_changes(Store, PeerGuid) ->
 	gen_server:call(Store, {sync_get_changes, PeerGuid}).
 
 
 %% @doc Set sync point of peer store to new generation
-%% @spec sync_set_anchor(Store, PeerGuid, SeqNum) ->
+%% @spec sync_set_anchor(Store, PeerGuid, SeqNum) -> Result
 %%       Store = pid()
 %%       PeerGuid = guid()
 %%       SeqNum = integer()
+%%       Result = ok | {error, Reason}
 sync_set_anchor(Store, PeerGuid, SeqNum) ->
 	gen_server:call(Store, {sync_set_anchor, PeerGuid, SeqNum}).
+
+
+%% @doc Release the lock for the peer store synchronizing process.
+%% @spec sync_finish(Store, PeerGuid) -> ok | {error, Reason}
+sync_finish(Store, PeerGuid) ->
+	gen_server:call(Store, {sync_finish, PeerGuid}).
 
 
 %% @doc Perform a garbage collection cycle on the store

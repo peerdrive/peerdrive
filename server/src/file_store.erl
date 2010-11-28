@@ -35,6 +35,7 @@
 	revisions,  % dict: Revision --> {refcount, #revision{} | stub}
 	parts,      % dict: PartHash --> refcount
 	peers,      % dict: GUID --> Generation
+	synclocks,  % dict: GUID --> pid()
 	locks,      % orddict: PartHash --> LockCount
 	hidden=[],  % list, documents exempted from garbage collection
 	changed=false
@@ -67,6 +68,7 @@ init({Id, Path, Name}) ->
 				revisions = Revisions,
 				parts     = Parts,
 				peers     = Peers,
+				synclocks = dict:new(),
 				locks     = orddict:new()
 			},
 			volman:reg_store(Id, Guid),
@@ -258,13 +260,17 @@ handle_call_internal({put_rev, Rev, Revision}, From, S) ->
 	{S2, Reply} = do_put_rev(S, Rev, Revision, User),
 	{reply, Reply, S2};
 
-handle_call_internal({sync_get_changes, PeerGuid}, _From, S) ->
-	Reply = do_sync_get_changes(S, PeerGuid),
-	{reply, Reply, S};
+handle_call_internal({sync_get_changes, PeerGuid}, {Caller, _}, S) ->
+	{S2, Reply} = do_sync_get_changes(S, PeerGuid, Caller),
+	{reply, Reply, S2};
 
 handle_call_internal({sync_set_anchor, PeerGuid, SeqNum}, _From, S) ->
 	S2 = do_sync_set_anchor(S, PeerGuid, SeqNum),
 	{reply, ok, S2};
+
+handle_call_internal({sync_finish, PeerGuid}, {Caller, _}, S) ->
+	{S2, Reply} = do_sync_finish(S, PeerGuid, Caller),
+	{reply, Reply, S2};
 
 handle_call_internal(gc, _From, S) ->
 	S2 = do_gc(S),
@@ -333,11 +339,19 @@ handle_info_internal(timeout, S) ->
 	do_checkpoint(S2),
 	{noreply, S2#state{changed=false}};
 
-handle_info_internal({'EXIT', _From, Reason}, S) ->
-	case Reason of
-		normal   -> {noreply, S};
-		shutdown -> {noreply, S};
-		_ ->        {stop, {eunexpected, Reason}, S}
+handle_info_internal({'EXIT', From, Reason}, S) ->
+	case sync_trap_exit(From, S) of
+		{ok, S2} ->
+			% a sync process went away
+			{noreply, S2};
+
+		error ->
+			% must be an associated worker process
+			case Reason of
+				normal   -> {noreply, S};
+				shutdown -> {noreply, S};
+				_ ->        {stop, {eunexpected, Reason}, S}
+			end
 	end.
 
 
@@ -1091,29 +1105,76 @@ do_revision_ref_dec(S, Rev) ->
 
 %%% Synching %%%%%%%%%%%%%%%%
 
-% returns [{Doc, SeqNum}]
-do_sync_get_changes(#state{uuids=Uuids, peers=Peers}, PeerGuid) ->
-	Anchor = case dict:find(PeerGuid, Peers) of
-		{ok, Value} -> Value;
-		error       -> 0
-	end,
-	Changes = dict:fold(
-		fun(Doc, {_Rev, _PreRevs, SeqNum}, Acc) ->
-			if
-				SeqNum > Anchor -> [{Doc, SeqNum} | Acc];
-				true            -> Acc
-			end
-		end,
-		[],
-		Uuids),
-	lists:sort(
-		fun({_Doc1, Seq1}, {_Doc2, Seq2}) -> Seq1 =< Seq2 end,
-		Changes).
+% returns {ok, [{Doc, SeqNum}]} | {error, Reason}
+do_sync_get_changes(S, PeerGuid, Caller) ->
+	case do_sync_lock(S, PeerGuid, Caller) of
+		{ok, S2} ->
+			#state{uuids=Uuids, peers=Peers} = S2,
+			Anchor = case dict:find(PeerGuid, Peers) of
+				{ok, Value} -> Value;
+				error       -> 0
+			end,
+			Changes = dict:fold(
+				fun(Doc, {_Rev, _PreRevs, SeqNum}, Acc) ->
+					if
+						SeqNum > Anchor -> [{Doc, SeqNum} | Acc];
+						true            -> Acc
+					end
+				end,
+				[],
+				Uuids),
+			Backlog = lists:sort(
+				fun({_Doc1, Seq1}, {_Doc2, Seq2}) -> Seq1 =< Seq2 end,
+				Changes),
+			{S2, {ok, Backlog}};
+
+		error ->
+			{S, {error, ebusy}}
+	end.
+
+
+do_sync_lock(#state{synclocks=SLocks} = S, PeerGuid, Caller) ->
+	case dict:find(PeerGuid, SLocks) of
+		{ok, Caller} ->
+			{ok, S};
+		{ok, _Other} ->
+			error;
+		error ->
+			link(Caller),
+			{ok, S#state{synclocks=dict:store(PeerGuid, Caller, SLocks)}}
+	end.
 
 
 do_sync_set_anchor(#state{peers=Peers} = S, PeerGuid, SeqNum) ->
 	NewPeers = dict:store(PeerGuid, SeqNum, Peers),
 	S#state{peers=NewPeers, changed=true}.
+
+
+do_sync_finish(#state{synclocks=SLocks} = S, PeerGuid, Caller) ->
+	case dict:find(PeerGuid, SLocks) of
+		{ok, Caller} ->
+			unlink(Caller),
+			{S#state{synclocks=dict:erase(PeerGuid, SLocks)}, ok};
+		{ok, _Other} ->
+			{S, {error, eaccess}};
+		error ->
+			{S, {error, einval}}
+	end.
+
+
+sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
+	Found = dict:fold(
+		fun(_Guid, Pid, Acc) -> Acc or (Pid == From) end,
+		false,
+		SLocks),
+	case Found of
+		true ->
+			NewLocks = dict:filter(fun(_, Pid) -> Pid =/= From end, SLocks),
+			{ok, S#state{synclocks=NewLocks}};
+		false ->
+			error
+	end.
+
 
 %%% Fsck %%%%%%%%%%%%%%%%
 

@@ -57,7 +57,12 @@ init(Parent, Mode, FromGuid, ToGuid) ->
 						numdone   = 0,
 						numremain = 0
 					},
-					loop(State, []),
+					try
+						loop(State, [])
+					catch
+						throw:Term -> error_logger:warning_msg(
+							"sync_worker: exit: ~p~n", [Term])
+					end,
 					hysteresis:stop(Monitor),
 					vol_monitor:deregister_proc(Id);
 
@@ -82,7 +87,10 @@ loop(State, OldBacklog) ->
 	case OldBacklog of
 		[] ->
 			NewDone = 1,
-			Backlog = store:sync_get_changes(FromPid, ToGuid),
+			Backlog = case store:sync_get_changes(FromPid, ToGuid) of
+				{ok, Value} -> Value;
+				Error       -> throw(Error)
+			end,
 			NewRemain = length(Backlog),
 			case NewRemain of
 				0 -> ok;
@@ -112,13 +120,16 @@ loop(State, OldBacklog) ->
 
 loop_check_msg(State, Backlog, Timeout) ->
 	#state{
-		from = {FromGuid, _},
+		from = {FromGuid, FromPid},
 		to   = {ToGuid, _}
 	} = State,
 	receive
-		{trigger_mod_doc, FromGuid, _Doc} -> loop_check_msg(State, Backlog, 0);
-		{trigger_rem_store, FromGuid}     -> ok;
-		{trigger_rem_store, ToGuid}       -> ok;
+		{trigger_mod_doc, FromGuid, _Doc} ->
+			loop_check_msg(State, Backlog, 0);
+		{trigger_rem_store, FromGuid} ->
+			ok;
+		{trigger_rem_store, ToGuid} ->
+			store:sync_finish(FromPid, ToGuid);
 
 		% deliberately ignore all other messages
 		_ -> loop_check_msg(State, Backlog, Timeout)
@@ -134,7 +145,10 @@ sync_step({Doc, SeqNum}, S) ->
 		to       = {ToGuid, _}  = To
 	} = S,
 	sync_doc(Doc, From, To, SyncFun),
-	store:sync_set_anchor(FromPid, ToGuid, SeqNum).
+	case store:sync_set_anchor(FromPid, ToGuid, SeqNum) of
+		ok -> ok;
+		Error -> throw(Error)
+	end.
 
 
 sync_doc(Doc, From, To, SyncFun) ->
