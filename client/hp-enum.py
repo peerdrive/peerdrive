@@ -17,11 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
-from hotchpotch import HpConnector, hpstruct
+from hotchpotch import Connector, struct
 
 # enumerate all stores
-enum = HpConnector().enum()
+enum = Connector().enum()
 for store in enum.allStores():
 	mountName = enum.name(store)
 
@@ -42,9 +41,9 @@ for store in enum.allStores():
 	if enum.isMounted(store):
 		doc = enum.doc(store)
 		try:
-			rev = HpConnector().lookup_doc(doc).rev(doc)
-			with HpConnector().peek(rev) as r:
-				metaData = hpstruct.loads(r.readAll('META'))
+			rev = Connector().lookup_doc(doc).rev(doc)
+			with Connector().peek(rev) as r:
+				metaData = struct.loads(r.readAll('META'))
 				realName = metaData["org.hotchpotch.annotation"]["title"]
 		except:
 			realName = "unknwown"

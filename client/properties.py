@@ -17,10 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
-
 from PyQt4 import QtCore, QtGui
-from hotchpotch import HpConnector, HpRegistry, hpstruct, hpgui
+from hotchpotch import Connector, Registry, struct, gui
 
 def extractMetaData(metaData, path, default):
 	item = metaData
@@ -46,13 +44,13 @@ def setMetaData(metaData, field, value):
 buttons = []
 
 def genStoreButton(store):
-	b = hpgui.DocButton(store, True)
+	b = gui.DocButton(store, True)
 	buttons.append(b)
 	button = b.getWidget()
 	return button
 
 def genRevButton(rev):
-	b = hpgui.RevButton(rev, True)
+	b = gui.RevButton(rev, True)
 	buttons.append(b)
 	button = b.getWidget()
 	return button
@@ -66,12 +64,12 @@ class PropertiesDialog(QtGui.QDialog):
 
 		if isDoc:
 			self.doc = uuid
-			info = HpConnector().lookup_doc(uuid)
+			info = Connector().lookup_doc(uuid)
 			mainLayout.addWidget(DocumentTab(info.stores(), "document"))
 			self.revs = info.revs()
 		else:
 			self.doc = None
-			mainLayout.addWidget(DocumentTab(HpConnector().lookup_rev(uuid), "revision"))
+			mainLayout.addWidget(DocumentTab(Connector().lookup_rev(uuid), "revision"))
 			self.revs = [uuid]
 
 		if len(self.revs) == 0:
@@ -109,8 +107,8 @@ class PropertiesDialog(QtGui.QDialog):
 	def __save(self):
 		rev = self.revs[0]
 		self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
-		with HpConnector().peek(rev) as r:
-			metaData = hpstruct.loads(r.readAll('META'))
+		with Connector().peek(rev) as r:
+			metaData = struct.loads(r.readAll('META'))
 		setMetaData(metaData, ["org.hotchpotch.annotation", "title"], str(self.annoTab.titleEdit.text()))
 		setMetaData(metaData, ["org.hotchpotch.annotation", "description"], str(self.annoTab.descEdit.text()))
 		if self.annoTab.tagsEdit.hasAcceptableInput():
@@ -118,8 +116,8 @@ class PropertiesDialog(QtGui.QDialog):
 			tagSet = set([ tag.strip() for tag in str(tagString).split(',')])
 			tagList = list(tagSet)
 			setMetaData(metaData, ["org.hotchpotch.annotation", "tags"], tagList)
-		with HpConnector().update(self.doc, rev) as writer:
-			writer.writeAll('META', hpstruct.dumps(metaData))
+		with Connector().update(self.doc, rev) as writer:
+			writer.writeAll('META', struct.dumps(metaData))
 			writer.commit()
 			self.revs[0] = writer.getRev()
 
@@ -150,10 +148,10 @@ class RevisionTab(QtGui.QWidget):
 
 		col = 1
 		for rev in revs:
-			stat = HpConnector().stat(rev)
+			stat = Connector().stat(rev)
 
 			layout.addWidget(genRevButton(rev), 0, col)
-			layout.addWidget(QtGui.QLabel(HpRegistry().getDisplayString(stat.type())), 1, col)
+			layout.addWidget(QtGui.QLabel(Registry().getDisplayString(stat.type())), 1, col)
 			layout.addWidget(QtGui.QLabel(str(stat.mtime())), 2, col)
 			size = 0
 			for part in stat.parts():
@@ -167,7 +165,7 @@ class RevisionTab(QtGui.QWidget):
 			layout.addWidget(QtGui.QLabel(sizeText), 3, col)
 
 			storeLayout = QtGui.QVBoxLayout()
-			for store in HpConnector().lookup_rev(rev):
+			for store in Connector().lookup_rev(rev):
 				storeLayout.addWidget(genStoreButton(store))
 			layout.addLayout(storeLayout, 4, col)
 
@@ -189,13 +187,13 @@ class HistoryTab(QtGui.QWidget):
 			for rev in heads:
 				try:
 					if rev not in self.__historyRevs:
-						stat = HpConnector().stat(rev)
+						stat = Connector().stat(rev)
 						mtime = str(stat.mtime())
 						comment = ""
 						if 'META' in stat.parts():
 							try:
-								with HpConnector().peek(rev) as r:
-									metaData = hpstruct.loads(r.readAll('META'))
+								with Connector().peek(rev) as r:
+									metaData = struct.loads(r.readAll('META'))
 									comment = extractMetaData(
 										metaData,
 										["org.hotchpotch.annotation", "comment"],
@@ -226,7 +224,7 @@ class HistoryTab(QtGui.QWidget):
 	def __open(self, item):
 		row = self.__historyListBox.row(item)
 		rev = self.__historyRevs[row]
-		hpgui.showDocument(hpstruct.RevLink(rev))
+		gui.showDocument(struct.RevLink(rev))
 
 
 class AnnotationTab(QtGui.QWidget):
@@ -241,8 +239,8 @@ class AnnotationTab(QtGui.QWidget):
 		tags = []
 		for rev in revs:
 			try:
-				with HpConnector().peek(rev) as r:
-					metaData = hpstruct.loads(r.readAll('META'))
+				with Connector().peek(rev) as r:
+					metaData = struct.loads(r.readAll('META'))
 					self.__title = extractMetaData(
 						metaData,
 						["org.hotchpotch.annotation", "title"],

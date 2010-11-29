@@ -17,17 +17,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
-
 from datetime import datetime
 from PyQt4 import QtCore, QtGui
 import os
 
-from hotchpotch import HpConnector, HpRegistry
-from hotchpotch import hpgui, hpstruct, importer
-from hotchpotch.hpconnector import HpWatch
+from hotchpotch import Connector, Registry
+from hotchpotch import gui, struct, importer
+from hotchpotch.connector import Watch
 
-class CollectionWindow(hpgui.HpMainWindow):
+class CollectionWindow(gui.MainWindow):
 	def __init__(self, argv):
 		self.__settings = None
 		super(CollectionWindow, self).__init__(
@@ -63,10 +61,10 @@ class CollectionWindow(hpgui.HpMainWindow):
 
 		self.__setEditable(False)
 
-	# HpGui callbacks
+	# Gui callbacks
 
 	def docRead(self, readWrite, r):
-		uti = HpConnector().stat(self.rev()).type()
+		uti = Connector().stat(self.rev()).type()
 		if uti in DictModel.UTIs:
 			model = DictModel(self)
 		elif uti in SetModel.UTIs:
@@ -100,7 +98,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 			if readWrite and uti == "org.hotchpotch.store":
 				self.fileToolBar.removeAction(self.delAct)
 				self.fileMenu.removeAction(self.delAct)
-				enum = HpConnector().enum()
+				enum = Connector().enum()
 				if enum.isRemovable(enum.store(self.doc())):
 					self.fileMenu.insertAction(self.cleanAct, self.unmountAct)
 					actions = self.fileToolBar.actions()
@@ -128,13 +126,13 @@ class CollectionWindow(hpgui.HpMainWindow):
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
 		conflicts = super(CollectionWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
 		if 'HPSD' in changedParts:
-			baseHpsd = hpstruct.loads(baseReader.readAll('HPSD'))
+			baseHpsd = struct.loads(baseReader.readAll('HPSD'))
 			mergeHpsd = []
 			for r in mergeReaders:
-				mergeHpsd.append(hpstruct.loads(r.readAll('HPSD')))
-			(newHpsd, newConflict) = hpstruct.merge(baseHpsd, mergeHpsd)
+				mergeHpsd.append(struct.loads(r.readAll('HPSD')))
+			(newHpsd, newConflict) = struct.merge(baseHpsd, mergeHpsd)
 			conflicts = conflicts or newConflict
-			writer.writeAll('HPSD', hpstruct.dumps(newHpsd))
+			writer.writeAll('HPSD', struct.dumps(newHpsd))
 
 		return conflicts
 
@@ -208,7 +206,7 @@ class CollectionWindow(hpgui.HpMainWindow):
 		index = self.listView.selectionModel().currentIndex()
 		item = self.listView.model().getItem(index)
 		if item and item.isValid():
-			hpgui.showProperties(item.getLink())
+			gui.showProperties(item.getLink())
 
 	def __createActions(self):
 		self.delItemAct = QtGui.QAction(QtGui.QIcon('icons/edittrash.png'), "&Delete", self)
@@ -246,8 +244,8 @@ class CollectionWindow(hpgui.HpMainWindow):
 
 	def __unmountStore(self):
 		self.checkpoint("Automatically saved before unmounting")
-		enum = HpConnector().enum()
-		HpConnector().unmount(enum.store(self.doc()))
+		enum = Connector().enum()
+		Connector().unmount(enum.store(self.doc()))
 
 	def __dataChanged(self):
 		# some fields in the model have changed. Doesn't mean we have to save...
@@ -258,17 +256,17 @@ class CollectionWindow(hpgui.HpMainWindow):
 		self.syncMenu.clear()
 		rules = SyncRules()
 		this = self.doc()
-		enum = HpConnector().enum()
+		enum = Connector().enum()
 		for store in enum.allStores():
 			if not enum.isMounted(store):
 				continue
 			uuid = enum.doc(store)
 			if uuid == this:
 				continue
-			rev = HpConnector().lookup_doc(uuid).rev(uuid)
-			with HpConnector().peek(rev) as r:
+			rev = Connector().lookup_doc(uuid).rev(uuid)
+			with Connector().peek(rev) as r:
 				try:
-					metaData = hpstruct.loads(r.readAll('META'))
+					metaData = struct.loads(r.readAll('META'))
 					storeName = metaData["org.hotchpotch.annotation"]["title"]
 				except:
 					storeName = "Unnamed store"
@@ -314,18 +312,18 @@ class CollectionWindow(hpgui.HpMainWindow):
 
 class SyncRules(object):
 	def __init__(self):
-		sysDoc = HpConnector().enum().sysStore()
-		sysRev = HpConnector().lookup_doc(sysDoc).rev(sysDoc)
-		with HpConnector().peek(sysRev) as r:
-			root = hpstruct.loads(r.readAll('HPSD'))
+		sysDoc = Connector().enum().sysStore()
+		sysRev = Connector().lookup_doc(sysDoc).rev(sysDoc)
+		with Connector().peek(sysRev) as r:
+			root = struct.loads(r.readAll('HPSD'))
 			self.syncDoc = root["syncrules"].doc()
-		self.syncRev = HpConnector().lookup_doc(self.syncDoc).rev(sysDoc)
-		with HpConnector().peek(self.syncRev) as r:
-			self.rules = hpstruct.loads(r.readAll('HPSD'))
+		self.syncRev = Connector().lookup_doc(self.syncDoc).rev(sysDoc)
+		with Connector().peek(self.syncRev) as r:
+			self.rules = struct.loads(r.readAll('HPSD'))
 
 	def save(self):
-		with HpConnector().update(self.syncDoc, self.syncRev) as w:
-			w.writeAll('HPSD', hpstruct.dumps(self.rules))
+		with Connector().update(self.syncDoc, self.syncRev) as w:
+			w.writeAll('HPSD', struct.dumps(self.rules))
 			w.commit()
 			self.rev = w.getRev()
 
@@ -411,10 +409,10 @@ class CollectionTreeView(QtGui.QTreeView):
 			return
 		else:
 			data = event.mimeData()
-			link = hpstruct.loadMimeData(data)
+			link = struct.loadMimeData(data)
 			if link:
 				# ourself?
-				if isinstance(link, hpstruct.DocLink):
+				if isinstance(link, struct.DocLink):
 					if link.doc() == self.__parent.doc():
 						return
 				# already contained?
@@ -450,10 +448,10 @@ class CollectionTreeView(QtGui.QTreeView):
 
 		# execute
 		choice = menu.exec_(event.globalPos())
-		c = HpConnector()
+		c = Connector()
 		if choice in repActions:
 			store = repActions[choice]
-			if isinstance(link, hpstruct.DocLink):
+			if isinstance(link, struct.DocLink):
 				c.replicateDoc(link.doc(), dstStores=[store])
 			else:
 				c.replicateRev(link.rev(), dstStores=[store])
@@ -469,19 +467,19 @@ class CollectionTreeView(QtGui.QTreeView):
 				w.commit()
 				destDoc = w.getDoc()
 				# add link
-				self.model().insertLink(hpstruct.DocLink(destDoc))
+				self.model().insertLink(struct.DocLink(destDoc))
 				# save immediately
 				self.__parent.save()
 		elif choice in openRevActions:
 			rev = openRevActions[choice]
-			hpgui.showDocument(hpstruct.RevLink(rev))
+			gui.showDocument(struct.RevLink(rev))
 
 	def __addReplicateActions(self, menu, link):
 		actions = { }
-		c = HpConnector()
+		c = Connector()
 		menu.addSeparator()
 		allVolumes = set(c.lookup_rev(self.__parent.rev()))
-		if isinstance(link, hpstruct.DocLink):
+		if isinstance(link, struct.DocLink):
 			curVolumes = set(c.lookup_doc(link.doc()).stores())
 		else:
 			curVolumes = set(c.lookup_rev(link.rev()))
@@ -490,7 +488,7 @@ class CollectionTreeView(QtGui.QTreeView):
 			try:
 				rev = c.lookup_doc(store).rev(store)
 				with c.peek(rev) as r:
-					metaData = hpstruct.loads(r.readAll('META'))
+					metaData = struct.loads(r.readAll('META'))
 					try:
 						name = metaData["org.hotchpotch.annotation"]["title"]
 					except:
@@ -505,11 +503,11 @@ class CollectionTreeView(QtGui.QTreeView):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
 		actions = { }
 
-		c = HpConnector()
-		sysStore = hpstruct.HpContainer(hpstruct.DocLink(c.enum().sysStore()))
-		templatesDict = hpstruct.HpContainer(sysStore.get("templates:"))
+		c = Connector()
+		sysStore = struct.Container(struct.DocLink(c.enum().sysStore()))
+		templatesDict = struct.Container(sysStore.get("templates:"))
 		for (name, link) in templatesDict.items():
-			icon = QtGui.QIcon(HpRegistry().getIcon(c.stat(link.rev()).type()))
+			icon = QtGui.QIcon(Registry().getIcon(c.stat(link.rev()).type()))
 			action = newMenu.addAction(icon, name)
 			actions[action] = link
 
@@ -520,8 +518,8 @@ class CollectionTreeView(QtGui.QTreeView):
 			menu.addAction(self.__parent.openAct)
 			menu.setDefaultAction(self.__parent.openAct)
 		actions = {}
-		if isinstance(link, hpstruct.DocLink):
-			c = HpConnector()
+		if isinstance(link, struct.DocLink):
+			c = Connector()
 			revs = c.lookup_doc(link.doc()).revs()
 			if len(revs) == 1:
 				action = menu.addAction("Open revision (read only)")
@@ -626,7 +624,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 	def __init__(self, parent = None):
 		super(CollectionModel, self).__init__(parent)
 		self.__parent = parent
-		self._connector = HpConnector()
+		self._connector = Connector()
 
 		self._listing = []
 		self.__changedContent = False
@@ -647,7 +645,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def doSave(self, w):
 		data = self.encode()
-		w.writeAll('HPSD', hpstruct.dumps(data))
+		w.writeAll('HPSD', struct.dumps(data))
 		self.__changedContent = False
 
 	def doLoad(self, r, readWrite, autoClean):
@@ -655,7 +653,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__changedContent = False
 		self.__autoClean = autoClean
 		self._listing = []
-		data = hpstruct.loads(r.readAll('HPSD'))
+		data = struct.loads(r.readAll('HPSD'))
 		listing = self.decode(data)
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
@@ -675,14 +673,14 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def openItem(self, index):
 		link = self._listing[index.row()].getLink()
-		if isinstance(link, hpstruct.DocLink):
+		if isinstance(link, struct.DocLink):
 			if self.__mutable:
-				hpgui.showDocument(link)
+				gui.showDocument(link)
 			else:
 				if link.rev():
-					hpgui.showDocument(hpstruct.RevLink(link.rev()))
-		elif isinstance(link, hpstruct.RevLink):
-			hpgui.showDocument(link)
+					gui.showDocument(struct.RevLink(link.rev()))
+		elif isinstance(link, struct.RevLink):
+			gui.showDocument(link)
 
 	def setAutoClean(self, autoClean):
 		self.__autoClean = autoClean
@@ -735,7 +733,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 	def __metaDataHandling(self, uti):
 		if uti not in self.__seenUti:
 			self.__seenUti.append(uti)
-			metaFields = HpRegistry().getMeta(uti)
+			metaFields = Registry().getMeta(uti)
 			for field in metaFields:
 				key = reduce(lambda x,y: x+":"+y, field["key"])
 				if key not in self.__availColumns:
@@ -835,8 +833,8 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def mimeTypes(self):
 		types = QtCore.QStringList()
-		types << hpstruct.DocLink.MIME_TYPE
-		types << hpstruct.RevLink.MIME_TYPE
+		types << struct.DocLink.MIME_TYPE
+		types << struct.RevLink.MIME_TYPE
 		types << 'application/x-hotchpotch-linklist'
 		types << "text/uri-list"
 		return types
@@ -846,7 +844,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		for index in indexes:
 			if index.isValid() and (index.column() == 0):
 				link = self.getItem(index).getLink()
-				if isinstance(link, hpstruct.DocLink):
+				if isinstance(link, struct.DocLink):
 					data += ',doc:' + link.doc().encode('hex')
 				else:
 					data += ',rev:' + link.rev().encode('hex')
@@ -879,7 +877,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 				handle = importer.importFile(store, path)
 				if handle:
 					try:
-						self.insertLink(hpstruct.DocLink(handle.getDoc()))
+						self.insertLink(struct.DocLink(handle.getDoc()))
 						self.__parent.save()
 					finally:
 						handle.close()
@@ -889,12 +887,12 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def __dropLink(self, data):
 		# parse link
-		link = hpstruct.loadMimeData(data)
+		link = struct.loadMimeData(data)
 		if not link:
 			return False
 
 		# what to do?
-		if isinstance(link, hpstruct.DocLink):
+		if isinstance(link, struct.DocLink):
 			self._docLinkAct.setEnabled(True)
 			self._revLinkAct.setEnabled(len(link.revs()) == 1)
 		else:
@@ -903,8 +901,8 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		if action is self._docLinkAct:
 			pass
 		elif action is self._revLinkAct:
-			if isinstance(link, hpstruct.DocLink):
-				link = hpstruct.RevLink(link.revs()[0])
+			if isinstance(link, struct.DocLink):
+				link = struct.RevLink(link.revs()[0])
 		else:
 			return False
 
@@ -915,9 +913,9 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		for link in linkList.split(','):
 			(cls, val) = link.split(':')
 			if cls == 'doc':
-				link = hpstruct.DocLink(val.decode("hex"), False)
+				link = struct.DocLink(val.decode("hex"), False)
 			elif cls == 'rev':
-				link = hpstruct.RevLink(val.decode("hex"))
+				link = struct.RevLink(val.decode("hex"))
 			else:
 				continue
 			self.insertLink(link)
@@ -967,7 +965,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.entryChanged(entry)
 
 
-class CEntry(HpWatch):
+class CEntry(Watch):
 	def __init__(self, link, model, columns):
 		self.__model = model
 		self.__link  = link
@@ -977,10 +975,10 @@ class CEntry(HpWatch):
 		self.__columnValues = [ column.default() for column in columns ]
 		self.__columnDefs = columns[:]
 
-		if isinstance(link, hpstruct.DocLink):
-			super(CEntry, self).__init__(HpWatch.TYPE_DOC, link.doc())
+		if isinstance(link, struct.DocLink):
+			super(CEntry, self).__init__(Watch.TYPE_DOC, link.doc())
 		else:
-			super(CEntry, self).__init__(HpWatch.TYPE_REV, link.rev())
+			super(CEntry, self).__init__(Watch.TYPE_REV, link.rev())
 
 		self.update()
 
@@ -1024,7 +1022,7 @@ class CEntry(HpWatch):
 
 		# determine revision
 		needMerge = False
-		if isinstance(self.__link, hpstruct.DocLink):
+		if isinstance(self.__link, struct.DocLink):
 			self.__link.update()
 			revisions = self.__link.revs()
 			if len(revisions) == 0:
@@ -1039,27 +1037,27 @@ class CEntry(HpWatch):
 
 		# stat
 		try:
-			s = HpConnector().stat(rev)
+			s = Connector().stat(rev)
 		except IOError:
 			return
 		self.__uti = s.type()
 		if needMerge:
-			image = QtGui.QImage(HpRegistry().getIcon(s.type()))
+			image = QtGui.QImage(Registry().getIcon(s.type()))
 			painter = QtGui.QPainter()
 			painter.begin(image)
 			painter.drawImage(0, 0, QtGui.QImage("icons/uti/merge_overlay.png"))
 			painter.end()
 			self.__icon = QtGui.QIcon(QtGui.QPixmap.fromImage(image))
 		else:
-			self.__icon = QtGui.QIcon(HpRegistry().getIcon(s.type()))
+			self.__icon = QtGui.QIcon(Registry().getIcon(s.type()))
 
 		self.__updateColumns()
 		self.__valid = True
 
 	def __updateColumns(self):
-		with HpConnector().peek(self.__rev) as r:
+		with Connector().peek(self.__rev) as r:
 			try:
-				metaData = hpstruct.loads(r.readAll('META'))
+				metaData = struct.loads(r.readAll('META'))
 			except:
 				metaData = { }
 		for i in xrange(len(self.__columnDefs)):
@@ -1069,13 +1067,13 @@ class CEntry(HpWatch):
 
 	# callback when watch was triggered
 	def triggered(self, cause):
-		if cause in [HpWatch.CAUSE_MODIFIED, HpWatch.CAUSE_REPLICATED, HpWatch.CAUSE_DIMINISHED]:
+		if cause in [Watch.CAUSE_MODIFIED, Watch.CAUSE_REPLICATED, Watch.CAUSE_DIMINISHED]:
 			self.update()
 			self.__model.entryChanged(self)
-		elif cause == HpWatch.CAUSE_APPEARED:
+		elif cause == Watch.CAUSE_APPEARED:
 			self.update()
 			self.__model.entryAppeared(self)
-		elif cause == HpWatch.CAUSE_DISAPPEARED:
+		elif cause == Watch.CAUSE_DISAPPEARED:
 			self.__valid = False
 			self.__icon  = None
 			self.__model.entryRemoved(self)

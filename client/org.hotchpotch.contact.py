@@ -20,9 +20,9 @@
 from __future__ import with_statement
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import HpConnector, HpRegistry, hpstruct, hpgui
+from hotchpotch import Connector, Registry, struct, gui
 
-class ContactWindow(hpgui.HpMainWindow):
+class ContactWindow(gui.MainWindow):
 
 	def __init__(self, argv):
 		super(ContactWindow, self).__init__(argv,
@@ -71,13 +71,13 @@ class ContactWindow(hpgui.HpMainWindow):
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
 		conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
 		if 'HPSD' in changedParts:
-			baseHpsd = hpstruct.loads(baseReader.readAll('HPSD'))
+			baseHpsd = struct.loads(baseReader.readAll('HPSD'))
 			mergeHpsd = []
 			for r in mergeReaders:
-				mergeHpsd.append(hpstruct.loads(r.readAll('HPSD')))
-			(newHpsd, newConflict) = hpstruct.merge(baseHpsd, mergeHpsd)
+				mergeHpsd.append(struct.loads(r.readAll('HPSD')))
+			(newHpsd, newConflict) = struct.merge(baseHpsd, mergeHpsd)
 			conflicts = conflicts or newConflict
-			writer.writeAll('HPSD', hpstruct.dumps(newHpsd))
+			writer.writeAll('HPSD', struct.dumps(newHpsd))
 		return conflicts
 
 	def needSave(self):

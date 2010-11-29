@@ -1,22 +1,22 @@
 import unittest
 import time
 import subprocess
-from hotchpotch import HpConnector
-from hotchpotch import hpconnector
-from hotchpotch import hpstruct
+from hotchpotch import Connector
+from hotchpotch import connector
+from hotchpotch import struct
 
 
 class CommonParts(unittest.TestCase):
 
-	class Watch(hpconnector.HpWatch):
+	class Watch(connector.Watch):
 		def __init__(self, typ, doc, event):
-			hpconnector.HpWatch.__init__(self, typ, doc)
+			connector.Watch.__init__(self, typ, doc)
 			self.__event = event
 			self.__received = False
-			HpConnector().watch(self)
+			Connector().watch(self)
 
 		def close(self):
-			HpConnector().unwatch(self)
+			Connector().unwatch(self)
 
 		def triggered(self, cause):
 			if self.__event == cause:
@@ -28,17 +28,17 @@ class CommonParts(unittest.TestCase):
 		def waitForWatch(self, maxSec=3):
 			latest = time.time() + maxSec
 			while not self.__received and not (time.time() > latest):
-				HpConnector().process(100)
+				Connector().process(100)
 			return self.__received
 
 	def setUp(self):
-		if not HpConnector().enum().isMounted('rem1'):
-			HpConnector().mount('rem1')
-		self.store1 = HpConnector().enum().doc('rem1')
+		if not Connector().enum().isMounted('rem1'):
+			Connector().mount('rem1')
+		self.store1 = Connector().enum().doc('rem1')
 		self.store1Id = 'rem1'
-		if not HpConnector().enum().isMounted('rem2'):
-			HpConnector().mount('rem2')
-		self.store2 = HpConnector().enum().doc('rem2')
+		if not Connector().enum().isMounted('rem2'):
+			Connector().mount('rem2')
+		self.store2 = Connector().enum().doc('rem2')
 		self.store2Id = 'rem2'
 
 		self._disposeHandles = []
@@ -57,32 +57,32 @@ class CommonParts(unittest.TestCase):
 		self._disposeWatches.append(watch)
 
 	def create(self, type, creator, stores):
-		w = HpConnector().create(type, creator, stores)
+		w = Connector().create(type, creator, stores)
 		self.disposeHandle(w)
 		return w
 
 	def fork(self, rev, creator, stores=[]):
-		w = HpConnector().fork(rev, "test.bar", stores)
+		w = Connector().fork(rev, "test.bar", stores)
 		self.disposeHandle(w)
 		return w
 
 	def assertRevContent(self, rev, content):
-		with HpConnector().peek(rev) as r:
+		with Connector().peek(rev) as r:
 			for (part, data) in content.items():
 				revData = r.readAll(part)
 				self.assertEqual(revData, data)
 
-		s = HpConnector().stat(rev)
+		s = Connector().stat(rev)
 		for part in s.parts():
 			self.assertTrue(part in content)
 
 	def watchDoc(self, doc, event):
-		w = CommonParts.Watch(hpconnector.HpWatch.TYPE_DOC, doc, event)
+		w = CommonParts.Watch(connector.Watch.TYPE_DOC, doc, event)
 		self.disposeWatch(w)
 		return w
 
 	def watchRev(self, rev, event):
-		w = CommonParts.Watch(hpconnector.HpWatch.TYPE_REV, rev, event)
+		w = CommonParts.Watch(connector.Watch.TYPE_REV, rev, event)
 		self.disposeWatch(w)
 		return w
 
@@ -103,11 +103,11 @@ class TestCreatorCode(CommonParts):
 		doc = w.getDoc()
 		rev = w.getRev()
 
-		s = HpConnector().stat(rev)
+		s = Connector().stat(rev)
 		self.assertEqual(s.creator(), "test.foo")
 
 	def test_fork(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("public.data", "test.foo", [self.store1])
 		w.commit()
 		doc1 = w.getDoc()
@@ -124,7 +124,7 @@ class TestCreatorCode(CommonParts):
 		self.assertEqual(s.creator(), "test.bar")
 
 	def test_update_change(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("public.data", "test.foo", [self.store1])
 		w.commit()
 		doc = w.getDoc()
@@ -140,7 +140,7 @@ class TestCreatorCode(CommonParts):
 		self.assertEqual(s.creator(), "test.baz")
 
 	def test_update_keep(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("public.data", "test.foo", [self.store1])
 		w.commit()
 		doc = w.getDoc()
@@ -160,7 +160,7 @@ class TestCreatorCode(CommonParts):
 class TestTypeCode(CommonParts):
 
 	def test_create(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("test.format", "test.ignore", [self.store1])
 		self.assertEqual(w.getType(), "test.format")
 		w.commit()
@@ -171,7 +171,7 @@ class TestTypeCode(CommonParts):
 		self.assertEqual(s.type(), "test.format")
 
 	def test_fork_keep(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("test.format.foo", "test.ignore", [self.store1])
 		self.assertEqual(w.getType(), "test.format.foo")
 		w.commit()
@@ -191,7 +191,7 @@ class TestTypeCode(CommonParts):
 		self.assertEqual(s.type(), "test.format.foo")
 
 	def test_fork_change(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("test.format.foo", "test.ignore", [self.store1])
 		self.assertEqual(w.getType(), "test.format.foo")
 		w.commit()
@@ -213,7 +213,7 @@ class TestTypeCode(CommonParts):
 		self.assertEqual(s.type(), "test.format.bar")
 
 	def test_update_keep(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("test.format.foo", "test.ignore", [self.store1])
 		self.assertEqual(w.getType(), "test.format.foo")
 		w.commit()
@@ -232,7 +232,7 @@ class TestTypeCode(CommonParts):
 		self.assertEqual(s.type(), "test.format.foo")
 
 	def test_update_change(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("test.format.foo", "test.ignore", [self.store1])
 		self.assertEqual(w.getType(), "test.format.foo")
 		w.commit()
@@ -256,7 +256,7 @@ class TestTypeCode(CommonParts):
 class TestSync(CommonParts):
 
 	def test_already_same(self):
-		c = HpConnector()
+		c = Connector()
 		stores = [self.store1, self.store2]
 		w = self.create("public.data", "test.ignore", stores)
 		w.commit()
@@ -267,7 +267,7 @@ class TestSync(CommonParts):
 		self.assertTrue(c.sync(doc, stores=stores) == rev)
 
 	def test_good(self):
-		c = HpConnector()
+		c = Connector()
 		stores = [self.store1, self.store2]
 		w = self.create("public.data", "test.ignore", stores)
 		w.commit()
@@ -287,7 +287,7 @@ class TestSync(CommonParts):
 		self.assertEqual(l.rev(self.store2), rev)
 
 	def test_bad(self):
-		c = HpConnector()
+		c = Connector()
 		stores = [self.store1, self.store2]
 		w = self.create("public.data", "test.ignore", stores)
 		w.commit()
@@ -316,7 +316,7 @@ class TestSync(CommonParts):
 		self.assertEqual(l.rev(self.store2), rev2)
 
 	def test_merge(self):
-		c = HpConnector()
+		c = Connector()
 		stores = [self.store1, self.store2]
 		w = self.create("public.data", "test.ignore", stores)
 		w.commit()
@@ -352,7 +352,7 @@ class TestSync(CommonParts):
 class TestPreRevs(CommonParts):
 
 	def createSuspendDoc(self):
-		c = HpConnector()
+		c = Connector()
 		w = self.create("test.format", "test.ignore", [self.store1])
 		w.writeAll('FILE', 'ok')
 		w.commit()
@@ -367,7 +367,7 @@ class TestPreRevs(CommonParts):
 		return (doc, rev1, rev2)
 
 	def test_suspend(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev2) = self.createSuspendDoc()
 
 		l = c.lookup_doc(doc)
@@ -377,7 +377,7 @@ class TestPreRevs(CommonParts):
 		self.assertRevContent(rev2, {'FILE' : 'update'})
 
 	def test_suspend_multi(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev_s1) = self.createSuspendDoc()
 
 		with c.update(doc, rev1) as w:
@@ -407,7 +407,7 @@ class TestPreRevs(CommonParts):
 		self.assertRevContent(rev_s2, {'FILE' : 'Hail to the king, baby!'})
 
 	def test_resume_wrong(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev2) = self.createSuspendDoc()
 		self.assertRaises(IOError, c.resume, doc, rev1)
 
@@ -418,7 +418,7 @@ class TestPreRevs(CommonParts):
 		self.assertRevContent(rev2, {'FILE' : 'update'})
 
 	def test_resume_abort(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev2) = self.createSuspendDoc()
 
 		with c.resume(doc, rev2) as w:
@@ -437,7 +437,7 @@ class TestPreRevs(CommonParts):
 		self.assertRevContent(rev2, {'FILE' : 'update'})
 
 	def test_resume_commit(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev2) = self.createSuspendDoc()
 
 		with c.resume(doc, rev2) as w:
@@ -455,7 +455,7 @@ class TestPreRevs(CommonParts):
 		self.assertRevContent(rev3, {'FILE' : 'What are you waiting for, christmas?'})
 
 	def test_resume_suspend_orig(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev2) = self.createSuspendDoc()
 
 		with c.resume(doc, rev2) as w:
@@ -473,7 +473,7 @@ class TestPreRevs(CommonParts):
 		self.assertRevContent(rev3, {'FILE' : 'update'})
 
 	def test_resume_suspend_mod(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev2) = self.createSuspendDoc()
 
 		with c.resume(doc, rev2) as w:
@@ -492,7 +492,7 @@ class TestPreRevs(CommonParts):
 		self.assertRevContent(rev3, {'FILE' : 'What are you waiting for, christmas?'})
 
 	def test_forget(self):
-		c = HpConnector()
+		c = Connector()
 		(doc, rev1, rev_s1) = self.createSuspendDoc()
 
 		with c.update(doc, rev1) as w:
@@ -516,7 +516,7 @@ class TestPreRevs(CommonParts):
 class TestGarbageCollector(CommonParts):
 
 	def test_collect(self):
-		c = HpConnector()
+		c = Connector()
 
 		# deliberately close handle after creating!
 		with c.create("public.data", "test.foo", [self.store1]) as w:
@@ -533,7 +533,7 @@ class TestGarbageCollector(CommonParts):
 		self.assertRaises(IOError, c.stat, rev)
 
 	def test_create_keep_handle(self):
-		c = HpConnector()
+		c = Connector()
 
 		with c.create("public.data", "test.foo", [self.store1]) as w:
 			w.commit()
@@ -550,7 +550,7 @@ class TestGarbageCollector(CommonParts):
 			c.stat(rev)
 
 	def test_fork_keep_handle(self):
-		c = HpConnector()
+		c = Connector()
 
 		w = self.create("test.format.foo", "test.ignore", [self.store1])
 		self.assertEqual(w.getType(), "test.format.foo")
@@ -576,20 +576,20 @@ class TestGarbageCollector(CommonParts):
 class TestReplicator(CommonParts):
 
 	def test_sticky(self):
-		s = hpstruct.HpSet()
+		s = struct.Set()
 		# create sticky contianer on two stores
 		with s.create("foo", [self.store1, self.store2]) as dummy:
 			# create document on first store
-			with HpConnector().create("test.format.foo", "test.ignore", [self.store1]) as w:
+			with Connector().create("test.format.foo", "test.ignore", [self.store1]) as w:
 				w.commit()
 				doc = w.getDoc()
 				rev = w.getRev()
 
-				watch1 = self.watchDoc(doc, hpconnector.HpWatch.CAUSE_REPLICATED)
-				watch2 = self.watchRev(rev, hpconnector.HpWatch.CAUSE_REPLICATED)
+				watch1 = self.watchDoc(doc, connector.Watch.EVENT_REPLICATED)
+				watch2 = self.watchRev(rev, connector.Watch.EVENT_REPLICATED)
 
 				# add to sticky container
-				s['dummy'] = hpstruct.DocLink(doc)
+				s['dummy'] = struct.DocLink(doc)
 				s.save()
 
 			# wait for sticky replicatin to happen
@@ -597,13 +597,13 @@ class TestReplicator(CommonParts):
 			self.assertTrue(watch2.waitForWatch())
 
 			# check doc (with rev) to exist on all stores
-			l = HpConnector().lookup_doc(doc)
+			l = Connector().lookup_doc(doc)
 			self.assertEqual(l.revs(), [rev])
 			self.assertEqual(len(l.stores(rev)), 2)
 			self.assertTrue(self.store1 in l.stores(rev))
 			self.assertTrue(self.store2 in l.stores(rev))
 
-			l = HpConnector().lookup_rev(rev)
+			l = Connector().lookup_rev(rev)
 			self.assertEqual(len(l), 2)
 			self.assertTrue(self.store1 in l)
 			self.assertTrue(self.store2 in l)
@@ -613,19 +613,19 @@ class TestSynchronization(CommonParts):
 
 	def setUp(self):
 		# make sure stores are unmounted to kill sync
-		if HpConnector().enum().isMounted('rem1'):
-			HpConnector().unmount('rem1')
-		if HpConnector().enum().isMounted('rem2'):
-			HpConnector().unmount('rem2')
+		if Connector().enum().isMounted('rem1'):
+			Connector().unmount('rem1')
+		if Connector().enum().isMounted('rem2'):
+			Connector().unmount('rem2')
 		CommonParts.setUp(self)
 
 	def tearDown(self):
 		CommonParts.tearDown(self)
 		# make sure stores are unmounted to kill sync
-		if HpConnector().enum().isMounted('rem1'):
-			HpConnector().unmount('rem1')
-		if HpConnector().enum().isMounted('rem2'):
-			HpConnector().unmount('rem2')
+		if Connector().enum().isMounted('rem1'):
+			Connector().unmount('rem1')
+		if Connector().enum().isMounted('rem2'):
+			Connector().unmount('rem2')
 
 	def startSync(self, mode, fromStore, toStore):
 		fromGuid = fromStore.encode('hex')
@@ -640,7 +640,7 @@ class TestSynchronization(CommonParts):
 		doc = w.getDoc()
 		rev1 = w.getRev()
 
-		with HpConnector().update(doc, rev1, stores=[self.store1]) as w:
+		with Connector().update(doc, rev1, stores=[self.store1]) as w:
 			w.writeAll('FILE', 'forward')
 			w.commit()
 			rev2 = w.getRev()
@@ -655,13 +655,13 @@ class TestSynchronization(CommonParts):
 		doc = w.getDoc()
 		rev1 = w.getRev()
 
-		with HpConnector().update(doc, rev1, stores=[self.store1]) as w:
+		with Connector().update(doc, rev1, stores=[self.store1]) as w:
 			for (part, data) in left.items():
 				w.writeAll(part, data)
 			w.commit()
 			rev2 = w.getRev()
 
-		with HpConnector().update(doc, rev1, stores=[self.store2]) as w:
+		with Connector().update(doc, rev1, stores=[self.store2]) as w:
 			for (part, data) in right.items():
 				w.writeAll(part, data)
 			w.commit()
@@ -670,14 +670,14 @@ class TestSynchronization(CommonParts):
 		return (doc, rev2, rev3)
 
 	def performSync(self, doc, strategy):
-		watch = self.watchDoc(doc, hpconnector.HpWatch.CAUSE_MODIFIED)
+		watch = self.watchDoc(doc, connector.Watch.EVENT_MODIFIED)
 
 		self.startSync(strategy, self.store1, self.store2)
 
 		while True:
 			watch.reset()
 			self.assertTrue(watch.waitForWatch())
-			l = HpConnector().lookup_doc(doc)
+			l = Connector().lookup_doc(doc)
 			if len(l.revs()) == 1:
 				break
 
@@ -699,7 +699,7 @@ class TestSynchronization(CommonParts):
 		(doc, rev1, rev2) = self.createMerge("public.data", {}, {'FILE' : "left"},
 			{'FILE' : "right"})
 
-		watch = self.watchDoc(doc, hpconnector.HpWatch.CAUSE_MODIFIED)
+		watch = self.watchDoc(doc, connector.Watch.EVENT_MODIFIED)
 
 		self.startSync('ff', self.store1, self.store2)
 		self.startSync('ff', self.store2, self.store1)
@@ -707,7 +707,7 @@ class TestSynchronization(CommonParts):
 		self.assertFalse(watch.waitForWatch(1))
 
 		# check that doc is not synced
-		l = HpConnector().lookup_doc(doc)
+		l = Connector().lookup_doc(doc)
 		self.assertEqual(len(l.revs()), 2)
 		self.assertEqual(l.rev(self.store1), rev1)
 		self.assertEqual(l.rev(self.store2), rev2)
@@ -720,7 +720,7 @@ class TestSynchronization(CommonParts):
 		l = self.performSync(doc, 'latest')
 
 		rev = l.revs()[0]
-		s = HpConnector().stat(rev)
+		s = Connector().stat(rev)
 		self.assertEqual(len(s.parents()), 2)
 		self.assertTrue(rev1 in s.parents())
 		self.assertTrue(rev2 in s.parents())
@@ -741,7 +741,7 @@ class TestSynchronization(CommonParts):
 		l = self.performSync(doc, 'merge')
 
 		rev = l.revs()[0]
-		s = HpConnector().stat(rev)
+		s = Connector().stat(rev)
 		self.assertEqual(len(s.parents()), 2)
 		self.assertTrue(rev1 in s.parents())
 		self.assertTrue(rev2 in s.parents())
@@ -750,28 +750,28 @@ class TestSynchronization(CommonParts):
 	# Checks that the 'merge' strategy really merges
 	def test_sync_merge(self):
 		(doc, rev1, rev2) = self.createMerge("org.hotchpotch.dict",
-			{'HPSD' : hpstruct.dumps({"a":1}) },
-			{'HPSD' : hpstruct.dumps({"a":1, "b":2}) },
-			{'HPSD' : hpstruct.dumps({"a":1, "c":3}) })
+			{'HPSD' : struct.dumps({"a":1}) },
+			{'HPSD' : struct.dumps({"a":1, "b":2}) },
+			{'HPSD' : struct.dumps({"a":1, "c":3}) })
 		l = self.performSync(doc, 'merge')
 
 		rev = l.revs()[0]
-		s = HpConnector().stat(rev)
+		s = Connector().stat(rev)
 		self.assertEqual(len(s.parents()), 2)
 		self.assertTrue(rev1 in s.parents())
 		self.assertTrue(rev2 in s.parents())
 
 		# all revs on all stores?
-		l = HpConnector().lookup_rev(rev1)
+		l = Connector().lookup_rev(rev1)
 		self.assertTrue(self.store1 in l)
 		self.assertTrue(self.store2 in l)
-		l = HpConnector().lookup_rev(rev2)
+		l = Connector().lookup_rev(rev2)
 		self.assertTrue(self.store1 in l)
 		self.assertTrue(self.store2 in l)
 
 		# see if merge was ok
-		with HpConnector().peek(rev) as r:
-			hpsd = hpstruct.loads(r.readAll('HPSD'))
+		with Connector().peek(rev) as r:
+			hpsd = struct.loads(r.readAll('HPSD'))
 			self.assertEqual(hpsd, {"a":1, "b":2, "c":3})
 
 if __name__ == '__main__':

@@ -16,6 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from hpconnector import HpConnector
-from hpregistry  import HpRegistry
+from __future__ import absolute_import
+
+from .connector import Connector
+from .registry  import Registry
 

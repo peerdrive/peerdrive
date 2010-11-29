@@ -16,26 +16,25 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
+from __future__ import absolute_import
 
 from PyQt4 import QtCore, QtGui
-import sys, os, subprocess, pickle
-import datetime
+import sys, os, subprocess, pickle, datetime
 
-from hpconnector import HpWatch, HpConnector
-from hpregistry import HpRegistry
-import hpstruct
+from .connector import Watch, Connector
+from .registry import Registry
+from . import struct
 
 
 def showDocument(link):
-	if isinstance(link, hpstruct.DocLink):
+	if isinstance(link, struct.DocLink):
 		args = ['doc:'+link.doc().encode('hex')]
-		rev = HpConnector().lookup_doc(link.doc()).revs()[0]
+		rev = Connector().lookup_doc(link.doc()).revs()[0]
 	else:
 		args = ['rev:'+link.rev().encode('hex')]
 		rev = link.rev()
-	uti = HpConnector().stat(rev).type()
-	executable = HpRegistry().getExecutable(uti)
+	uti = Connector().stat(rev).type()
+	executable = Registry().getExecutable(uti)
 	if executable:
 		if sys.platform == "win32":
 			subprocess.Popen([executable] + args, shell=True)
@@ -45,7 +44,7 @@ def showDocument(link):
 
 
 def showProperties(link):
-	if isinstance(link, hpstruct.DocLink):
+	if isinstance(link, struct.DocLink):
 		args = ['doc:'+link.doc().encode('hex')]
 	else:
 		args = ['rev:'+link.rev().encode('hex')]
@@ -58,10 +57,10 @@ def showProperties(link):
 class DocButton(object):
 
 	# convenient class to watch store
-	class DocumentWatch(HpWatch):
+	class DocumentWatch(Watch):
 		def __init__(self, doc, callback):
 			self.__callback = callback
-			super(DocButton.DocumentWatch, self).__init__(HpWatch.TYPE_DOC, doc)
+			super(DocButton.DocumentWatch, self).__init__(Watch.TYPE_DOC, doc)
 
 		def triggered(self, cause):
 			self.__callback(cause)
@@ -82,32 +81,32 @@ class DocButton(object):
 	def setDocument(self, doc):
 		self.__doc = doc
 		if self.__watch:
-			HpConnector().unwatch(self.__watch)
+			Connector().unwatch(self.__watch)
 			self.__watch = None
 		if doc:
 			self.__watch = DocButton.DocumentWatch(doc, self.__update)
-			HpConnector().watch(self.__watch)
+			Connector().watch(self.__watch)
 		self.__update(0)
 
 	def __update(self, cause):
-		if cause == HpWatch.CAUSE_DISAPPEARED:
+		if cause == Watch.EVENT_DISAPPEARED:
 			self.setDocument(None)
 
 		if self.__doc:
 			self.__button.setEnabled(True)
 			try:
-				rev = HpConnector().lookup_doc(self.__doc).revs()[0]
+				rev = Connector().lookup_doc(self.__doc).revs()[0]
 				docIcon = None
-				with HpConnector().peek(rev) as r:
+				with Connector().peek(rev) as r:
 					try:
-						metaData = hpstruct.loads(r.readAll('META'))
+						metaData = struct.loads(r.readAll('META'))
 						docName = metaData["org.hotchpotch.annotation"]["title"]
 						# TODO: individual store icon...
 					except:
 						docName = "Unnamed"
 				if not docIcon:
-					uti = HpConnector().stat(rev).type()
-					docIcon = QtGui.QIcon(HpRegistry().getIcon(uti))
+					uti = Connector().stat(rev).type()
+					docIcon = QtGui.QIcon(Registry().getIcon(uti))
 			except IOError:
 				docName = ''
 				docIcon = QtGui.QIcon("icons/uti/file_broken.png")
@@ -127,7 +126,7 @@ class DocButton(object):
 
 	def __clicked(self):
 		if self.__doc:
-			showDocument(hpstruct.DocLink(self.__doc, False))
+			showDocument(struct.DocLink(self.__doc, False))
 
 	def getWidget(self):
 		return self.__button
@@ -144,9 +143,9 @@ class RevButton(object):
 		mtime = None
 		try:
 			title = "Unnamed"
-			with HpConnector().peek(rev) as r:
+			with Connector().peek(rev) as r:
 				try:
-					metaData = hpstruct.loads(r.readAll('META'))
+					metaData = struct.loads(r.readAll('META'))
 					if "org.hotchpotch.annotation" in metaData:
 						metaData = metaData["org.hotchpotch.annotation"]
 						if "title" in metaData:
@@ -162,10 +161,10 @@ class RevButton(object):
 								tags = reduce(lambda x,y: x+', '+y, tagList)
 				except:
 					pass
-			stat = HpConnector().stat(rev)
+			stat = Connector().stat(rev)
 			uti = stat.type()
 			mtime = stat.mtime()
-			revIcon = QtGui.QIcon(HpRegistry().getIcon(uti))
+			revIcon = QtGui.QIcon(Registry().getIcon(uti))
 		except IOError:
 			title = ''
 			revIcon = QtGui.QIcon("icons/uti/file_broken.png")
@@ -195,13 +194,13 @@ class RevButton(object):
 		pass
 
 	def __clicked(self):
-		showDocument(hpstruct.RevLink(self.__rev))
+		showDocument(struct.RevLink(self.__rev))
 
 	def getWidget(self):
 		return self.__button
 
 
-class HpMainWindow(QtGui.QMainWindow, HpWatch):
+class MainWindow(QtGui.QMainWindow, Watch):
 	HPA_TITLE        = ["org.hotchpotch.annotation", "title"]
 	HPA_TAGS         = ["org.hotchpotch.annotation", "tags"]
 	HPA_COMMENT      = ["org.hotchpotch.annotation", "comment"]
@@ -225,7 +224,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		self.__types      = types
 		self.__isEditor   = isEditor
 		self.__utiPixmap  = None
-		self.__connection = HpConnector()
+		self.__connection = Connector()
 		self.__storeButtons = { }
 		self.__userEventType = QtCore.QEvent.registerEventType()
 
@@ -239,8 +238,8 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		elif len(argv) == 2 and argv[1].startswith('rev:'):
 			self.__rev = argv[1][4:].decode("hex")
 		elif len(argv) == 2:
-			link = hpstruct.resolvePath(argv[1])
-			if isinstance(link, hpstruct.DocLink):
+			link = struct.resolvePath(argv[1])
+			if isinstance(link, struct.DocLink):
 				self.__doc = link.doc()
 			else:
 				self.__rev = link.rev()
@@ -421,7 +420,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def checkpoint(self, comment, forceComment=False):
 		# explicitly set comment, the user expects it's comment to be applied
 		if forceComment:
-			self.metaDataSetField(HpMainWindow.HPA_COMMENT, comment)
+			self.metaDataSetField(MainWindow.HPA_COMMENT, comment)
 		self.__saveFile(comment)
 		if self.__preliminary:
 			with self.__connection.resume(self.__doc, self.__rev) as writer:
@@ -447,12 +446,12 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	# return conflict True/False
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-		baseMeta = hpstruct.loads(baseReader.readAll('META'))
+		baseMeta = struct.loads(baseReader.readAll('META'))
 		if 'META' in changedParts:
 			mergeMeta = []
 			for mr in mergeReaders:
-				mergeMeta.append(hpstruct.loads(mr.readAll('META')))
-			(newMeta, conflict) = hpstruct.merge(baseMeta, mergeMeta)
+				mergeMeta.append(struct.loads(mr.readAll('META')))
+			(newMeta, conflict) = struct.merge(baseMeta, mergeMeta)
 		else:
 			newMeta = baseMeta
 
@@ -462,7 +461,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			newMeta["org.hotchpotch.annotation"]["comment"] = comment
 		else:
 			newMeta["org.hotchpotch.annotation"] = { "comment" : comment }
-		writer.writeAll('META', hpstruct.dumps(newMeta))
+		writer.writeAll('META', struct.dumps(newMeta))
 		return False
 
 	# === re-implemented inherited methods
@@ -476,7 +475,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 	def triggered(self, cause):
 		#print >>sys.stderr, "watch %d for %s" % (cause, self.getHash().encode('hex'))
-		if cause == HpWatch.CAUSE_DISAPPEARED:
+		if cause == Watch.EVENT_DISAPPEARED:
 			# FIXME: maybe we don't want to loose all changes...
 			self.__mutable = False # prevent useless saving
 			self.close()
@@ -493,7 +492,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	# === private methods
 
 	def __postEvent(self, action):
-		event = HpMainWindow.UserEvent(self.__userEventType, action)
+		event = MainWindow.UserEvent(self.__userEventType, action)
 		QtGui.QApplication.postEvent(self, event)
 
 	def __startup(self):
@@ -513,7 +512,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				self.__rev = revs[0]
 				self.statusBar().showMessage("Document loaded", 3000)
 			else:
-				pixmap = QtGui.QPixmap(HpRegistry().getIcon(self.__types[0]))
+				pixmap = QtGui.QPixmap(Registry().getIcon(self.__types[0]))
 				self.setWindowIcon(QtGui.QIcon(pixmap))
 				self.dragWidget.setPixmap(pixmap)
 				if not self.__chooseStartRev(l, revs, preRevs):
@@ -522,12 +521,12 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 
 			self.__setMutable(True)
 			self.__loadFile()
-			HpWatch.__init__(self, HpWatch.TYPE_DOC, self.__doc)
+			Watch.__init__(self, Watch.TYPE_DOC, self.__doc)
 		else:
 			self.__setMutable(False)
 			self.__loadFile()
 			self.statusBar().showMessage("Revision loaded", 3000)
-			HpWatch.__init__(self, HpWatch.TYPE_REV, self.__rev)
+			Watch.__init__(self, Watch.TYPE_REV, self.__rev)
 		self.__connection.watch(self)
 
 		# window icon
@@ -680,7 +679,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 		try:
 			with self.__connection.peek(self.__rev) as r:
 				try:
-					self.__metaData = hpstruct.loads(r.readAll('META'))
+					self.__metaData = struct.loads(r.readAll('META'))
 				except IOError:
 					self.__metaData = { }
 				self.__metaDataChanged = False
@@ -710,9 +709,9 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 	def __saveFileInternal(self, comment, writer):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 		try:
-			self.metaDataSetField(HpMainWindow.HPA_COMMENT, comment)
+			self.metaDataSetField(MainWindow.HPA_COMMENT, comment)
 			if self.__metaDataChanged:
-				writer.writeAll('META', hpstruct.dumps(self.__metaData))
+				writer.writeAll('META', struct.dumps(self.__metaData))
 			if self.__isEditor:
 				self.docSave(writer)
 		finally:
@@ -725,28 +724,28 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			return False
 
 	def __extractMetaData(self):
-		name = self.metaDataGetField(HpMainWindow.HPA_TITLE, "Unnamed document")
+		name = self.metaDataGetField(MainWindow.HPA_TITLE, "Unnamed document")
 		self.__nameEdit.setText(name)
-		tagList = self.metaDataGetField(HpMainWindow.HPA_TAGS, [])
+		tagList = self.metaDataGetField(MainWindow.HPA_TAGS, [])
 		tagList.sort()
 		if len(tagList) == 0:
 			tagString = ""
 		else:
 			tagString = reduce(lambda x,y: x+', '+y, tagList)
 		self.__tagsEdit.setText(tagString)
-		self.__descEdit.setPlainText(self.metaDataGetField(HpMainWindow.HPA_DESCRIPTION, ""))
+		self.__descEdit.setPlainText(self.metaDataGetField(MainWindow.HPA_DESCRIPTION, ""))
 		self.setWindowTitle(name)
 		if self.__isEditor:
 			self.__stickyAct.setEnabled(self.__isMutable())
-			self.__stickyAct.setChecked(self.metaDataGetField(HpMainWindow.SYNC_STICKY, False))
+			self.__stickyAct.setChecked(self.metaDataGetField(MainWindow.SYNC_STICKY, False))
 			self.__historyAct.setEnabled(self.__isMutable() and self.__stickyAct.isChecked())
-			self.__historySpin.setValue(self.metaDataGetField(HpMainWindow.SYNC_HISTROY, 0) / (24*60*60))
+			self.__historySpin.setValue(self.metaDataGetField(MainWindow.SYNC_HISTROY, 0) / (24*60*60))
 
 	def __showProperties(self):
 		if self.__isMutable():
-			link = hpstruct.DocLink(self.__doc, False)
+			link = struct.DocLink(self.__doc, False)
 		else:
-			link = hpstruct.RevLink(self.__rev)
+			link = struct.RevLink(self.__rev)
 		showProperties(link)
 
 	def __saveSettings(self):
@@ -791,34 +790,34 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 				uti = self.__connection.stat(self.__rev).type()
 			else:
 				uti = self.__types[0]
-			self.__utiPixmap = QtGui.QPixmap(HpRegistry().getIcon(uti))
+			self.__utiPixmap = QtGui.QPixmap(Registry().getIcon(uti))
 		return self.__utiPixmap
 
 	def __nameChanged(self, name):
-		self.metaDataSetField(HpMainWindow.HPA_TITLE, str(self.__nameEdit.text()))
+		self.metaDataSetField(MainWindow.HPA_TITLE, str(self.__nameEdit.text()))
 		self.setWindowTitle(name)
 
 	def __tagsChanged(self, tagString):
 		if self.__tagsEdit.hasAcceptableInput():
 			tagSet = set([ tag.strip() for tag in str(tagString).split(',')])
 			tagList = list(tagSet)
-			self.metaDataSetField(HpMainWindow.HPA_TAGS, tagList)
+			self.metaDataSetField(MainWindow.HPA_TAGS, tagList)
 
 	def __descChanged(self):
-		old = self.metaDataGetField(HpMainWindow.HPA_DESCRIPTION, "")
+		old = self.metaDataGetField(MainWindow.HPA_DESCRIPTION, "")
 		new = str(self.__descEdit.toPlainText())
 		if old != new:
-			self.metaDataSetField(HpMainWindow.HPA_DESCRIPTION, new)
+			self.metaDataSetField(MainWindow.HPA_DESCRIPTION, new)
 
 	def __toggleSticky(self, checked):
-		self.metaDataSetField(HpMainWindow.SYNC_STICKY, checked)
+		self.metaDataSetField(MainWindow.SYNC_STICKY, checked)
 		self.__historyAct.setEnabled(checked)
 
 	def __toggleHistroy(self, value):
-		self.metaDataSetField(HpMainWindow.SYNC_HISTROY, value*24*60*60)
+		self.metaDataSetField(MainWindow.SYNC_HISTROY, value*24*60*60)
 
 	def __checkpointFile(self):
-		self.__commentPopup.popup(self.metaDataGetField(HpMainWindow.HPA_COMMENT, "Enter comment"))
+		self.__commentPopup.popup(self.metaDataGetField(MainWindow.HPA_COMMENT, "Enter comment"))
 
 	def __deleteFile(self):
 		self.__delMenu.clear()
@@ -848,7 +847,7 @@ class HpMainWindow(QtGui.QMainWindow, HpWatch):
 			rev = self.__connection.lookup_doc(store).rev(store)
 			with self.__connection.peek(rev) as r:
 				try:
-					metaData = hpstruct.loads(r.readAll('META'))
+					metaData = struct.loads(r.readAll('META'))
 					return metaData["org.hotchpotch.annotation"]["title"]
 				except:
 					return "Unnamed store"
@@ -1060,10 +1059,10 @@ class DragWidget(QtGui.QLabel):
 		mimeData = QtCore.QMimeData()
 		doc = self.__parent.doc()
 		if doc:
-			hpstruct.DocLink(doc, False).mimeData(mimeData)
+			struct.DocLink(doc, False).mimeData(mimeData)
 		else:
 			rev = self.__parent.rev()
-			hpstruct.RevLink(rev).mimeData(mimeData)
+			struct.RevLink(rev).mimeData(mimeData)
 
 		drag.setMimeData(mimeData)
 		drag.setPixmap(self.pixmap())
@@ -1176,7 +1175,7 @@ class ChooseWindow(QtGui.QDialog):
 		layout.addLayout(openLayout, row, 2)
 
 	def purgeRev(self, rev, stores, row, widgets):
-		HpConnector().forget(self.__doc, rev, stores)
+		Connector().forget(self.__doc, rev, stores)
 		for i in xrange(3):
 			item = self.__layout.itemAtPosition(row, i)
 			self.__layout.removeItem(item)

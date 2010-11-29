@@ -2,7 +2,6 @@
 	- fix sync
 		- stop sync in case of error
 		- let user pause/resume
-		- support overwrite merge
 	- File store improvements
 		- automatically delete old revisions when disk full
 	- add search engine

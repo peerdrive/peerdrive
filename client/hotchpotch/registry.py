@@ -16,30 +16,32 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
-import hpstruct, hpconnector
+from __future__ import absolute_import
 
-class _HpRegistry(hpconnector.HpWatch):
+from . import struct
+from . import connector
+
+class _Registry(connector.Watch):
 
 	def __init__(self):
-		self.connection = hpconnector.HpConnector()
+		self.connection = connector.Connector()
 
 		self.__sysDoc = self.connection.enum().sysStore()
 		sysRev = self.connection.lookup_doc(self.__sysDoc).rev(self.__sysDoc)
 		with self.connection.peek(sysRev) as r:
-			root = hpstruct.loads(r.readAll('HPSD'))
+			root = struct.loads(r.readAll('HPSD'))
 			self.__regDoc = root["registry"].doc()
 
-		hpconnector.HpWatch.__init__(self, hpconnector.HpWatch.TYPE_DOC, self.__regDoc)
+		connector.Watch.__init__(self, connector.Watch.TYPE_DOC, self.__regDoc)
 		self.loadRegistry()
 
 	def loadRegistry(self):
 		regRev = self.connection.lookup_doc(self.__regDoc).rev(self.__sysDoc)
 		with self.connection.peek(regRev) as r:
-			self.registry = hpstruct.loads(r.readAll('HPSD'))
+			self.registry = struct.loads(r.readAll('HPSD'))
 
-	def triggered(self, cause):
-		if cause == hpconnector.HpWatch.CAUSE_MODIFIED:
+	def triggered(self, event):
+		if event == connector.Watch.EVENT_MODIFIED:
 			self.loadRegistry()
 		else:
 			print "hpregistry: Unexpected watch trigger: %s -> %d" % (self.getHash().encode("hex"), cause)
@@ -112,11 +114,11 @@ class _HpRegistry(hpconnector.HpWatch):
 		return data
 
 
-_registry = None
+_instance = None
 
-def HpRegistry():
-	global _registry
-	if not _registry:
-		_registry = _HpRegistry()
-	return _registry
+def Registry():
+	global _instance
+	if not _instance:
+		_instance = _Registry()
+	return _instance
 

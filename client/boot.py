@@ -17,9 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
-
-from hotchpotch import hpstruct
+import hotchpotch.struct
 from hotchpotch.importer import importObjectByPath
 import json
 
@@ -31,8 +29,8 @@ importObjectByPath(
 	"sys/registry",
 	"org.hotchpotch.registry",
 	[
-		("HPSD", hpstruct.dumps(registry)),
-		("META", hpstruct.dumps({
+		("HPSD", hotchpotch.struct.dumps(registry)),
+		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
 				"title"   : "UTI registry",
 				"comment" : "Import by boot.py"
@@ -46,8 +44,8 @@ importObjectByPath(
 	"sys/syncrules",
 	"public.data",
 	[
-		("HPSD", hpstruct.dumps([])),
-		("META", hpstruct.dumps({
+		("HPSD", hotchpotch.struct.dumps([])),
+		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
 				"title" : "Synchronization rules"
 			}
@@ -60,7 +58,7 @@ importObjectByPath(
 	"public.plain-text",
 	[
 		("FILE", "Empty document"),
-		("META", hpstruct.dumps({
+		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
 				"title" : "New, empty text document",
 				"comment" : "Created from template"
@@ -71,8 +69,8 @@ importObjectByPath(
 	"sys/templates:Document templates/Dictionary:",
 	"org.hotchpotch.dict",
 	[
-		("HPSD", hpstruct.dumps( {} )),
-		("META", hpstruct.dumps({
+		("HPSD", hotchpotch.struct.dumps( {} )),
+		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
 				"title" : "New, empty dictionary",
 				"comment" : "Created from template"
@@ -86,8 +84,8 @@ importObjectByPath(
 	"sys/templates:Document templates/Collection:",
 	"org.hotchpotch.set",
 	[
-		("HPSD", hpstruct.dumps( [] )),
-		("META", hpstruct.dumps({
+		("HPSD", hotchpotch.struct.dumps( [] )),
+		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
 				"title" : "New, empty collection",
 				"comment" : "Created from template"

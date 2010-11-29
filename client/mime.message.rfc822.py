@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui, QtWebKit
-from hotchpotch import hpgui
+from hotchpotch import gui
 
 import sys
 import email
@@ -40,7 +40,7 @@ def format(addr):
 	return email.utils.formataddr((unicodeName, dest))
 
 
-class MailWindow(hpgui.HpMainWindow):
+class MailWindow(gui.MainWindow):
 
 	def __init__(self, argv):
 		super(MailWindow, self).__init__(
@@ -124,7 +124,7 @@ class MailWindow(hpgui.HpMainWindow):
 		pass
 
 	def docRead(self, readWrite, r):
-		tags = self.metaDataGetField(hpgui.HpMainWindow.HPA_TAGS, [])
+		tags = self.metaDataGetField(gui.MainWindow.HPA_TAGS, [])
 		self.unreadAct.setChecked("unread" in tags)
 
 		self.__mail = email.message_from_string(r.readAll('FILE'))
@@ -153,13 +153,13 @@ class MailWindow(hpgui.HpMainWindow):
 			self.headerLayout.addWidget(self.ccLabel, 3, 1)
 
 	def __unreadChanged(self, checked):
-		tags = self.metaDataGetField(hpgui.HpMainWindow.HPA_TAGS, [])
+		tags = self.metaDataGetField(gui.MainWindow.HPA_TAGS, [])
 		if checked:
 			if "unread" not in tags:
 				tags.append("unread")
 		else:
 			tags = [tag for tag in tags if tag != "unread"]
-		self.metaDataSetField(hpgui.HpMainWindow.HPA_TAGS, tags)
+		self.metaDataSetField(gui.MainWindow.HPA_TAGS, tags)
 
 	def getAddresses(self, field):
 		raw = email.utils.getaddresses(self.__mail.get_all(field, []))

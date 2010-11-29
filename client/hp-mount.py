@@ -17,17 +17,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
 import sys
-from hotchpotch import HpConnector, hpstruct
+from hotchpotch import Connector, struct
 
 if len(sys.argv) == 2:
-	if HpConnector().mount(sys.argv[1]):
-		doc = HpConnector().enum().doc(sys.argv[1])
+	if Connector().mount(sys.argv[1]):
+		doc = Connector().enum().doc(sys.argv[1])
 		try:
-			rev = HpConnector().lookup_doc(doc).rev(doc)
-			with HpConnector().peek(rev) as r:
-				metaData = hpstruct.loads(r.readAll('META'))
+			rev = Connector().lookup_doc(doc).rev(doc)
+			with Connector().peek(rev) as r:
+				metaData = struct.loads(r.readAll('META'))
 				name = metaData["org.hotchpotch.annotation"]["title"]
 		except:
 			name = "Unnamed store"

@@ -16,11 +16,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
+from __future__ import absolute_import
 
-import struct
-import json
-import hpconnector
+import struct, json
+
+from . import connector
 
 
 ###############################################################################
@@ -135,7 +135,7 @@ class DocLink(object):
 		mimeData.setData(DocLink.MIME_TYPE, self.__doc.encode('hex'))
 
 	def update(self):
-		self.__revs = hpconnector.HpConnector().lookup_doc(self.__doc).revs()
+		self.__revs = connector.Connector().lookup_doc(self.__doc).revs()
 		self.__updated = True
 
 	def doc(self):
@@ -155,7 +155,7 @@ class DocLink(object):
 		return self.__revs
 
 
-class HpDecoder(object):
+class Decoder(object):
 	def __init__(self):
 		pass
 
@@ -238,7 +238,7 @@ class HpDecoder(object):
 		return value
 
 
-class HpEncoder(object):
+class Encoder(object):
 	def __init__(self):
 		pass
 
@@ -331,12 +331,12 @@ def __encode_link(obj):
 
 
 def loads(s):
-	dec = HpDecoder()
+	dec = Decoder()
 	return dec.decode(s)
 
 
 def dumps(o):
-	enc = HpEncoder()
+	enc = Encoder()
 	return enc.encode(o)
 
 
@@ -468,26 +468,26 @@ def __mergeList(base, versions):
 # HPSD container objects
 ###############################################################################
 
-def HpContainer(link):
+def Container(link):
 	if isinstance(link, RevLink):
 		rev = link.rev()
 	else:
 		link.update()
 		rev = link.rev()
-	uti = hpconnector.HpConnector().stat(rev).type()
-	if uti in HpDict.UTIs:
-		return HpDict(link)
-	elif uti in HpSet.UTIs:
-		return HpSet(link)
+	uti = connector.Connector().stat(rev).type()
+	if uti in Dict.UTIs:
+		return Dict(link)
+	elif uti in Set.UTIs:
+		return Set(link)
 	else:
 		return None
 
 
-class HpDict(object):
+class Dict(object):
 	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
 
 	def __init__(self, link = None):
-		self.__conn = hpconnector.HpConnector()
+		self.__conn = connector.Connector()
 		if link:
 			self.__rev = link.rev()
 			self.__doc = link.doc()
@@ -499,7 +499,7 @@ class HpDict(object):
 
 	def __load(self):
 		uti = self.__conn.stat(self.__rev).type()
-		if uti not in HpDict.UTIs:
+		if uti not in Dict.UTIs:
 			raise IOError("Not a dict: "+uti)
 		with self.__conn.peek(self.__rev) as r:
 			self.__meta    = loads(r.readAll('META'))
@@ -520,7 +520,7 @@ class HpDict(object):
 				"sticky" : True
 			}
 		}
-		w = hpconnector.HpConnector().create("org.hotchpotch.dict", "", stores)
+		w = connector.Connector().create("org.hotchpotch.dict", "", stores)
 		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(self.__content))
@@ -535,7 +535,7 @@ class HpDict(object):
 	def save(self):
 		self.__meta["org.hotchpotch.annotation"]["comment"] = "<<Changed by import>>"
 		if self.__rev and self.__doc:
-			with hpconnector.HpConnector().update(self.__doc, self.__rev) as w:
+			with connector.Connector().update(self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
 				w.writeAll('HPSD', dumps(self.__content))
 				self.__rev = w.commit()
@@ -569,12 +569,12 @@ class HpDict(object):
 		return self.__content.items()
 
 
-class HpSet(object):
+class Set(object):
 	UTIs = ["org.hotchpotch.set"]
 
 	def __init__(self, link = None):
 		self.__didCache = False
-		self.__conn = hpconnector.HpConnector()
+		self.__conn = connector.Connector()
 		if link:
 			self.__rev = link.rev()
 			self.__doc = link.doc()
@@ -586,7 +586,7 @@ class HpSet(object):
 
 	def __load(self):
 		uti = self.__conn.stat(self.__rev).type()
-		if uti not in HpSet.UTIs:
+		if uti not in Set.UTIs:
 			raise IOError("Not a dict: "+uti)
 		with self.__conn.peek(self.__rev) as r:
 			self.__meta = loads(r.readAll('META'))
@@ -616,7 +616,7 @@ class HpSet(object):
 		content = [ link for (descr, link) in self.__content ]
 		for link in content:
 			link.update()
-		w = hpconnector.HpConnector().create("org.hotchpotch.set", "", stores)
+		w = connector.Connector().create("org.hotchpotch.set", "", stores)
 		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(content))
@@ -634,7 +634,7 @@ class HpSet(object):
 			content = [ link for (descr, link) in self.__content ]
 			for link in content:
 				link.update()
-			with hpconnector.HpConnector().update(self.__doc, self.__rev) as w:
+			with connector.Connector().update(self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
 				w.writeAll('HPSD', dumps(content))
 				self.__rev = w.commit()
@@ -691,7 +691,7 @@ def _loadTitle(link):
 	rev = link.rev()
 	if rev:
 		try:
-			with hpconnector.HpConnector().peek(rev) as r:
+			with connector.Connector().peek(rev) as r:
 				meta = loads(r.readAll('META'))
 			if "org.hotchpotch.annotation" in meta:
 				annotation = meta["org.hotchpotch.annotation"]
@@ -707,7 +707,7 @@ def _loadTitle(link):
 # Path resolving
 ###############################################################################
 
-# return (store:uuid, container:HpContainer, docName:str)
+# return (store:uuid, container:Container, docName:str)
 def walkPath(path, create=False):
 	steps = path.split('/')
 	storeName = steps[0]
@@ -717,7 +717,7 @@ def walkPath(path, create=False):
 	steps = steps[1:-1]
 
 	# search for store
-	enum = hpconnector.HpConnector().enum()
+	enum = connector.Connector().enum()
 	storeDoc = None
 	for mount in enum.allStores():
 		if not enum.isMounted(mount):
@@ -730,17 +730,17 @@ def walkPath(path, create=False):
 		raise StructError("Store not found")
 
 	# walk the path
-	curContainer = HpDict(DocLink(storeDoc, False))
+	curContainer = Dict(DocLink(storeDoc, False))
 	for (step, nextStep) in steps:
 		next = curContainer.get(step)
 		if next:
-			curContainer = HpContainer(next)
+			curContainer = Container(next)
 		elif create:
 			name = step.split(':')[-1]
 			if ':' in nextStep:
-				handle = HpDict().create(name, [storeDoc])
+				handle = Dict().create(name, [storeDoc])
 			else:
-				handle = HpSet().create(name, [storeDoc])
+				handle = Set().create(name, [storeDoc])
 
 			try:
 				next = DocLink(handle.getDoc())
@@ -748,7 +748,7 @@ def walkPath(path, create=False):
 				curContainer.save()
 			finally:
 				handle.close()
-			curContainer = HpContainer(next)
+			curContainer = Container(next)
 		else:
 			raise StructError("Invalid path")
 
@@ -761,6 +761,6 @@ def resolvePath(path):
 		(storeDoc, container, docName) = walkPath(path)
 		return container[docName]
 	else:
-		storeDoc = hpconnector.HpConnector().enum().doc(path)
+		storeDoc = connector.Connector().enum().doc(path)
 		return DocLink(storeDoc, False)
 

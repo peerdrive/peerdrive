@@ -16,14 +16,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
+from __future__ import absolute_import
 
-import os, sys
-import subprocess
+import os, sys, subprocess
 
-import hpstruct
-from hpconnector import HpConnector
-from hpregistry import HpRegistry
+from . import struct
+from .connector import Connector
+from .registry import Registry
 
 try:
 	import magic
@@ -46,7 +45,7 @@ def __runExtractor(extractor, path):
 		proc = subprocess.Popen(['./'+extractor, path], stdout=subprocess.PIPE)
 	data = proc.stdout.read()
 	proc.wait()
-	return hpstruct.loadJSON(data)
+	return struct.loadJSON(data)
 
 
 def __merge(old, new):
@@ -72,10 +71,10 @@ def importFile(store, path, name=""):
 		uti = None
 		if mimeGuess:
 			mime = mimeGuess.file(path)
-			uti = HpRegistry().getUtiFromMime(mime, None)
+			uti = Registry().getUtiFromMime(mime, None)
 		if not uti:
 			ext  = os.path.splitext(path)[1][1:].lower()
-			uti  = HpRegistry().getUtiFromExtension(ext)
+			uti  = Registry().getUtiFromExtension(ext)
 		if not name:
 			name = os.path.basename(path)
 		meta = {
@@ -86,7 +85,7 @@ def importFile(store, path, name=""):
 			}
 		}
 
-		extractor = HpRegistry().getExtractor(uti)
+		extractor = Registry().getExtractor(uti)
 		if extractor:
 			additionalMeta = __runExtractor(extractor, path)
 			if additionalMeta:
@@ -94,10 +93,10 @@ def importFile(store, path, name=""):
 
 		#print 'META: ', repr(meta)
 		with open(path, "rb") as file:
-			writer = HpConnector().create(uti, "", [store])
+			writer = Connector().create(uti, "", [store])
 			try:
 				writer.write('FILE', file.read())
-				writer.write('META', hpstruct.dumps(meta))
+				writer.write('META', struct.dumps(meta))
 				writer.commit()
 				return writer
 			except:
@@ -110,7 +109,7 @@ def importFile(store, path, name=""):
 # returns a commited writer or None
 def importObject(store, uti, spec):
 	try:
-		writer = HpConnector().create(uti, "", [store])
+		writer = Connector().create(uti, "", [store])
 		try:
 			for (fourcc, data) in spec:
 				writer.writeAll(fourcc, data)
@@ -126,7 +125,7 @@ def importObject(store, uti, spec):
 def importObjectByPath(path, uti, spec, overwrite=False):
 	try:
 		# resolve the path
-		(store, container, name) = hpstruct.walkPath(path, True)
+		(store, container, name) = struct.walkPath(path, True)
 		if (name in container) and (not overwrite):
 			return False
 
@@ -135,7 +134,7 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 		if not handle:
 			return False
 		try:
-			container[name] = hpstruct.DocLink(handle.getDoc())
+			container[name] = struct.DocLink(handle.getDoc())
 			container.save()
 			return True
 		finally:
@@ -147,7 +146,7 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 
 def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=None):
 	# resolve the path
-	(store, container, name) = hpstruct.walkPath(impPath, True)
+	(store, container, name) = struct.walkPath(impPath, True)
 
 	# create the object and add to dict
 	if isinstance(impFile, list):
@@ -164,7 +163,7 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 				handle = importFile(store, f)
 				if handle:
 					handles.append(handle)
-					container[nn] = hpstruct.DocLink(handle.getDoc())
+					container[nn] = struct.DocLink(handle.getDoc())
 				elif error:
 					error(f, nn)
 			container.save()
@@ -178,7 +177,7 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 		handle = importFile(store, impFile, name)
 		try:
 			if handle:
-				container[name] = hpstruct.DocLink(handle.getDoc())
+				container[name] = struct.DocLink(handle.getDoc())
 				container.save()
 			else:
 				raise ImporterError("Invalid file")

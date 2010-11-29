@@ -17,16 +17,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
 import sys, tempfile, os.path, subprocess
 
-from hotchpotch import hpstruct, HpConnector, HpRegistry
+from hotchpotch import struct, Connector, Registry
 
 
 # parse command line
 if len(sys.argv) == 2 and sys.argv[1].startswith('doc:'):
 	doc = sys.argv[1][4:].decode("hex")
-	rev = HpConnector().lookup_doc(doc).revs()[0]
+	rev = Connector().lookup_doc(doc).revs()[0]
 elif len(sys.argv) == 2 and sys.argv[1].startswith('rev:'):
 	rev = sys.argv[1][4:].decode("hex")
 else:
@@ -38,18 +37,18 @@ else:
 	sys.exit(1)
 
 
-stat = HpConnector().stat(rev)
+stat = Connector().stat(rev)
 uti  = stat.type()
 hash = stat.hash('FILE')
 
 # determine extension
-extensions = HpRegistry().search(uti, "extensions")
+extensions = Registry().search(uti, "extensions")
 if extensions:
 	ext = extensions[0]
 else:
 	ext = ""
-	with HpConnector().peek(rev) as r:
-		meta = hpstruct.loads(r.readAll('META'))
+	with Connector().peek(rev) as r:
+		meta = struct.loads(r.readAll('META'))
 
 	if "org.hotchpotch.annotation" in meta:
 		annotation = meta["org.hotchpotch.annotation"]
@@ -65,7 +64,7 @@ else:
 path = os.path.join(tempfile.gettempdir(), hash.encode('hex')+ext)
 if not os.path.isfile(path):
 	with open(path, "wb") as file:
-		with HpConnector().peek(rev) as reader:
+		with Connector().peek(rev) as reader:
 			file.write(reader.readAll('FILE'))
 
 # start external program

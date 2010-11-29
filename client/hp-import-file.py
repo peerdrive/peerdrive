@@ -17,10 +17,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
 import sys, os
 
-from hotchpotch import hpstruct
+from hotchpotch import struct
 from hotchpotch.importer import importFileByPath
 
 

@@ -17,13 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
-
-import sys
-import email
-import email.utils
-import email.header
-import json
+import sys, email, email.utils, email.header, json
 from datetime import datetime
 
 with open(sys.argv[1]) as fp:

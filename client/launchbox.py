@@ -19,9 +19,9 @@
 
 import sys
 from PyQt4 import QtCore, QtGui
-from hotchpotch import HpConnector
-from hotchpotch.hpgui import DocButton, RevButton
-from hotchpotch.hpconnector import HpWatch
+from hotchpotch import Connector
+from hotchpotch.gui import DocButton, RevButton
+from hotchpotch.connector import Watch
 
 PROGRESS_SYNC = 0
 PROGRESS_REP_DOC = 1
@@ -43,7 +43,7 @@ class Launchbox(QtGui.QDialog):
 
 		self.mainLayout = QtGui.QVBoxLayout()
 		self.mainLayout.setSizeConstraint(QtGui.QLayout.SetMinimumSize)
-		enum = HpConnector().enum()
+		enum = Connector().enum()
 		for store in enum.allStores():
 			self.mainLayout.addWidget(StoreWidget(store))
 		hLine = QtGui.QFrame()
@@ -57,7 +57,7 @@ class Launchbox(QtGui.QDialog):
 		self.setWindowIcon(QtGui.QIcon("icons/launch.png"))
 		#self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.WindowCloseButtonHint)
 
-		HpConnector().regProgressHandler(self.progress)
+		Connector().regProgressHandler(self.progress)
 
 	def progress(self, typ, value, tag):
 		if value == 0:
@@ -74,13 +74,13 @@ class Launchbox(QtGui.QDialog):
 			#self.adjustSize()
 
 class StoreWidget(QtGui.QWidget):
-	class StoreWatch(HpWatch):
+	class StoreWatch(Watch):
 		def __init__(self, doc, callback):
 			self.__callback = callback
-			super(StoreWidget.StoreWatch, self).__init__(HpWatch.TYPE_DOC, doc)
+			super(StoreWidget.StoreWatch, self).__init__(Watch.TYPE_DOC, doc)
 		
 		def triggered(self, cause):
-			if cause == HpWatch.CAUSE_DISAPPEARED:
+			if cause == Watch.CAUSE_DISAPPEARED:
 				self.__callback()
 
 	def __init__(self, mountId, parent=None):
@@ -103,17 +103,17 @@ class StoreWidget(QtGui.QWidget):
 
 	def update(self):
 		if self.watch:
-			HpConnector().unwatch(self.watch)
+			Connector().unwatch(self.watch)
 			self.watch = None
 
-		enum = HpConnector().enum()
+		enum = Connector().enum()
 		self.mountBtn.setEnabled(enum.isRemovable(self.mountId))
 		if enum.isMounted(self.mountId):
 			doc = enum.doc(self.mountId)
 			self.mountBtn.setText("Unmount")
 			self.storeBtn.setDocument(doc)
 			self.watch = StoreWidget.StoreWatch(doc, self.update)
-			HpConnector().watch(self.watch)
+			Connector().watch(self.watch)
 			self.mounted = True
 		else:
 			self.mountBtn.setText("Mount")
@@ -122,9 +122,9 @@ class StoreWidget(QtGui.QWidget):
 
 	def mountUnmount(self):
 		if self.mounted:
-			HpConnector().unmount(self.mountId)
+			Connector().unmount(self.mountId)
 		else:
-			HpConnector().mount(self.mountId)
+			Connector().mount(self.mountId)
 			self.update()
 
 
@@ -149,10 +149,10 @@ class SyncWidget(QtGui.QFrame):
 		layout.addWidget(self.toBtn.getWidget())
 		self.setLayout(layout)
 
-		HpConnector().regProgressHandler(self.progress)
+		Connector().regProgressHandler(self.progress)
 
 	def remove(self):
-		HpConnector().unregProgressHandler(self.progress)
+		Connector().unregProgressHandler(self.progress)
 		self.fromBtn.cleanup()
 		self.toBtn.cleanup()
 		self.deleteLater()
@@ -190,10 +190,10 @@ class ReplicationWidget(QtGui.QFrame):
 			stores = stores[16:]
 		self.setLayout(layout)
 
-		HpConnector().regProgressHandler(self.progress)
+		Connector().regProgressHandler(self.progress)
 
 	def remove(self):
-		HpConnector().unregProgressHandler(self.progress)
+		Connector().unregProgressHandler(self.progress)
 		self.docBtn.cleanup()
 		for button in self.storeButtons:
 			button.cleanup()

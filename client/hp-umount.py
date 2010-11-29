@@ -18,10 +18,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import sys
-from hotchpotch import HpConnector
+from hotchpotch import Connector
 
 if len(sys.argv) == 2:
-	HpConnector().unmount(sys.argv[1])
+	Connector().unmount(sys.argv[1])
 else:
 	print "Usage: hp-umount.py <id>"
 	sys.exit(1)

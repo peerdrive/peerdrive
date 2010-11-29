@@ -18,10 +18,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import hpgui
+from hotchpotch import gui
 
 
-class ImageWindow(hpgui.HpMainWindow):
+class ImageWindow(gui.MainWindow):
 
 	def __init__(self, argv):
 		super(ImageWindow, self).__init__(argv,
