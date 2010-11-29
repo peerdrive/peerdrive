@@ -366,7 +366,6 @@ do_commit_store(Fun, S) ->
 		[Rev] ->
 			% as expected
 			do_close(RWHandles),
-			vol_monitor:trigger_mod_doc(local, S#state.doc),
 			{ok, Errors, Rev, S#state{handles=ROHandles}};
 
 		[] when ROHandles =:= [] ->

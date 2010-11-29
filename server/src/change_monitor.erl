@@ -69,23 +69,14 @@ init([]) ->
 	{ok, #state{watches=dict:new()}}.
 
 
-handle_info({trigger_mod_doc, Store, Doc}, #state{watches=Watches} = State) ->
-	% This is a special trigger. Only forward special locally generated events.
-	% This prevents useless flooding of change notifications if the document
-	% exists on several stores.
-	case Store of
-		local ->
-			case dict:find({doc, Doc}, Watches) of
-				{ok, {_StoreSet, PidSet}} ->
-					fire_trigger(modified, doc, Doc, PidSet);
-				error ->
-					ok
-			end,
-			{noreply, State};
-
-		_Else ->
-			{noreply, State}
-	end;
+handle_info({trigger_mod_doc, _Store, Doc}, #state{watches=Watches} = State) ->
+	case dict:find({doc, Doc}, Watches) of
+		{ok, {_StoreSet, PidSet}} ->
+			fire_trigger(modified, doc, Doc, PidSet);
+		error ->
+			ok
+	end,
+	{noreply, State};
 
 handle_info({trigger_add_rev, Store, Rev}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_inc(rev, Store, Rev, Watches),

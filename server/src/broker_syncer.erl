@@ -163,7 +163,6 @@ switch(Doc, NewRev, Stores) ->
 		end,
 		[],
 		Stores),
-	vol_monitor:trigger_mod_doc(local, Doc),
 	case ErrInfo of
 		[] -> {ok, [], NewRev};
 		_  -> broker:consolidate_error(ErrInfo)
