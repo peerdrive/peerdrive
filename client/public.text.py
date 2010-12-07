@@ -18,20 +18,59 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import gui
+from hotchpotch.gui2 import main, widgets
 import diff3
 
-class TextEditWindow(gui.MainWindow):
 
-	def __init__(self, argv):
-		super(TextEditWindow, self).__init__(
-			argv,
-			"org.hotchpotch.textedit",
-			["public.plain-text"],
-			True)
+class TextEdit(widgets.DocumentView):
 
+	def __init__(self):
 		self.textEdit = QtGui.QTextEdit()
-		self.setCentralWidget(self.textEdit)
+		self.textEdit.textChanged.connect(self._emitSaveNeeded)
+		super(TextEdit, self).__init__(None, self.textEdit, "org.hotchpotch.textedit")
+
+	def docRead(self, readWrite, r):
+		self.textEdit.textChanged.disconnect(self._emitSaveNeeded)
+		self.textEdit.setPlainText(r.readAll('FILE'))
+		self.textEdit.document().setModified(False)
+		self.textEdit.setReadOnly(not readWrite)
+		self.textEdit.textChanged.connect(self._emitSaveNeeded)
+
+	def docSave(self, w):
+		if self.textEdit.document().isModified():
+			w.writeAll('FILE', self.textEdit.toPlainText().toUtf8())
+
+#	def docSaved(self):
+#		super(TextEditWindow, self).docSaved()
+#		self.textEdit.document().setModified(False)
+#
+#	def docMergeCheck(self, heads, types, changedParts):
+#		(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, types, changedParts)
+#		if heads == 2:
+#			return (uti, handled | set(['FILE']))
+#		else:
+#			return (uti, handled)
+#
+#	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
+#		conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
+#		if 'FILE' in changedParts:
+#			baseFile = baseReader.readAll('FILE')
+#			rev1File = mergeReaders[0].readAll('FILE')
+#			rev2File = mergeReaders[1].readAll('FILE')
+#			newFile = diff3.text_merge(baseFile, rev1File, rev2File)
+#			writer.writeAll('FILE', newFile)
+#
+#		return conflicts
+
+	def needSave(self):
+		default = super(TextEditWindow, self).needSave()
+		return default or self.textEdit.document().isModified()
+
+
+class TextWindow(main.MainWindow):
+
+	def __init__(self):
+		super(TextWindow, self).__init__(TextEdit(), True)
 
 		self.createActions()
 		self.createMenus()
@@ -43,28 +82,26 @@ class TextEditWindow(gui.MainWindow):
 		self.cutAct.setShortcut(QtGui.QKeySequence.Cut)
 		self.cutAct.setStatusTip("Cut the current selection's contents to the clipboard")
 		QtCore.QObject.connect(self.cutAct, QtCore.SIGNAL("triggered()"),
-			self.textEdit, QtCore.SLOT("cut()"))
+			self.viewWidget().textEdit, QtCore.SLOT("cut()"))
 
 		self.copyAct = QtGui.QAction(QtGui.QIcon('icons/copy.png'), "&Copy", self)
 		self.copyAct.setShortcut(QtGui.QKeySequence.Copy)
 		self.copyAct.setStatusTip("Copy the current selection's contents to the clipboard")
 		QtCore.QObject.connect(self.copyAct, QtCore.SIGNAL("triggered()"),
-			self.textEdit, QtCore.SLOT("copy()"))
+			self.viewWidget().textEdit, QtCore.SLOT("copy()"))
 
 		self.pasteAct = QtGui.QAction(QtGui.QIcon('icons/paste.png'), "&Paste", self)
 		self.pasteAct.setShortcut(QtGui.QKeySequence.Paste)
 		self.pasteAct.setStatusTip("Paste the clipboard's contents into the current selection")
 		QtCore.QObject.connect(self.pasteAct, QtCore.SIGNAL("triggered()"),
-				self.textEdit, QtCore.SLOT("paste()"))
+				self.viewWidget().textEdit, QtCore.SLOT("paste()"))
 
 		self.cutAct.setEnabled(False)
 		self.copyAct.setEnabled(False)
-		QtCore.QObject.connect(self.textEdit, QtCore.SIGNAL("copyAvailable(bool)"),
+		QtCore.QObject.connect(self.viewWidget().textEdit, QtCore.SIGNAL("copyAvailable(bool)"),
 				self.cutAct, QtCore.SLOT("setEnabled(bool)"))
-		QtCore.QObject.connect(self.textEdit, QtCore.SIGNAL("copyAvailable(bool)"),
+		QtCore.QObject.connect(self.viewWidget().textEdit, QtCore.SIGNAL("copyAvailable(bool)"),
 				self.copyAct, QtCore.SLOT("setEnabled(bool)"))
-		QtCore.QObject.connect(self.textEdit, QtCore.SIGNAL("textChanged()"),
-				self.emitChanged)
 
 	def createMenus(self):
 		self.editMenu = self.menuBar().addMenu("&Edit")
@@ -81,42 +118,6 @@ class TextEditWindow(gui.MainWindow):
 	def createStatusBar(self):
 		self.statusBar().showMessage("Ready")
 
-	def docRead(self, readWrite, r):
-		QtCore.QObject.disconnect(self.textEdit, QtCore.SIGNAL("textChanged()"), self.emitChanged)
-		self.textEdit.setPlainText(r.readAll('FILE'))
-		self.textEdit.document().setModified(False)
-		self.textEdit.setReadOnly(not readWrite)
-		QtCore.QObject.connect(self.textEdit, QtCore.SIGNAL("textChanged()"), self.emitChanged)
-
-	def docSave(self, w):
-		if self.textEdit.document().isModified():
-			w.writeAll('FILE', self.textEdit.toPlainText().toUtf8())
-
-	def docSaved(self):
-		super(TextEditWindow, self).docSaved()
-		self.textEdit.document().setModified(False)
-
-	def docMergeCheck(self, heads, types, changedParts):
-		(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, types, changedParts)
-		if heads == 2:
-			return (uti, handled | set(['FILE']))
-		else:
-			return (uti, handled)
-
-	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-		conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
-		if 'FILE' in changedParts:
-			baseFile = baseReader.readAll('FILE')
-			rev1File = mergeReaders[0].readAll('FILE')
-			rev2File = mergeReaders[1].readAll('FILE')
-			newFile = diff3.text_merge(baseFile, rev1File, rev2File)
-			writer.writeAll('FILE', newFile)
-
-		return conflicts
-
-	def needSave(self):
-		default = super(TextEditWindow, self).needSave()
-		return default or self.textEdit.document().isModified()
 
 
 if __name__ == '__main__':
@@ -124,7 +125,8 @@ if __name__ == '__main__':
 	import sys
 
 	app = QtGui.QApplication(sys.argv)
-	mainWin = TextEditWindow(sys.argv)
+	mainWin = TextWindow()
+	mainWin.open(sys.argv)
 	mainWin.show()
 	sys.exit(app.exec_())
 
