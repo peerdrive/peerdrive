@@ -1067,13 +1067,13 @@ class CEntry(Watch):
 
 	# callback when watch was triggered
 	def triggered(self, cause):
-		if cause in [Watch.CAUSE_MODIFIED, Watch.CAUSE_REPLICATED, Watch.CAUSE_DIMINISHED]:
+		if cause in [Watch.EVENT_MODIFIED, Watch.EVENT_REPLICATED, Watch.EVENT_DIMINISHED]:
 			self.update()
 			self.__model.entryChanged(self)
-		elif cause == Watch.CAUSE_APPEARED:
+		elif cause == Watch.EVENT_APPEARED:
 			self.update()
 			self.__model.entryAppeared(self)
-		elif cause == Watch.CAUSE_DISAPPEARED:
+		elif cause == Watch.EVENT_DISAPPEARED:
 			self.__valid = False
 			self.__icon  = None
 			self.__model.entryRemoved(self)

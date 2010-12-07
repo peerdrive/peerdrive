@@ -80,7 +80,7 @@ class StoreWidget(QtGui.QWidget):
 			super(StoreWidget.StoreWatch, self).__init__(Watch.TYPE_DOC, doc)
 		
 		def triggered(self, cause):
-			if cause == Watch.CAUSE_DISAPPEARED:
+			if cause == Watch.EVENT_DISAPPEARED:
 				self.__callback()
 
 	def __init__(self, mountId, parent=None):
