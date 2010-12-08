@@ -24,7 +24,7 @@ import sys, os, subprocess, pickle, datetime
 from ..connector import Watch, Connector
 from ..registry import Registry
 from .. import struct
-from .widgets import DocumentView
+from .widgets import DocumentView, DocButton
 from .utils import showProperties
 
 class MainWindow(QtGui.QMainWindow, Watch):
@@ -37,12 +37,12 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__isEditor = isEditor
 		self.__mutable  = False
 		self.__utiPixmap = None
+		self.__storeButtons = { }
 		self.setCentralWidget(self.__view)
 
-		viewWidget.checkpointNeeded.connect(lambda e: self.__saveAct.setEnabled(e))
-		viewWidget.mergeNeeded.connect(lambda e: self.__mergeAct.setVisible(e))
 		viewWidget.revChanged.connect(self.__extractMetaData)
 		viewWidget.mutable.connect(self.__setMutable)
+		viewWidget.distributionChanged.connect(self.__updateStoreButtons)
 
 		# create standard actions
 		if isEditor:
@@ -51,6 +51,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			self.__saveAct.setShortcut(QtGui.QKeySequence.Save)
 			self.__saveAct.setStatusTip("Create checkpoint of document")
 			QtCore.QObject.connect(self.__saveAct, QtCore.SIGNAL("triggered()"), self.__checkpointFile)
+			self.__view.checkpointNeeded.connect(lambda e: self.__saveAct.setEnabled(e))
 
 			self.__mergeMenu = QtGui.QMenu()
 			self.__mergeMenu.aboutToShow.connect(self.__mergeShow)
@@ -59,6 +60,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			self.__mergeAct.setMenu(self.__mergeMenu)
 			self.__mergeAct.triggered.connect(lambda: self.__mergeMenu.exec_(QtGui.QCursor.pos()))
 			self.__mergeAct.setVisible(False)
+			self.__view.mergeNeeded.connect(lambda e: self.__mergeAct.setVisible(e))
 
 			self.__stickyAct = QtGui.QAction("Sticky", self)
 			self.__stickyAct.setStatusTip("Automatically replicate referenced documents")
@@ -136,7 +138,8 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 		# standard tool bars
 		self.fileToolBar = self.addToolBar("Document")
-		self.dragWidget = DragWidget(self)
+		self.dragWidget = DragWidget(self.__view)
+		self.dragWidget.setPixmap(QtGui.QPixmap("icons/uti/unknown.png"))
 		self.fileToolBar.addWidget(self.dragWidget)
 		self.fileToolBar.addSeparator()
 		if isEditor:
@@ -181,6 +184,53 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 		# open the document
 		self.__view.open(guid, isDoc)
+		self.__updateStoreButtons()
+		self.__loadSettings()
+
+	# === re-implemented inherited methods
+
+	def closeEvent(self, event):
+		event.accept()
+		self.__saveSettings()
+
+	# === protected methos
+
+	def _saveSettings(self, settings):
+		settings["resx"] = self.size().width()
+		settings["resy"] = self.size().height()
+		settings["posx"] = self.pos().x()
+		settings["posy"] = self.pos().y()
+
+	def _loadSettings(self, settings):
+		self.resize(settings["resx"], settings["resy"])
+		self.move(settings["posx"], settings["posy"])
+
+	def __saveSettings(self):
+		if self.__view.doc():
+			hash = self.__view.doc().encode('hex')
+		else:
+			hash = self.__view.rev().encode('hex')
+		path = ".settings/" + hash[0:2]
+		if not os.path.exists(path):
+			os.makedirs(path)
+		with open(path + "/" + hash[2:], 'w') as f:
+			settings = { }
+			self._saveSettings(settings)
+			pickle.dump(settings, f)
+
+	def __loadSettings(self):
+		if self.__view.doc():
+			hash = self.__view.doc().encode('hex')
+		else:
+			hash = self.__view.rev().encode('hex')
+		path = ".settings/" + hash[0:2] + "/" + hash[2:]
+		try:
+			if os.path.isfile(path):
+				with open(path, 'r') as f:
+					settings = pickle.load(f)
+				self._loadSettings(settings)
+		except:
+			print "Failed to load settings!"
 
 	def __setMutable(self, mutable):
 		self.__mutable = mutable
@@ -220,6 +270,22 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			self.__utiPixmap = QtGui.QPixmap(Registry().getIcon(uti))
 		return self.__utiPixmap
 
+	def __updateStoreButtons(self):
+		if self.__view.doc():
+			allStores = Connector().lookup_doc(self.__view.doc()).stores()
+		else:
+			allStores = Connector().lookup_rev(self.__view.rev())
+
+		# update store buttons in status bar
+		for store in set(self.__storeButtons) ^ set(allStores):
+			if store in allStores:
+				button = DocButton(store)
+				self.statusBar().addPermanentWidget(button)
+				self.__storeButtons[store] = button
+			else:
+				self.statusBar().removeWidget(self.__storeButtons[store])
+				del self.__storeButtons[store]
+
 	def __checkpointFile(self):
 		self.__commentPopup.popup(self.__view.metaDataGetField(DocumentView.HPA_COMMENT, "Enter comment"))
 
@@ -247,7 +313,19 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__view.metaDataSetField(DocumentView.SYNC_HISTROY, value*24*60*60)
 
 	def __mergeShow(self):
-		pass
+		lookup = Connector().lookup_doc(self.__view.doc())
+		revs = set(lookup.revs())
+		if self.__view.rev() in lookup.preRevs():
+			revs -= set(Connector().stat(self.__view.rev()).parents())
+		else:
+			revs -= set([self.__view.rev()])
+
+		self.__mergeMenu.clear()
+		for rev in revs:
+			stores = [self.__getStoreName(store) for store in lookup.stores(rev)]
+			names = reduce(lambda x,y: x+", "+y, stores)
+			action = self.__mergeMenu.addAction(names)
+			action.triggered.connect(lambda: self.__view.merge(rev))
 
 	def __showProperties(self):
 		if self.__view.doc():
@@ -296,9 +374,9 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 class DragWidget(QtGui.QLabel):
 
-	def __init__(self, parent):
+	def __init__(self, view):
 		super(DragWidget, self).__init__()
-		self.__parent = parent
+		self.__view = view
 		self.setFrameShadow(QtGui.QFrame.Raised)
 		self.setFrameShape(QtGui.QFrame.Box)
 
@@ -314,11 +392,11 @@ class DragWidget(QtGui.QLabel):
 
 		drag = QtGui.QDrag(self)
 		mimeData = QtCore.QMimeData()
-		doc = self.__parent.doc()
+		doc = self.__view.doc()
 		if doc:
 			struct.DocLink(doc, False).mimeData(mimeData)
 		else:
-			rev = self.__parent.rev()
+			rev = self.__view.rev()
 			struct.RevLink(rev).mimeData(mimeData)
 
 		drag.setMimeData(mimeData)

@@ -190,11 +190,15 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	# editing the document.
 	mergeNeeded = QtCore.pyqtSignal(bool)
 
+	# mutable: Reflects if the document is currently mutable or read-only
 	mutable = QtCore.pyqtSignal(bool)
 
 	# revChanged: Fired whenever the backing document changes. You should update
 	# any meta data you have about the document.
 	revChanged = QtCore.pyqtSignal()
+
+	# fired whenever the documents distribution changed
+	distributionChanged = QtCore.pyqtSignal()
 
 	class UserEvent(QtCore.QEvent):
 		def __init__(self, eventType, action):
@@ -226,8 +230,6 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.addWidget(self.__noDocWidget)
 		self.__editWidget = widget
 		self.addWidget(self.__editWidget)
-		self.__chooseOverwriteWidget = QtGui.QLabel("TODO: Choose overwrite target")
-		self.addWidget(self.__chooseOverwriteWidget)
 		self.__chooseSaveAsWidget = QtGui.QLabel("TODO: Choose new location")
 		self.addWidget(self.__chooseSaveAsWidget)
 
@@ -238,8 +240,10 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		if isDoc:
 			self.__doc = guid
 			Watch.__init__(self, Watch.TYPE_DOC, guid)
-			self.__chooseRevWidget = ChooseWidget(self, guid, self.__chooseRev)
+			self.__chooseRevWidget = _ChooseWidget(self, guid, self.__chooseRev)
 			self.addWidget(self.__chooseRevWidget)
+			self.__chooseOverwriteWidget = _OverwriteWidget(self, self.__rebase)
+			self.addWidget(self.__chooseOverwriteWidget)
 		else:
 			self.__rev = guid
 			Watch.__init__(self, Watch.TYPE_REV, guid)
@@ -293,6 +297,35 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		if self.__mergeOurs(revs, stores):
 			return
 
+	# returns (type, handled) where:
+	#   type:    the resulting type code (if we would handle it)
+	#   handled: set of parts which this instance can merge automatically
+	def docMergeCheck(self, heads, types, changedParts):
+		# don't care about the number of heads
+		if len(types) != 1:
+			return (None, set(['META'])) # cannot merge different types
+		return (types.copy().pop(), set(['META']))
+
+	# return conflict True/False
+	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
+		baseMeta = struct.loads(baseReader.readAll('META'))
+		if 'META' in changedParts:
+			mergeMeta = []
+			for mr in mergeReaders:
+				mergeMeta.append(struct.loads(mr.readAll('META')))
+			(newMeta, conflict) = struct.merge(baseMeta, mergeMeta)
+		else:
+			newMeta = baseMeta
+
+		# FIXME: ugly, should be common code
+		comment = "<<Automatic merge>>"
+		if "org.hotchpotch.annotation" in newMeta:
+			newMeta["org.hotchpotch.annotation"]["comment"] = comment
+		else:
+			newMeta["org.hotchpotch.annotation"] = { "comment" : comment }
+		writer.writeAll('META', struct.dumps(newMeta))
+		return False
+
 	def metaDataSetField(self, field, value):
 		item = self.__metaData
 		path = field[:]
@@ -322,6 +355,8 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	def triggered(self, event):
 		#print >>sys.stderr, "watch %d for %s" % (event, self.getHash().encode('hex'))
+		if event != Watch.EVENT_MODIFIED:
+			self.distributionChanged.emit()
 		self.__postEvent(lambda: self.__update())
 
 	def event(self, event):
@@ -377,9 +412,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	def __updateRev(self):
 		avail = len(Connector().lookup_rev(self.__rev)) > 0
-		if self.__state == DocumentView.STATE_NO_DOC:
+		if (self.__state == DocumentView.STATE_NO_DOC) and avail:
 			self.__setState(DocumentView.STATE_EDITING)
-		else:
+		elif (self.__state == DocumentView.STATE_EDITING) and not avail:
 			self.__setState(DocumentView.STATE_NO_DOC)
 
 	def __updateDoc(self):
@@ -396,9 +431,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 				self.__setState(DocumentView.STATE_CHOOSE_START)
 		elif self.__state == DocumentView.STATE_EDITING:
 			# are we gone?
+			stores = Connector().lookup_rev(self.__rev)
 			info = Connector().lookup_doc(self.__doc)
-			if ((not self.__preliminary and (self.__rev in info.revs())) or
-			(self.__preliminary and (self.__rev in info.preRevs()))):
+			if len(set(stores) & set(info.stores())) > 0:
 				# still there, make a preliminary commit if necessary
 				self.__saveFile('<<Internal checkpoint>>')
 
@@ -444,17 +479,14 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			if self.__state == DocumentView.STATE_NO_DOC:
 				self.setCurrentWidget(self.__noDocWidget)
 			elif self.__state == DocumentView.STATE_CHOOSE_START:
-				self.__updateDocStartRev()
 				self.setCurrentWidget(self.__chooseRevWidget)
 			elif self.__state == DocumentView.STATE_CHOOSE_FF:
-				self.__updateDocFastForward()
 				self.setCurrentWidget(self.__chooseRevWidget)
 			elif self.__state == DocumentView.STATE_CHOOSE_REBASE:
-				self.__updateDocRebase()
 				self.setCurrentWidget(self.__chooseOverwriteWidget)
 			elif self.__state == DocumentView.STATE_CHOOSE_ALTERNATE:
-				self.__updateDocSaveAs()
 				self.setCurrentWidget(self.__chooseSaveAsWidget)
+		self.__update()
 
 	def __updateDocStartRev(self):
 		l = Connector().lookup_doc(self.__doc)
@@ -536,6 +568,19 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__setState(DocumentView.STATE_EDITING)
 		self.__emitNewRev()
 
+	def __rebase(self, rev, overwrite):
+		if overwrite:
+			with Connector().resume(self.__doc, self.__rev) as writer:
+				writer.setParents([rev]) # FIXME: will wreck a merge prerev
+				writer.suspend()
+			self.__rev = writer.getRev()
+		else:
+			Connector().forget(self.__doc, self.__rev)
+			self.__rev = rev
+			self.__setPreliminary(False)
+		self.__setState(DocumentView.STATE_EDITING)
+		self.__emitNewRev()
+
 	def __loadFile(self):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 		try:
@@ -546,6 +591,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 					self.__metaData = { }
 				self.__metaDataChanged = False
 				self.docRead(self.__mutable, r)
+				self.__setSaveNeeded(False)
 		finally:
 			QtGui.QApplication.restoreOverrideCursor()
 
@@ -674,7 +720,6 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 					writer.suspend()
 				self.__rev = writer.getRev()
 				self.__setPreliminary(True)
-				print "rev:%s" % self.__rev.encode("hex")
 		finally:
 			for r in mergeReaders:
 				r.close()
@@ -739,10 +784,10 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			return (False, mergeBase)
 
 
-class ChooseWidget(QtGui.QWidget):
+class _ChooseWidget(QtGui.QWidget):
 
 	def __init__(self, parent, doc, action):
-		super(ChooseWidget, self).__init__(parent)
+		super(_ChooseWidget, self).__init__(parent)
 		self.__doc = doc
 		self.__action = action
 		self.__revs = {}
@@ -761,7 +806,7 @@ class ChooseWidget(QtGui.QWidget):
 	def updateChoices(self, lookup, revs, preRevs):
 		for rev in set(self.__revs.keys()) ^ set(revs):
 			if rev in revs:
-				line = self.createStoreLine(lookup, rev, False)
+				line = self.__createStoreLine(lookup, rev, False)
 				self.__revs[rev] = line
 				self.__revsLayout.addWidget(line)
 			else:
@@ -770,14 +815,14 @@ class ChooseWidget(QtGui.QWidget):
 
 		for rev in set(self.__preRevs.keys()) ^ set(preRevs):
 			if rev in preRevs:
-				line = self.createStoreLine(lookup, rev, True)
+				line = self.__createStoreLine(lookup, rev, True)
 				self.__preRevs[rev] = line
 				self.__preRevsLayout.addWidget(line)
 			else:
 				self.__preRevs[rev].setParent(None)
 				del self.__preRevs[rev]
 
-	def createStoreLine(self, lookup, rev, preliminary):
+	def __createStoreLine(self, lookup, rev, preliminary):
 		widget = QtGui.QWidget()
 		layout = QtGui.QHBoxLayout()
 
@@ -804,55 +849,50 @@ class ChooseWidget(QtGui.QWidget):
 		return widget
 
 
-class OverwriteDialog(QtGui.QDialog):
+class _OverwriteWidget(QtGui.QWidget):
 
-	def __init__(self, lookup, revs, parent=None):
-		super(OverwriteDialog, self).__init__(parent)
+	def __init__(self, parent, action):
+		super(_OverwriteWidget, self).__init__(parent)
 
-		self.__result = (None, False)
-		self.__buttons = []
+		self.__action = action
+		self.__revs = {}
+		self.__layout = QtGui.QVBoxLayout()
+		label = QtGui.QLabel(
+			"Your document contains currently unsaved changes which are " +
+			"based on an outdated revision. Choose a revision below to " +
+			"overwrite or load (and discarding your current changes):")
+		label.setWordWrap(True)
+		self.__layout.addWidget(label)
+		self.setLayout(self.__layout)
 
-		mainLayout = QtGui.QGridLayout()
-		mainLayout.addWidget(
-			QtGui.QLabel("Choose revision to overwrite or load:"),
-			0, 0, 1, 4)
-		row = 1
-		for rev in revs:
-			button = RevButton(rev, True)
-			self.__buttons.append(button)
-			mainLayout.addWidget(button.getWidget(), row, 0)
+	def updateChoices(self, lookup, revs):
+		for rev in set(self.__revs.keys()) ^ set(revs):
+			if rev in revs:
+				line = self.__createStoreLine(lookup, rev)
+				self.__revs[rev] = line
+				self.__layout.addWidget(line)
+			else:
+				self.__revs[rev].setParent(None)
+				del self.__revs[rev]
 
-			storesLayout = QtGui.QHBoxLayout()
-			for doc in lookup.stores(rev):
-				button = DocButton(doc, True)
-				self.__buttons.append(button)
-				storesLayout.addWidget(button.getWidget())
-			storesLayout.addStretch()
-			mainLayout.addLayout(storesLayout, row, 1)
+	def __createStoreLine(self, lookup, rev):
+		widget = QtGui.QWidget()
+		layout = QtGui.QHBoxLayout()
 
-			button = QtGui.QPushButton("Open")
-			button.clicked.connect(lambda: self.buttonClicked((rev, False)))
-			mainLayout.addWidget(button, row, 2)
-			button = QtGui.QPushButton("Overwrite")
-			button.clicked.connect(lambda: self.buttonClicked((rev, True)))
-			mainLayout.addWidget(button, row, 3)
-			row += 1
+		layout.addWidget(RevButton(rev, True))
 
-		okButton = QtGui.QPushButton("Quit")
-		okButton.clicked.connect(self.reject)
-		buttonsLayout = QtGui.QHBoxLayout()
-		buttonsLayout.addStretch()
-		buttonsLayout.addWidget(okButton)
+		stores = lookup.stores(rev)
+		for doc in stores:
+			layout.addWidget(DocButton(doc, True))
 
-		mainLayout.addLayout(buttonsLayout, row, 0, 1, 4)
-		self.setLayout(mainLayout)
+		layout.addStretch()
+		button = QtGui.QPushButton("Open")
+		button.clicked.connect(lambda: self.__action(rev, False))
+		layout.addWidget(button)
+		button = QtGui.QPushButton("Overwrite")
+		button.clicked.connect(lambda: self.__action(rev, True))
+		layout.addWidget(button)
 
-		self.setWindowTitle("Choose new revision")
-
-	def buttonClicked(self, result):
-		self.__result = result
-		self.accept()
-
-	def getResult(self):
-		return self.__result
+		widget.setLayout(layout)
+		return widget
 

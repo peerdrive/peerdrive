@@ -26,45 +26,38 @@ class TextEdit(widgets.DocumentView):
 
 	def __init__(self):
 		self.textEdit = QtGui.QTextEdit()
-		self.textEdit.textChanged.connect(self._emitSaveNeeded)
 		super(TextEdit, self).__init__(None, self.textEdit, "org.hotchpotch.textedit")
+		self.textEdit.setReadOnly(True)
+		self.textEdit.textChanged.connect(self._emitSaveNeeded)
+		self.mutable.connect(lambda m: self.textEdit.setReadOnly(not m))
 
 	def docRead(self, readWrite, r):
 		self.textEdit.textChanged.disconnect(self._emitSaveNeeded)
 		self.textEdit.setPlainText(r.readAll('FILE'))
 		self.textEdit.document().setModified(False)
-		self.textEdit.setReadOnly(not readWrite)
 		self.textEdit.textChanged.connect(self._emitSaveNeeded)
 
 	def docSave(self, w):
 		if self.textEdit.document().isModified():
 			w.writeAll('FILE', self.textEdit.toPlainText().toUtf8())
 
-#	def docSaved(self):
-#		super(TextEditWindow, self).docSaved()
-#		self.textEdit.document().setModified(False)
-#
-#	def docMergeCheck(self, heads, types, changedParts):
-#		(uti, handled) = super(TextEditWindow, self).docMergeCheck(heads, types, changedParts)
-#		if heads == 2:
-#			return (uti, handled | set(['FILE']))
-#		else:
-#			return (uti, handled)
-#
-#	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-#		conflicts = super(TextEditWindow, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
-#		if 'FILE' in changedParts:
-#			baseFile = baseReader.readAll('FILE')
-#			rev1File = mergeReaders[0].readAll('FILE')
-#			rev2File = mergeReaders[1].readAll('FILE')
-#			newFile = diff3.text_merge(baseFile, rev1File, rev2File)
-#			writer.writeAll('FILE', newFile)
-#
-#		return conflicts
+	def docMergeCheck(self, heads, types, changedParts):
+		(uti, handled) = super(TextEdit, self).docMergeCheck(heads, types, changedParts)
+		if heads == 2:
+			return (uti, handled | set(['FILE']))
+		else:
+			return (uti, handled)
 
-	def needSave(self):
-		default = super(TextEditWindow, self).needSave()
-		return default or self.textEdit.document().isModified()
+	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
+		conflicts = super(TextEdit, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
+		if 'FILE' in changedParts:
+			baseFile = baseReader.readAll('FILE')
+			rev1File = mergeReaders[0].readAll('FILE')
+			rev2File = mergeReaders[1].readAll('FILE')
+			newFile = diff3.text_merge(baseFile, rev1File, rev2File)
+			writer.writeAll('FILE', newFile)
+
+		return conflicts
 
 
 class TextWindow(main.MainWindow):
