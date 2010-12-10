@@ -371,6 +371,14 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def _emitSaveNeeded(self):
 		self.__setSaveNeeded(True)
 
+	def _loadSettings(self, settings):
+		# will be called by container, may be reimplemented...
+		pass
+
+	def _saveSettings(self, settings):
+		# will be called by container, may be reimplemented...
+		pass
+
 	# === private methods
 
 	def __setSaveNeeded(self, state):

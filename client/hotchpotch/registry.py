@@ -47,19 +47,14 @@ class _Registry(connector.Watch):
 			print "hpregistry: Unexpected watch trigger: %s -> %d" % (self.getHash().encode("hex"), cause)
 
 	def getDisplayString(self, uti):
-		name = self.search(uti, "display")
-		if name is None:
-			name = uti
-		return name
+		return self.search(uti, "display", default=uti)
 
 	def getIcon(self, uti):
-		icon = self.search(uti, "icon")
-		if icon is None:
-			icon = "uti/unknown.png"
+		icon = self.search(uti, "icon", default="uti/unknown.png")
 		return "icons/" + icon
 
 	def getMeta(self, uti):
-		return reduce(lambda x,y: x+y, self._searchAll(uti, "meta"), [])
+		return reduce(lambda x,y: x+y, self.searchAll(uti, "meta").values(), [])
 
 	def getUtiFromExtension(self, ext, default = "public.data"):
 		for (uti, spec) in self.registry.items():
@@ -83,34 +78,36 @@ class _Registry(connector.Watch):
 	def getExecutable(self, uti):
 		return self.search(uti, "exec")
 
-	def search(self, uti, key):
+	def search(self, uti, key, recursive=True, default=None):
 		if uti not in self.registry:
-			return None
+			return default
 
 		item = self.registry[uti]
 		if key in item:
 			return item[key]
+		elif not recursive:
+			return default
 		elif "conforming" not in item:
-			return None
+			return default
 		else:
 			for i in item["conforming"]:
 				data = self.search(i, key)
 				if not (data is None):
 					return data
-			return None
+			return default
 
-	def _searchAll(self, uti, key):
+	def searchAll(self, uti, key):
 		if uti not in self.registry:
-			return []
+			return {}
 
 		item = self.registry[uti]
 		if key in item:
-			data = [ item[key] ]
+			data = { uti : item[key] }
 		else:
-			data = []
+			data = {}
 		if "conforming" in item:
 			for i in item["conforming"]:
-				data = data + self._searchAll(i, key)
+				data.update(self.searchAll(i, key))
 		return data
 
 

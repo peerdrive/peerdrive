@@ -216,6 +216,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		with open(path + "/" + hash[2:], 'w') as f:
 			settings = { }
 			self._saveSettings(settings)
+			self.__view._saveSettings(settings)
 			pickle.dump(settings, f)
 
 	def __loadSettings(self):
@@ -228,6 +229,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			if os.path.isfile(path):
 				with open(path, 'r') as f:
 					settings = pickle.load(f)
+				self.__view._loadSettings(settings)
 				self._loadSettings(settings)
 		except:
 			print "Failed to load settings!"
@@ -350,6 +352,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		for (name, store) in stores:
 			action = self.__delMenu.addAction("Delete item from '%s'" % name)
 			action.triggered.connect(lambda: delFun(store))
+			action.setEnabled(doc != store)
 
 		if len(stores) > 1:
 			self.__delMenu.addSeparator()
