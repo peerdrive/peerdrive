@@ -17,11 +17,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys
+import sys, itertools
 from PyQt4 import QtCore, QtGui
-from hotchpotch import Connector
-from hotchpotch.gui import DocButton, RevButton
-from hotchpotch.connector import Watch
+
+from hotchpotch import struct
+from hotchpotch.connector import Connector, Watch
+from hotchpotch.gui2.widgets import DocButton, RevButton
 
 PROGRESS_SYNC = 0
 PROGRESS_REP_DOC = 1
@@ -45,7 +46,19 @@ class Launchbox(QtGui.QDialog):
 		self.mainLayout.setSizeConstraint(QtGui.QLayout.SetMinimumSize)
 		enum = Connector().enum()
 		for store in enum.allStores():
-			self.mainLayout.addWidget(StoreWidget(store))
+			if not enum.isSystem(store):
+				self.mainLayout.addWidget(StoreWidget(store))
+
+		syncButton = QtGui.QPushButton("Synchronization")
+		syncButton.clicked.connect(lambda: SyncEditor().exec_())
+		setupLayout = QtGui.QHBoxLayout()
+		setupLayout.addWidget(syncButton)
+		setupLayout.addStretch()
+		hLine = QtGui.QFrame()
+		hLine.setFrameStyle(QtGui.QFrame.HLine | QtGui.QFrame.Raised)
+		self.mainLayout.addWidget(hLine)
+		self.mainLayout.addLayout(setupLayout)
+
 		hLine = QtGui.QFrame()
 		hLine.setFrameStyle(QtGui.QFrame.HLine | QtGui.QFrame.Raised)
 		self.mainLayout.addWidget(hLine)
@@ -73,12 +86,70 @@ class Launchbox(QtGui.QDialog):
 			widget.remove()
 			#self.adjustSize()
 
+
+class SyncEditor(QtGui.QDialog):
+	MODES = [None, "ff", "latest", "merge"]
+	MAP = {
+		None     : "",
+		"ff"     : "Fast-forward",
+		"latest" : "Take latest revision",
+		"merge"  : "3-way merge"
+	}
+
+	def __init__(self, parent=None):
+		super(SyncEditor, self).__init__(parent)
+
+		self.__changed = False
+		self.__rules = SyncRules()
+		enum = Connector().enum()
+		stores = zip(itertools.count(1), [enum.doc(s) for s in enum.allStores()
+			if not enum.isSystem(s) and enum.isMounted(s)])
+
+		mainLayout = QtGui.QVBoxLayout()
+
+		layout = QtGui.QGridLayout()
+		for (pos, store) in stores:
+			layout.addWidget(DocButton(store, True), 0, pos)
+			layout.addWidget(DocButton(store, True), pos, 0)
+		for (row, store) in stores:
+			for (col, peer) in stores:
+				if store==peer:
+					continue
+				box = QtGui.QComboBox()
+				box.addItems([SyncEditor.MAP[m] for m in SyncEditor.MODES])
+				box.setCurrentIndex(SyncEditor.MODES.index(self.__rules.mode(store, peer)))
+				box.currentIndexChanged.connect(
+					lambda i, store=store, peer=peer: self.__setRule(store, peer, i))
+				layout.addWidget(box, row, col)
+
+		mainLayout.addLayout(layout)
+
+		buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
+			| QtGui.QDialogButtonBox.Cancel);
+		buttonBox.accepted.connect(self.accept)
+		buttonBox.rejected.connect(self.reject)
+		mainLayout.addWidget(buttonBox)
+
+		self.setLayout(mainLayout)
+		self.setWindowTitle("Synchronization rules")
+
+	def accept(self):
+		if self.__changed:
+			self.__rules.save()
+		super(SyncEditor, self).accept()
+
+	def __setRule(self, store, peer, index):
+		mode = SyncEditor.MODES[index]
+		self.__rules.setMode(store, peer, mode)
+		self.__changed = True
+
+
 class StoreWidget(QtGui.QWidget):
 	class StoreWatch(Watch):
 		def __init__(self, doc, callback):
 			self.__callback = callback
 			super(StoreWidget.StoreWatch, self).__init__(Watch.TYPE_DOC, doc)
-		
+
 		def triggered(self, cause):
 			if cause == Watch.EVENT_DISAPPEARED:
 				self.__callback()
@@ -90,11 +161,11 @@ class StoreWidget(QtGui.QWidget):
 
 		self.mountBtn = QtGui.QPushButton("")
 		self.storeBtn = DocButton(None, True)
-		QtCore.QObject.connect(self.mountBtn, QtCore.SIGNAL("clicked()"), self.mountUnmount)
+		self.mountBtn.clicked.connect(self.mountUnmount)
 
 		layout = QtGui.QHBoxLayout()
 		layout.setMargin(0)
-		layout.addWidget(self.storeBtn.getWidget())
+		layout.addWidget(self.storeBtn)
 		layout.addStretch()
 		layout.addWidget(self.mountBtn)
 		self.setLayout(layout)
@@ -117,7 +188,7 @@ class StoreWidget(QtGui.QWidget):
 			self.mounted = True
 		else:
 			self.mountBtn.setText("Mount")
-			self.storeBtn.getWidget().setText(enum.name(self.mountId))
+			self.storeBtn.setText(enum.name(self.mountId))
 			self.mounted = False
 
 	def mountUnmount(self):
@@ -144,9 +215,9 @@ class SyncWidget(QtGui.QFrame):
 
 		layout = QtGui.QHBoxLayout()
 		layout.setMargin(0)
-		layout.addWidget(self.fromBtn.getWidget())
+		layout.addWidget(self.fromBtn)
 		layout.addWidget(self.progressBar)
-		layout.addWidget(self.toBtn.getWidget())
+		layout.addWidget(self.toBtn)
 		self.setLayout(layout)
 
 		Connector().regProgressHandler(self.progress)
@@ -180,13 +251,13 @@ class ReplicationWidget(QtGui.QFrame):
 		self.storeButtons = []
 		layout = QtGui.QHBoxLayout()
 		layout.setMargin(0)
-		layout.addWidget(self.docBtn.getWidget())
+		layout.addWidget(self.docBtn)
 		layout.addWidget(self.progressBar)
 		while stores:
 			store = stores[0:16]
 			button = DocButton(store)
 			self.storeButtons.append(button)
-			layout.addWidget(button.getWidget())
+			layout.addWidget(button)
 			stores = stores[16:]
 		self.setLayout(layout)
 
@@ -202,6 +273,51 @@ class ReplicationWidget(QtGui.QFrame):
 	def progress(self, typ, value, tag):
 		if self.tag == tag:
 			self.progressBar.setValue(value)
+
+
+class SyncRules(object):
+	def __init__(self):
+		sysDoc = Connector().enum().sysStore()
+		sysRev = Connector().lookup_doc(sysDoc).rev(sysDoc)
+		with Connector().peek(sysRev) as r:
+			root = struct.loads(r.readAll('HPSD'))
+			self.syncDoc = root["syncrules"].doc()
+		self.syncRev = Connector().lookup_doc(self.syncDoc).rev(sysDoc)
+		with Connector().peek(self.syncRev) as r:
+			self.rules = struct.loads(r.readAll('HPSD'))
+
+	def save(self):
+		with Connector().update(self.syncDoc, self.syncRev) as w:
+			w.writeAll('HPSD', struct.dumps(self.rules))
+			w.commit()
+			self.rev = w.getRev()
+
+	def mode(self, store, peer):
+		for rule in self.rules:
+			if (rule["from"].decode('hex') == store) and (rule["to"].decode('hex') == peer):
+				return rule["mode"]
+		return None
+
+	def setMode(self, store, peer, mode):
+		if mode:
+			# try to update rule
+			for rule in self.rules:
+				if ((rule["from"].decode('hex') == store) and
+					(rule["to"].decode('hex') == peer)):
+					rule["mode"] = mode
+					return
+
+			# add new rule
+			rule = {}
+			rule["from"] = store.encode('hex')
+			rule["to"]   = peer.encode('hex')
+			rule["mode"] = mode
+			self.rules.append(rule)
+		else:
+			# delete rule
+			self.rules = [r for r in self.rules if (r["from"].decode('hex') != store)
+				or (r["to"].decode('hex') != peer)]
+
 
 
 app = QtGui.QApplication(sys.argv)
