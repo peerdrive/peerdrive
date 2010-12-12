@@ -191,6 +191,8 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 	def closeEvent(self, event):
 		event.accept()
+		if self.__mutable:
+			self.__view.checkpoint("<<Automatically saved>>")
 		self.__saveSettings()
 
 	# === protected methos

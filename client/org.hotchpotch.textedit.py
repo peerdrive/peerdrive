@@ -25,10 +25,11 @@ import diff3
 class TextEdit(widgets.DocumentView):
 
 	def __init__(self):
+		super(TextEdit, self).__init__("org.hotchpotch.textedit")
 		self.textEdit = QtGui.QTextEdit()
-		super(TextEdit, self).__init__(None, self.textEdit, "org.hotchpotch.textedit")
 		self.textEdit.setReadOnly(True)
 		self.textEdit.textChanged.connect(self._emitSaveNeeded)
+		self.setCentralWidget(self.textEdit)
 		self.mutable.connect(lambda m: self.textEdit.setReadOnly(not m))
 
 	def docRead(self, readWrite, r):

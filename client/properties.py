@@ -18,7 +18,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import Connector, Registry, struct, gui
+from hotchpotch import Connector, Registry, struct
+from hotchpotch.gui2.widgets import DocButton, RevButton
+from hotchpotch.gui2.utils import showDocument
 
 def extractMetaData(metaData, path, default):
 	item = metaData
@@ -40,20 +42,6 @@ def setMetaData(metaData, field, value):
 		path = path[1:]
 	item[path[0]] = value
 
-
-buttons = []
-
-def genStoreButton(store):
-	b = gui.DocButton(store, True)
-	buttons.append(b)
-	button = b.getWidget()
-	return button
-
-def genRevButton(rev):
-	b = gui.RevButton(rev, True)
-	buttons.append(b)
-	button = b.getWidget()
-	return button
 
 class PropertiesDialog(QtGui.QDialog):
 	def __init__(self, uuid, isDoc, parent=None):
@@ -130,7 +118,7 @@ class DocumentTab(QtGui.QWidget):
 		mainLayout.addWidget(QtGui.QLabel("The "+descr+" exists on the following stores:"))
 		subLayout = QtGui.QHBoxLayout()
 		for store in stores:
-			subLayout.addWidget(genStoreButton(store))
+			subLayout.addWidget(DocButton(store, True))
 		subLayout.addStretch()
 		mainLayout.addLayout(subLayout)
 		self.setLayout(mainLayout)
@@ -150,7 +138,7 @@ class RevisionTab(QtGui.QWidget):
 		for rev in revs:
 			stat = Connector().stat(rev)
 
-			layout.addWidget(genRevButton(rev), 0, col)
+			layout.addWidget(RevButton(rev, True), 0, col)
 			layout.addWidget(QtGui.QLabel(Registry().getDisplayString(stat.type())), 1, col)
 			layout.addWidget(QtGui.QLabel(str(stat.mtime())), 2, col)
 			size = 0
@@ -166,7 +154,7 @@ class RevisionTab(QtGui.QWidget):
 
 			storeLayout = QtGui.QVBoxLayout()
 			for store in Connector().lookup_rev(rev):
-				storeLayout.addWidget(genStoreButton(store))
+				storeLayout.addWidget(DocButton(store, True))
 			layout.addLayout(storeLayout, 4, col)
 
 			col += 1
@@ -224,7 +212,7 @@ class HistoryTab(QtGui.QWidget):
 	def __open(self, item):
 		row = self.__historyListBox.row(item)
 		rev = self.__historyRevs[row]
-		gui.showDocument(struct.RevLink(rev))
+		showDocument(struct.RevLink(rev))
 
 
 class AnnotationTab(QtGui.QWidget):

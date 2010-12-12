@@ -18,47 +18,113 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import gui
+from hotchpotch.gui2 import main, widgets
 
 
-class ImageWindow(gui.MainWindow):
+class ImageWidget(widgets.DocumentView):
 
-	def __init__(self, argv):
-		super(ImageWindow, self).__init__(argv,
-			"org.hotchpotch.imageview",
-			["public.image"],
-			False)
+	def __init__(self):
+		super(ImageWidget, self).__init__("org.hotchpotch.imageview")
+
+		self.__scale = None
+		self.__manualScale = 1.0
+
 		self.imageLabel = QtGui.QLabel()
 		self.imageLabel.setBackgroundRole(QtGui.QPalette.Base)
 		self.imageLabel.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Ignored)
 		self.imageLabel.setScaledContents(True)
-
 		self.scrollArea = QtGui.QScrollArea()
 		self.scrollArea.setBackgroundRole(QtGui.QPalette.Dark)
 		self.scrollArea.setWidget(self.imageLabel)
 		self.setCentralWidget(self.scrollArea)
 
+	def docRead(self, readWrite, r):
+		data = r.readAll('FILE')
+		image = QtGui.QImage()
+		image.loadFromData(QtCore.QByteArray(data))
+		if image.isNull():
+			return
+		self.imageLabel.setPixmap(QtGui.QPixmap.fromImage(image))
+		self.__adjustSize()
+
+	def zoomIn(self):
+		self.__scaleImage(1.25)
+
+	def zoomOut(self):
+		self.__scaleImage(0.8)
+
+	def zoomNormal(self):
+		self.__scale = 1.0
+		self.__manualScale = 1.0
+
+	def fitToWindow(self, enable):
+		if enable:
+			self.__scale = None
+		else:
+			self.__scale = self.__manualScale
+		self.__adjustSize()
+
+	def currentScale(self):
+		return self.__scale
+
+	def __scaleImage(self, factor):
+		if self.__scale is None:
+			return
+		self.__scale = self.__scale * factor
+		self.__manualScale = self.__manualScale
+		self.__adjustSize()
+		self.__adjustScrollBar(self.scrollArea.horizontalScrollBar(), factor)
+		self.__adjustScrollBar(self.scrollArea.verticalScrollBar(), factor)
+
+	def __adjustScrollBar(self, scrollBar, factor):
+		scrollBar.setValue(int(factor * scrollBar.value()
+			+ ((factor - 1) * scrollBar.pageStep()/2)))
+
+	def __adjustSize(self):
+		if self.__scale is None:
+			hScale = float(self.size().width()-3) / self.imageLabel.pixmap().size().width()
+			vScale = float(self.size().height()-3) / self.imageLabel.pixmap().size().height()
+			if hScale < vScale:
+				factor = hScale
+			else:
+				factor = vScale
+		else:
+			factor = self.__scale
+		self.imageLabel.resize(factor * self.imageLabel.pixmap().size())
+
+	def resizeEvent(self, event):
+		if (self.__scale is None) and (self.imageLabel.pixmap() is not None):
+			self.__adjustSize()
+		super(ImageWidget, self).resizeEvent(event)
+
+
+class ImageWindow(main.MainWindow):
+
+	def __init__(self):
+		super(ImageWindow, self).__init__(ImageWidget(), False)
+
 		self.createActions()
 		self.createMenus()
 		self.createToolBars()
+		self.updateActions()
 
 	def createActions(self):
 		self.zoomInAct = QtGui.QAction(QtGui.QIcon('icons/viewmag+.png'), "Zoom &In (25%)", self)
 		self.zoomInAct.setShortcut("Ctrl++")
-		QtCore.QObject.connect(self.zoomInAct, QtCore.SIGNAL("triggered()"), self.zoomIn)
+		self.zoomInAct.triggered.connect(self.zoomIn)
 
 		self.zoomOutAct = QtGui.QAction(QtGui.QIcon('icons/viewmag-.png'), "Zoom &Out (25%)", self)
 		self.zoomOutAct.setShortcut("Ctrl+-")
-		QtCore.QObject.connect(self.zoomOutAct, QtCore.SIGNAL("triggered()"), self.zoomOut)
+		self.zoomOutAct.triggered.connect(self.zoomOut)
 
 		self.normalSizeAct = QtGui.QAction(QtGui.QIcon('icons/viewmag1.png'), "&Normal Size", self)
 		self.normalSizeAct.setShortcut("Ctrl+S")
-		QtCore.QObject.connect(self.normalSizeAct, QtCore.SIGNAL("triggered()"), self.normalSize)
+		self.normalSizeAct.triggered.connect(self.normalSize)
 
 		self.fitToWindowAct = QtGui.QAction(QtGui.QIcon('icons/viewmagfit.png'), "&Fit to Window", self)
 		self.fitToWindowAct.setCheckable(True)
 		self.fitToWindowAct.setShortcut("Ctrl+F")
-		QtCore.QObject.connect(self.fitToWindowAct, QtCore.SIGNAL("triggered(bool)"), self.fitToWindow)
+		self.fitToWindowAct.triggered.connect(self.fitToWindow)
 
 	def createMenus(self):
 		self.viewMenu = QtGui.QMenu("&View", self)
@@ -76,56 +142,34 @@ class ImageWindow(gui.MainWindow):
 		self.viewToolBar.addAction(self.normalSizeAct)
 		self.viewToolBar.addAction(self.fitToWindowAct)
 
-	def docRead(self, readWrite, r):
-		data = r.readAll('FILE')
-		image = QtGui.QImage()
-		image.loadFromData(QtCore.QByteArray(data))
-		if image.isNull():
-			return
-		self.imageLabel.setPixmap(QtGui.QPixmap.fromImage(image))
-		self.scaleFactor = 1.0
-		self.oldFactor = 1.0
-		self.imageLabel.adjustSize()
-		self.updateActions()
+	def updateActions(self):
+		scale = self.viewWidget().currentScale()
+		fit = scale is None
+		if fit:
+			self.zoomInAct.setEnabled(False)
+			self.zoomOutAct.setEnabled(False)
+		else:
+			self.zoomInAct.setEnabled(scale < 16.0)
+			self.zoomOutAct.setEnabled(scale > 0.03)
+		self.normalSizeAct.setEnabled(not fit)
+		if fit != self.fitToWindowAct.isChecked():
+			self.fitToWindowAct.setChecked(fit)
 
 	def zoomIn(self):
-		self.scaleImage(1.25)
-
-	def zoomOut(self):
-		self.scaleImage(0.8)
-
-	def normalSize(self):
-		self.imageLabel.adjustSize()
-		self.scaleFactor = 1.0
-		self.oldFactor = 1.0
-
-	def fitToWindow(self):
-		fitToWindow = self.fitToWindowAct.isChecked()
-		self.scrollArea.setWidgetResizable(fitToWindow)
-		if not fitToWindow:
-			self.scaleFactor = self.oldFactor
-			self.scaleImage(1.0)
+		self.viewWidget().zoomIn()
 		self.updateActions()
 
-	def updateActions(self):
-		self.zoomInAct.setEnabled(not self.fitToWindowAct.isChecked())
-		self.zoomOutAct.setEnabled(not self.fitToWindowAct.isChecked())
-		self.normalSizeAct.setEnabled(not self.fitToWindowAct.isChecked())
+	def zoomOut(self):
+		self.viewWidget().zoomOut()
+		self.updateActions()
 
-	def scaleImage(self, factor):
-		self.scaleFactor *= factor
-		self.oldFactor = self.scaleFactor
-		self.imageLabel.resize(self.scaleFactor * self.imageLabel.pixmap().size())
+	def normalSize(self):
+		self.viewWidget().zoomNormal()
+		self.updateActions()
 
-		self.adjustScrollBar(self.scrollArea.horizontalScrollBar(), factor)
-		self.adjustScrollBar(self.scrollArea.verticalScrollBar(), factor)
-
-		self.zoomInAct.setEnabled(self.scaleFactor < 3.0)
-		self.zoomOutAct.setEnabled(self.scaleFactor > 0.333)
-
-	def adjustScrollBar(self, scrollBar, factor):
-		scrollBar.setValue(int(factor * scrollBar.value()
-			+ ((factor - 1) * scrollBar.pageStep()/2)))
+	def fitToWindow(self, enabled):
+		self.viewWidget().fitToWindow(enabled)
+		self.updateActions()
 
 
 if __name__ == '__main__':
@@ -133,7 +177,8 @@ if __name__ == '__main__':
 	import sys
 
 	app = QtGui.QApplication(sys.argv)
-	mainWin = ImageWindow(sys.argv)
+	mainWin = ImageWindow()
+	mainWin.open(sys.argv)
 	mainWin.show()
 	sys.exit(app.exec_())
 

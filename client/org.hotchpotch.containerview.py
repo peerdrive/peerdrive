@@ -778,16 +778,7 @@ class CollectionTreeView(QtGui.QTreeView):
 class CollectionWidget(widgets.DocumentView):
 
 	def __init__(self):
-		self.listView = CollectionTreeView(self)
-		self.listView.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
-		self.listView.setDragEnabled(True)
-		self.listView.setAutoScroll(True)
-		self.listView.setExpandsOnDoubleClick(False)
-		self.listView.setRootIsDecorated(False)
-		self.listView.setEditTriggers(
-			QtGui.QAbstractItemView.SelectedClicked |
-			QtGui.QAbstractItemView.EditKeyPressed)
-		super(CollectionWidget, self).__init__(None, self.listView, "org.hotchpotch.containerview")
+		super(CollectionWidget, self).__init__("org.hotchpotch.containerview")
 
 		self.__settings = None
 		self.mutable.connect(self.__setMutable)
@@ -801,8 +792,18 @@ class CollectionWidget(widgets.DocumentView):
 		self.itemPropertiesAct = QtGui.QAction("&Properties", self)
 		self.itemPropertiesAct.triggered.connect(self.__showProperties)
 
+		self.listView = CollectionTreeView(self)
+		self.listView.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
+		self.listView.setDragEnabled(True)
+		self.listView.setAutoScroll(True)
+		self.listView.setExpandsOnDoubleClick(False)
+		self.listView.setRootIsDecorated(False)
+		self.listView.setEditTriggers(
+			QtGui.QAbstractItemView.SelectedClicked |
+			QtGui.QAbstractItemView.EditKeyPressed)
 		self.listView.addAction(self.itemDelAct)
 		self.listView.doubleClicked.connect(self.__doubleClicked)
+		self.setCentralWidget(self.listView)
 
 	def docRead(self, readWrite, handle):
 		uti = Connector().stat(self.rev()).type()
@@ -968,7 +969,6 @@ class CollectionWindow(main.MainWindow):
 
 	def __setMutable(self, mutable):
 		self.__cleanAct.setEnabled(mutable)
-		self.__colMenu.setEnabled(mutable)
 
 
 if __name__ == '__main__':

@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui, QtWebKit
-from hotchpotch import gui
+from hotchpotch.gui2 import widgets, main
 
 import sys
 import email
@@ -40,14 +40,10 @@ def format(addr):
 	return email.utils.formataddr((unicodeName, dest))
 
 
-class MailWindow(gui.MainWindow):
+class MailWidget(widgets.DocumentView):
 
-	def __init__(self, argv):
-		super(MailWindow, self).__init__(
-			argv,
-			"org.hotchpotch.mailview",
-			["mime.message.rfc822"],
-			False)
+	def __init__(self):
+		super(MailWidget, self).__init__("org.hotchpotch.mailview")
 
 		settings = QtWebKit.QWebSettings.globalSettings()
 		settings.setAttribute(QtWebKit.QWebSettings.AutoLoadImages, False)
@@ -97,38 +93,9 @@ class MailWindow(gui.MainWindow):
 		central.setLayout(layout)
 		self.setCentralWidget(central)
 
-
-		self.createActions()
-		self.createMenus()
-		self.createToolBars()
-
-	def createActions(self):
-		self.unreadAct = QtGui.QAction(QtGui.QIcon('icons/mail_new.png'), "Mark unread", self)
-		self.unreadAct.setStatusTip("Mark the mail as unread")
-		self.unreadAct.setCheckable(True)
-		QtCore.QObject.connect(self.unreadAct, QtCore.SIGNAL("triggered(bool)"), self.__unreadChanged)
-		pass
-
-	def createMenus(self):
-		#self.editMenu = self.menuBar().addMenu("&Edit")
-		#self.editMenu.addAction(self.cutAct)
-		#self.editMenu.addAction(self.copyAct)
-		#self.editMenu.addAction(self.pasteAct)
-		pass
-
-	def createToolBars(self):
-		self.mailToolBar = self.addToolBar("Mail")
-		self.mailToolBar.addAction(self.unreadAct)
-		#self.editToolBar.addAction(self.copyAct)
-		#self.editToolBar.addAction(self.pasteAct)
-		pass
-
 	def docRead(self, readWrite, r):
-		tags = self.metaDataGetField(gui.MainWindow.HPA_TAGS, [])
-		self.unreadAct.setChecked("unread" in tags)
-
 		self.__mail = email.message_from_string(r.readAll('FILE'))
-		content = self.findPart(self.__mail)
+		content = self.__findPart(self.__mail)
 		if not content:
 			self.view.setCurrentWidget(self.textView)
 			self.view.setPlainText("Well, I was too stupid to find the mail text...")
@@ -144,38 +111,21 @@ class MailWindow(gui.MainWindow):
 				self.textView.setPlainText("No suitable content encoding found...")
 
 		self.dateLabel.setText(self.__mail['date'])
-		self.fromLabel.setText(self.getAddresses('from'))
-		self.toLabel.setText(self.getAddresses('to'))
-		cc = self.getAddresses('cc')
+		self.fromLabel.setText(self.__getAddresses('from'))
+		self.toLabel.setText(self.__getAddresses('to'))
+		cc = self.__getAddresses('cc')
 		if cc:
 			self.ccLabel.setText(cc)
 			self.headerLayout.addWidget(QtGui.QLabel("CC:"), 3, 0)
 			self.headerLayout.addWidget(self.ccLabel, 3, 1)
 
-	def __unreadChanged(self, checked):
-		tags = self.metaDataGetField(gui.MainWindow.HPA_TAGS, [])
-		if checked:
-			if "unread" not in tags:
-				tags.append("unread")
-		else:
-			tags = [tag for tag in tags if tag != "unread"]
-		self.metaDataSetField(gui.MainWindow.HPA_TAGS, tags)
-
-	def getAddresses(self, field):
-		raw = email.utils.getaddresses(self.__mail.get_all(field, []))
-		pretty = [ format(addr) for addr in raw ]
-		if pretty:
-			return reduce(lambda x,y: x+', '+y, pretty)
-		else:
-			return ""
-
-	def findPart(self, part):
+	def __findPart(self, part):
 		content = {}
 		if part.is_multipart():
 			subParts = part.get_payload()
 			for sub in subParts:
 				if sub.get_content_maintype() == 'multipart':
-					content.update( self.findPart(sub) )
+					content.update( self.__findPart(sub) )
 				elif sub.get_content_type() == "text/plain":
 					data = sub.get_payload(decode=True)
 					charset = sub.get_content_charset(None)
@@ -188,12 +138,58 @@ class MailWindow(gui.MainWindow):
 			content[part.get_content_type()] = part.get_payload(decode=True)
 		return content
 
+	def __getAddresses(self, field):
+		raw = email.utils.getaddresses(self.__mail.get_all(field, []))
+		pretty = [ format(addr) for addr in raw ]
+		if pretty:
+			return reduce(lambda x,y: x+', '+y, pretty)
+		else:
+			return ""
+
+
+class MailWindow(main.MainWindow):
+
+	def __init__(self):
+		super(MailWindow, self).__init__(MailWidget(), False)
+		self.createActions()
+		self.createMenus()
+		self.createToolBars()
+
+		self.viewWidget().revChanged.connect(self.__readMetaData)
+
+	def createActions(self):
+		self.unreadAct = QtGui.QAction(QtGui.QIcon('icons/mail_new.png'), "Mark unread", self)
+		self.unreadAct.setStatusTip("Mark the mail as unread")
+		self.unreadAct.setCheckable(True)
+		self.unreadAct.triggered.connect(self.__unreadChanged)
+
+	def createMenus(self):
+		pass
+
+	def createToolBars(self):
+		self.mailToolBar = self.addToolBar("Mail")
+		self.mailToolBar.addAction(self.unreadAct)
+
+	def __readMetaData(self):
+		tags = self.viewWidget().metaDataGetField(widgets.DocumentView.HPA_TAGS, [])
+		self.unreadAct.setChecked("unread" in tags)
+
+	def __unreadChanged(self, checked):
+		tags = self.viewWidget().metaDataGetField(widgets.DocumentView.HPA_TAGS, [])
+		if checked:
+			if "unread" not in tags:
+				tags.append("unread")
+		else:
+			tags = [tag for tag in tags if tag != "unread"]
+		self.viewWidget().metaDataSetField(widgets.DocumentView.HPA_TAGS, tags)
+
 if __name__ == '__main__':
 
 	import sys
 
 	app = QtGui.QApplication(sys.argv)
-	mainWin = MailWindow(sys.argv)
+	mainWin = MailWindow()
+	mainWin.open(sys.argv)
 	mainWin.show()
 	sys.exit(app.exec_())
 

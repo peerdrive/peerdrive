@@ -208,7 +208,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		def execute(self):
 			self.__action()
 
-	def __init__(self, parent, widget, creator):
+	def __init__(self, creator, parent=None):
 		self.__userEventType = QtCore.QEvent.registerEventType()
 		QtGui.QStackedWidget.__init__(self, parent)
 
@@ -228,12 +228,14 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 		self.__noDocWidget = QtGui.QLabel("No doc")
 		self.addWidget(self.__noDocWidget)
-		self.__editWidget = widget
-		self.addWidget(self.__editWidget)
 		self.__chooseSaveAsWidget = QtGui.QLabel("TODO: Choose new location")
 		self.addWidget(self.__chooseSaveAsWidget)
 
 		self.setCurrentWidget(self.__noDocWidget)
+
+	def setCentralWidget(self, widget):
+		self.__editWidget = widget
+		self.addWidget(self.__editWidget)
 
 	def open(self, guid, isDoc):
 		self.__mutable = isDoc
@@ -296,6 +298,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 		if self.__mergeOurs(revs, stores):
 			return
+
+	def docSave(self, writer):
+		pass
 
 	# returns (type, handled) where:
 	#   type:    the resulting type code (if we would handle it)
@@ -422,6 +427,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		avail = len(Connector().lookup_rev(self.__rev)) > 0
 		if (self.__state == DocumentView.STATE_NO_DOC) and avail:
 			self.__setState(DocumentView.STATE_EDITING)
+			self.__emitNewRev()
 		elif (self.__state == DocumentView.STATE_EDITING) and not avail:
 			self.__setState(DocumentView.STATE_NO_DOC)
 
