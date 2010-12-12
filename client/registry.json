@@ -56,7 +56,7 @@
 	"public.text" : {
 		"conforming" : ["public.content", "public.data"],
 		"icon" : "uti/document.png",
-		"exec" : "public.text.py"
+		"exec" : "org.hotchpotch.textedit.py"
 	},
 	"public.plain-text" : {
 		"conforming" : ["public.text"],
@@ -138,7 +138,7 @@
 	"org.hotchpotch.container" : {
 		"conforming" : ["public.item"],
 		"display" : "Collection",
-		"exec" : "org.hotchpotch.container.py",
+		"exec" : "org.hotchpotch.containerview.py",
 		"meta" : [
 			{
 				"key"     : ["org.hotchpotch.container", "autoclean"],
@@ -193,7 +193,7 @@
 		"extensions" : ["eml"],
 		"mimetypes"  : ["message/rfc822", "text/x-mail"],
 		"display" : "Internet Mail",
-		"exec" : "mime.message.rfc822.py",
+		"exec" : "org.hotchpotch.mailview.py",
 		"extractor" : "extract-rfc822.py",
 		"meta" : [
 			{
@@ -213,7 +213,7 @@
 	"public.image" : {
 		"conforming" : ["public.data", "public.content"],
 		"icon" : "uti/image.png",
-		"exec" : "public.image.py",
+		"exec" : "org.hotchpotch.imageview.py",
 		"extractor" : "extract-public.image.py",
 		"display" : "Image",
 		"meta" : [

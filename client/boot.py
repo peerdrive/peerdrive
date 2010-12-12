@@ -76,7 +76,8 @@ importObjectByPath(
 				"comment" : "Created from template"
 			},
 			"org.hotchpotch.sync" : {
-				"sticky" : True
+				"sticky"  : True,
+				"history" : 31*24*60*60 # 1 month
 			}
 		}))
 	])
@@ -91,7 +92,8 @@ importObjectByPath(
 				"comment" : "Created from template"
 			},
 			"org.hotchpotch.sync" : {
-				"sticky" : True
+				"sticky"  : True,
+				"history" : 31*24*60*60 # 1 month
 			}
 		}))
 	])

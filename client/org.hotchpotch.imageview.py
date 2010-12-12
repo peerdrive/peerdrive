@@ -25,7 +25,7 @@ class ImageWindow(gui.MainWindow):
 
 	def __init__(self, argv):
 		super(ImageWindow, self).__init__(argv,
-			"org.hotchpotch.xv",
+			"org.hotchpotch.imageview",
 			["public.image"],
 			False)
 		self.imageLabel = QtGui.QLabel()
