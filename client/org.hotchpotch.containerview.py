@@ -23,7 +23,7 @@ from datetime import datetime
 from hotchpotch import Connector, Registry
 from hotchpotch import struct, importer
 from hotchpotch.connector import Watch
-from hotchpotch.gui2 import main, widgets, utils
+from hotchpotch.gui import main, widgets, utils
 
 
 class NameColumnInfo(object):

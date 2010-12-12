@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch.gui2 import main, widgets
+from hotchpotch.gui import main, widgets
 import diff3
 
 

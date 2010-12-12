@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui, QtWebKit
-from hotchpotch.gui2 import widgets, main
+from hotchpotch.gui import widgets, main
 
 import sys
 import email

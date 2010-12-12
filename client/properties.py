@@ -19,8 +19,8 @@
 
 from PyQt4 import QtCore, QtGui
 from hotchpotch import Connector, Registry, struct
-from hotchpotch.gui2.widgets import DocButton, RevButton
-from hotchpotch.gui2.utils import showDocument
+from hotchpotch.gui.widgets import DocButton, RevButton
+from hotchpotch.gui.utils import showDocument
 
 def extractMetaData(metaData, path, default):
 	item = metaData

@@ -22,7 +22,7 @@ from PyQt4 import QtCore, QtGui
 
 from hotchpotch import struct
 from hotchpotch.connector import Connector, Watch
-from hotchpotch.gui2.widgets import DocButton, RevButton
+from hotchpotch.gui.widgets import DocButton, RevButton
 
 PROGRESS_SYNC = 0
 PROGRESS_REP_DOC = 1
