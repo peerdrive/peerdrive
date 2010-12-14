@@ -213,6 +213,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		QtGui.QStackedWidget.__init__(self, parent)
 
 		self.__creator = creator
+		self.__open = False
 		self.__doc = None
 		self.__rev = None
 		self.__mutable = False
@@ -230,6 +231,8 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.addWidget(self.__noDocWidget)
 		self.__chooseSaveAsWidget = QtGui.QLabel("TODO: Choose new location")
 		self.addWidget(self.__chooseSaveAsWidget)
+		self.__chooseRevWidget = None
+		self.__chooseOverwriteWidget = None
 
 		self.setCurrentWidget(self.__noDocWidget)
 
@@ -238,6 +241,23 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.addWidget(self.__editWidget)
 
 	def open(self, guid, isDoc):
+		if self.__open:
+			self.__open = False
+			if self.__state != DocumentView.STATE_NO_DOC:
+				if self.__state == DocumentView.STATE_EDITING:
+					self.__saveFile('<<Internal checkpoint>>')
+				self.__setState(DocumentView.STATE_NO_DOC)
+			if self.__chooseRevWidget:
+				self.removeWidget(self.__chooseRevWidget)
+				self.__chooseRevWidget = None
+			if self.__chooseOverwriteWidget:
+				self.removeWidget(self.__chooseOverwriteWidget)
+				self.__chooseOverwriteWidget = None
+			Connector().unwatch(self)
+			self.__doc = None
+			self.__rev = None
+			self.__mutable = False
+
 		self.__mutable = isDoc
 		if isDoc:
 			self.__doc = guid
@@ -250,6 +270,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__rev = guid
 			Watch.__init__(self, Watch.TYPE_REV, guid)
 		Connector().watch(self)
+		self.__open = True
 		self.__update()
 
 	def doc(self):
@@ -500,7 +521,10 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 				self.setCurrentWidget(self.__chooseOverwriteWidget)
 			elif self.__state == DocumentView.STATE_CHOOSE_ALTERNATE:
 				self.setCurrentWidget(self.__chooseSaveAsWidget)
-		self.__update()
+
+		# try to sync with the document state
+		if self.__open:
+			self.__update()
 
 	def __updateDocStartRev(self):
 		l = Connector().lookup_doc(self.__doc)
