@@ -53,8 +53,19 @@ class CollectionWindow(main.MainWindow):
 		self.__colMenu.clear()
 		reg = Registry()
 		model = self.viewWidget().model()
-		types = model.typeCodes()
+		types = model.typeCodes().copy()
 		columns = model.getColumns()
+		for col in columns:
+			(uti, path) = col.split(':')
+			if uti != "":
+				types.add(uti)
+		# add stat columns
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":size", "Size")
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":mtime", "Modification time")
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":type", "Type code")
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":creator", "Creator code")
+		self.__colMenu.addSeparator()
+		# add meta columns
 		metaSpecs = {}
 		for t in types:
 			metaSpecs.update(reg.searchAll(t, "meta"))
@@ -62,14 +73,18 @@ class CollectionWindow(main.MainWindow):
 			subMenu = self.__colMenu.addMenu(reg.getDisplayString(uti))
 			for spec in specs:
 				key = uti+":"+reduce(lambda x,y: x+"/"+y, spec["key"])
-				visible = key in columns
-				action = subMenu.addAction(spec["display"])
-				action.setCheckable(True)
-				action.setChecked(visible)
-				if visible:
-					action.triggered.connect(lambda en, col=key: model.remColumn(col))
-				else:
-					action.triggered.connect(lambda en, col=key: model.addColumn(col))
+				self.__columnsShowAddEntry(subMenu, columns, key, spec["display"])
+
+	def __columnsShowAddEntry(self, subMenu, columns, key, display):
+		model = self.viewWidget().model()
+		visible = key in columns
+		action = subMenu.addAction(display)
+		action.setCheckable(True)
+		action.setChecked(visible)
+		if visible:
+			action.triggered.connect(lambda en, col=key: model.remColumn(col))
+		else:
+			action.triggered.connect(lambda en, col=key: model.addColumn(col))
 
 	def __toggleAutoClean(self, checked):
 		self.viewWidget().metaDataSetField(CollectionModel.AUTOCLEAN, checked)

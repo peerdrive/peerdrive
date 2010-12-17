@@ -83,7 +83,7 @@ class MetaColumnInfo(object):
 	def key(self):
 		return self.__key
 
-	def extract(self, metaData):
+	def extract(self, stat, metaData):
 		item = metaData
 		for step in self.__path:
 			if step in item:
@@ -115,14 +115,65 @@ class MetaColumnInfo(object):
 			return "#VALUE"
 
 
+class StatColumnInfo(object):
+	def __init__(self, key):
+		self.__key = key
+		self.__default = ""
+		if key == ":size":
+			self.__name = "Size"
+			self.__extractor = StatColumnInfo.__extractSize
+		elif key == ":mtime":
+			self.__name = "Modification time"
+			self.__extractor = lambda s: str(s.mtime())
+		elif key == ":type":
+			self.__name = "Type code"
+			self.__extractor = lambda s: s.type()
+		elif key == ":creator":
+			self.__name = "Creator code"
+			self.__extractor = lambda s: s.creator()
+		else:
+			raise KeyError("Invalid StatColumnInfo key")
+
+	def removable(self):
+		return True
+
+	def editable(self):
+		return False
+
+	def derived(self):
+		return True
+
+	def default(self):
+		return self.__default
+
+	def name(self):
+		return self.__name
+
+	def key(self):
+		return self.__key
+
+	def extract(self, stat, metaData):
+		return self.__extractor(stat)
+
+	@staticmethod
+	def __extractSize(stat):
+		size = 0
+		for part in stat.parts():
+			size += stat.size(part)
+		return str(size)
+
+
 def _columnFactory(key):
 	if key == NameColumnInfo.KEY:
 		return NameColumnInfo()
 	else:
 		(uti, path) = key.split(':')
-		for meta in Registry().search(uti, "meta", recursive=False, default=[]):
-			if path == reduce(lambda x,y: x+"/"+y, meta["key"]):
-				return MetaColumnInfo(key, meta)
+		if uti == "":
+			return StatColumnInfo(key)
+		else:
+			for meta in Registry().search(uti, "meta", recursive=False, default=[]):
+				if path == reduce(lambda x,y: x+"/"+y, meta["key"]):
+					return MetaColumnInfo(key, meta)
 	return None
 
 
@@ -160,6 +211,22 @@ class CollectionEntry(Watch):
 	def remColumn(self, index):
 		del self.__columnValues[index]
 		del self.__columnDefs[index]
+
+	def setColumns(self, columns):
+		values = []
+		for column in columns:
+			if column.derived():
+				values.append(column.default())
+			else:
+				old = column.default()
+				for (oldVal, oldDef) in zip(self.__columnValues, self.__columnDefs):
+					if oldDef.key() == column.key():
+						old = oldVal
+						break
+				values.append(old)
+		self.__columnValues = values
+		self.__columnDefs = columns[:]
+		self.__updateColumns()
 
 	def getLink(self):
 		return self.__link
@@ -216,15 +283,24 @@ class CollectionEntry(Watch):
 		self.__valid = True
 
 	def __updateColumns(self):
-		with Connector().peek(self.__rev) as r:
-			try:
-				metaData = struct.loads(r.readAll('META'))
-			except:
-				metaData = { }
-		for i in xrange(len(self.__columnDefs)):
-			column = self.__columnDefs[i]
-			if column.derived():
-				self.__columnValues[i] = column.extract(metaData)
+		try:
+			stat = Connector().stat(self.__rev)
+			with Connector().peek(self.__rev) as r:
+				try:
+					metaData = struct.loads(r.readAll('META'))
+				except:
+					metaData = { }
+
+			for i in xrange(len(self.__columnDefs)):
+				column = self.__columnDefs[i]
+				if column.derived():
+					self.__columnValues[i] = column.extract(stat, metaData)
+
+		except IOError:
+			for i in xrange(len(self.__columnDefs)):
+				column = self.__columnDefs[i]
+				if column.derived():
+					self.__columnValues[i] = column.default()
 
 	# callback when watch was triggered
 	def triggered(self, cause):
@@ -294,7 +370,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 	def typeCodes(self):
 		return self.__typeCodes
 
-	def getOpenItemLink(self, index):
+	def getItemLink(self, index):
 		link = self._listing[index.row()].getLink()
 		if isinstance(link, struct.DocLink):
 			if self.__mutable:
@@ -330,6 +406,9 @@ class CollectionModel(QtCore.QAbstractTableModel):
 	def setColumns(self, columns):
 		self._columns = [ci for ci in [_columnFactory(c) for c in columns]
 			if ci is not None]
+		for i in self._listing:
+			i.setColumns(self._columns)
+		self.reset()
 
 	def addColumn(self, columnKey):
 		index = len(self._columns)
@@ -680,120 +759,15 @@ class CollectionTreeView(QtGui.QTreeView):
 
 	def contextMenuEvent(self, event):
 		menu = QtGui.QMenu(self)
-		repActions = {}
-		openRevActions = {}
-		createActions = {}
-
-		# selected an item?
-		item = self.model().getItem(self.indexAt(event.pos()))
-		if item:
-			if item.isValid():
-				link = item.getLink()
-				openRevActions = self.__addOpenActions(menu, link)
-				if self.__parent.isMutable:
-					menu.addSeparator()
-					repActions = self.__addReplicateActions(menu, link)
-			# add default options
-			if self.__parent.isMutable:
-				menu.addSeparator()
-				menu.addAction(self.__parent.itemDelAct)
-			menu.addSeparator()
-			menu.addAction(self.__parent.itemPropertiesAct)
-		elif self.__parent.isMutable:
-			createActions = self.__addCreateActions(menu)
-		else:
-			return
-
-		# execute
+		self.__parent.fillContextMenu(menu)
 		choice = menu.exec_(event.globalPos())
-		c = Connector()
-		if choice in repActions:
-			store = repActions[choice]
-			if isinstance(link, struct.DocLink):
-				c.replicateDoc(link.doc(), dstStores=[store])
-			else:
-				c.replicateRev(link.rev(), dstStores=[store])
-		elif choice in createActions:
-			sourceRev = createActions[choice].rev()
-			info = c.stat(sourceRev)
-			destStores = c.lookup_rev(self.__parent.rev())
-			# copy
-			with c.create(info.type(), info.creator(), destStores) as w:
-				with c.peek(sourceRev) as r:
-					for part in info.parts():
-						w.write(part, r.readAll(part))
-				w.commit()
-				destDoc = w.getDoc()
-				# add link
-				self.model().insertLink(struct.DocLink(destDoc))
-				# save immediately
-				self.__parent.save()
-		elif choice in openRevActions:
-			rev = openRevActions[choice]
-			self.__parent.itemOpen.emit(struct.RevLink(rev))
-
-	def __addReplicateActions(self, menu, link):
-		actions = { }
-		c = Connector()
-		menu.addSeparator()
-		allVolumes = set(c.lookup_rev(self.__parent.rev()))
-		if isinstance(link, struct.DocLink):
-			curVolumes = set(c.lookup_doc(link.doc()).stores())
-		else:
-			curVolumes = set(c.lookup_rev(link.rev()))
-		repVolumes = allVolumes - curVolumes
-		for store in repVolumes:
-			try:
-				rev = c.lookup_doc(store).rev(store)
-				with c.peek(rev) as r:
-					metaData = struct.loads(r.readAll('META'))
-					try:
-						name = metaData["org.hotchpotch.annotation"]["title"]
-					except:
-						name = "Unknown store"
-					action = menu.addAction("Replicate item to '%s'" % name)
-					actions[action] = store
-			except:
-				pass
-		return actions
-
-	def __addCreateActions(self, menu):
-		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
-		actions = { }
-
-		c = Connector()
-		sysStore = struct.Container(struct.DocLink(c.enum().sysStore()))
-		templatesDict = struct.Container(sysStore.get("templates:"))
-		for (name, link) in templatesDict.items():
-			icon = QtGui.QIcon(Registry().getIcon(c.stat(link.rev()).type()))
-			action = newMenu.addAction(icon, name)
-			actions[action] = link
-
-		return actions
-
-	def __addOpenActions(self, menu, link):
-		if self.__parent.isMutable:
-			menu.addAction(self.__parent.itemOpenAct)
-			menu.setDefaultAction(self.__parent.itemOpenAct)
-		actions = {}
-		if isinstance(link, struct.DocLink):
-			c = Connector()
-			revs = c.lookup_doc(link.doc()).revs()
-			if len(revs) == 1:
-				action = menu.addAction("Open revision (read only)")
-				actions[action] = revs[0]
-			elif len(revs) > 1:
-				revMenu = menu.addMenu("Open revision (read only)")
-				for rev in revs:
-					date = str(c.stat(rev).mtime())
-					action = revMenu.addAction(date)
-					actions[action] = rev
-		return actions
 
 
 class CollectionWidget(widgets.DocumentView):
 
 	itemOpen = QtCore.pyqtSignal(object)
+
+	selectionChanged = QtCore.pyqtSignal()
 
 	def __init__(self):
 		super(CollectionWidget, self).__init__("org.hotchpotch.containerview")
@@ -820,7 +794,7 @@ class CollectionWidget(widgets.DocumentView):
 			QtGui.QAbstractItemView.SelectedClicked |
 			QtGui.QAbstractItemView.EditKeyPressed)
 		self.listView.addAction(self.itemDelAct)
-		self.listView.doubleClicked.connect(self.__doubleClicked)
+		self.listView.activated.connect(self.__doubleClicked)
 		self.setCentralWidget(self.listView)
 
 	def docRead(self, readWrite, handle):
@@ -836,22 +810,19 @@ class CollectionWidget(widgets.DocumentView):
 		if oldModel:
 			model.setColumns(oldModel.getColumns())
 			oldModel.clear()
+			self.listView.selectionModel().deleteLater()
 			oldModel.deleteLater()
-		elif self.__settings:
-			columns = self.__settings.get("columns")
-			if columns:
-				model.setColumns(columns)
-			widths = self.__settings.get("colwidths", [])[:model.columnCount(None)]
-			i = 0
-			for w in widths:
-				self.listView.setColumnWidth(i, w)
-				i += 1
 		self.listView.setModel(model)
+		if self.__settings:
+			self.__applySettings(model, self.__settings)
 
 		model.rowsInserted.connect(self._emitSaveNeeded)
 		model.rowsRemoved.connect(self._emitSaveNeeded)
 		model.dataChanged.connect(self.__dataChanged)
 		model.modelReset.connect(self.__dataChanged)
+		model.modelReset.connect(lambda: self.selectionChanged.emit())
+		self.listView.selectionModel().selectionChanged.connect(
+			lambda: self.selectionChanged.emit())
 
 		autoClean = self.metaDataGetField(CollectionModel.AUTOCLEAN, False)
 		model.doLoad(handle, readWrite, autoClean)
@@ -884,6 +855,19 @@ class CollectionWidget(widgets.DocumentView):
 	def _loadSettings(self, settings):
 		super(CollectionWidget, self)._loadSettings(settings)
 		self.__settings = settings
+		model = self.listView.model()
+		if model:
+			self.__applySettings(model, settings)
+
+	def __applySettings(self, model, settings):
+		columns = settings.get("columns")
+		if columns:
+			model.setColumns(columns)
+		widths = settings.get("colwidths", [])[:model.columnCount(None)]
+		i = 0
+		for w in widths:
+			self.listView.setColumnWidth(i, w)
+			i += 1
 
 	def __setMutable(self, enabled):
 		self.isMutable = enabled
@@ -901,7 +885,7 @@ class CollectionWidget(widgets.DocumentView):
 			self.__doubleClicked(index)
 
 	def __doubleClicked(self, index):
-		link = self.listView.model().getOpenItemLink(index)
+		link = self.listView.model().getItemLink(index)
 		if link:
 			self.itemOpen.emit(link)
 
@@ -934,4 +918,101 @@ class CollectionWidget(widgets.DocumentView):
 				acc.append(right)
 			return acc
 
+	def getSelectedLinks(self):
+		return [self.listView.model().getItem(row).getLink() for row in
+			self.listView.selectionModel().selectedRows()]
+
+	def fillContextMenu(self, menu):
+		# get selected items
+		items = [self.listView.model().getItem(row) for row in
+			self.listView.selectionModel().selectedRows()]
+
+		# selected an item?
+		if len(items) > 0:
+			if len(items) == 1:
+				[item] = items
+				if item.isValid():
+					link = item.getLink()
+					self.__addOpenActions(menu, link)
+					if self.isMutable:
+						menu.addSeparator()
+						self.__addReplicateActions(menu, link)
+			# add default options
+			if self.isMutable:
+				menu.addSeparator()
+				menu.addAction(self.itemDelAct)
+			menu.addSeparator()
+			menu.addAction(self.itemPropertiesAct)
+		elif self.isMutable:
+			self.__addCreateActions(menu)
+
+	def __addReplicateActions(self, menu, link):
+		c = Connector()
+		allVolumes = set(c.lookup_rev(self.rev()))
+		if isinstance(link, struct.DocLink):
+			curVolumes = set(c.lookup_doc(link.doc()).stores())
+		else:
+			curVolumes = set(c.lookup_rev(link.rev()))
+		repVolumes = allVolumes - curVolumes
+		for store in repVolumes:
+			try:
+				rev = c.lookup_doc(store).rev(store)
+				with c.peek(rev) as r:
+					metaData = struct.loads(r.readAll('META'))
+					try:
+						name = metaData["org.hotchpotch.annotation"]["title"]
+					except:
+						name = "Unknown store"
+					action = menu.addAction("Replicate item to '%s'" % name)
+					action.triggered.connect(
+						lambda x,l=link,s=store: self.__doReplicate(l, s))
+			except:
+				pass
+
+	def __doReplicate(self, link, store):
+		if isinstance(link, struct.DocLink):
+			Connector().replicateDoc(link.doc(), dstStores=[store])
+		else:
+			Connector().replicateRev(link.rev(), dstStores=[store])
+
+	def __addCreateActions(self, menu):
+		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
+		sysStore = struct.Container(struct.DocLink(Connector().enum().sysStore()))
+		templatesDict = struct.Container(sysStore.get("templates:"))
+		for (name, link) in templatesDict.items():
+			rev = link.rev()
+			icon = QtGui.QIcon(Registry().getIcon(Connector().stat(rev).type()))
+			action = newMenu.addAction(icon, name)
+			action.triggered.connect(lambda x,r=rev: self.__doCreate(r))
+
+	def __doCreate(self, sourceRev):
+		info = Connector().stat(sourceRev)
+		destStores = Connector().lookup_rev(self.rev())
+		with Connector().create(info.type(), info.creator(), destStores) as w:
+			with Connector().peek(sourceRev) as r:
+				for part in info.parts():
+					w.write(part, r.readAll(part))
+			w.commit()
+			destDoc = w.getDoc()
+			# add link
+			self.model().insertLink(struct.DocLink(destDoc))
+			# save immediately
+			self.save()
+
+	def __addOpenActions(self, menu, link):
+		if self.isMutable:
+			menu.addAction(self.itemOpenAct)
+			menu.setDefaultAction(self.itemOpenAct)
+		if isinstance(link, struct.DocLink):
+			links = [struct.RevLink(rev) for rev in
+				Connector().lookup_doc(link.doc()).revs()]
+			if len(links) == 1:
+				action = menu.addAction("Open revision (read only)")
+				action.triggered.connect(lambda x,l=links[0]: self.itemOpen.emit(l))
+			elif len(links) > 1:
+				revMenu = menu.addMenu("Open revision (read only)")
+				for link in links:
+					date = str(c.stat(link.rev()).mtime())
+					action = revMenu.addAction(date)
+					action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l))
 

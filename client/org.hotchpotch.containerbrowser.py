@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import Connector, struct
+from hotchpotch import Connector, Registry, struct
 from hotchpotch.gui import utils
 from hotchpotch.gui.widgets import DocumentView
 
@@ -46,9 +46,9 @@ class HistoryItem(object):
 
 class History(QtCore.QObject):
 
-	navigated = QtCore.pyqtSignal()
+	leaveItem = QtCore.pyqtSignal(HistoryItem)
 
-	changed = QtCore.pyqtSignal()
+	enterItem = QtCore.pyqtSignal(HistoryItem)
 
 	def __init__(self):
 		super(History, self).__init__()
@@ -58,13 +58,15 @@ class History(QtCore.QObject):
 
 	def back(self):
 		if self.__current > 0:
+			self.leaveItem.emit(self.__items[self.__current])
 			self.__current -= 1
-			self.navigated.emit()
+			self.enterItem.emit(self.__items[self.__current])
 
 	def forward(self):
 		if self.__current < len(self.__items)-1:
+			self.leaveItem.emit(self.__items[self.__current])
 			self.__current += 1
-			self.navigated.emit()
+			self.enterItem.emit(self.__items[self.__current])
 
 	def backItems(self, maxItems):
 		return self.__items[:self.__current]
@@ -82,16 +84,19 @@ class History(QtCore.QObject):
 		return self.__items[self.__current]
 
 	def goToItem(self, item):
+		self.leaveItem.emit(self.__items[self.__current])
 		self.__current = self.__items.index(item)
-		self.navigated.emit()
+		self.enterItem.emit(self.__items[self.__current])
 
 	def items(self):
 		return self.__items[:]
 
 	def push(self, link):
+		if self.__current >= 0:
+			self.leaveItem.emit(self.__items[self.__current])
 		self.__current += 1
 		self.__items[self.__current:] = [HistoryItem(link)]
-		self.changed.emit()
+		self.enterItem.emit(self.__items[self.__current])
 
 
 class BrowserWindow(QtGui.QMainWindow):
@@ -103,11 +108,12 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__view = CollectionWidget()
 		self.__view.itemOpen.connect(self.__itemOpen)
 		self.__view.revChanged.connect(self.__extractMetaData)
+		self.__view.selectionChanged.connect(self.__selectionChanged)
 		self.setCentralWidget(self.__view)
 
 		self.__history = History()
-		self.__history.changed.connect(self.__updateBrowseActions)
-		self.__history.navigated.connect(self.__navigate)
+		self.__history.leaveItem.connect(self.__leaveItem)
+		self.__history.enterItem.connect(self.__enterItem)
 
 		self.__backMenu = QtGui.QMenu()
 		self.__backMenu.aboutToShow.connect(self.__showBackMenu)
@@ -119,10 +125,19 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__forwardAct = QtGui.QAction(QtGui.QIcon('icons/forward.png'), "Forward", self)
 		self.__forwardAct.setMenu(self.__forwardMenu)
 		self.__forwardAct.triggered.connect(self.__history.forward)
+		self.__exitAct = QtGui.QAction("Close", self)
+		self.__exitAct.setShortcut("Ctrl+Q")
+		self.__exitAct.setStatusTip("Close the document")
+		self.__exitAct.triggered.connect(self.close)
 
 		self.__browseToolBar = self.addToolBar("Browse")
 		self.__browseToolBar.addAction(self.__backAct)
 		self.__browseToolBar.addAction(self.__forwardAct)
+
+		self.__fileMenu = self.menuBar().addMenu("File")
+		self.__fileMenu.aboutToShow.connect(self.__showFileMenu)
+		self.__colMenu = self.menuBar().addMenu("Columns")
+		self.__colMenu.aboutToShow.connect(self.__columnsShow)
 
 	def open(self, argv):
 		# parse command line
@@ -154,13 +169,6 @@ class BrowserWindow(QtGui.QMainWindow):
 			self.__history.push(struct.DocLink(guid, False))
 		else:
 			self.__history.push(struct.RevLink(guid))
-		self.__view.open(guid, isDoc)
-
-	def __openLink(self, link):
-		if isinstance(link, struct.DocLink):
-			self.__view.open(link.doc(), True)
-		else:
-			self.__view.open(link.rev(), False)
 
 	def __extractMetaData(self):
 		caption = self.__view.metaDataGetField(DocumentView.HPA_TITLE, "Unnamed")
@@ -176,32 +184,85 @@ class BrowserWindow(QtGui.QMainWindow):
 			type = Connector().stat(revs[0]).type()
 			if type in ["org.hotchpotch.dict", "org.hotchpotch.store", "org.hotchpotch.set"]:
 				self.__history.push(link)
-				self.__openLink(link)
 			else:
 				utils.showDocument(link)
 		except IOError:
 			pass
 
-	def __updateBrowseActions(self):
+	def __leaveItem(self, item):
+		self.__view._saveSettings(item.state())
+
+	def __enterItem(self, item):
+		self.__view._loadSettings(item.state())
+		link = item.link()
+		if isinstance(link, struct.DocLink):
+			self.__view.open(link.doc(), True)
+		else:
+			self.__view.open(link.rev(), False)
+
 		self.__backAct.setEnabled(self.__history.canGoBack())
 		self.__forwardAct.setEnabled(self.__history.canGoForward())
 
-	def __navigate(self):
-		self.__openLink(self.__history.currentItem().link())
-		self.__updateBrowseActions()
-
 	def __showBackMenu(self):
 		self.__backMenu.clear()
-		for item in self.__history.backItems(10):
+		items = self.__history.backItems(10)[:]
+		items.reverse()
+		for item in items:
 			action = self.__backMenu.addAction(item.text())
-			action.triggered.connect(lambda item=item: self.__history.goToItem(item))
+			action.triggered.connect(lambda x,item=item: self.__history.goToItem(item))
 
 	def __showForwardMenu(self):
 		self.__forwardMenu.clear()
 		for item in self.__history.forwardItems(10):
 			action = self.__forwardMenu.addAction(item.text())
-			action.triggered.connect(lambda item=item: self.__history.goToItem(item))
+			action.triggered.connect(lambda x,item=item: self.__history.goToItem(item))
 
+	def __showFileMenu(self):
+		self.__fileMenu.clear()
+		self.__view.fillContextMenu(self.__fileMenu)
+		self.__fileMenu.addSeparator()
+		self.__fileMenu.addAction(self.__exitAct)
+
+	def __columnsShow(self):
+		self.__colMenu.clear()
+		reg = Registry()
+		model = self.__view.model()
+		types = model.typeCodes().copy()
+		columns = model.getColumns()
+		for col in columns:
+			(uti, path) = col.split(':')
+			if uti != "":
+				types.add(uti)
+		# add stat columns
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":size", "Size")
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":mtime", "Modification time")
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":type", "Type code")
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":creator", "Creator code")
+		self.__colMenu.addSeparator()
+		# add meta columns
+		metaSpecs = {}
+		for t in types:
+			metaSpecs.update(reg.searchAll(t, "meta"))
+		for (uti, specs) in metaSpecs.items():
+			subMenu = self.__colMenu.addMenu(reg.getDisplayString(uti))
+			for spec in specs:
+				key = uti+":"+reduce(lambda x,y: x+"/"+y, spec["key"])
+				self.__columnsShowAddEntry(subMenu, columns, key, spec["display"])
+
+	def __columnsShowAddEntry(self, subMenu, columns, key, display):
+		model = self.__view.model()
+		visible = key in columns
+		action = subMenu.addAction(display)
+		action.setCheckable(True)
+		action.setChecked(visible)
+		if visible:
+			action.triggered.connect(lambda en, col=key: model.remColumn(col))
+		else:
+			action.triggered.connect(lambda en, col=key: model.addColumn(col))
+
+	def __selectionChanged(self):
+		selected = self.__view.getSelectedLinks()
+		self.statusBar().showMessage("%d item(s) selected" % len(selected))
 
 class BreadcrumBar(QtGui.QWidget):
 
