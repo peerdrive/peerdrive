@@ -252,17 +252,17 @@ class WarpItem(connector.Watch):
 		if event == connector.Watch.EVENT_DISAPPEARED:
 			self.__available = False
 			self.__watch()
-			self.__view._update()
+			self.__view._update(0)
 		elif event == connector.Watch.EVENT_APPEARED:
 			self.__update()
 			if self.__available:
-				self.__view._update()
+				self.__view._update(0)
 
 	def __createWidget(self, level):
 		widget = CollectionWidget()
 		if self.__state:
 			widget._loadSettings(self.__state)
-		widget.open(self.__rev, False)
+		widget.docOpen(self.__rev, False)
 		widget.itemOpen.connect(self.__itemOpen)
 		proxy = WarpProxy(self, level)
 		proxy.setWidget(widget)
@@ -273,6 +273,7 @@ class WarpItem(connector.Watch):
 
 	def _vanished(self):
 		if self.__widget:
+			self.__widget.widget().docClose()
 			self.__scene.removeItem(self.__widget)
 			self.__widget = None
 
@@ -587,9 +588,9 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__view._loadSettings(item.state())
 		link = item.link()
 		if isinstance(link, struct.DocLink):
-			self.__view.open(link.doc(), True)
+			self.__view.docOpen(link.doc(), True)
 		else:
-			self.__view.open(link.rev(), False)
+			self.__view.docOpen(link.rev(), False)
 
 		self.__backAct.setEnabled(self.__history.canGoBack())
 		self.__forwardAct.setEnabled(self.__history.canGoForward())

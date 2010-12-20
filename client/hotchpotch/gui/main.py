@@ -183,7 +183,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			sys.exit(1)
 
 		# open the document
-		self.__view.open(guid, isDoc)
+		self.__view.docOpen(guid, isDoc)
 		self.__updateStoreButtons()
 		self.__loadSettings()
 
@@ -194,6 +194,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		if self.__mutable:
 			self.__view.checkpoint("<<Automatically saved>>")
 		self.__saveSettings()
+		self.__view.docClose()
 
 	# === protected methos
 
@@ -329,7 +330,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			stores = [self.__getStoreName(store) for store in lookup.stores(rev)]
 			names = reduce(lambda x,y: x+", "+y, stores)
 			action = self.__mergeMenu.addAction(names)
-			action.triggered.connect(lambda: self.__view.merge(rev))
+			action.triggered.connect(lambda x,rev=rev: self.__view.merge(rev))
 
 	def __showProperties(self):
 		if self.__view.doc():

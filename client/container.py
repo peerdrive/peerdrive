@@ -797,6 +797,15 @@ class CollectionWidget(widgets.DocumentView):
 		self.listView.activated.connect(self.__doubleClicked)
 		self.setCentralWidget(self.listView)
 
+	def docClose(self):
+		super(CollectionWidget, self).docClose()
+		oldModel = self.listView.model()
+		if oldModel:
+			oldModel.clear()
+			oldModel.deleteLater()
+			self.listView.selectionModel().deleteLater()
+			self.listView.setModel(None)
+
 	def docRead(self, readWrite, handle):
 		uti = Connector().stat(self.rev()).type()
 		if uti in DictModel.UTIs:
@@ -806,12 +815,6 @@ class CollectionWidget(widgets.DocumentView):
 		else:
 			raise TypeError('Unhandled type code: %s' % (uti))
 
-		oldModel = self.listView.model()
-		if oldModel:
-			model.setColumns(oldModel.getColumns())
-			oldModel.clear()
-			self.listView.selectionModel().deleteLater()
-			oldModel.deleteLater()
 		self.listView.setModel(model)
 		if self.__settings:
 			self.__applySettings(model, self.__settings)
@@ -832,6 +835,23 @@ class CollectionWidget(widgets.DocumentView):
 	def docSave(self, handle):
 		if self.listView.model().hasChanged():
 			self.listView.model().doSave(handle)
+
+	def docMergeCheck(self, heads, types, changedParts):
+		(uti, handled) = super(CollectionWidget, self).docMergeCheck(heads, types, changedParts)
+		return (uti, handled | set(['HPSD']))
+
+	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
+		conflicts = super(CollectionWidget, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
+		if 'HPSD' in changedParts:
+			baseHpsd = struct.loads(baseReader.readAll('HPSD'))
+			mergeHpsd = []
+			for r in mergeReaders:
+				mergeHpsd.append(struct.loads(r.readAll('HPSD')))
+			(newHpsd, newConflict) = struct.merge(baseHpsd, mergeHpsd)
+			conflicts = conflicts or newConflict
+			writer.writeAll('HPSD', struct.dumps(newHpsd))
+
+		return conflicts
 
 	# reimplemented to catch changes to "autoClean"
 	def metaDataSetField(self, field, value):

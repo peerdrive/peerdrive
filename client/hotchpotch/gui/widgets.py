@@ -27,20 +27,11 @@ from .. import struct
 from .utils import showDocument
 
 
-class DocButton(QtGui.QToolButton):
-
-	# convenient class to watch store
-	class DocumentWatch(Watch):
-		def __init__(self, doc, callback):
-			self.__callback = callback
-			super(DocButton.DocumentWatch, self).__init__(Watch.TYPE_DOC, doc)
-
-		def triggered(self, cause):
-			self.__callback(cause)
+class DocButton(QtGui.QToolButton, Watch):
 
 	def __init__(self, doc=None, withText=False):
-		super(DocButton, self).__init__()
-		self.__watch = None
+		QtGui.QToolButton.__init__(self)
+		self.__watching = None
 		self.__withText = withText
 		self.setAutoRaise(True)
 		self.clicked.connect(self.__clicked)
@@ -53,15 +44,16 @@ class DocButton(QtGui.QToolButton):
 
 	def setDocument(self, doc):
 		self.__doc = doc
-		if self.__watch:
-			Connector().unwatch(self.__watch)
-			self.__watch = None
+		if self.__watching:
+			Connector().unwatch(self)
+			self.__watching = False
 		if doc:
-			self.__watch = DocButton.DocumentWatch(doc, self.__update)
-			Connector().watch(self.__watch)
-		self.__update(0)
+			Watch.__init__(self, Watch.TYPE_DOC, doc)
+			Connector().watch(self)
+			self.__watching = True
+		self.triggered(0)
 
-	def __update(self, cause):
+	def triggered(self, cause):
 		if cause == Watch.EVENT_DISAPPEARED:
 			self.setDocument(None)
 
@@ -240,7 +232,24 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__editWidget = widget
 		self.addWidget(self.__editWidget)
 
-	def open(self, guid, isDoc):
+	def docOpen(self, guid, isDoc):
+		self.docClose()
+		self.__mutable = isDoc
+		if isDoc:
+			self.__doc = guid
+			Watch.__init__(self, Watch.TYPE_DOC, guid)
+			self.__chooseRevWidget = _ChooseWidget(self, guid, self.__chooseRev)
+			self.addWidget(self.__chooseRevWidget)
+			self.__chooseOverwriteWidget = _OverwriteWidget(self, self.__rebase)
+			self.addWidget(self.__chooseOverwriteWidget)
+		else:
+			self.__rev = guid
+			Watch.__init__(self, Watch.TYPE_REV, guid)
+		Connector().watch(self)
+		self.__open = True
+		self.__update()
+
+	def docClose(self):
 		if self.__open:
 			self.__open = False
 			if self.__state != DocumentView.STATE_NO_DOC:
@@ -257,21 +266,6 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__doc = None
 			self.__rev = None
 			self.__mutable = False
-
-		self.__mutable = isDoc
-		if isDoc:
-			self.__doc = guid
-			Watch.__init__(self, Watch.TYPE_DOC, guid)
-			self.__chooseRevWidget = _ChooseWidget(self, guid, self.__chooseRev)
-			self.addWidget(self.__chooseRevWidget)
-			self.__chooseOverwriteWidget = _OverwriteWidget(self, self.__rebase)
-			self.addWidget(self.__chooseOverwriteWidget)
-		else:
-			self.__rev = guid
-			Watch.__init__(self, Watch.TYPE_REV, guid)
-		Connector().watch(self)
-		self.__open = True
-		self.__update()
 
 	def doc(self):
 		return self.__doc
@@ -317,7 +311,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			if self.__mergeAuto(base, revs, stores):
 				return
 
-		if self.__mergeOurs(revs, stores):
+		if self.__mergeOurs(revs, list(stores)):
 			return
 
 	def docSave(self, writer):
@@ -439,7 +433,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		QtGui.QApplication.postEvent(self, event)
 
 	def __update(self):
-		if self.__mutable:
+		if self.__rev is None and self.__doc is None:
+			return
+		elif self.__mutable:
 			self.__updateDoc()
 		else:
 			self.__updateRev()
@@ -683,16 +679,28 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		except IOError:
 			return False
 
+	def __getStoreName(self, store):
+		try:
+			rev = Connector().lookup_doc(store).rev(store)
+			with Connector().peek(rev) as r:
+				try:
+					metaData = struct.loads(r.readAll('META'))
+					return metaData["org.hotchpotch.annotation"]["title"]
+				except:
+					return "Unnamed store"
+		except:
+			return None
+
 	def __mergeOurs(self, revs, stores):
 		# last resort: "ours"-merge
 		options = []
 		for rev in revs:
 			revDate = Connector().stat(rev, stores).mtime()
 			revStores = Connector().lookup_rev(rev, stores)
-			stores = reduce(
+			storeNames = reduce(
 				lambda x,y: x+", "+y,
 				[self.__getStoreName(s) for s in revStores])
-			options.append(str(revDate) + ": " + stores)
+			options.append(str(revDate) + ": " + storeNames)
 
 		(choice, ok) = QtGui.QInputDialog.getItem(
 			self,

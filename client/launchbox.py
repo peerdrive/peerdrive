@@ -98,8 +98,10 @@ class SyncEditor(QtGui.QDialog):
 
 	def __init__(self, parent=None):
 		super(SyncEditor, self).__init__(parent)
+		self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
 
 		self.__changed = False
+		self.__buttons = []
 		self.__rules = SyncRules()
 		enum = Connector().enum()
 		stores = zip(itertools.count(1), [enum.doc(s) for s in enum.allStores()
@@ -109,8 +111,12 @@ class SyncEditor(QtGui.QDialog):
 
 		layout = QtGui.QGridLayout()
 		for (pos, store) in stores:
-			layout.addWidget(DocButton(store, True), 0, pos)
-			layout.addWidget(DocButton(store, True), pos, 0)
+			button = DocButton(store, True)
+			self.__buttons.append(button)
+			layout.addWidget(button, 0, pos)
+			button = DocButton(store, True)
+			self.__buttons.append(button)
+			layout.addWidget(button, pos, 0)
 		for (row, store) in stores:
 			for (col, peer) in stores:
 				if store==peer:
@@ -137,6 +143,16 @@ class SyncEditor(QtGui.QDialog):
 		if self.__changed:
 			self.__rules.save()
 		super(SyncEditor, self).accept()
+		self.__cleanup()
+
+	def reject(self):
+		super(SyncEditor, self).reject()
+		self.__cleanup()
+
+	def __cleanup(self):
+		for btn in self.__buttons:
+			btn.cleanup()
+		self.__buttons = []
 
 	def __setRule(self, store, peer, index):
 		mode = SyncEditor.MODES[index]
