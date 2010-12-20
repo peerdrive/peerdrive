@@ -20,8 +20,7 @@ from __future__ import absolute_import
 
 from PyQt4 import QtCore, QtNetwork
 from datetime import datetime
-import struct
-import atexit
+import sys, struct, atexit, weakref, traceback
 
 _errorCodes = {
 	1 : 'ECONFLICT',
@@ -229,23 +228,38 @@ class _Connector(object):
 	def watch(self, w):
 		if w._incWatchRef() == 1:
 			(typ, h) = ref = w._getRef()
-			if ref in self.watchHandlers:
-				self.watchHandlers[ref].append(w)
-			else:
+			if ref not in self.watchHandlers:
 				reply = self._rpc(_Connector.WATCH_ADD_REQ,
 					_Connector.WATCH_ADD_CNF, struct.pack('>B16s', typ, h))
 				self._parseDirectResult(reply)
-				self.watchHandlers[ref] = [w]
+				self.watchHandlers[ref] = []
+			tb = traceback.extract_stack()
+			self.watchHandlers[ref].append(weakref.ref(w,
+				lambda r, ref=ref, tb=tb: self.__delWatch(r, ref, tb)))
+
+	def __delWatch(self, watchObjRef, watchSpec, tb):
+		print >>sys.stderr, "Warning: watch object has been deleted while being armed!"
+		for line in traceback.format_list(tb)[:-1]:
+			print >>sys.stderr, line,
+		self.watchHandlers[watchSpec].remove(watchObjRef)
+		if self.watchHandlers[watchSpec] == []:
+			(typ, h) = watchSpec
+			self._rpc(_Connector.WATCH_REM_REQ,
+				_Connector.WATCH_REM_CNF, struct.pack('>B16s', typ, h))
+			del self.watchHandlers[watchSpec]
 
 	def unwatch(self, w):
 		if w._decWatchRef() == 0:
 			(typ, h) = ref = w._getRef()
-			self.watchHandlers[ref].remove(w)
-			if self.watchHandlers[ref] == []:
+			oldHandlers = self.watchHandlers[ref]
+			newHandlers = [x for x in oldHandlers if x() != w]
+			if newHandlers == []:
 				reply = self._rpc(_Connector.WATCH_REM_REQ,
 					_Connector.WATCH_REM_CNF, struct.pack('>B16s', typ, h))
 				self._parseDirectResult(reply)
 				del self.watchHandlers[ref]
+			else:
+				self.watchHandlers[ref] = newHandlers
 
 	def forget(self, doc, rev, stores=[]):
 		_checkUuid(doc)
@@ -417,7 +431,9 @@ class _Connector(object):
 					dispatched = True
 					matches = self.watchHandlers.get((typ, h), [])[:]
 					for i in matches:
-						i.triggered(event)
+						i = i() # dereference weakref
+						if i is not None:
+							i.triggered(event)
 
 				progressIndications = self.progressIndications[:]
 				self.progressIndications = []
