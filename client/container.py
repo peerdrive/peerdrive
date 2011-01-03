@@ -1032,7 +1032,7 @@ class CollectionWidget(widgets.DocumentView):
 			elif len(links) > 1:
 				revMenu = menu.addMenu("Open revision (read only)")
 				for link in links:
-					date = str(c.stat(link.rev()).mtime())
+					date = str(Connector().stat(link.rev()).mtime())
 					action = revMenu.addAction(date)
 					action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l))
 

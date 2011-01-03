@@ -236,6 +236,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.docClose()
 		self.__mutable = isDoc
 		if isDoc:
+			print "doc:%s" % guid.encode("hex")
 			self.__doc = guid
 			Watch.__init__(self, Watch.TYPE_DOC, guid)
 			self.__chooseRevWidget = _ChooseWidget(self, guid, self.__chooseRev)
