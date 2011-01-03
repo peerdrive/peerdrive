@@ -2,7 +2,7 @@
 # vim: set fileencoding=utf-8 :
 #
 # Hotchpotch
-# Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+# Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,12 +17,220 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt4 import QtCore, QtNetwork
-import sys, tempfile, os.path, subprocess
+from PyQt4 import QtCore, QtNetwork, QtGui
+import sys, tempfile, os.path, subprocess, hashlib
 
-from hotchpotch import struct, Connector, Registry
+from hotchpotch import struct, Registry
+from hotchpotch.connector import Connector, Watch
 
 PIPE_NAME = "org.hotchpotch.oslauncher"
+
+
+class DocSyncer(QtCore.QObject, Watch):
+
+	fileNameChanged = QtCore.pyqtSignal(object)
+
+	def __init__(self, doc, basePath, parent=None):
+		QtCore.QObject.__init__(self, parent)
+		Watch.__init__(self, Watch.TYPE_DOC, doc)
+
+		self.__doc = doc
+		self.__basePath = basePath
+		self.__rev = None
+		self.__metaHash = None
+		self.__fileHash = None
+		self.__path = None
+
+		self.__timer = QtCore.QTimer(self)
+		self.__timer.setInterval(3000)
+		self.__timer.setSingleShot(True)
+		self.__timer.timeout.connect(self.__syncToHotchpotch)
+
+	def startSync(self):
+		Connector().watch(self)
+		try:
+			self.__update()
+		except:
+			Connector().unwatch(self)
+			raise
+
+	def stopSync(self):
+		Connector().unwatch(self)
+		self.__timer.stop()
+
+	def getDoc(self):
+		return self.__doc
+
+	def getPath(self):
+		return self.__path
+
+	def triggered(self, event):
+		if event == Watch.EVENT_MODIFIED and not self.__timer.isActive():
+			self.__update()
+
+	def modified(self):
+		self.__timer.start()
+
+	def __update(self):
+		revs = Connector().lookup_doc(self.__doc).revs()
+		if self.__rev in revs:
+			return
+		# FIXME: prompt if more than one version
+		self.__rev = revs[0]
+
+		stat = Connector().stat(self.__rev)
+		# FIXME: META and/or FILE part may be missing
+		metaHash = stat.hash('META')
+		fileHash = stat.hash('FILE')
+
+		if metaHash != self.__metaHash:
+			self.__metaHash = metaHash
+			self.__updateFileName()
+
+		if fileHash != self.__fileHash:
+			self.__fileHash = fileHash
+			self.__syncToFilesystem()
+
+	def __updateFileName(self):
+		try:
+			with Connector().peek(self.__rev) as r:
+				meta = struct.loads(r.readAll('META'))
+		except IOError:
+			meta = {}
+
+		name = ''
+		ext = ''
+		if "org.hotchpotch.annotation" in meta:
+			annotation = meta["org.hotchpotch.annotation"]
+			if "title" in annotation:
+				(name, ext) = os.path.splitext(annotation["title"])
+		if name == '':
+			if "origin" in annotation:
+				name = os.path.splitext(annotation["origin"])[0]
+		if name == '':
+			name = self.__doc.encode('hex')
+		if ext == '':
+			uti = Connector().stat(self.__rev).type()
+			extensions = Registry().search(uti, "extensions")
+			if extensions:
+				ext = extensions[0]
+		if ext == '':
+			if "origin" in annotation:
+				ext  = os.path.splitext(annotation["origin"])[1]
+		if ext == '':
+			ext = '.bin'
+
+		newPath = os.path.join(self.__basePath, name+ext)
+		oldPath = self.__path
+		if oldPath != newPath:
+			# try to rename the current file
+			try:
+				if oldPath and os.path.isfile(oldPath):
+					os.rename(oldPath, newPath)
+				self.__path = newPath
+			except OSError:
+				# FIXME: inform user
+				pass
+		if (self.__path != oldPath) and (self.__path is not None):
+			self.fileNameChanged.emit(oldPath)
+
+	def __syncToHotchpotch(self):
+		# will also be triggered by __syncToFilesystem
+		# apply hash to check if really changed from outside
+		sha = hashlib.sha1()
+		with open(self.__path, "rb") as f:
+			data = f.read(0x10000)
+			while data:
+				sha.update(data)
+				data = f.read(0x10000)
+
+			# changed?
+			newFileHash = sha.digest()[:16]
+			if newFileHash != self.__fileHash:
+				f.seek(0)
+				with Connector().update(self.__doc, self.__rev) as w:
+					meta = struct.loads(w.readAll('META'))
+					if not "org.hotchpotch.annotation" in meta:
+						meta["org.hotchpotch.annotation"] = {}
+					meta["org.hotchpotch.annotation"]["comment"] = "<<Changed by external app>>"
+					w.writeAll('META', struct.dumps(meta))
+					w.writeAll('FILE', f.read())
+					w.commit()
+					self.__rev = w.getRev()
+					self.__fileHash = newFileHash
+
+	def __syncToFilesystem(self):
+		self.__timer.stop()
+		with open(self.__path, "wb") as f:
+			with Connector().peek(self.__rev) as reader:
+				f.write(reader.readAll('FILE'))
+
+
+class SyncManager(QtCore.QObject):
+	def __init__(self, basePath, parent=None):
+		super(SyncManager, self).__init__(parent)
+		self.__basePath = basePath
+		self.__pathToSyncer = {}
+		self.__docToSyncer = {}
+		self.__revToPath = {}
+		self.__watcher = QtCore.QFileSystemWatcher()
+		self.__watcher.fileChanged.connect(self.__fileChanged)
+
+	def getDocFile(self, doc):
+		if doc in self.__docToSyncer:
+			return self.__docToSyncer[doc].getPath()
+		else:
+			syncer = DocSyncer(doc, self.__basePath)
+			syncer.startSync()
+			path = syncer.getPath()
+			self.__docToSyncer[doc] = syncer
+			self.__pathToSyncer[path] = syncer
+			self.__watcher.addPath(path)
+			syncer.fileNameChanged.connect(self.__pathChanged)
+			return path
+
+	def getRevFile(self, rev):
+		if rev in self.__revToPath:
+			return self.__revToPath[rev]
+		else:
+			syncer = RevSyncer(rev, self.__basePath)
+			syncer.sync()
+			path = syncer.getPath()
+			self.__revToPath[rev] = path
+			return path
+
+	def quit(self):
+		for syncer in self.__docToSyncer.values():
+			syncer.stopSync()
+			self.__watcher.removePath(syncer.getPath())
+		self.__pathToSyncer = {}
+		self.__docToSyncer = {}
+		# Need to explicitly destroy QFileSystemWatcher before QCoreApplication,
+		# otherwise we may deadlock on exit.
+		del self.__watcher
+
+	def __pathChanged(self, oldPath):
+		syncer = self.__pathToSyncer[oldPath]
+		newPath = syncer.getPath()
+		del self.__pathToSyncer[oldPath]
+		self.__watcher.removePath(oldPath)
+		self.__pathToSyncer[newPath] = syncer
+		self.__watcher.addPath(newPath)
+
+	def __fileChanged(self, path):
+		path = str(path) # is a QString
+		# might have been renamed
+		if path in self.__pathToSyncer:
+			syncer = self.__pathToSyncer[path]
+			if os.path.isfile(path):
+				self.__watcher.removePath(path)
+				syncer.modified()
+				self.__watcher.addPath(path)
+			else:
+				syncer.stopSync()
+				self.__watcher.removePath(path)
+				del self.__pathToSyncer[path]
+				del self.__docToSyncer[syncer.getDoc()]
 
 
 class RequestManager(QtCore.QObject):
@@ -44,6 +252,7 @@ class RequestManager(QtCore.QObject):
 		return not self.__quitRequested
 
 	def serve(self):
+		self.__syncManager = SyncManager('.')
 		self.__server = QtNetwork.QLocalServer(self)
 		self.__server.newConnection.connect(self.__serverConnect)
 		if not self.__server.listen(PIPE_NAME):
@@ -54,6 +263,7 @@ class RequestManager(QtCore.QObject):
 	def __finished(self):
 		self.__quitRequested = True
 		if self.__server:
+			self.__syncManager.quit()
 			self.__server.close()
 		for client in self.__clients:
 			client.close()
@@ -102,50 +312,19 @@ class RequestManager(QtCore.QObject):
 	def __process(self, request):
 		if request.startswith('doc:'):
 			doc = request[4:].decode("hex")
-			rev = Connector().lookup_doc(doc).revs()[0]
+			path = self.__syncManager.getDocFile(doc)
 		elif request.startswith('rev:'):
 			rev = request[4:].decode("hex")
+			path = self.__syncManager.getRevFile(rev)
 		elif request == "kill":
 			self.__finished()
 			return
 		else:
 			return
 
-		stat = Connector().stat(rev)
-		uti  = stat.type()
-		hash = stat.hash('FILE')
-
-		# determine extension
-		extensions = Registry().search(uti, "extensions")
-		if extensions:
-			ext = extensions[0]
-		else:
-			ext = ""
-			with Connector().peek(rev) as r:
-				meta = struct.loads(r.readAll('META'))
-
-			if "org.hotchpotch.annotation" in meta:
-				annotation = meta["org.hotchpotch.annotation"]
-				# try origin
-				if "origin" in annotation:
-					ext  = os.path.splitext(annotation["origin"])[1]
-				# try title
-				if not ext:
-					if "title" in annotation:
-						ext = os.path.splitext(annotation["title"])[1]
-
-		# copy out file (if necessary)
-		path = os.path.join(tempfile.gettempdir(), hash.encode('hex')+ext)
-		if not os.path.isfile(path):
-			with open(path, "wb") as file:
-				with Connector().peek(rev) as reader:
-					file.write(reader.readAll('FILE'))
-
 		# start external program
-		if sys.platform == "win32":
-			subprocess.call(["start", path], shell=True)
-		else:
-			subprocess.call(["xdg-open", path])
+		path = os.path.abspath(path)
+		QtGui.QDesktopServices.openUrl(QtCore.QUrl("file://"+path, QtCore.QUrl.TolerantMode))
 
 
 def usage():
