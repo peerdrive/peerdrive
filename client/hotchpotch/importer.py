@@ -73,7 +73,7 @@ def importFile(store, path, name=""):
 			mime = mimeGuess.file(path)
 			uti = Registry().getUtiFromMime(mime, None)
 		if not uti:
-			ext  = os.path.splitext(path)[1][1:].lower()
+			ext  = os.path.splitext(path)[1].lower()
 			uti  = Registry().getUtiFromExtension(ext)
 		if not name:
 			name = os.path.basename(path)

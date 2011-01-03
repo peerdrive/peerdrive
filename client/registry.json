@@ -60,12 +60,12 @@
 	},
 	"public.plain-text" : {
 		"conforming" : ["public.text"],
-		"extensions" : ["txt", "asc", "text", "pot", "brf"],
+		"extensions" : [".txt", ".asc", ".text", ".pot", ".brf"],
 		"mimetypes"  : ["text/plain"]
 	},
 	"public.html" : {
 		"conforming" : ["public.text"],
-		"extensions" : ["html", "htm"],
+		"extensions" : [".html", ".htm"],
 		"mimetypes"  : ["text/html"],
 		"icon" : "uti/html.png",
 		"exec" : "public.data.py"
@@ -73,7 +73,7 @@
 
 	"com.adobe.pdf" : {
 		"conforming" : ["public.data", "public.composite-content"],
-		"extensions" : ["pdf"],
+		"extensions" : [".pdf"],
 		"mimetypes"  : ["application/pdf"],
 		"icon"       : "uti/pdf.png",
 		"display"    : "PDF-Document"
@@ -81,21 +81,21 @@
 
 	"com.microsoft.word.doc" : {
 		"conforming" : ["public.data"],
-		"extensions" : ["doc"],
+		"extensions" : [".doc"],
 		"mimetypes"  : ["application/msword"],
 		"icon"       : "uti/word.png",
 		"display"    : "Microsoft Word document"
 	},
 	"com.microsoft.excel.xls" : {
 		"conforming" : ["public.data"],
-		"extensions" : ["xls"],
+		"extensions" : [".xls"],
 		"mimetypes"  : ["application/vnd.ms-excel"],
 		"icon"       : "uti/excel.png",
 		"display"    : "Microsoft Excel document"
 	},
 	"com.microsoft.powerpoint.ppt" : {
 		"conforming" : ["public.data"],
-		"extensions" : ["ppt"],
+		"extensions" : [".ppt"],
 		"mimetypes"  : ["application/mspowerpoint"],
 		"icon"       : "uti/powerpoint.png",
 		"display"    : "Microsoft PowerPoint presentation"
@@ -107,25 +107,25 @@
 	},
 	"org.gnu.gnu-tar-archive" : {
 		"conforming" : ["public.archive", "public.data"],
-		"extensions" : ["gtar"],
+		"extensions" : [".gtar"],
 		"mimetypes"  : ["application/x-gtar"],
 		"display"    :  "GNU archive"
 	},
 	"public.tar-archive" : {
 		"conforming" : ["org.gnu.gnu-tar-archive"],
-		"extensions" : ["tar"],
+		"extensions" : [".tar"],
 		"mimetypes"  : ["application/x-tar", "application/tar"],
 		"display"    :  "Tar archive"
 	},
 	"org.gnu.gnu-zip-archive" : {
 		"conforming" : ["public.archive", "public.data"],
-		"extensions" : ["gz", "gzip"],
+		"extensions" : [".gz", ".gzip"],
 		"mimetypes"  : ["application/x-gzip", "application/gzip"],
 		"display"    :  "Gzip archive"
 	},
 	"org.gnu.gnu-zip-tar-archive" : {
 		"conforming" : ["org.gnu.gnu-zip-archve"],
-		"extensions" : ["tgz"],
+		"extensions" : [".tgz"],
 		"display"    :  "Gzip tar archive"
 	},
 	"com.pkware.zip-archive" : {
@@ -190,7 +190,7 @@
 	},
 	"mime.message.rfc822" : {
 		"conforming" : [ "public.message", "public.text" ],
-		"extensions" : ["eml"],
+		"extensions" : [".eml"],
 		"mimetypes"  : ["message/rfc822", "text/x-mail"],
 		"display" : "Internet Mail",
 		"exec" : "org.hotchpotch.mailview.py",
@@ -231,31 +231,31 @@
 	},
 	"public.jpeg" : {
 		"conforming" : ["public.image"],
-		"extensions" : ["jpg", "jpeg"],
+		"extensions" : [".jpg", ".jpeg"],
 		"mimetypes"  : ["image/jpeg"],
 		"display"    : "JPEG image"
 	},
 	"public.tiff" : {
 		"conforming" : ["public.image"],
-		"extensions" : ["tif", "tiff"],
+		"extensions" : [".tif", ".tiff"],
 		"mimetypes"  : ["image/tiff"],
 		"display"    : "TIFF image"
 	},
 	"public.png" : {
 		"conforming" : ["public.image"],
-		"extensions" : ["png"],
+		"extensions" : [".png"],
 		"mimetypes"  : ["image/png"],
 		"display"    : "PNG image"
 	},
 	"com.compuserve.gif" : {
 		"conforming" : ["public.image"],
-		"extensions" : ["gif"],
+		"extensions" : [".gif"],
 		"mimetypes"  : ["image/gif"],
 		"display"    : "GIF image"
 	},
 	"com.microsoft.bmp" : {
 		"conforming" : ["public.image"],
-		"extensions" : ["bmp"],
+		"extensions" : [".bmp"],
 		"display"    : "Windows bitmap image"
 	}
 }
