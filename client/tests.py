@@ -95,6 +95,22 @@ class CommonParts(unittest.TestCase):
 		return proc.stdout.read()
 
 
+class TestReadWrite(CommonParts):
+
+	def test_readback(self):
+		dataOrig = 'akjdfaqhfkjsalur\naqidahgajsoasoiga\n\nakhsfdlkaf\r\n'
+		w = self.create("public.data", "test.foo", [self.store1])
+		w.writeAll('FILE', dataOrig)
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
+
+		with Connector().peek(rev) as r:
+			dataRead = r.readAll('FILE')
+
+		self.assertEqual(dataOrig, dataRead)
+
+
 class TestCreatorCode(CommonParts):
 
 	def test_create(self):
