@@ -63,7 +63,7 @@ def _raiseError(error):
 		raise IOError('Unknown error')
 
 
-class _Connector(object):
+class _Connector(QtCore.QObject):
 	INIT_REQ            = 0x0000
 	INIT_CNF            = 0x0001
 	ENUM_REQ            = 0x0010
@@ -129,11 +129,12 @@ class _Connector(object):
 	WATCH_IND           = 0x0002
 	PROGRESS_IND        = 0x0012
 
+	watchReady = QtCore.pyqtSignal()
 
 	def __init__(self, host = '127.0.0.1', port = 4567):
+		super(_Connector, self).__init__()
 		self.socket = QtNetwork.QTcpSocket()
-		QtCore.QObject.connect(self.socket, QtCore.SIGNAL("readyRead()"),
-				self.__readReady)
+		self.socket.readyRead.connect(self.__readReady)
 		self.socket.connectToHost(host, port)
 		if not self.socket.waitForConnected(1000):
 			raise IOError("Could not connect to server!")
@@ -145,6 +146,8 @@ class _Connector(object):
 		self.progressHandlers = []
 		self.progressIndications = []
 		self.recursion = 0
+
+		self.watchReady.connect(self.__dispatchIndications, QtCore.Qt.QueuedConnection)
 
 		try:
 			reply = self._rpc(_Connector.INIT_REQ, _Connector.INIT_CNF,
@@ -396,10 +399,8 @@ class _Connector(object):
 			raise IOError("Could not send request to server!")
 
 	def __readReady(self):
-		# increase recursion depth
-		self.recursion += 1
-
 		# unpack incoming packets
+		indications = False
 		self.buf = self.buf + str(self.socket.readAll())
 		while len(self.buf) > 2:
 			expect = struct.unpack_from('>H', self.buf, 0)[0] + 2
@@ -412,15 +413,21 @@ class _Connector(object):
 				(ref, ind) = struct.unpack_from('>LH', packet, 0)
 				if ind == _Connector.WATCH_IND:
 					self.watchIndications.append(struct.unpack('>BB16s', packet[6:]))
+					indications = True
 				elif ind == _Connector.PROGRESS_IND:
 					self.progressIndications.append(packet[6:])
+					indications = True
 				else:
 					self.queue.append(packet)
 			else:
 				break
 
+		if indications:
+			self.__dispatchIndications()
+
+	def __dispatchIndications(self):
 		# dispatch received indications if not in recursion
-		if self.recursion <= 1:
+		if self.recursion == 0:
 			dispatched = True
 			while dispatched:
 				dispatched = False
@@ -443,21 +450,24 @@ class _Connector(object):
 					(typ, prog) = struct.unpack_from('>BH', ind, 0)
 					for handler in handlers:
 						handler(typ, prog, ind[3:])
-
-		# decrease nesting level
-		self.recursion -= 1
+		else:
+			self.watchReady.emit()
 
 	def __poll(self, ref, cnf_op):
-		# loop until we've received the answer
-		while True:
-			for packet in self.queue:
-				if self.__match(ref, cnf_op, packet):
-					self.queue.remove(packet)
-					return packet[6:]
+		self.recursion += 1
+		try:
+			# loop until we've received the answer
+			while True:
+				for packet in self.queue:
+					if self.__match(ref, cnf_op, packet):
+						self.queue.remove(packet)
+						return packet[6:]
 
-			if not self.socket.waitForReadyRead(-1):
-				raise IOError("Error while waiting for data from server!")
-			self.__readReady()
+				if not self.socket.waitForReadyRead(-1):
+					raise IOError("Error while waiting for data from server!")
+				self.__readReady()
+		finally:
+			self.recursion -= 1
 
 	def __match(self, cnf_ref, cnf_op, packet):
 		(ref, op) = struct.unpack_from('>LH', packet, 0)
