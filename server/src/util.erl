@@ -118,8 +118,9 @@ read_rev_struct(Rev, Part) ->
 
 
 get_time() ->
-	{MegaSecs, Secs, _} = now(),
-	(MegaSecs*1000000+Secs).
+	% Thanks to http://www.epochconverter.com/ :)
+	calendar:datetime_to_gregorian_seconds(calendar:universal_time()) -
+	719528*24*3600.
 
 
 % returns {ok, Sha1} | {error, Reason}
