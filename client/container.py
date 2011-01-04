@@ -283,6 +283,10 @@ class CollectionEntry(Watch):
 		self.__valid = True
 
 	def __updateColumns(self):
+		# This makes only sense if we're a valid entry
+		if not self.__valid:
+			return
+
 		try:
 			stat = Connector().stat(self.__rev)
 			with Connector().peek(self.__rev) as r:
