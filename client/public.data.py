@@ -78,9 +78,27 @@ class Syncer(object):
 				pass
 
 	def _syncToFilesystem(self):
+		try:
+			if not os.access(self._path, os.W_OK):
+				os.chmod(self._path, stat.S_IREAD | stat.S_IWRITE)
+		except OSError:
+			pass
+
 		with open(self._path, "wb") as f:
 			with Connector().peek(self._rev) as reader:
 				f.write(reader.readAll('FILE'))
+
+	def _hashFile(self):
+		try:
+			sha = hashlib.sha1()
+			with open(self._path, "rb") as f:
+				data = f.read(0x10000)
+				while data:
+					sha.update(data)
+					data = f.read(0x10000)
+			return sha.digest()[:16]
+		except IOError:
+			return None
 
 	def getPath(self):
 		return self._path
@@ -143,8 +161,12 @@ class DocSyncer(QtCore.QObject, Syncer, Watch):
 			self._updateFileName()
 
 		if fileHash != self.__fileHash:
+			if self.__fileHash is None:
+				if self._hashFile() != fileHash:
+					self._syncToFilesystem()
+			else:
+				self._syncToFilesystem()
 			self.__fileHash = fileHash
-			self._syncToFilesystem()
 
 	def _updateFileName(self):
 		oldPath = self._path
@@ -156,17 +178,9 @@ class DocSyncer(QtCore.QObject, Syncer, Watch):
 	def __syncToHotchpotch(self):
 		# will also be triggered by _syncToFilesystem
 		# apply hash to check if really changed from outside
-		sha = hashlib.sha1()
-		with open(self._path, "rb") as f:
-			data = f.read(0x10000)
-			while data:
-				sha.update(data)
-				data = f.read(0x10000)
-
-			# changed?
-			newFileHash = sha.digest()[:16]
-			if newFileHash != self.__fileHash:
-				f.seek(0)
+		newFileHash = self._hashFile()
+		if newFileHash != self.__fileHash:
+			with open(self._path, "rb") as f:
 				with Connector().update(self.__doc, self._rev) as w:
 					meta = struct.loads(w.readAll('META'))
 					if not "org.hotchpotch.annotation" in meta:
@@ -191,8 +205,11 @@ class RevSyncer(Syncer):
 
 	def sync(self):
 		self._updateFileName(self._rev)
-		self._syncToFilesystem()
-		os.chmod(self._path, stat.S_IREAD)
+		s = Connector().stat(self._rev)
+		fileHash = s.hash('FILE')
+		if fileHash != self._hashFile():
+			self._syncToFilesystem()
+			os.chmod(self._path, stat.S_IREAD)
 
 
 class SyncManager(QtCore.QObject):
@@ -353,7 +370,7 @@ class RequestManager(QtCore.QObject):
 
 		# start external program
 		path = os.path.abspath(path)
-		QtGui.QDesktopServices.openUrl(QtCore.QUrl("file://"+path, QtCore.QUrl.TolerantMode))
+		QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
 
 
 def usage():
