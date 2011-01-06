@@ -1,5 +1,5 @@
 %% Hotchpotch
-%% Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+%% Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 %%
 %% This program is free software: you can redistribute it and/or modify
 %% it under the terms of the GNU General Public License as published by
@@ -328,7 +328,7 @@ do_loopup_doc(Body, RetPath) ->
 do_lookup_encode(Revs) ->
 	encode_list(
 		fun({Rev, Stores}) ->
-			StoresBin = encode_list(fun(Store) -> Store end, Stores),
+			StoresBin = encode_list(Stores),
 			<<Rev/binary, StoresBin/binary>>
 		end,
 		Revs).
@@ -338,7 +338,7 @@ do_loopup_rev(Body, RetPath) ->
 	<<Rev:16/binary, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
 	Found = broker:lookup_rev(Rev, broker:get_stores(Stores)),
-	FoundBin = encode_list(fun(Store) -> Store end, Found),
+	FoundBin = encode_list(Found),
 	send_reply(RetPath, ?LOOKUP_REV_CNF, FoundBin).
 
 
@@ -356,14 +356,24 @@ do_stat(Body, RetPath) ->
 				parents = Parents,
 				mtime   = Mtime,
 				type    = TypeCode,
-				creator = CreatorCode
+				creator = CreatorCode,
+				links   = {SDL, WDL, SRL, WRL, DocMap}
 			} = Stat,
 			ReplyParts = encode_list(
 				fun ({FourCC, Size, Hash}) ->
 					<<FourCC/binary, Size:64, Hash/binary>>
 				end,
 				Parts),
-			ReplyParents = encode_list(fun (Parent) -> Parent end, Parents),
+			BinDocMap = encode_list_32(
+				fun ({Doc, Revs}) ->
+					<<Doc/binary, (encode_list(Revs))/binary>>
+				end,
+				DocMap),
+			ReplyLinks = <<
+				(encode_list_32(SDL))/binary, (encode_list_32(WDL))/binary,
+				(encode_list_32(SRL))/binary, (encode_list_32(WRL))/binary,
+				BinDocMap/binary>>,
+			ReplyParents = encode_list(Parents),
 			<<
 				(encode_broker_result(Result))/binary,
 				Flags:32,
@@ -371,7 +381,8 @@ do_stat(Body, RetPath) ->
 				ReplyParents/binary,
 				Mtime:64,
 				(encode_string(TypeCode))/binary,
-				(encode_string(CreatorCode))/binary
+				(encode_string(CreatorCode))/binary,
+				ReplyLinks/binary
 			>>;
 
 		Error ->
@@ -626,7 +637,7 @@ io_loop(Handle) ->
 			Reply = case broker:get_parents(Handle) of
 				{ok, _Errors, Parents} = Result ->
 					<<(encode_broker_result(Result))/binary,
-						(encode_list(fun(P) -> P end, Parents))/binary>>;
+						(encode_list(Parents))/binary>>;
 				Error ->
 					encode_broker_result(Error)
 			end,
@@ -704,13 +715,26 @@ parse_store(Packet) ->
 	end.
 
 
+encode_list(List) ->
+	encode_list_n(8, fun(Element) -> Element end, List).
+
 encode_list(EncodeElement, List) ->
+	encode_list_n(8, EncodeElement, List).
+
+encode_list_32(List) ->
+	encode_list_n(32, fun(Element) -> Element end, List).
+
+encode_list_32(EncodeElement, List) ->
+	encode_list_n(32, EncodeElement, List).
+
+
+encode_list_n(Width, EncodeElement, List) ->
 	lists:foldl(
 		fun(Element, Acc) ->
 			Bin = EncodeElement(Element),
 			<<Acc/binary, Bin/binary>>
 		end,
-		<<(length(List)):8>>,
+		<<(length(List)):Width>>,
 		List).
 
 

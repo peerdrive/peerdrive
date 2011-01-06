@@ -2,7 +2,7 @@
 # vim: set fileencoding=utf-8 :
 #
 # Hotchpotch
-# Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+# Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -279,8 +279,8 @@ class CollectionEntry(Watch):
 		else:
 			self.__icon = QtGui.QIcon(Registry().getIcon(s.type()))
 
-		self.__updateColumns()
 		self.__valid = True
+		self.__updateColumns()
 
 	def __updateColumns(self):
 		# This makes only sense if we're a valid entry
@@ -323,8 +323,9 @@ class CollectionEntry(Watch):
 class CollectionModel(QtCore.QAbstractTableModel):
 	AUTOCLEAN = ["org.hotchpotch.container", "autoclean"]
 
-	def __init__(self, parent = None):
+	def __init__(self, linkMap, parent = None):
 		super(CollectionModel, self).__init__(parent)
+		self.__linkMap = linkMap
 		self.__parent = parent
 
 		self._listing = []
@@ -347,7 +348,11 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__autoClean = autoClean
 		self.__typeCodes = set()
 		self._listing = []
-		data = struct.loads(handle.readAll('HPSD'))
+		if self.__linkMap:
+			data = struct.loads(handle.readAll('HPSD'),
+				lookup=lambda doc: self.__linkMap.lookup(doc))
+		else:
+			data = struct.loads(handle.readAll('HPSD'))
 		listing = self.decode(data)
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
@@ -374,18 +379,36 @@ class CollectionModel(QtCore.QAbstractTableModel):
 	def typeCodes(self):
 		return self.__typeCodes
 
-	def getItemLink(self, index):
-		link = self._listing[index.row()].getLink()
-		if isinstance(link, struct.DocLink):
-			if self.__mutable:
-				return link
-			else:
-				if link.rev():
-					return struct.RevLink(link.rev())
-		elif isinstance(link, struct.RevLink):
-			return link
+	def getItem(self, index):
+		if index.isValid():
+			return self._listing[index.row()]
 		else:
 			return None
+
+	def isDoc(self):
+		return self.__mutable
+
+	def getItemLinkReal(self, index):
+		"""Returns the original link at the given position. Might point to nowhere."""
+		item = self.getItem(index)
+		if item:
+			return item.getLink()
+		else:
+			return None
+
+	def getItemLinkUser(self, index):
+		"""Returns the link as the user would expect it. Might return None!"""
+		link = self.getItemLinkReal(index)
+		if link:
+			if isinstance(link, struct.DocLink):
+				if self.isDoc():
+					return link
+				else:
+					if link.rev():
+						return struct.RevLink(link.rev())
+			elif isinstance(link, struct.RevLink):
+				return link
+		return None
 
 	def setAutoClean(self, autoClean):
 		self.__autoClean = autoClean
@@ -397,12 +420,6 @@ class CollectionModel(QtCore.QAbstractTableModel):
 				for item in removed:
 					Connector().unwatch(item)
 				self.reset()
-
-	def getItem(self, index):
-		if index.isValid():
-			return self._listing[index.row()]
-		else:
-			return None
 
 	def getColumns(self):
 		return [c.key() for c in self._columns]
@@ -538,10 +555,10 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		data = []
 		for index in indexes:
 			if index.isValid() and (index.column() == 0):
-				link = self.getItem(index).getLink()
+				link = self.getItemLinkUser(index)
 				if isinstance(link, struct.DocLink):
 					data.append('doc:' + link.doc().encode('hex'))
-				else:
+				elif isinstance(link, struct.RevLink):
 					data.append('rev:' + link.rev().encode('hex'))
 		if data == []:
 			mimeData = None
@@ -665,8 +682,8 @@ class CollectionModel(QtCore.QAbstractTableModel):
 class DictModel(CollectionModel):
 	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
 
-	def __init__(self, parent = None):
-		super(DictModel, self).__init__(parent)
+	def __init__(self, linkMap, parent = None):
+		super(DictModel, self).__init__(linkMap, parent)
 
 	def setColumns(self, columns):
 		# make sure the static 'Name' column is included
@@ -719,8 +736,8 @@ class DictModel(CollectionModel):
 class SetModel(CollectionModel):
 	UTIs = ["org.hotchpotch.set"]
 
-	def __init__(self, parent = None):
-		super(SetModel, self).__init__(parent)
+	def __init__(self, linkMap, parent = None):
+		super(SetModel, self).__init__(linkMap, parent)
 
 	def setColumns(self, columns):
 		# make sure the 'Name' column is not included
@@ -811,11 +828,16 @@ class CollectionWidget(widgets.DocumentView):
 			self.listView.setModel(None)
 
 	def docRead(self, readWrite, handle):
-		uti = Connector().stat(self.rev()).type()
+		stat = Connector().stat(self.rev())
+		uti = stat.type()
+		if readWrite:
+			linkMap = None
+		else:
+			linkMap = stat.linkMap()
 		if uti in DictModel.UTIs:
-			model = DictModel(self)
+			model = DictModel(linkMap, self)
 		elif uti in SetModel.UTIs:
-			model = SetModel(self)
+			model = SetModel(linkMap, self)
 		else:
 			raise TypeError('Unhandled type code: %s' % (uti))
 
@@ -909,15 +931,15 @@ class CollectionWidget(widgets.DocumentView):
 			self.__doubleClicked(index)
 
 	def __doubleClicked(self, index):
-		link = self.listView.model().getItemLink(index)
+		link = self.listView.model().getItemLinkUser(index)
 		if link:
 			self.itemOpen.emit(link)
 
 	def __showProperties(self):
 		index = self.listView.selectionModel().currentIndex()
-		item = self.listView.model().getItem(index)
-		if item and item.isValid():
-			utils.showProperties(item.getLink())
+		link = self.listView.model().getItemLinkUser(index)
+		if link:
+			utils.showProperties(link)
 
 	def __removeRows(self):
 		rows = [(i.row(), i.row()) for i in self.listView.selectionModel().selectedRows()]
@@ -943,24 +965,23 @@ class CollectionWidget(widgets.DocumentView):
 			return acc
 
 	def getSelectedLinks(self):
-		return [self.listView.model().getItem(row).getLink() for row in
+		return [self.listView.model().getItemLinkReal(row) for row in
 			self.listView.selectionModel().selectedRows()]
 
 	def fillContextMenu(self, menu):
 		# get selected items
-		items = [self.listView.model().getItem(row) for row in
+		isDoc = self.listView.model().isDoc()
+		links = [self.listView.model().getItemLinkReal(row) for row in
 			self.listView.selectionModel().selectedRows()]
 
 		# selected an item?
-		if len(items) > 0:
-			if len(items) == 1:
-				[item] = items
-				if item.isValid():
-					link = item.getLink()
-					self.__addOpenActions(menu, link)
-					if self.isMutable:
-						menu.addSeparator()
-						self.__addReplicateActions(menu, link)
+		if len(links) > 0:
+			if len(links) == 1:
+				[link] = links
+				if link:
+					self.__addOpenActions(menu, link, isDoc)
+					menu.addSeparator()
+					self.__addReplicateActions(menu, link)
 			# add default options
 			if self.isMutable:
 				menu.addSeparator()
@@ -972,11 +993,14 @@ class CollectionWidget(widgets.DocumentView):
 
 	def __addReplicateActions(self, menu, link):
 		c = Connector()
-		allVolumes = set(c.lookup_rev(self.rev()))
-		if isinstance(link, struct.DocLink):
-			curVolumes = set(c.lookup_doc(link.doc()).stores())
-		else:
-			curVolumes = set(c.lookup_rev(link.rev()))
+		try:
+			allVolumes = set(c.lookup_rev(self.rev()))
+			if isinstance(link, struct.DocLink):
+				curVolumes = set(c.lookup_doc(link.doc()).stores())
+			else:
+				curVolumes = set(c.lookup_rev(link.rev()))
+		except IOError:
+			return
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
 			try:
@@ -1023,20 +1047,29 @@ class CollectionWidget(widgets.DocumentView):
 			# save immediately
 			self.save()
 
-	def __addOpenActions(self, menu, link):
-		if self.isMutable:
+	def __addOpenActions(self, menu, link, isDoc):
+		if isDoc:
 			menu.addAction(self.itemOpenAct)
 			menu.setDefaultAction(self.itemOpenAct)
-		if isinstance(link, struct.DocLink):
-			links = [struct.RevLink(rev) for rev in
-				Connector().lookup_doc(link.doc()).revs()]
+			if isinstance(link, struct.DocLink):
+				links = [struct.RevLink(rev) for rev in link.revs()]
+				if len(links) == 1:
+					action = menu.addAction("Open revision (read only)")
+					action.triggered.connect(lambda x,l=links[0]: self.itemOpen.emit(l))
+				elif len(links) > 1:
+					revMenu = menu.addMenu("Open revision (read only)")
+					for link in links:
+						date = str(Connector().stat(link.rev()).mtime())
+						action = revMenu.addAction(date)
+						action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l))
+		else:
+			links = [struct.RevLink(rev) for rev in link.revs()]
 			if len(links) == 1:
-				action = menu.addAction("Open revision (read only)")
-				action.triggered.connect(lambda x,l=links[0]: self.itemOpen.emit(l))
+				menu.addAction(self.itemOpenAct)
+				menu.setDefaultAction(self.itemOpenAct)
 			elif len(links) > 1:
-				revMenu = menu.addMenu("Open revision (read only)")
 				for link in links:
-					date = str(Connector().stat(link.rev()).mtime())
-					action = revMenu.addAction(date)
+					date = "Open " + str(Connector().stat(link.rev()).mtime())
+					action = menu.addAction(date)
 					action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l))
 

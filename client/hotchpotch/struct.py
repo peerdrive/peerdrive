@@ -34,6 +34,7 @@ class StructError(Exception):
 
 class RevLink(object):
 	MIME_TYPE = 'application/x-hotchpotch-revlink'
+	__slots__ = ['__rev']
 
 	def __init__(self, rev=None):
 		self.__rev = rev
@@ -86,9 +87,11 @@ class RevLink(object):
 
 class DocLink(object):
 	MIME_TYPE = 'application/x-hotchpotch-doclink'
+	__slots__ = ['__doc', '__lookup', '__revs', '__updated']
 
-	def __init__(self, doc=None, autoUpdate=True):
+	def __init__(self, doc=None, autoUpdate=True, lookup=None):
 		self.__doc = doc
+		self.__lookup = lookup
 		self.__revs = []
 		self.__updated = False
 		if doc and autoUpdate:
@@ -135,7 +138,10 @@ class DocLink(object):
 		mimeData.setData(DocLink.MIME_TYPE, self.__doc.encode('hex'))
 
 	def update(self):
-		self.__revs = connector.Connector().lookup_doc(self.__doc).revs()
+		if self.__lookup:
+			self.__revs = self.__lookup(self.__doc)
+		else:
+			self.__revs = connector.Connector().lookup_doc(self.__doc).revs()
 		self.__updated = True
 
 	def doc(self):
@@ -156,23 +162,23 @@ class DocLink(object):
 
 
 class Decoder(object):
-	def __init__(self):
-		pass
+	def __init__(self, lookup=None):
+		self._lookup = lookup
 
 	def decode(self, s):
-		self.s = s
-		self.i = 0
+		self._s = s
+		self._i = 0
 		return self._decodeDoc()
 
 	def _getInt(self, code):
 		length = struct.calcsize('<'+code)
-		value = struct.unpack_from('<'+code, self.s, self.i)[0]
-		self.i += length
+		value = struct.unpack_from('<'+code, self._s, self._i)[0]
+		self._i += length
 		return value
 
 	def _getStr(self, length):
-		res = self.s[self.i:self.i+length]
-		self.i += length
+		res = self._s[self._i:self._i+length]
+		self._i += length
 		return res
 
 	def _decodeDoc(self):
@@ -189,7 +195,7 @@ class Decoder(object):
 			res = RevLink()
 			res._fromStruct(self)
 		elif tag == 0x41:
-			res = DocLink()
+			res = DocLink(lookup=self._lookup)
 			res._fromStruct(self)
 		elif tag == 0x50:
 			res = self._getInt('f')
@@ -330,8 +336,8 @@ def __encode_link(obj):
 		raise TypeError(repr(obj) + " is not serializable")
 
 
-def loads(s):
-	dec = Decoder()
+def loads(s, lookup=None):
+	dec = Decoder(lookup)
 	return dec.decode(s)
 
 

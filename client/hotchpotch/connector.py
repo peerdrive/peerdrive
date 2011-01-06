@@ -1,7 +1,7 @@
 # vim: set fileencoding=utf-8 :
 #
 # Hotchpotch
-# Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+# Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -341,6 +341,7 @@ class _Connector(QtCore.QObject):
 	def process(self, timeout=1):
 		if self.socket.waitForReadyRead(timeout):
 			self.__readReady()
+		self.__dispatchIndications()
 
 	def regProgressHandler(self, handler):
 		self.progressHandlers.append(handler)
@@ -636,6 +637,56 @@ class Lookup(object):
 
 
 class Stat(object):
+	__slots__ = ['__flags', '__parts', '__parents', '__mtime', '__type',
+		'__creator', '__links']
+
+	class StatLinkMap(object):
+		__slots__ = ['__sdl', '__wdl', '__srl', '__wrl', '__map']
+
+		def __init__(self, packet, pos):
+			(self.__sdl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
+			(self.__wdl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
+			(self.__srl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
+			(self.__wrl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
+			(count,) = struct.unpack_from('>L', packet, pos)
+			pos += 4
+			self.__map = {}
+			for i in xrange(count):
+				doc = packet[pos:pos+16]
+				pos += 16
+				revs = []
+				(revCount,) = struct.unpack_from('>B', packet, pos)
+				pos += 1
+				for i in xrange(revCount):
+					revs.append(packet[pos:pos+16])
+					pos += 16
+				self.__map[doc] = revs
+
+		def strongDocLinks(self):
+			return self.__sdl
+
+		def weakDocLinks(self):
+			return self.__wdl
+
+		def strongRevLinks(self):
+			return self.__srl
+
+		def weakRevLinks(self):
+			return self.__wrl
+
+		def lookup(self, doc):
+			return self.__map[doc]
+
+		@staticmethod
+		def __extractList(packet, pos):
+			(count,) = struct.unpack_from('>L', packet, pos)
+			pos += 4
+			l = []
+			for i in xrange(count):
+				l.append(packet[pos:pos+16])
+				pos += 16
+			return (l, pos)
+
 	def __init__(self, packet):
 		# Packet format:
 		#   Flags:32
@@ -647,7 +698,7 @@ class Stat(object):
 		pos = 5
 		self.__flags = flags
 		self.__parts = {}
-		for i in range(count):
+		for i in xrange(count):
 			(fourcc, size, hash) = struct.unpack_from('>4sQ16s', packet, pos)
 			pos += 28
 			self.__parts[fourcc] = (size, hash)
@@ -668,6 +719,8 @@ class Stat(object):
 		(count,) = struct.unpack_from('>H', packet, pos)
 		pos += 2
 		self.__creator = packet[pos:pos+count]
+		pos += count
+		self.__links = Stat.StatLinkMap(packet, pos)
 
 	def size(self, part):
 		return self.__parts[part][0]
@@ -690,8 +743,8 @@ class Stat(object):
 	def creator(self):
 		return self.__creator
 
-	def preliminary(self):
-		return (self.__flags & 0x10) != 0
+	def linkMap(self):
+		return self.__links
 
 
 class Handle(object):
