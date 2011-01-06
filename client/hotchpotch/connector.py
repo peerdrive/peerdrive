@@ -236,14 +236,15 @@ class _Connector(QtCore.QObject):
 					_Connector.WATCH_ADD_CNF, struct.pack('>B16s', typ, h))
 				self._parseDirectResult(reply)
 				self.watchHandlers[ref] = []
-			tb = traceback.extract_stack()
+			tb = None #traceback.extract_stack()
 			self.watchHandlers[ref].append(weakref.ref(w,
 				lambda r, ref=ref, tb=tb: self.__delWatch(r, ref, tb)))
 
 	def __delWatch(self, watchObjRef, watchSpec, tb):
-		print >>sys.stderr, "Warning: watch object has been deleted while being armed!"
-		for line in traceback.format_list(tb)[:-1]:
-			print >>sys.stderr, line,
+		if tb:
+			print >>sys.stderr, "Warning: watch object has been deleted while being armed!"
+			for line in traceback.format_list(tb)[:-1]:
+				print >>sys.stderr, line,
 		self.watchHandlers[watchSpec].remove(watchObjRef)
 		if self.watchHandlers[watchSpec] == []:
 			(typ, h) = watchSpec
