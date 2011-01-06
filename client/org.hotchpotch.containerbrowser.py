@@ -520,6 +520,10 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__colMenu = self.menuBar().addMenu("Columns")
 		self.__colMenu.aboutToShow.connect(self.__columnsShow)
 
+	def closeEvent(self, event):
+		super(BrowserWindow, self).closeEvent(event)
+		self.__view.checkpoint("<<Changed by browser>>")
+
 	def open(self, argv):
 		# parse command line
 		if len(argv) == 2 and argv[1].startswith('doc:'):
@@ -582,6 +586,7 @@ class BrowserWindow(QtGui.QMainWindow):
 	def __leaveItem(self, item):
 		if self.__warpAct.isChecked():
 			self.__warpAct.setChecked(False)
+		self.__view.checkpoint("<<Changed by browser>>")
 		self.__view._saveSettings(item.state())
 
 	def __enterItem(self, item):
@@ -665,6 +670,7 @@ class BrowserWindow(QtGui.QMainWindow):
 	def __warp(self, checked):
 		if checked:
 			state = {}
+			self.__view.checkpoint("<<Changed by browser>>")
 			self.__view.setParent(None)
 			self.__view._saveSettings(state)
 			warp = WarpView(self.__view.rev(), state)
