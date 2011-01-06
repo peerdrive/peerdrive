@@ -1,7 +1,7 @@
 # vim: set fileencoding=utf-8 :
 #
 # Hotchpotch
-# Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+# Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -122,12 +122,30 @@ def importObject(store, uti, spec):
 	return None
 
 
+def overwriteObject(store, link, uti, spec):
+	doc = link.doc()
+	rev = Connector().lookup_doc(doc, [store]).rev(store)
+	with Connector().update(doc, rev, stores=[store]) as writer:
+		for (fourcc, data) in spec:
+			writer.writeAll(fourcc, data)
+		writer.setType(uti)
+		writer.commit()
+
+
 def importObjectByPath(path, uti, spec, overwrite=False):
 	try:
 		# resolve the path
 		(store, container, name) = struct.walkPath(path, True)
-		if (name in container) and (not overwrite):
-			return False
+		if name in container:
+			if not overwrite:
+				return False
+			try:
+				print "overwrite"
+				overwriteObject(store, container[name], uti, spec)
+				print "overwritten"
+				return True
+			except IOError:
+				pass
 
 		# create the object and add to dict
 		handle = importObject(store, uti, spec)
