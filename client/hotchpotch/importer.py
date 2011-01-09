@@ -140,9 +140,7 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 			if not overwrite:
 				return False
 			try:
-				print "overwrite"
 				overwriteObject(store, container[name], uti, spec)
-				print "overwritten"
 				return True
 			except IOError:
 				pass

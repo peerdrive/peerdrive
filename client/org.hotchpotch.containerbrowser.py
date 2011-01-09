@@ -480,8 +480,9 @@ class BrowserWindow(QtGui.QMainWindow):
 	def __init__(self):
 		QtGui.QMainWindow.__init__(self)
 		self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+		self.setWindowIcon(QtGui.QIcon("icons/system-file-manager.png"))
 
-		self.__view = CollectionWidget()
+		self.__view = CollectionWidget(True)
 		self.__view.itemOpen.connect(self.__itemOpen)
 		self.__view.revChanged.connect(self.__extractMetaData)
 		self.__view.selectionChanged.connect(self.__selectionChanged)
@@ -566,22 +567,13 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__history.currentItem().setText(caption)
 		self.setWindowTitle(caption)
 
-	def __itemOpen(self, link, state={}):
-		link.update()
-		revs = link.revs()
-		if len(revs) == 0:
+	def __itemOpen(self, link, executable=None, state={}):
+		if executable in [None, "org.hotchpotch.containerbrowser.py"]:
+			self.__history.push(link, state)
+			return True
+		else:
+			utils.showDocument(link, executable)
 			return False
-		ret = False
-		try:
-			type = Connector().stat(revs[0]).type()
-			if type in ["org.hotchpotch.dict", "org.hotchpotch.store", "org.hotchpotch.set"]:
-				self.__history.push(link, state)
-				ret = True
-			else:
-				utils.showDocument(link)
-		except IOError:
-			pass
-		return ret
 
 	def __leaveItem(self, item):
 		if self.__warpAct.isChecked():
@@ -681,7 +673,7 @@ class BrowserWindow(QtGui.QMainWindow):
 			self.setCentralWidget(self.__view)
 
 	def __warpOpen(self, link, state):
-		if self.__itemOpen(link, state):
+		if self.__itemOpen(link, state=state):
 			self.__warpAct.setChecked(False)
 
 

@@ -786,22 +786,21 @@ class CollectionTreeView(QtGui.QTreeView):
 
 class CollectionWidget(widgets.DocumentView):
 
-	itemOpen = QtCore.pyqtSignal(object)
+	itemOpen = QtCore.pyqtSignal(object, object)
 
 	selectionChanged = QtCore.pyqtSignal()
 
-	def __init__(self):
+	def __init__(self, isBrowser=False):
 		super(CollectionWidget, self).__init__("org.hotchpotch.containerview")
 
 		self.__settings = None
+		self.__isBrowser = isBrowser
 		self.mutable.connect(self.__setMutable)
 
 		self.itemDelAct = QtGui.QAction(QtGui.QIcon('icons/edittrash.png'), "&Delete", self)
 		self.itemDelAct.setShortcut(QtGui.QKeySequence.Delete)
 		self.itemDelAct.setStatusTip("Delete selected item(s)")
 		self.itemDelAct.triggered.connect(self.__removeRows)
-		self.itemOpenAct = QtGui.QAction("&Open", self)
-		self.itemOpenAct.triggered.connect(self.__openItem)
 		self.itemPropertiesAct = QtGui.QAction("&Properties", self)
 		self.itemPropertiesAct.triggered.connect(self.__showProperties)
 
@@ -925,15 +924,15 @@ class CollectionWidget(widgets.DocumentView):
 		if self.listView.model().hasChanged():
 			self._emitSaveNeeded()
 
-	def __openItem(self):
+	def __openItem(self, executable=None):
 		index = self.listView.selectionModel().currentIndex()
 		if index.isValid():
-			self.__doubleClicked(index)
+			self.__doubleClicked(index, executable)
 
-	def __doubleClicked(self, index):
+	def __doubleClicked(self, index, executable=None):
 		link = self.listView.model().getItemLinkUser(index)
 		if link:
-			self.itemOpen.emit(link)
+			self.itemOpen.emit(link, executable)
 
 	def __showProperties(self):
 		index = self.listView.selectionModel().currentIndex()
@@ -1048,28 +1047,64 @@ class CollectionWidget(widgets.DocumentView):
 			self.save()
 
 	def __addOpenActions(self, menu, link, isDoc):
+		executables = []
+		revs = link.revs()
+		for rev in revs:
+			try:
+				uti = Connector().stat(rev).type()
+				executables = Registry().getExecutables(uti)
+				break
+			except IOError:
+				pass
+
+		prefix = "Open"
+		if "org.hotchpotch.containerbrowser.py" in executables:
+			executables.remove("org.hotchpotch.containerbrowser.py")
+			executables.remove("org.hotchpotch.containerview.py")
+			if self.__isBrowser:
+				prefix = "Browse"
+			isContainer = True
+		else:
+			isContainer = False
+
 		if isDoc:
-			menu.addAction(self.itemOpenAct)
-			menu.setDefaultAction(self.itemOpenAct)
+			if isContainer:
+				action = menu.addAction("&Open")
+				action.triggered.connect(lambda x: self.__openItem("org.hotchpotch.containerview.py"))
+				if not self.__isBrowser:
+					menu.setDefaultAction(action)
+				action = menu.addAction("&Browse")
+				action.triggered.connect(lambda x: self.__openItem("org.hotchpotch.containerbrowser.py"))
+				if self.__isBrowser:
+					menu.setDefaultAction(action)
+			else:
+				action = menu.addAction("&Open")
+				action.triggered.connect(lambda x: self.__openItem(None))
+				menu.setDefaultAction(action)
+			if len(executables) > 1:
+				openWith = menu.addMenu("Open with")
+				for e in executables:
+					action = openWith.addAction(e)
+					action.triggered.connect(lambda x,e=e: self.__openItem(e))
 			if isinstance(link, struct.DocLink):
 				links = [struct.RevLink(rev) for rev in link.revs()]
 				if len(links) == 1:
-					action = menu.addAction("Open revision (read only)")
-					action.triggered.connect(lambda x,l=links[0]: self.itemOpen.emit(l))
+					action = menu.addAction(prefix+" revision (read only)")
+					action.triggered.connect(lambda x,l=links[0]: self.itemOpen.emit(l, None))
 				elif len(links) > 1:
-					revMenu = menu.addMenu("Open revision (read only)")
+					revMenu = menu.addMenu(prefix+" revision (read only)")
 					for link in links:
 						date = str(Connector().stat(link.rev()).mtime())
 						action = revMenu.addAction(date)
-						action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l))
+						action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None))
 		else:
 			links = [struct.RevLink(rev) for rev in link.revs()]
 			if len(links) == 1:
-				menu.addAction(self.itemOpenAct)
-				menu.setDefaultAction(self.itemOpenAct)
+				action = menu.addAction(prefix)
+				action.triggered.connect(lambda x: self.__openItem(None))
 			elif len(links) > 1:
 				for link in links:
-					date = "Open " + str(Connector().stat(link.rev()).mtime())
+					date = prefix + " " + str(Connector().stat(link.rev()).mtime())
 					action = menu.addAction(date)
-					action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l))
+					action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None))
 

@@ -76,8 +76,21 @@ class _Registry(connector.Watch):
 	def getExtractor(self, uti):
 		return self.search(uti, "extractor")
 
-	def getExecutable(self, uti):
-		return self.search(uti, "exec")
+	def getExecutables(self, uti):
+		preliminary = self.__getExecutables(uti)
+		# remove duplicate items
+		result = []
+		for i in preliminary:
+			if i not in result:
+				result.append(i)
+		return result
+
+	def __getExecutables(self, uti):
+		item = self.registry.get(uti, {})
+		data = item.get("exec", [])
+		for i in item.get("conforming", []):
+			data.extend(self.__getExecutables(i))
+		return data
 
 	def search(self, uti, key, recursive=True, default=None):
 		if uti not in self.registry:

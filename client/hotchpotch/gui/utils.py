@@ -25,7 +25,7 @@ from ..registry import Registry
 from .. import struct
 
 
-def showDocument(link):
+def showDocument(link, executable=None):
 	if isinstance(link, struct.DocLink):
 		args = ['doc:'+link.doc().encode('hex')]
 		rev = Connector().lookup_doc(link.doc()).revs()[0]
@@ -33,7 +33,8 @@ def showDocument(link):
 		args = ['rev:'+link.rev().encode('hex')]
 		rev = link.rev()
 	uti = Connector().stat(rev).type()
-	executable = Registry().getExecutable(uti)
+	if not executable:
+		executable = Registry().getExecutables(uti)[0]
 	if executable:
 		if sys.platform == "win32":
 			subprocess.Popen([executable] + args, shell=True)

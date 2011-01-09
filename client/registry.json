@@ -45,7 +45,7 @@
 	"public.content" : { },
 	"public.data" : {
 		"conforming" : ["public.item"],
-		"exec" : "public.data.py"
+		"exec" : ["public.data.py"]
 	},
 
 	"public.composite-content" : {
@@ -56,7 +56,7 @@
 	"public.text" : {
 		"conforming" : ["public.content", "public.data"],
 		"icon" : "uti/document.png",
-		"exec" : "org.hotchpotch.textedit.py"
+		"exec" : ["org.hotchpotch.textedit.py"]
 	},
 	"public.plain-text" : {
 		"conforming" : ["public.text"],
@@ -68,7 +68,7 @@
 		"extensions" : [".html", ".htm"],
 		"mimetypes"  : ["text/html"],
 		"icon" : "uti/html.png",
-		"exec" : "public.data.py"
+		"exec" : ["public.data.py"]
 	},
 
 	"com.adobe.pdf" : {
@@ -138,7 +138,7 @@
 	"org.hotchpotch.container" : {
 		"conforming" : ["public.item"],
 		"display" : "Collection",
-		"exec" : "org.hotchpotch.containerview.py",
+		"exec" : ["org.hotchpotch.containerbrowser.py", "org.hotchpotch.containerview.py"],
 		"meta" : [
 			{
 				"key"     : ["org.hotchpotch.container", "autoclean"],
@@ -193,7 +193,7 @@
 		"extensions" : [".eml"],
 		"mimetypes"  : ["message/rfc822", "text/x-mail"],
 		"display" : "Internet Mail",
-		"exec" : "org.hotchpotch.mailview.py",
+		"exec" : ["org.hotchpotch.mailview.py"],
 		"extractor" : "extract-rfc822.py",
 		"meta" : [
 			{
@@ -213,7 +213,7 @@
 	"public.image" : {
 		"conforming" : ["public.data", "public.content"],
 		"icon" : "uti/image.png",
-		"exec" : "org.hotchpotch.imageview.py",
+		"exec" : ["org.hotchpotch.imageview.py"],
 		"extractor" : "extract-public.image.py",
 		"display" : "Image",
 		"meta" : [
