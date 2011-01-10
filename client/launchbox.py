@@ -90,7 +90,10 @@ class Syncer(object):
 
 		with open(self._path, "wb") as f:
 			with Connector().peek(self._rev) as reader:
-				f.write(reader.readAll('FILE'))
+				data = reader.read('FILE', 0x10000)
+				while data:
+					f.write(data)
+					data = reader.read('FILE', 0x10000)
 
 	def _hashFile(self):
 		try:
