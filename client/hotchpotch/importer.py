@@ -64,8 +64,11 @@ def __merge(old, new):
 			old[key] = newValue
 
 
-# returns a commited writer or None
+# returns a commited writer, None or throws an IOError
 def importFile(store, path, name=""):
+	if not name:
+		name = os.path.basename(path)
+
 	if os.path.isfile(path):
 		# determine file type
 		uti = None
@@ -75,8 +78,6 @@ def importFile(store, path, name=""):
 		if not uti:
 			ext  = os.path.splitext(path)[1].lower()
 			uti  = Registry().getUtiFromExtension(ext)
-		if not name:
-			name = os.path.basename(path)
 		meta = {
 			"org.hotchpotch.annotation" : {
 				"title"   : name,
@@ -102,6 +103,21 @@ def importFile(store, path, name=""):
 			except:
 				writer.close()
 				raise
+	elif os.path.isdir(path):
+		handles = []
+		try:
+			for entry in os.listdir(path):
+				handle = importFile(store, os.path.join(path, entry), entry)
+				handles.append((entry, handle))
+
+			container = struct.Set()
+			for (entry, handle) in handles:
+				container[entry] = struct.DocLink(handle.getDoc())
+
+			return container.create(name, [store])
+		finally:
+			for (entry, handle) in handles:
+				handle.close()
 	else:
 		return None
 
