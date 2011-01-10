@@ -765,6 +765,10 @@ class Handle(object):
 			self.close()
 		return False
 
+	def __del__(self):
+		if self.active:
+			self.close()
+
 	def _getPos(self, part):
 		if part in self.__pos:
 			return self.__pos[part]
