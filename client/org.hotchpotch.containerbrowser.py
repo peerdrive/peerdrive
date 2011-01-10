@@ -568,7 +568,17 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.setWindowTitle(caption)
 
 	def __itemOpen(self, link, executable=None, state={}):
-		if executable in [None, "org.hotchpotch.containerbrowser.py"]:
+		if not executable:
+			# default 'open' action -> browse containers, open externally otherwise
+			for rev in link.revs():
+				try:
+					type = Connector().stat(rev).type()
+					if type in ["org.hotchpotch.dict", "org.hotchpotch.store", "org.hotchpotch.set"]:
+						executable = "org.hotchpotch.containerbrowser.py"
+					break
+				except IOError:
+					pass
+		if executable == "org.hotchpotch.containerbrowser.py":
 			self.__history.push(link, state)
 			return True
 		else:
