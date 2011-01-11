@@ -398,7 +398,8 @@ class _Connector(QtCore.QObject):
 	def __send(self, packet):
 		raw = struct.pack('>H', len(packet)) + packet
 		if self.socket.write(raw) == -1:
-			raise IOError("Could not send request to server!")
+			raise IOError("Could not send request to server: "
+				+ str(self.socket.errorString()))
 
 	def __readReady(self):
 		# unpack incoming packets
@@ -466,7 +467,8 @@ class _Connector(QtCore.QObject):
 						return packet[6:]
 
 				if not self.socket.waitForReadyRead(-1):
-					raise IOError("Error while waiting for data from server!")
+					raise IOError("Error while waiting for data from server: "
+						+ str(self.socket.errorString()))
 				self.__readReady()
 		finally:
 			self.recursion -= 1
