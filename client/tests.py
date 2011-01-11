@@ -588,6 +588,32 @@ class TestGarbageCollector(CommonParts):
 			self.assertEqual(l.preRevs(), [])
 			c.stat(rev2)
 
+	def test_transitive_keep(self):
+		with Connector().create("test.format.foo", "test.foo", [self.store1]) as w1:
+			with Connector().create("test.format.bar", "test.foo", [self.store1]) as w2:
+				w2.write('FILE', 'test')
+				w2.commit()
+				doc2 = w2.getDoc()
+				rev2 = w2.getRev()
+
+				# create a reference from w1 to w2
+				w1.write('HPSD', struct.dumps([struct.DocLink(doc2)]))
+				w1.commit()
+				doc1 = w1.getDoc()
+				rev1 = w1.getRev()
+
+			# w2 is closed now, w1 still open, should prevent gc
+			Connector().gc(self.store1Id)
+
+			l = Connector().lookup_doc(doc1)
+			self.assertEqual(l.revs(), [rev1])
+			self.assertEqual(l.preRevs(), [])
+			self.assertEqual(Connector().lookup_rev(rev1), [self.store1])
+			l = Connector().lookup_doc(doc2)
+			self.assertEqual(l.revs(), [rev2])
+			self.assertEqual(l.preRevs(), [])
+			self.assertEqual(Connector().lookup_rev(rev2), [self.store1])
+
 
 class TestReplicator(CommonParts):
 

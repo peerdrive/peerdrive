@@ -1328,13 +1328,20 @@ do_gc(S) ->
 		path      = Path,
 		hidden    = Hidden
 	} = S,
-	{RootRev, RootPreRevs, _RootGen} = dict:fetch(Guid, Uuids),
-	WhiteSet = dict:erase(Guid, Uuids),
-	DelDocs = dict:fetch_keys(
-		lists:foldl(
-			fun(HiddenDoc, Acc) -> dict:erase(HiddenDoc, Acc) end,
-			gc_step([RootRev | RootPreRevs], WhiteSet, Revisions, Path),
-			Hidden)),
+	GreyList = lists:foldl(
+		fun(HiddenDoc, Acc) ->
+			case dict:find(HiddenDoc, Uuids) of
+				{ok, {Rev, PreRevs, _Gen}} -> [Rev | PreRevs] ++ Acc;
+				error                      -> Acc
+			end
+		end,
+		[],
+		[Guid | Hidden]),
+	WhiteSet = lists:foldl(
+		fun(HiddenDoc, Acc) -> dict:erase(HiddenDoc, Acc) end,
+		Uuids,
+		[Guid | Hidden]),
+	DelDocs = dict:fetch_keys(gc_step(GreyList, WhiteSet, Revisions, Path)),
 	NumCollected = length(DelDocs),
 	if
 		NumCollected > 0 ->
