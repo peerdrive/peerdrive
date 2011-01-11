@@ -279,7 +279,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	def checkpoint(self, comment, forceComment=False):
 		# explicitly set comment, the user expects it's comment to be applied
-		if forceComment:
+		if forceComment or self.__preliminary:
 			self.metaDataSetField(DocumentView.HPA_COMMENT, comment)
 		self.__saveFile(comment)
 		if self.__preliminary:
