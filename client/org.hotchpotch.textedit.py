@@ -24,19 +24,44 @@ import diff3
 
 class TextEdit(widgets.DocumentView):
 
+	TE_FONT_SIZE  = ["org.hotchpotch.textedit", "format", "pointsize"]
+	TE_FONT_FIXED = ["org.hotchpotch.textedit", "format", "fixedpitch"]
+	TE_WORD_WRAP  = ["org.hotchpotch.textedit", "format", "wordwrap"]
+
 	def __init__(self):
 		super(TextEdit, self).__init__("org.hotchpotch.textedit")
 		self.textEdit = QtGui.QTextEdit()
+		self.textEdit.setAcceptRichText(False)
 		self.textEdit.setReadOnly(True)
 		self.textEdit.textChanged.connect(self._emitSaveNeeded)
 		self.setCentralWidget(self.textEdit)
-		self.mutable.connect(lambda m: self.textEdit.setReadOnly(not m))
+		self.mutable.connect(self.__setMutable)
+
+		self.textWrap = QtGui.QAction("Wrap words", self)
+		self.textWrap.setCheckable(True)
+		self.textWrap.setChecked(True)
+		self.textWrap.triggered.connect(self.__setWordWrap)
+		self.textFixedPitch = QtGui.QAction("Fixed pitch", self)
+		self.textFixedPitch.setCheckable(True)
+		self.textFixedPitch.triggered.connect(self.__setFixedPitch)
+		self.textStoreSettings = QtGui.QAction("Store format settings", self)
+		self.textStoreSettings.setEnabled(False)
+		self.textStoreSettings.triggered.connect(self.__storeSettings)
 
 	def docRead(self, readWrite, r):
 		self.textEdit.textChanged.disconnect(self._emitSaveNeeded)
 		self.textEdit.setPlainText(r.readAll('FILE'))
 		self.textEdit.document().setModified(False)
 		self.textEdit.textChanged.connect(self._emitSaveNeeded)
+
+		fontPoints = self.metaDataGetField(TextEdit.TE_FONT_SIZE, 10)
+		self.setFontSize(fontPoints)
+		fontFixed = self.metaDataGetField(TextEdit.TE_FONT_FIXED, False)
+		self.__setFixedPitch(fontFixed)
+		self.textFixedPitch.setChecked(fontFixed)
+		wordWrap = self.metaDataGetField(TextEdit.TE_WORD_WRAP, True)
+		self.__setWordWrap(wordWrap)
+		self.textWrap.setChecked(wordWrap)
 
 	def docSave(self, w):
 		if self.textEdit.document().isModified():
@@ -60,6 +85,37 @@ class TextEdit(widgets.DocumentView):
 
 		return conflicts
 
+	def setFontSize(self, size):
+		font = QtGui.QFont(self.textEdit.document().defaultFont())
+		font.setPointSize(size)
+		self.textEdit.document().setDefaultFont(font)
+
+	def __setMutable(self, mutable):
+		self.textEdit.setReadOnly(not mutable)
+		self.textStoreSettings.setEnabled(mutable)
+
+	def __setWordWrap(self, enabled):
+		if enabled:
+			self.textEdit.setWordWrapMode(QtGui.QTextOption.WordWrap)
+		else:
+			self.textEdit.setWordWrapMode(QtGui.QTextOption.NoWrap)
+
+	def __setFixedPitch(self, enabled):
+		font = QtGui.QFont(self.textEdit.document().defaultFont())
+		if enabled:
+			font.setFamily("Courier")
+			font.setFixedPitch(True)
+		else:
+			font.setFamily("Sans")
+			font.setFixedPitch(False)
+		self.textEdit.document().setDefaultFont(font)
+
+	def __storeSettings(self):
+		font = QtGui.QFont(self.textEdit.document().defaultFont())
+		self.metaDataSetField(TextEdit.TE_FONT_SIZE, font.pointSize())
+		self.metaDataSetField(TextEdit.TE_FONT_FIXED, font.fixedPitch())
+		wordWrap = self.textEdit.wordWrapMode() == QtGui.QTextOption.WordWrap
+		self.metaDataSetField(TextEdit.TE_WORD_WRAP, wordWrap)
 
 class TextWindow(main.MainWindow):
 
@@ -102,6 +158,19 @@ class TextWindow(main.MainWindow):
 		self.editMenu.addAction(self.cutAct)
 		self.editMenu.addAction(self.copyAct)
 		self.editMenu.addAction(self.pasteAct)
+
+		self.formatMenu = self.menuBar().addMenu("Format")
+		action = self.formatMenu.addAction("Small")
+		action.triggered.connect(lambda: self.viewWidget().setFontSize(8))
+		action = self.formatMenu.addAction("Normal")
+		action.triggered.connect(lambda: self.viewWidget().setFontSize(10))
+		action = self.formatMenu.addAction("Large")
+		action.triggered.connect(lambda: self.viewWidget().setFontSize(12))
+		self.formatMenu.addSeparator()
+		self.formatMenu.addAction(self.viewWidget().textFixedPitch)
+		self.formatMenu.addAction(self.viewWidget().textWrap)
+		self.formatMenu.addSeparator()
+		self.formatMenu.addAction(self.viewWidget().textStoreSettings)
 
 	def createToolBars(self):
 		self.editToolBar = self.addToolBar("Edit")
