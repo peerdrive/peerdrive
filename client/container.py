@@ -160,7 +160,12 @@ class StatColumnInfo(object):
 		size = 0
 		for part in stat.parts():
 			size += stat.size(part)
-		return str(size)
+		for unit in ['Bytes', 'KiB', 'MiB', 'GiB']:
+			if size < (1 << 10):
+				break
+			else:
+				size = size >> 10
+		return "%d %s" % (size, unit)
 
 
 def _columnFactory(key):
