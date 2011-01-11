@@ -51,14 +51,14 @@ cancel(Worker) ->
 
 init({Request, From}) ->
 	Tag = case Request of
-		{modified, Doc, StoreGuid} ->
+		{modified, Doc, {StoreGuid, _StorePid}} ->
 			{rep_doc, Doc, [StoreGuid]};
 
 		{replicate_doc, Doc, _Depth, _SrcStores, DstStores, _Important} ->
-			{rep_doc, Doc, DstStores};
+			{rep_doc, Doc, lists:map(fun({Uuid, _Pid}) -> Uuid end, DstStores)};
 
 		{replicate_rev, Rev, _Depth, _SrcStores, DstStores, _Important} ->
-			{rep_rev, Rev, DstStores}
+			{rep_rev, Rev, lists:map(fun({Uuid, _Pid}) -> Uuid end, DstStores)}
 	end,
 	{ok, Monitor} = hysteresis:start(Tag),
 	hysteresis:started(Monitor),
