@@ -380,7 +380,9 @@ class Launchbox(QtGui.QDialog):
 		self.setLayout(self.mainLayout)
 		self.setWindowTitle("Hotchpotch launch box")
 		self.setWindowIcon(QtGui.QIcon("icons/launch.png"))
-		#self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.WindowCloseButtonHint)
+		self.setWindowFlags(QtCore.Qt.Window
+			| QtCore.Qt.WindowCloseButtonHint
+			| QtCore.Qt.WindowMinimizeButtonHint)
 
 		Connector().regProgressHandler(self.progress)
 
