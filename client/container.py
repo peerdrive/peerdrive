@@ -1026,7 +1026,9 @@ class CollectionWidget(widgets.DocumentView):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
 		sysStore = struct.Container(struct.DocLink(Connector().enum().sysStore()))
 		templatesDict = struct.Container(sysStore.get("templates:"))
-		for (name, link) in templatesDict.items():
+		items = templatesDict.items()
+		items.sort(key=lambda item: item[0])
+		for (name, link) in items:
 			rev = link.rev()
 			icon = QtGui.QIcon(Registry().getIcon(Connector().stat(rev).type()))
 			action = newMenu.addAction(icon, name)
