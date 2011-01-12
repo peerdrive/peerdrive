@@ -33,6 +33,7 @@ class TextEdit(widgets.DocumentView):
 		self.textEdit = QtGui.QTextEdit()
 		self.textEdit.setAcceptRichText(False)
 		self.textEdit.setReadOnly(True)
+		self.textEdit.setTabStopWidth(40)
 		self.textEdit.textChanged.connect(self._emitSaveNeeded)
 		self.setCentralWidget(self.textEdit)
 		self.mutable.connect(self.__setMutable)
