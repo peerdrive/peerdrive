@@ -885,15 +885,19 @@ class _ChooseWidget(QtGui.QWidget):
 			button1.clicked.connect(lambda: Connector().forget(self.__doc, rev, stores))
 			layout.addWidget(button1)
 			button2 = QtGui.QPushButton("Resume")
-			button2.clicked.connect(lambda: self.__action(rev, True))
+			button2.clicked.connect(lambda: self.__trigger(rev, True))
 			layout.addWidget(button2)
 		else:
 			button = QtGui.QPushButton("Open")
-			button.clicked.connect(lambda: self.__action(rev, False))
+			button.clicked.connect(lambda: self.__trigger(rev, False))
 			layout.addWidget(button)
 
 		widget.setLayout(layout)
 		return widget
+
+	def __trigger(self, rev, preliminary):
+		self.updateChoices(None, [], [])
+		self.__action(rev, preliminary)
 
 
 class _OverwriteWidget(QtGui.QWidget):
@@ -934,12 +938,16 @@ class _OverwriteWidget(QtGui.QWidget):
 
 		layout.addStretch()
 		button = QtGui.QPushButton("Open")
-		button.clicked.connect(lambda: self.__action(rev, False))
+		button.clicked.connect(lambda: self.__trigger(rev, False))
 		layout.addWidget(button)
 		button = QtGui.QPushButton("Overwrite")
-		button.clicked.connect(lambda: self.__action(rev, True))
+		button.clicked.connect(lambda: self.__trigger(rev, True))
 		layout.addWidget(button)
 
 		widget.setLayout(layout)
 		return widget
+
+	def __trigger(self, rev, overwrite):
+		self.updateChoices(None, [])
+		self.__action(rev, overwrite)
 
