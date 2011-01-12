@@ -377,6 +377,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		for item in self._listing:
 			Connector().unwatch(item)
 		self._listing = []
+		del self.__parent
 
 	def hasChanged(self):
 		return self.__changedContent
@@ -779,7 +780,7 @@ class CollectionTreeView(QtGui.QTreeView):
 					if link.doc() == self.__parent.doc():
 						return
 				# already contained?
-				if not self.model().validateDragEnter(link):
+				if not self.__parent.model().validateDragEnter(link):
 					return
 		QtGui.QTreeView.dragEnterEvent(self, event)
 
@@ -800,6 +801,9 @@ class CollectionWidget(widgets.DocumentView):
 
 		self.__settings = None
 		self.__isBrowser = isBrowser
+		self.__containerModel = None
+		self.__filterModel = QtGui.QSortFilterProxyModel()
+		self.__filterModel.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
 		self.mutable.connect(self.__setMutable)
 
 		self.itemDelAct = QtGui.QAction(QtGui.QIcon('icons/edittrash.png'), "&Delete", self)
@@ -818,18 +822,15 @@ class CollectionWidget(widgets.DocumentView):
 		self.listView.setEditTriggers(
 			QtGui.QAbstractItemView.SelectedClicked |
 			QtGui.QAbstractItemView.EditKeyPressed)
+		self.listView.setSortingEnabled(True)
+		self.listView.setModel(self.__filterModel)
 		self.listView.addAction(self.itemDelAct)
 		self.listView.activated.connect(self.__doubleClicked)
 		self.setCentralWidget(self.listView)
 
 	def docClose(self):
 		super(CollectionWidget, self).docClose()
-		oldModel = self.listView.model()
-		if oldModel:
-			oldModel.clear()
-			oldModel.deleteLater()
-			self.listView.selectionModel().deleteLater()
-			self.listView.setModel(None)
+		self.__setModel(None)
 
 	def docRead(self, readWrite, handle):
 		stat = Connector().stat(self.rev())
@@ -845,9 +846,9 @@ class CollectionWidget(widgets.DocumentView):
 		else:
 			raise TypeError('Unhandled type code: %s' % (uti))
 
-		self.listView.setModel(model)
+		self.__setModel(model)
 		if self.__settings:
-			self.__applySettings(model, self.__settings)
+			self.__applySettings(self.__settings)
 
 		model.rowsInserted.connect(self._emitSaveNeeded)
 		model.rowsRemoved.connect(self._emitSaveNeeded)
@@ -863,8 +864,8 @@ class CollectionWidget(widgets.DocumentView):
 			self._emitSaveNeeded()
 
 	def docSave(self, handle):
-		if self.listView.model().hasChanged():
-			self.listView.model().doSave(handle)
+		if self.model().hasChanged():
+			self.model().doSave(handle)
 
 	def docMergeCheck(self, heads, types, changedParts):
 		(uti, handled) = super(CollectionWidget, self).docMergeCheck(heads, types, changedParts)
@@ -883,41 +884,53 @@ class CollectionWidget(widgets.DocumentView):
 
 		return conflicts
 
+	def model(self):
+		return self.__containerModel
+
+	def __setModel(self, model):
+		self.__filterModel.setSourceModel(model)
+		if self.__containerModel:
+			self.__containerModel.clear()
+			self.__containerModel.deleteLater()
+		self.__containerModel = model
+
 	# reimplemented to catch changes to "autoClean"
 	def metaDataSetField(self, field, value):
 		super(CollectionWidget, self).metaDataSetField(field, value)
 		if field == CollectionModel.AUTOCLEAN:
-			model = self.listView.model()
+			model = self.model()
 			if model:
 				model.setAutoClean(value)
 
-	def model(self):
-		return self.listView.model()
-
 	def _saveSettings(self, settings):
 		super(CollectionWidget, self)._saveSettings(settings)
-		model = self.listView.model()
-		if model:
-			settings["columns"] = model.getColumns()
+		if self.__containerModel:
+			settings["columns"] = self.__containerModel.getColumns()
 			settings["colwidths"] = [self.listView.columnWidth(i)
-				for i in xrange(model.columnCount(None))]
+				for i in xrange(self.__containerModel.columnCount(None))]
+			settings["sortcol"] = self.__filterModel.sortColumn()
+			settings["sortorder"] = self.__filterModel.sortOrder()
 
 	def _loadSettings(self, settings):
 		super(CollectionWidget, self)._loadSettings(settings)
 		self.__settings = settings
-		model = self.listView.model()
-		if model:
-			self.__applySettings(model, settings)
+		self.__applySettings(settings)
 
-	def __applySettings(self, model, settings):
+	def __applySettings(self, settings):
+		if not self.__containerModel:
+			return
 		columns = settings.get("columns")
 		if columns:
-			model.setColumns(columns)
-		widths = settings.get("colwidths", [])[:model.columnCount(None)]
+			self.__containerModel.setColumns(columns)
+		widths = settings.get("colwidths", [])[:self.__containerModel.columnCount(None)]
 		i = 0
-		for w in widths:
+		for w in widths[:-1]:
 			self.listView.setColumnWidth(i, w)
 			i += 1
+		self.listView.resizeColumnToContents(i)
+		sortColumn = settings.get("sortcol", -1)
+		sortOrder  = settings.get("sortorder", QtCore.Qt.AscendingOrder)
+		self.listView.sortByColumn(sortColumn, sortOrder)
 
 	def __setMutable(self, enabled):
 		self.isMutable = enabled
@@ -926,7 +939,7 @@ class CollectionWidget(widgets.DocumentView):
 
 	def __dataChanged(self):
 		# some fields in the model have changed. Doesn't mean we have to save...
-		if self.listView.model().hasChanged():
+		if self.model().hasChanged():
 			self._emitSaveNeeded()
 
 	def __openItem(self, executable=None):
@@ -935,13 +948,13 @@ class CollectionWidget(widgets.DocumentView):
 			self.__doubleClicked(index, executable)
 
 	def __doubleClicked(self, index, executable=None):
-		link = self.listView.model().getItemLinkUser(index)
+		link = self.model().getItemLinkUser(index)
 		if link:
 			self.itemOpen.emit(link, executable)
 
 	def __showProperties(self):
 		index = self.listView.selectionModel().currentIndex()
-		link = self.listView.model().getItemLinkUser(index)
+		link = self.model().getItemLinkUser(index)
 		if link:
 			utils.showProperties(link)
 
@@ -950,7 +963,7 @@ class CollectionWidget(widgets.DocumentView):
 		rows.sort()
 		rows = reduce(self.__concatRanges, rows, [])
 		rows.reverse()
-		model = self.listView.model()
+		model = self.model()
 		for (start, end) in rows:
 			model.removeRows(start, end-start+1, None)
 
@@ -969,13 +982,13 @@ class CollectionWidget(widgets.DocumentView):
 			return acc
 
 	def getSelectedLinks(self):
-		return [self.listView.model().getItemLinkReal(row) for row in
+		return [self.model().getItemLinkReal(row) for row in
 			self.listView.selectionModel().selectedRows()]
 
 	def fillContextMenu(self, menu):
 		# get selected items
-		isDoc = self.listView.model().isDoc()
-		links = [self.listView.model().getItemLinkReal(row) for row in
+		isDoc = self.model().isDoc()
+		links = [self.model().getItemLinkReal(row) for row in
 			self.listView.selectionModel().selectedRows()]
 
 		# selected an item?
