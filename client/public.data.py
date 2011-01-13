@@ -17,11 +17,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt4 import QtCore, QtNetwork, QtGui
-import sys, tempfile, os, os.path, subprocess, hashlib, stat
+from PyQt4 import QtCore, QtNetwork
+import sys, optparse
 
-from hotchpotch import struct, Registry
-from hotchpotch.connector import Connector, Watch
+from hotchpotch import struct
 
 PIPE_NAME = "org.hotchpotch.oslauncher"
 
@@ -56,27 +55,26 @@ class RequestManager(QtCore.QObject):
 		self.__finished()
 
 
-def usage():
-	print "Usage: public.data.py [Request]"
-	print
-	print "Request:"
-	print "    doc:<document>  ...open the latest version of the given document"
-	print "    rev:<revision>  ...display the given revision"
-	print
-	print "If no request is given then a server is started."
-	sys.exit(1)
-
-
-if len(sys.argv) != 2:
-	usage()
-elif (not sys.argv[1].startswith('doc:') and
-		not sys.argv[1].startswith('rev:')):
-	usage()
+usage = ("usage: %prog [options] <Document>\n\n"
+	"Document:\n"
+	"    doc:<document>  ...open the latest version of the given document\n"
+	"    rev:<revision>  ...display the given revision\n"
+	"    <hp-path-spec>  ...open by path spec")
+parser = optparse.OptionParser(usage=usage)
+parser.add_option("--referrer", dest="referrer", metavar="REF",
+	help="Document from which we're coming")
+(options, args) = parser.parse_args()
+if len(args) != 1:
+	parser.error("incorrect number of arguments")
+try:
+	link = struct.Link(args[0])
+except IOError as e:
+	parser.error(str(e))
 
 app = QtCore.QCoreApplication(sys.argv)
 mgr = RequestManager(app)
 mgr.finished.connect(app.quit)
-if mgr.request(sys.argv[1]):
+if mgr.request(str(link)):
 	sys.exit(app.exec_())
 else:
 	sys.exit(1)

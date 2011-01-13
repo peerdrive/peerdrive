@@ -19,7 +19,7 @@
 
 from PyQt4 import QtCore, QtGui#, QtOpenGL
 from datetime import datetime
-import itertools
+import itertools, optparse
 
 from hotchpotch import Connector, Registry, struct, connector
 from hotchpotch.gui import utils
@@ -528,35 +528,26 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__view.checkpoint("<<Changed by browser>>")
 
 	def open(self, argv):
+		usage = ("usage: %prog [options] <Document>\n\n"
+			"Document:\n"
+			"    doc:<document>  ...open the latest version of the given document\n"
+			"    rev:<revision>  ...display the given revision\n"
+			"    <hp-path-spec>  ...open by path spec")
+		parser = optparse.OptionParser(usage=usage)
+		parser.add_option("--referrer", dest="referrer", metavar="REF",
+			help="Document from which we're coming")
+		(options, args) = parser.parse_args(args=argv[1:])
+		if len(args) != 1:
+			parser.error("incorrect number of arguments")
+
 		# parse command line
-		if len(argv) == 2 and argv[1].startswith('doc:'):
-			guid = argv[1][4:].decode("hex")
-			isDoc = True
-		elif len(argv) == 2 and argv[1].startswith('rev:'):
-			guid = argv[1][4:].decode("hex")
-			isDoc = False
-		elif len(argv) == 2:
-			link = struct.resolvePath(argv[1])
-			if isinstance(link, struct.DocLink):
-				guid = link.doc()
-				isDoc = True
-			else:
-				guid = link.rev()
-				isDoc = False
-		else:
-			print "Usage: %s <Document>" % (sys.argv[0])
-			print
-			print "Document:"
-			print "    doc:<document>  ...open the latest version of the given document"
-			print "    rev:<revision>  ...display the given revision"
-			print "    <hp-path-spec>  ...open by path spec"
-			sys.exit(1)
+		try:
+			link = struct.Link(args[0])
+		except IOError as e:
+			parser.error(str(e))
 
 		# open the document
-		if isDoc:
-			self.__history.push(struct.DocLink(guid, False))
-		else:
-			self.__history.push(struct.RevLink(guid))
+		self.__history.push(link)
 
 	def __extractMetaData(self):
 		caption = self.__view.metaDataGetField(DocumentView.HPA_TITLE, "Unnamed")
@@ -584,7 +575,8 @@ class BrowserWindow(QtGui.QMainWindow):
 			self.__history.push(link, state)
 			return True
 		else:
-			utils.showDocument(link, executable)
+			utils.showDocument(link, executable=executable,
+				referrer=self.__history.currentItem().link())
 			return False
 
 	def __leaveItem(self, item):

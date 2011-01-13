@@ -19,7 +19,7 @@
 
 from PyQt4 import QtGui
 
-from hotchpotch import Registry
+from hotchpotch import struct, Registry
 from hotchpotch.gui import main, utils
 
 from container import CollectionWidget, CollectionModel
@@ -97,7 +97,13 @@ class CollectionWindow(main.MainWindow):
 		self.__cleanAct.setEnabled(mutable)
 
 	def __itemOpen(self, link):
-		utils.showDocument(link)
+		if self.viewWidget().doc():
+			ref = struct.DocLink(self.viewWidget().doc(), autoUpdate=False)
+		elif self.viewWidget().rev():
+			ref = struct.RevLink(self.viewWidget().rev())
+		else:
+			ref = None
+		utils.showDocument(link, referrer=ref)
 
 
 if __name__ == '__main__':

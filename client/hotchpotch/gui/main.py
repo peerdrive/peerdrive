@@ -19,7 +19,7 @@
 from __future__ import absolute_import
 
 from PyQt4 import QtCore, QtGui
-import sys, os, subprocess, pickle, datetime
+import sys, os, subprocess, pickle, datetime, optparse
 
 from ..connector import Watch, Connector
 from ..registry import Registry
@@ -38,6 +38,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__mutable  = False
 		self.__utiPixmap = None
 		self.__storeButtons = { }
+		self.__referrer = None
 		self.setCentralWidget(self.__view)
 
 		viewWidget.revChanged.connect(self.__extractMetaData)
@@ -111,11 +112,11 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		QtCore.QObject.connect(self.__propertiesAct, QtCore.SIGNAL("triggered()"), self.__showProperties)
 
 		self.__delMenu = QtGui.QMenu()
-		self.__delMenu.aboutToShow.connect(self.__deleteFile)
+		self.__delMenu.aboutToShow.connect(self.__fillDelMenu)
 		self.delAct = QtGui.QAction(QtGui.QIcon('icons/edittrash.png'), "&Delete", self)
 		self.delAct.setStatusTip("Delete the document")
 		self.delAct.setMenu(self.__delMenu)
-		self.delAct.triggered.connect(lambda: self.__delMenu.exec_(QtGui.QCursor.pos()))
+		self.delAct.triggered.connect(self.__delete)
 
 		self.__exitAct = QtGui.QAction("Close", self)
 		self.__exitAct.setShortcut("Ctrl+Q")
@@ -158,29 +159,34 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		return self.__view
 
 	def open(self, argv):
+		usage = ("usage: %prog [options] <Document>\n\n"
+			"Document:\n"
+			"    doc:<document>  ...open the latest version of the given document\n"
+			"    rev:<revision>  ...display the given revision\n"
+			"    <hp-path-spec>  ...open by path spec")
+		parser = optparse.OptionParser(usage=usage)
+		parser.add_option("--referrer", dest="referrer", metavar="REF",
+			help="Document from which we're coming")
+		(options, args) = parser.parse_args(args=argv[1:])
+		if len(args) != 1:
+			parser.error("incorrect number of arguments")
+		try:
+			if options.referrer:
+				self.__referrer = struct.Link(options.referrer)
+		except IOError:
+			parser.error("invalid referrer")
+
 		# parse command line
-		if len(argv) == 2 and argv[1].startswith('doc:'):
-			guid = argv[1][4:].decode("hex")
+		try:
+			link = struct.Link(args[0])
+		except IOError as e:
+			parser.error(str(e))
+		if isinstance(link, struct.DocLink):
+			guid = link.doc()
 			isDoc = True
-		elif len(argv) == 2 and argv[1].startswith('rev:'):
-			guid = argv[1][4:].decode("hex")
-			isDoc = False
-		elif len(argv) == 2:
-			link = struct.resolvePath(argv[1])
-			if isinstance(link, struct.DocLink):
-				guid = link.doc()
-				isDoc = True
-			else:
-				guid = link.rev()
-				isDoc = False
 		else:
-			print "Usage: %s <Document>" % (sys.argv[0])
-			print
-			print "Document:"
-			print "    doc:<document>  ...open the latest version of the given document"
-			print "    rev:<revision>  ...display the given revision"
-			print "    <hp-path-spec>  ...open by path spec"
-			sys.exit(1)
+			guid = link.rev()
+			isDoc = False
 
 		# open the document
 		self.__view.docOpen(guid, isDoc)
@@ -242,6 +248,8 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__nameEdit.setReadOnly(not mutable)
 		self.__tagsEdit.setReadOnly(not mutable)
 		self.__descEdit.setReadOnly(not mutable)
+		self.__stickyAct.setEnabled(mutable)
+		self.__historyAct.setEnabled(mutable and self.__stickyAct.isChecked())
 
 	def __extractMetaData(self):
 		# window icon
@@ -339,10 +347,27 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			link = struct.RevLink(self.__view.rev())
 		showProperties(link)
 
-	def __deleteFile(self):
-		self.__delMenu.clear()
+	def __fillDelMenu(self):
 		doc = self.__view.doc()
 		rev = self.__view.rev()
+		self.__delMenu.clear()
+		if isinstance(self.__referrer, struct.DocLink):
+			if doc:
+				link = struct.DocLink(doc, autoUpdate=False)
+			else:
+				link = struct.RevLink(rev)
+			try:
+				container = struct.Container(self.__referrer)
+				title = container.title()
+				for (name, ref) in container.items():
+					if ref == link:
+						action = self.__delMenu.addAction("Unlink '" + name +
+							"' from '" + title + "'")
+						action.triggered.connect(
+							lambda x,n=name,l=ref: self.__unlink(n,l))
+			except IOError:
+				pass
+			self.__delMenu.addSeparator()
 		if doc:
 			lookup = Connector().lookup_doc(doc)
 			stores = lookup.stores()
@@ -364,6 +389,39 @@ class MainWindow(QtGui.QMainWindow, Watch):
 				delAllAction.triggered.connect(lambda: Connector().deleteDoc(doc, rev))
 			else:
 				delAllAction.triggered.connect(lambda: Connector().deleteRev(rev))
+
+	def __unlink(self, name, link):
+		try:
+			container = struct.Container(self.__referrer)
+			container.remove(name, link)
+			container.save()
+			self.close()
+		except IOError:
+			QtGui.QMessageBox.warning(self, 'Unlink failed',
+				'Could not unlink from container. Try again...')
+
+	def __delete(self):
+		try:
+			if isinstance(self.__referrer, struct.DocLink):
+				doc = self.__view.doc()
+				if doc:
+					link = struct.DocLink(doc, autoUpdate=False)
+				else:
+					link = struct.RevLink(self.__view.rev())
+				container = struct.Container(self.__referrer)
+				candidates = [(name, ref) for (name, ref) in container.items()
+					if ref == link]
+				if len(candidates) == 1:
+					[(name, ref)] = candidates
+					container.remove(name, ref)
+					container.save()
+					self.close()
+					return
+		except IOError:
+			pass
+
+		# fallback: show menu
+		self.__delMenu.exec_(QtGui.QCursor.pos())
 
 	def __getStoreName(self, store):
 		try:

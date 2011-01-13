@@ -27,10 +27,13 @@ from . import connector
 # HPSD data structures, encoders and decoders
 ###############################################################################
 
-class StructError(Exception):
-    """Base class for exceptions in this module."""
-    pass
-
+def Link(spec):
+	if spec.startswith('doc:'):
+		return DocLink(spec[4:].decode("hex"), autoUpdate=False)
+	elif spec.startswith('rev:'):
+		return RevLink(spec[4:].decode("hex"))
+	else:
+		return resolvePath(spec)
 
 class RevLink(object):
 	MIME_TYPE = 'application/x-hotchpotch-revlink'
@@ -38,6 +41,9 @@ class RevLink(object):
 
 	def __init__(self, rev=None):
 		self.__rev = rev
+
+	def __str__(self):
+		return 'rev:'+self.__rev.encode('hex')
 
 	def __eq__(self, link):
 		if isinstance(link, RevLink):
@@ -98,6 +104,9 @@ class DocLink(object):
 			self.update()
 		else:
 			self.__revs = None
+
+	def __str__(self):
+		return 'doc:'+self.__doc.encode('hex')
 
 	def __eq__(self, link):
 		if isinstance(link, DocLink):
@@ -218,7 +227,7 @@ class Decoder(object):
 		elif tag ==	0x67:
 			res = self._getInt('q')
 		else:
-			raise StructError("Invalid tag")
+			raise TypeError("Invalid tag")
 
 		return res
 
@@ -475,11 +484,10 @@ def __mergeList(base, versions):
 ###############################################################################
 
 def Container(link):
-	if isinstance(link, RevLink):
-		rev = link.rev()
-	else:
-		link.update()
-		rev = link.rev()
+	link.update()
+	rev = link.rev()
+	if not rev:
+		return None
 	uti = connector.Connector().stat(rev).type()
 	if uti in Dict.UTIs:
 		return Dict(link)
@@ -548,6 +556,13 @@ class Dict(object):
 		else:
 			raise IOError('Not writable')
 
+	def title(self):
+		if "org.hotchpotch.annotation" in self.__meta:
+			a = self.__meta["org.hotchpotch.annotation"]
+			if "title" in a:
+				return a["title"]
+		return "Unnamed dictionary"
+
 	def __len__(self):
 		return len(self.__content)
 
@@ -573,6 +588,12 @@ class Dict(object):
 
 	def items(self):
 		return self.__content.items()
+
+	def remove(self, name, link):
+		if self.__content.get(name) == link:
+			del self.__content[name]
+		else:
+			raise KeyError(name)
 
 
 class Set(object):
@@ -647,6 +668,13 @@ class Set(object):
 		else:
 			raise IOError('Not writable')
 
+	def title(self):
+		if "org.hotchpotch.annotation" in self.__meta:
+			a = self.__meta["org.hotchpotch.annotation"]
+			if "title" in a:
+				return a["title"]
+		return "Unnamed set"
+
 	def __index(self, title, fail=True):
 		i = 0
 		for (key, link) in self.__content:
@@ -692,6 +720,10 @@ class Set(object):
 		self.__doCache()
 		return self.__content
 
+	def remove(self, name, link):
+		self.__doCache()
+		self.__content.remove((name, link))
+
 # tiny helper function
 def _loadTitle(link):
 	rev = link.rev()
@@ -733,7 +765,7 @@ def walkPath(path, create=False):
 			storeDoc = mountDoc
 			break
 	if not storeDoc:
-		raise StructError("Store not found")
+		raise IOError("Store not found")
 
 	# walk the path
 	curContainer = Dict(DocLink(storeDoc, False))
@@ -756,7 +788,7 @@ def walkPath(path, create=False):
 				handle.close()
 			curContainer = Container(next)
 		else:
-			raise StructError("Invalid path")
+			raise IOError("Path not found")
 
 	# return result
 	return (storeDoc, curContainer, docName)
@@ -765,8 +797,12 @@ def walkPath(path, create=False):
 def resolvePath(path):
 	if '/' in path:
 		(storeDoc, container, docName) = walkPath(path)
+		if docName not in container:
+			raise IOError("Path not found")
 		return container[docName]
 	else:
-		storeDoc = connector.Connector().enum().doc(path)
-		return DocLink(storeDoc, False)
+		enum = connector.Connector().enum()
+		if path not in enum.allStores():
+			raise IOError("Path not found")
+		return DocLink(enum.doc(path), False)
 

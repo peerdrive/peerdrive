@@ -25,15 +25,15 @@ from ..registry import Registry
 from .. import struct
 
 
-def showDocument(link, executable=None):
-	if isinstance(link, struct.DocLink):
-		args = ['doc:'+link.doc().encode('hex')]
-		rev = Connector().lookup_doc(link.doc()).revs()[0]
-	else:
-		args = ['rev:'+link.rev().encode('hex')]
-		rev = link.rev()
-	uti = Connector().stat(rev).type()
+def showDocument(link, executable=None, referrer=None):
+	args = [str(link)]
+	if referrer:
+		args.append('--referrer')
+		args.append(str(referrer))
 	if not executable:
+		link.update()
+		rev = link.revs()[0]
+		uti = Connector().stat(rev).type()
 		executable = Registry().getExecutables(uti)[0]
 	if executable:
 		if sys.platform == "win32":
@@ -44,10 +44,7 @@ def showDocument(link, executable=None):
 
 
 def showProperties(link):
-	if isinstance(link, struct.DocLink):
-		args = ['doc:'+link.doc().encode('hex')]
-	else:
-		args = ['rev:'+link.rev().encode('hex')]
+	args = [str(link)]
 	if sys.platform == "win32":
 		subprocess.Popen(['properties.py'] + args, shell=True)
 	else:
