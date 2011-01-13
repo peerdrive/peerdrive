@@ -787,7 +787,7 @@ class CollectionTreeView(QtGui.QTreeView):
 	def contextMenuEvent(self, event):
 		menu = QtGui.QMenu(self)
 		self.__parent.fillContextMenu(menu)
-		choice = menu.exec_(event.globalPos())
+		menu.exec_(event.globalPos())
 
 
 class CollectionWidget(widgets.DocumentView):
@@ -887,6 +887,9 @@ class CollectionWidget(widgets.DocumentView):
 	def model(self):
 		return self.__containerModel
 
+	def modelMapIndex(self, index):
+		return self.__filterModel.mapToSource(index)
+
 	def __setModel(self, model):
 		self.__filterModel.setSourceModel(model)
 		if self.__containerModel:
@@ -948,18 +951,19 @@ class CollectionWidget(widgets.DocumentView):
 			self.__doubleClicked(index, executable)
 
 	def __doubleClicked(self, index, executable=None):
-		link = self.model().getItemLinkUser(index)
+		link = self.model().getItemLinkUser(self.modelMapIndex(index))
 		if link:
 			self.itemOpen.emit(link, executable)
 
 	def __showProperties(self):
 		index = self.listView.selectionModel().currentIndex()
-		link = self.model().getItemLinkUser(index)
+		link = self.model().getItemLinkUser(self.modelMapIndex(index))
 		if link:
 			utils.showProperties(link)
 
 	def __removeRows(self):
-		rows = [(i.row(), i.row()) for i in self.listView.selectionModel().selectedRows()]
+		rows = [self.modelMapIndex(i) for i in self.listView.selectionModel().selectedRows()]
+		rows = [(i.row(), i.row()) for i in rows if i.isValid()]
 		rows.sort()
 		rows = reduce(self.__concatRanges, rows, [])
 		rows.reverse()
@@ -982,13 +986,13 @@ class CollectionWidget(widgets.DocumentView):
 			return acc
 
 	def getSelectedLinks(self):
-		return [self.model().getItemLinkReal(row) for row in
+		return [self.model().getItemLinkReal(self.modelMapIndex(row)) for row in
 			self.listView.selectionModel().selectedRows()]
 
 	def fillContextMenu(self, menu):
 		# get selected items
 		isDoc = self.model().isDoc()
-		links = [self.model().getItemLinkReal(row) for row in
+		links = [self.model().getItemLinkReal(self.modelMapIndex(row)) for row in
 			self.listView.selectionModel().selectedRows()]
 
 		# selected an item?
