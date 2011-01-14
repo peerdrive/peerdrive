@@ -531,6 +531,15 @@ class TestPreRevs(CommonParts):
 
 class TestGarbageCollector(CommonParts):
 
+	def gc(self, store):
+		guid = store.encode('hex')
+		result = self.erlCall(
+			"""case volman:store(<<16#"""+guid+""":128>>) of
+				{ok, Pid} -> store:gc(Pid);
+				error     -> {error, enoent}
+			end.""")
+		self.assertEqual(result, '{ok, ok}')
+
 	def test_collect(self):
 		c = Connector()
 
@@ -541,7 +550,7 @@ class TestGarbageCollector(CommonParts):
 			rev = w.getRev()
 
 		# perform a GC cycle
-		c.gc(self.store1Id)
+		self.gc(self.store1)
 
 		l = c.lookup_doc(doc)
 		self.assertEqual(l.revs(), [])
@@ -557,7 +566,7 @@ class TestGarbageCollector(CommonParts):
 			rev = w.getRev()
 
 			# perform a GC cycle
-			c.gc(self.store1Id)
+			self.gc(self.store1)
 
 			l = c.lookup_doc(doc)
 			self.assertEqual(l.revs(), [rev])
@@ -581,7 +590,7 @@ class TestGarbageCollector(CommonParts):
 			rev2 = w.getRev()
 
 			# perform a GC cycle
-			c.gc(self.store1Id)
+			self.gc(self.store1)
 
 			l = c.lookup_doc(doc2)
 			self.assertEqual(l.revs(), [rev2])
@@ -603,7 +612,7 @@ class TestGarbageCollector(CommonParts):
 				rev1 = w1.getRev()
 
 			# w2 is closed now, w1 still open, should prevent gc
-			Connector().gc(self.store1Id)
+			self.gc(self.store1)
 
 			l = Connector().lookup_doc(doc1)
 			self.assertEqual(l.revs(), [rev1])

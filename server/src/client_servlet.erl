@@ -83,8 +83,6 @@
 -define(MOUNT_CNF,          16#01D1).
 -define(UNMOUNT_REQ,        16#01E0).
 -define(UNMOUNT_CNF,        16#01E1).
--define(GC_REQ,             16#01F0).
--define(GC_CNF,             16#01F1).
 -define(WATCH_IND,          16#0002).
 -define(PROGRESS_START_IND, 16#0012).
 -define(PROGRESS_IND,       16#0022).
@@ -274,10 +272,6 @@ handle_packet(Packet, S) ->
 
 		?UNMOUNT_REQ ->
 			spawn_link(fun () -> do_unmount(Body, RetPath) end),
-			{ok, S};
-
-		?GC_REQ ->
-			spawn_link(fun () -> do_gc(Body, RetPath) end),
 			{ok, S};
 
 		?WATCH_PROGRESS_REQ ->
@@ -569,20 +563,6 @@ do_unmount(Body, RetPath) ->
 			Error
 	end,
 	send_reply(RetPath, ?UNMOUNT_CNF, encode_direct_result(Reply)).
-
-
-do_gc(Body, RetPath) ->
-	Reply = case parse_store(Body) of
-		{ok, {_Id, _Descr, Guid, _Tags}} ->
-			case volman:store(Guid) of
-				{ok, Pid} -> store:gc(Pid);
-				error     -> {error, enoent}
-			end;
-
-		{error, _Reason} = Error ->
-			Error
-	end,
-	send_reply(RetPath, ?GC_CNF, encode_direct_result(Reply)).
 
 
 do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->

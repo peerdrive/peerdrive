@@ -74,8 +74,6 @@ Opcode ::=
 	MOUNT_CNF           0x01D1
 	UNMOUNT_REQ         0x01E0
 	UNMOUNT_CNF         0x01E1
-	GC_REQ              0x01F0
-	GC_CNF              0x01F1
 
 	WATCH_IND           0x0002
 	PROGRESS_START_IND  0x0012
@@ -153,8 +151,6 @@ Body ::=
 	MOUNT_CNF           Result::DirectCnf
 	UNMOUNT_REQ         Id::String
 	UNMOUNT_CNF         Result::DirectCnf
-	GC_REQ              Id::String
-	GC_CNF              Result::DirectCnf
 
 	WATCH_IND           Event::WatchEvent, Type::WatchType, Element::UUID
 

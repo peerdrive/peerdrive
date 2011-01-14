@@ -126,8 +126,6 @@ class _Connector(QtCore.QObject):
 	MOUNT_CNF           = 0x01D1
 	UNMOUNT_REQ         = 0x01E0
 	UNMOUNT_CNF         = 0x01E1
-	GC_REQ              = 0x01F0
-	GC_CNF              = 0x01F1
 	WATCH_IND           = 0x0002
 	PROGRESS_START_IND  = 0x0012
 	PROGRESS_IND        = 0x0022
@@ -329,12 +327,6 @@ class _Connector(QtCore.QObject):
 
 	def unmount(self, store):
 		reply = self._rpc(_Connector.UNMOUNT_REQ, _Connector.UNMOUNT_CNF,
-			_encodeString(store))
-		self._parseDirectResult(reply)
-		return True
-
-	def gc(self, store):
-		reply = self._rpc(_Connector.GC_REQ, _Connector.GC_CNF,
 			_encodeString(store))
 		self._parseDirectResult(reply)
 		return True
