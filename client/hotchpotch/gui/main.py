@@ -248,8 +248,9 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__nameEdit.setReadOnly(not mutable)
 		self.__tagsEdit.setReadOnly(not mutable)
 		self.__descEdit.setReadOnly(not mutable)
-		self.__stickyAct.setEnabled(mutable)
-		self.__historyAct.setEnabled(mutable and self.__stickyAct.isChecked())
+		if self.__isEditor:
+			self.__stickyAct.setEnabled(mutable)
+			self.__historyAct.setEnabled(mutable and self.__stickyAct.isChecked())
 
 	def __extractMetaData(self):
 		# window icon
