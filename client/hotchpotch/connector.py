@@ -108,26 +108,30 @@ class _Connector(QtCore.QObject):
 	WATCH_ADD_CNF       = 0x0141
 	WATCH_REM_REQ       = 0x0150
 	WATCH_REM_CNF       = 0x0151
-	FORGET_REQ          = 0x0160
-	FORGET_CNF          = 0x0161
-	DELETE_DOC_REQ      = 0x0170
-	DELETE_DOC_CNF      = 0x0171
-	DELETE_REV_REQ      = 0x0180
-	DELETE_REV_CNF      = 0x0181
-	SYNC_DOC_REQ        = 0x0190
-	SYNC_DOC_CNF        = 0x0191
-	REPLICATE_DOC_REQ   = 0x01A0
-	REPLICATE_DOC_CNF   = 0x01A1
-	REPLICATE_REV_REQ   = 0x01B0
-	REPLICATE_REV_CNF   = 0x01B1
-	MOUNT_REQ           = 0x01C0
-	MOUNT_CNF           = 0x01C1
-	UNMOUNT_REQ         = 0x01D0
-	UNMOUNT_CNF         = 0x01D1
-	GC_REQ              = 0x01E0
-	GC_CNF              = 0x01E1
+	WATCH_PROGRESS_REQ  = 0x0160
+	WATCH_PROGRESS_CNF  = 0x0161
+	FORGET_REQ          = 0x0170
+	FORGET_CNF          = 0x0171
+	DELETE_DOC_REQ      = 0x0180
+	DELETE_DOC_CNF      = 0x0181
+	DELETE_REV_REQ      = 0x0190
+	DELETE_REV_CNF      = 0x0191
+	SYNC_DOC_REQ        = 0x01A0
+	SYNC_DOC_CNF        = 0x01A1
+	REPLICATE_DOC_REQ   = 0x01B0
+	REPLICATE_DOC_CNF   = 0x01B1
+	REPLICATE_REV_REQ   = 0x01C0
+	REPLICATE_REV_CNF   = 0x01C1
+	MOUNT_REQ           = 0x01D0
+	MOUNT_CNF           = 0x01D1
+	UNMOUNT_REQ         = 0x01E0
+	UNMOUNT_CNF         = 0x01E1
+	GC_REQ              = 0x01F0
+	GC_CNF              = 0x01F1
 	WATCH_IND           = 0x0002
-	PROGRESS_IND        = 0x0012
+	PROGRESS_START_IND  = 0x0012
+	PROGRESS_IND        = 0x0022
+	PROGRESS_END_IND    = 0x0032
 
 	watchReady = QtCore.pyqtSignal()
 
@@ -344,11 +348,35 @@ class _Connector(QtCore.QObject):
 			self.__readReady()
 		self.__dispatchIndications()
 
-	def regProgressHandler(self, handler):
-		self.progressHandlers.append(handler)
+	def regProgressHandler(self, start=None, progress=None, stop=None):
+		if start:
+			self.__regProgressHandler(_Connector.PROGRESS_START_IND, start)
+		if progress:
+			self.__regProgressHandler(_Connector.PROGRESS_IND, progress)
+		if stop:
+			self.__regProgressHandler(_Connector.PROGRESS_END_IND, stop)
 
-	def unregProgressHandler(self, handler):
-		self.progressHandlers.remove(handler)
+	def __regProgressHandler(self, event, handler):
+		if len(self.progressHandlers) == 0:
+			reply = self._rpc(_Connector.WATCH_PROGRESS_REQ,
+				_Connector.WATCH_PROGRESS_CNF, '\x01')
+			self._parseDirectResult(reply)
+		self.progressHandlers.append((event, handler))
+
+	def unregProgressHandler(self, start=None, progress=None, stop=None):
+		if start:
+			self.__unregProgressHandler(_Connector.PROGRESS_START_IND, start)
+		if progress:
+			self.__unregProgressHandler(_Connector.PROGRESS_IND, progress)
+		if stop:
+			self.__unregProgressHandler(_Connector.PROGRESS_END_IND, stop)
+
+	def __unregProgressHandler(self, event, handler):
+		self.progressHandlers.remove((event, handler))
+		if len(self.progressHandlers) == 0:
+			reply = self._rpc(_Connector.WATCH_PROGRESS_REQ,
+				_Connector.WATCH_PROGRESS_CNF, '\x00')
+			self._parseDirectResult(reply)
 
 	# protected functions
 
@@ -417,8 +445,8 @@ class _Connector(QtCore.QObject):
 				if ind == _Connector.WATCH_IND:
 					self.watchIndications.append(struct.unpack('>BB16s', packet[6:]))
 					indications = True
-				elif ind == _Connector.PROGRESS_IND:
-					self.progressIndications.append(packet[6:])
+				elif ind in [_Connector.PROGRESS_START_IND, _Connector.PROGRESS_IND, _Connector.PROGRESS_END_IND]:
+					self.progressIndications.append((ind, packet[6:]))
 					indications = True
 				else:
 					self.queue.append(packet)
@@ -447,12 +475,20 @@ class _Connector(QtCore.QObject):
 
 				progressIndications = self.progressIndications[:]
 				self.progressIndications = []
-				for ind in progressIndications:
+				for (ind, body) in progressIndications:
 					dispatched = True
 					handlers = self.progressHandlers[:]
-					(typ, prog) = struct.unpack_from('>BH', ind, 0)
-					for handler in handlers:
-						handler(typ, prog, ind[3:])
+					if ind == _Connector.PROGRESS_START_IND:
+						(tag,typ) = struct.unpack_from('>HB', body, 0)
+						info = body[3:]
+						args = (tag, typ, info)
+					elif ind == _Connector.PROGRESS_IND:
+						args = struct.unpack_from('>HB', body, 0)
+					else:
+						args = struct.unpack_from('>H', body, 0)
+					for (event, handler) in handlers:
+						if event == ind:
+							handler(*args)
 		else:
 			self.watchReady.emit()
 

@@ -50,7 +50,7 @@ cancel(Worker) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({Request, From}) ->
-	Tag = case Request of
+	Info = case Request of
 		{modified, Doc, {StoreGuid, _StorePid}} ->
 			{rep_doc, Doc, [StoreGuid]};
 
@@ -60,7 +60,7 @@ init({Request, From}) ->
 		{replicate_rev, Rev, _Depth, _SrcStores, DstStores, _Important} ->
 			{rep_rev, Rev, lists:map(fun({Uuid, _Pid}) -> Uuid end, DstStores)}
 	end,
-	{ok, Monitor} = hysteresis:start(Tag),
+	{ok, Monitor} = hysteresis:start(Info),
 	hysteresis:started(Monitor),
 	{
 		ok,
@@ -81,7 +81,7 @@ handle_cast(cancel, State) ->
 handle_info(timeout, State) ->
 	NewState = run_queue(State),
 	#state{count=Count, done=Done, monitor=Monitor} = NewState,
-	hysteresis:progress(Monitor, Done * 256 div Count),
+	hysteresis:progress(Monitor, Done * 255 div Count),
 	case queue:is_empty(NewState#state.backlog) of
 		true  -> {stop, normal, NewState};
 		false -> {noreply, NewState, 0}

@@ -18,7 +18,7 @@
 -export([init/1, handle_packet/2, handle_info/2, terminate/1]).
 -include("store.hrl").
 
--record(state, {socket, cookies, next}).
+-record(state, {socket, cookies, next, progreg=false}).
 -record(retpath, {socket, ref}).
 
 -define(INIT_REQ,           16#0000).
@@ -65,26 +65,30 @@
 -define(WATCH_ADD_CNF,      16#0141).
 -define(WATCH_REM_REQ,      16#0150).
 -define(WATCH_REM_CNF,      16#0151).
--define(FORGET_REQ,         16#0160).
--define(FORGET_CNF,         16#0161).
--define(DELETE_DOC_REQ,     16#0170).
--define(DELETE_DOC_CNF,     16#0171).
--define(DELETE_REV_REQ,     16#0180).
--define(DELETE_REV_CNF,     16#0181).
--define(SYNC_DOC_REQ,       16#0190).
--define(SYNC_DOC_CNF,       16#0191).
--define(REPLICATE_DOC_REQ,  16#01A0).
--define(REPLICATE_DOC_CNF,  16#01A1).
--define(REPLICATE_REV_REQ,  16#01B0).
--define(REPLICATE_REV_CNF,  16#01B1).
--define(MOUNT_REQ,          16#01C0).
--define(MOUNT_CNF,          16#01C1).
--define(UNMOUNT_REQ,        16#01D0).
--define(UNMOUNT_CNF,        16#01D1).
--define(GC_REQ,             16#01E0).
--define(GC_CNF,             16#01E1).
+-define(WATCH_PROGRESS_REQ, 16#0160).
+-define(WATCH_PROGRESS_CNF, 16#0161).
+-define(FORGET_REQ,         16#0170).
+-define(FORGET_CNF,         16#0171).
+-define(DELETE_DOC_REQ,     16#0180).
+-define(DELETE_DOC_CNF,     16#0181).
+-define(DELETE_REV_REQ,     16#0190).
+-define(DELETE_REV_CNF,     16#0191).
+-define(SYNC_DOC_REQ,       16#01A0).
+-define(SYNC_DOC_CNF,       16#01A1).
+-define(REPLICATE_DOC_REQ,  16#01B0).
+-define(REPLICATE_DOC_CNF,  16#01B1).
+-define(REPLICATE_REV_REQ,  16#01C0).
+-define(REPLICATE_REV_CNF,  16#01C1).
+-define(MOUNT_REQ,          16#01D0).
+-define(MOUNT_CNF,          16#01D1).
+-define(UNMOUNT_REQ,        16#01E0).
+-define(UNMOUNT_CNF,        16#01E1).
+-define(GC_REQ,             16#01F0).
+-define(GC_CNF,             16#01F1).
 -define(WATCH_IND,          16#0002).
--define(PROGRESS_IND,       16#0012).
+-define(PROGRESS_START_IND, 16#0012).
+-define(PROGRESS_IND,       16#0022).
+-define(PROGRESS_END_IND,   16#0032).
 
 -define(WATCH_CAUSE_MOD, 0). % Doc has been modified
 -define(WATCH_CAUSE_ADD, 1). % Doc/Rev appeared
@@ -105,13 +109,15 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init(Socket) ->
-	work_monitor:register_proc(self()),
 	process_flag(trap_exit, true),
 	#state{socket=Socket, cookies=dict:new(), next=0}.
 
 
-terminate(State) ->
-	work_monitor:deregister_proc(self()),
+terminate(#state{progreg=ProgReg} = State) ->
+	if
+		ProgReg -> work_monitor:deregister_proc(self());
+		true    -> ok
+	end,
 	change_monitor:remove(),
 	dict:fold(
 		fun(_Cookie, Worker, _Acc) -> Worker ! closed end,
@@ -119,31 +125,36 @@ terminate(State) ->
 		State#state.cookies).
 
 
-handle_info({work_event, Tag, Progress}, S) ->
-	Num = case Progress of
-		started -> 0;
-		done    -> 16#ffff;
-		_       -> Progress
-	end,
-	Data = case Tag of
-		{sync, FromGuid, ToGuid} ->
-			<<?PROGRESS_TYPE_SYNC:8, Num:16, FromGuid/binary, ToGuid/binary>>;
+handle_info({work_event, Event, Tag, Info}, S) ->
+	case Event of
+		progress ->
+			send_indication(S#state.socket, ?PROGRESS_IND, <<Tag:16, Info:8>>);
 
-		{rep_doc, Doc, Stores} ->
-			BinStores = lists:foldl(
-				fun(Store, Acc) -> <<Acc/binary, Store/binary>> end,
-				<<>>,
-				Stores),
-			<<?PROGRESS_TYPE_REP_DOC:8, Num:16, Doc/binary, BinStores/binary>>;
+		started ->
+			Data = case Info of
+				{sync, FromGuid, ToGuid} ->
+					<<?PROGRESS_TYPE_SYNC:8, FromGuid/binary, ToGuid/binary>>;
 
-		{rep_rev, Rev, Stores} ->
-			BinStores = lists:foldl(
-				fun(Store, Acc) -> <<Acc/binary, Store/binary>> end,
-				<<>>,
-				Stores),
-			<<?PROGRESS_TYPE_REP_REV:8, Num:16, Rev/binary, BinStores/binary>>
+				{rep_doc, Doc, Stores} ->
+					BinStores = lists:foldl(
+						fun(Store, Acc) -> <<Acc/binary, Store/binary>> end,
+						<<>>,
+						Stores),
+					<<?PROGRESS_TYPE_REP_DOC:8, Doc/binary, BinStores/binary>>;
+
+				{rep_rev, Rev, Stores} ->
+					BinStores = lists:foldl(
+						fun(Store, Acc) -> <<Acc/binary, Store/binary>> end,
+						<<>>,
+						Stores),
+					<<?PROGRESS_TYPE_REP_REV:8, Rev/binary, BinStores/binary>>
+			end,
+			send_indication(S#state.socket, ?PROGRESS_START_IND,
+				<<Tag:16, Data/binary>>);
+
+		done ->
+			send_indication(S#state.socket, ?PROGRESS_END_IND, <<Tag:16>>)
 	end,
-	send_indication(S#state.socket, ?PROGRESS_IND, Data),
 	{ok, S};
 
 handle_info({done, Cookie}, S) ->
@@ -268,6 +279,10 @@ handle_packet(Packet, S) ->
 		?GC_REQ ->
 			spawn_link(fun () -> do_gc(Body, RetPath) end),
 			{ok, S};
+
+		?WATCH_PROGRESS_REQ ->
+			S2 = do_watch_progress_req(Body, RetPath, S),
+			{ok, S2};
 
 		_ ->
 			<<Cookie:32, Data/binary>> = Body,
@@ -569,6 +584,22 @@ do_gc(Body, RetPath) ->
 	end,
 	send_reply(RetPath, ?GC_CNF, encode_direct_result(Reply)).
 
+
+do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->
+	<<EnableInt:8>> = Body,
+	Enable = EnableInt =/= 0,
+	S2 = case Enable of
+		ProgReg ->
+			S;
+		true ->
+			work_monitor:register_proc(self()),
+			S#state{progreg=true};
+		false ->
+			work_monitor:deregister_proc(self()),
+			S#state{progreg=false}
+	end,
+	send_reply(RetPath, ?WATCH_PROGRESS_CNF, encode_direct_result(ok)),
+	S2.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% IO handler loop

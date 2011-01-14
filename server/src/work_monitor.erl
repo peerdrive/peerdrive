@@ -1,5 +1,5 @@
 %% Hotchpotch
-%% Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+%% Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 %%
 %% This program is free software: you can redistribute it and/or modify
 %% it under the terms of the GNU General Public License as published by
@@ -29,16 +29,18 @@ start_link() ->
 	gen_event:start_link({local, work_monitor}).
 
 
-started(Tag) ->
-	gen_event:notify(work_monitor, {work_event, Tag, started}).
+started(Info) ->
+	Tag = work_tags:create(),
+	gen_event:notify(work_monitor, {work_event, started, Tag, Info}),
+	Tag.
 
 
 done(Tag) ->
-	gen_event:notify(work_monitor, {work_event, Tag, done}).
+	gen_event:notify(work_monitor, {work_event, done, Tag, ok}).
 
 
 progress(Tag, Progress) ->
-	gen_event:notify(work_monitor, {work_event, Tag, Progress}).
+	gen_event:notify(work_monitor, {work_event, progress, Tag, Progress}).
 
 
 register_proc(Id) ->

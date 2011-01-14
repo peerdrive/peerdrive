@@ -384,21 +384,21 @@ class Launchbox(QtGui.QDialog):
 			| QtCore.Qt.WindowCloseButtonHint
 			| QtCore.Qt.WindowMinimizeButtonHint)
 
-		Connector().regProgressHandler(self.progress)
+		Connector().regProgressHandler(start=self.progressStart,
+			stop=self.progressStop)
 
-	def progress(self, typ, value, tag):
-		if value == 0:
-			if typ == PROGRESS_SYNC:
-				widget = SyncWidget(tag)
-			else:
-				widget = ReplicationWidget(typ, tag)
-			self.progressWidgets[tag] = widget
-			self.progressLayout.addWidget(widget)
-		elif value == 0xffff:
-			widget = self.progressWidgets[tag]
-			del self.progressWidgets[tag]
-			widget.remove()
-			#self.adjustSize()
+	def progressStart(self, tag, typ, info):
+		if typ == PROGRESS_SYNC:
+			widget = SyncWidget(tag, info)
+		else:
+			widget = ReplicationWidget(tag, typ, info)
+		self.progressWidgets[tag] = widget
+		self.progressLayout.addWidget(widget)
+
+	def progressStop(self, tag):
+		widget = self.progressWidgets[tag]
+		del self.progressWidgets[tag]
+		widget.remove()
 
 	def reject(self):
 		super(Launchbox, self).reject()
@@ -534,18 +534,18 @@ class StoreWidget(QtGui.QWidget):
 
 
 class SyncWidget(QtGui.QFrame):
-	def __init__(self, tag, parent=None):
+	def __init__(self, tag, info, parent=None):
 		super(SyncWidget, self).__init__(parent)
 		self.tag = tag
-		fromUuid = tag[0:16]
-		toUuid = tag[16:32]
+		fromUuid = info[0:16]
+		toUuid = info[16:32]
 
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
 		self.fromBtn = DocButton(fromUuid, True)
 		self.toBtn = DocButton(toUuid, True)
 		self.progressBar = QtGui.QProgressBar()
-		self.progressBar.setMaximum(256)
+		self.progressBar.setMaximum(255)
 
 		layout = QtGui.QHBoxLayout()
 		layout.setMargin(0)
@@ -554,25 +554,25 @@ class SyncWidget(QtGui.QFrame):
 		layout.addWidget(self.toBtn)
 		self.setLayout(layout)
 
-		Connector().regProgressHandler(self.progress)
+		Connector().regProgressHandler(progress=self.progress)
 
 	def remove(self):
-		Connector().unregProgressHandler(self.progress)
+		Connector().unregProgressHandler(progress=self.progress)
 		self.fromBtn.cleanup()
 		self.toBtn.cleanup()
 		self.deleteLater()
 
-	def progress(self, typ, value, tag):
+	def progress(self, tag, value):
 		if self.tag == tag:
 			self.progressBar.setValue(value)
 
 
 class ReplicationWidget(QtGui.QFrame):
-	def __init__(self, typ, tag, parent=None):
+	def __init__(self, tag, typ, info, parent=None):
 		super(ReplicationWidget, self).__init__(parent)
 		self.tag = tag
-		uuid = tag[0:16]
-		stores = tag[16:]
+		uuid = info[0:16]
+		stores = info[16:]
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
 		if typ == PROGRESS_REP_DOC:
@@ -580,7 +580,7 @@ class ReplicationWidget(QtGui.QFrame):
 		else:
 			self.docBtn = RevButton(uuid, True)
 		self.progressBar = QtGui.QProgressBar()
-		self.progressBar.setMaximum(256)
+		self.progressBar.setMaximum(255)
 
 		self.storeButtons = []
 		layout = QtGui.QHBoxLayout()
@@ -595,16 +595,16 @@ class ReplicationWidget(QtGui.QFrame):
 			stores = stores[16:]
 		self.setLayout(layout)
 
-		Connector().regProgressHandler(self.progress)
+		Connector().regProgressHandler(progress=self.progress)
 
 	def remove(self):
-		Connector().unregProgressHandler(self.progress)
+		Connector().unregProgressHandler(progress=self.progress)
 		self.docBtn.cleanup()
 		for button in self.storeButtons:
 			button.cleanup()
 		self.deleteLater()
 
-	def progress(self, typ, value, tag):
+	def progress(self, tag, value):
 		if self.tag == tag:
 			self.progressBar.setValue(value)
 

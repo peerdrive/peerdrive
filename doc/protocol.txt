@@ -53,30 +53,34 @@ Opcode ::=
 	WATCH_ADD_CNF       0x0141
 	WATCH_REM_REQ       0x0150
 	WATCH_REM_CNF       0x0151
+	WATCH_PROGRESS_REQ  0x0160
+	WATCH_PROGRESS_CNF  0x0161
 
-	FORGET_REQ          0x0160
-	FORGET_CNF          0x0161
-	DELETE_DOC_REQ      0x0170
-	DELETE_DOC_CNF      0x0171
-	DELETE_REV_REQ      0x0180
-	DELETE_REV_CNF      0x0181
+	FORGET_REQ          0x0170
+	FORGET_CNF          0x0171
+	DELETE_DOC_REQ      0x0180
+	DELETE_DOC_CNF      0x0181
+	DELETE_REV_REQ      0x0190
+	DELETE_REV_CNF      0x0191
 
-	SYNC_DOC_REQ        0x0190
-	SYNC_DOC_CNF        0x0191
-	REPLICATE_DOC_REQ   0x01A0
-	REPLICATE_DOC_CNF   0x01A1
-	REPLICATE_REV_REQ   0x01B0
-	REPLICATE_REV_CNF   0x01B1
+	SYNC_DOC_REQ        0x01A0
+	SYNC_DOC_CNF        0x01A1
+	REPLICATE_DOC_REQ   0x01B0
+	REPLICATE_DOC_CNF   0x01B1
+	REPLICATE_REV_REQ   0x01C0
+	REPLICATE_REV_CNF   0x01C1
 
-	MOUNT_REQ           0x01C0
-	MOUNT_CNF           0x01C1
-	UNMOUNT_REQ         0x01D0
-	UNMOUNT_CNF         0x01D1
-	GC_REQ              0x01E0
-	GC_CNF              0x01E1
+	MOUNT_REQ           0x01D0
+	MOUNT_CNF           0x01D1
+	UNMOUNT_REQ         0x01E0
+	UNMOUNT_CNF         0x01E1
+	GC_REQ              0x01F0
+	GC_CNF              0x01F1
 
 	WATCH_IND           0x0002
-	PROGRESS_IND        0x0012
+	PROGRESS_START_IND  0x0012
+	PROGRESS_IND        0x0022
+	PROGRESS_END_IND    0x0032
 
 Body ::=
 	INIT_REQ            Version::Version
@@ -128,6 +132,8 @@ Body ::=
 	WATCH_ADD_CNF       Result::DirectCnf
 	WATCH_REM_REQ       Type::WatchType, Element::UUID
 	WATCH_REM_CNF       Result::DirectCnf
+	WATCH_PROGRESS_REQ  Enable::Bool
+	WATCH_PROGRESS_CNF  Result::DirectCnf
 
 	FORGET_REQ          Doc::UUID, Rev::UUID, Stores::List(Store::UUID)
 	FORGET_CNF          Result::BrokerCnf
@@ -151,7 +157,10 @@ Body ::=
 	GC_CNF              Result::DirectCnf
 
 	WATCH_IND           Event::WatchEvent, Type::WatchType, Element::UUID
-	PROGRESS_IND        Type:8 {0=sync, 1=docrep, 2=revrep}, Progress:16 {0..256, 0=start, 0xffff=end}, Data...
+
+	PROGRESS_START_IND  Tag:16, Type:8 {0=sync, 1=docrep, 2=revrep}, Data...
+	PROGRESS_IND        Tag:16, Progress:8
+	PROGRESS_END_IND    Tag:16
 
 
 UUID ::= UINT128
@@ -161,6 +170,10 @@ List(Body) ::= NumberOfElements::UINT8, Body{NumberOfElements}
 List32(Body) ::= NumberOfElements::UINT32, Body{NumberOfElements}
 
 String ::= LengthOfString::UINT16, CHAR{LengtOfString}
+
+Bool ::= UINT8
+	0   = False
+	1   = True
 
 ErrorCode ::= UINT32
 	0	= EOK

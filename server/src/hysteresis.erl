@@ -24,14 +24,14 @@
 -define(STARTUP, 300).
 -define(UPDATE, 100).
 
--record(state, {tag, timeout, informed, actual}).
+-record(state, {info, tag, timeout, informed, actual}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start(Tag) ->
-	gen_fsm:start(?MODULE, {self(), Tag}, []).
+start(Info) ->
+	gen_fsm:start(?MODULE, {self(), Info}, []).
 
 
 stop(Fsm) ->
@@ -54,10 +54,10 @@ progress(Fsm, Progress) ->
 %% Callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Parent, Tag}) ->
+init({Parent, Info}) ->
 	process_flag(trap_exit, true),
 	link(Parent),
-	{ok, idle, #state{tag=Tag}}.
+	{ok, idle, #state{info=Info}}.
 
 
 idle(start, State) ->
@@ -69,13 +69,13 @@ starting(stop, #state{timeout=Timer} = State) ->
 	gen_fsm:cancel_timer(Timer),
 	{next_state, idle, State};
 
-starting(publish, #state{tag=Tag, actual=Actual} = State) ->
-	work_monitor:started(Tag),
+starting(publish, #state{info=Info, actual=Actual} = State) ->
+	Tag = work_monitor:started(Info),
 	if
 		Actual /= 0 -> work_monitor:progress(Tag, Actual);
 		true        -> ok
 	end,
-	{next_state, busy, State#state{informed=Actual}};
+	{next_state, busy, State#state{tag=Tag, informed=Actual}};
 
 starting({progress, Progress}, State) ->
 	{next_state, starting, State#state{actual=Progress}}.

@@ -30,6 +30,14 @@ init([]) ->
 
 	ChildSpecs = [
 		{
+			work_tags,
+			{work_tags, start_link, []},
+			permanent,
+			1000,
+			worker,
+			[work_tags]
+		},
+		{
 			work_monitor,
 			{work_monitor, start_link, []},
 			permanent,
