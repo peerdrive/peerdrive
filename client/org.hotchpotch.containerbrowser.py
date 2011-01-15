@@ -25,7 +25,8 @@ from hotchpotch import Connector, Registry, struct, connector
 from hotchpotch.gui import utils
 from hotchpotch.gui.widgets import DocumentView
 
-from container import CollectionWidget, CollectionModel
+from views.container import CollectionWidget, CollectionModel
+from views.text import TextEdit
 
 class HistoryItem(object):
 
@@ -174,9 +175,10 @@ class WarpProxy(QtGui.QGraphicsProxyWidget):
 
 class WarpItem(connector.Watch):
 
-	def __init__(self, view, size, scene, rev):
+	def __init__(self, view, cls, size, scene, rev):
 		connector.Watch.__init__(self, connector.Watch.TYPE_REV, rev)
 		self.__view = view
+		self.__class = cls
 		self.__geometry = QtCore.QRectF(-size.width()/2.0, -size.height()/2.0,
 			float(size.width()), float(size.height()))
 		self.__scene = scene
@@ -258,15 +260,20 @@ class WarpItem(connector.Watch):
 			if self.__available:
 				self.__view._update(0)
 
+	def setCacheMode(self, mode):
+		if self.__widget:
+			self.__widget.setCacheMode(mode)
+
 	def __createWidget(self, level):
-		widget = CollectionWidget()
+		widget = self.__class()
 		if self.__state:
 			widget._loadSettings(self.__state)
 		widget.docOpen(self.__rev, False)
-		widget.itemOpen.connect(self.__itemOpen)
+		#widget.itemOpen.connect(self.__itemOpen)
 		proxy = WarpProxy(self, level)
 		proxy.setWidget(widget)
 		proxy.setGeometry(self.__geometry)
+		proxy.setCacheMode(QtGui.QGraphicsItem.ItemCoordinateCache)
 		self.__widget = proxy
 		self.__scene.addItem(self.__widget)
 		self.__watch()
@@ -312,7 +319,8 @@ class WarpView(QtGui.QGraphicsView):
 
 	openItem = QtCore.pyqtSignal(struct.RevLink, object)
 
-	def __init__(self, rev, state):
+	def __init__(self, cls, rev, state):
+		self.__class = cls
 		self.__scene = QtGui.QGraphicsScene()
 		super(WarpView, self).__init__(self.__scene)
 
@@ -341,21 +349,22 @@ class WarpView(QtGui.QGraphicsView):
 		self.__scene.addWidget(self.__goPresent)
 		self.__scene.addWidget(self.__openBtn)
 
-		self.__distance = 1
-		self.__zoom = 1
-		self.__initTimeLine = QtCore.QTimeLine(250, self)
-		self.__initTimeLine.valueChanged.connect(self.__initValueChanged)
-		self.__initTimeLine.start()
-
-		item = WarpItem(self, self.size(), self.__scene, rev)
+		item = WarpItem(self, self.__class, self.size(), self.__scene, rev)
 		item.fadeFull(0)
 		item.setState(state)
+		self.__distance = 1
+		self.__zoom = 1
 		self.__state = state
 		self.__allItems = { rev : item }
 		self.__availItems = []
 		self.__visibleItems = []
 		self.__curItem = item
 		self._update(0)
+
+		self.__initTimeLine = QtCore.QTimeLine(250, self)
+		self.__initTimeLine.valueChanged.connect(self.__initValueChanged)
+		self.__initTimeLine.stateChanged.connect(self.__initStateChanged)
+		self.__initTimeLine.start()
 
 	def delete(self):
 		for item in self.__allItems.values():
@@ -413,7 +422,7 @@ class WarpView(QtGui.QGraphicsView):
 
 		for rev in todo:
 			if rev not in self.__allItems:
-				self.__allItems[rev] = WarpItem(self, self.size()*self.__distance, self.__scene, rev)
+				self.__allItems[rev] = WarpItem(self, self.__class, self.size()*self.__distance, self.__scene, rev)
 				trigger = True
 
 		if trigger:
@@ -446,6 +455,14 @@ class WarpView(QtGui.QGraphicsView):
 		self.__distance = 1 - 0.25*step
 		self.__resize()
 
+	def __initStateChanged(self, state):
+		if state == QtCore.QTimeLine.Running:
+			for item in self.__visibleItems:
+				item.setCacheMode(QtGui.QGraphicsItem.ItemCoordinateCache)
+		elif state == QtCore.QTimeLine.NotRunning:
+			for item in self.__visibleItems:
+				item.setCacheMode(QtGui.QGraphicsItem.DeviceCoordinateCache)
+
 	def __movePast(self):
 		self.__state = self.__curItem.getState()
 		self.__curItem = self.__visibleItems[1]
@@ -459,173 +476,78 @@ class WarpView(QtGui.QGraphicsView):
 
 	def __open(self):
 		self.__state = self.__curItem.getState()
-		self._open(struct.RevLink(self.__curItem.rev()), self.__state)
-
-	def _open(self, link, state={}):
-		try:
-			type = Connector().stat(link.rev()).type()
-			if type in ["org.hotchpotch.dict", "org.hotchpotch.store", "org.hotchpotch.set"]:
-				self.__initTimeLine.setDirection(QtCore.QTimeLine.Backward)
-				self.__initTimeLine.finished.connect(
-					lambda l=link, s=state: self.openItem.emit(l, s))
-				self.__initTimeLine.start()
-			else:
-				self.openItem.emit(link, state)
-		except IOError:
-			pass
+		link = struct.RevLink(self.__curItem.rev())
+		state = self.__state
+		self.__initTimeLine.setDirection(QtCore.QTimeLine.Backward)
+		self.__initTimeLine.finished.connect(
+			lambda l=link, s=state: self.openItem.emit(l, s))
+		self.__initTimeLine.start()
 
 
-class BrowserWindow(QtGui.QMainWindow):
+class ViewHandler(object):
 
-	def __init__(self):
-		QtGui.QMainWindow.__init__(self)
-		self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
-		self.setWindowIcon(QtGui.QIcon("icons/system-file-manager.png"))
+	def __init__(self, mainWindow, view):
+		self._main = mainWindow
+		self._view = view
+		self._view.revChanged.connect(self._extractMetaData)
 
-		self.__view = CollectionWidget(True)
-		self.__view.itemOpen.connect(self.__itemOpen)
-		self.__view.revChanged.connect(self.__extractMetaData)
-		self.__view.selectionChanged.connect(self.__selectionChanged)
-		self.setCentralWidget(self.__view)
+	def enter(self, link, state):
+		self._view._loadSettings(state)
+		if isinstance(link, struct.DocLink):
+			self._view.docOpen(link.doc(), True)
+		else:
+			self._view.docOpen(link.rev(), False)
 
-		self.__history = History()
-		self.__history.leaveItem.connect(self.__leaveItem)
-		self.__history.enterItem.connect(self.__enterItem)
+	def leave(self, state={}):
+		self._view.checkpoint("<<Changed by browser>>")
+		self._view._saveSettings(state)
 
-		self.__backMenu = QtGui.QMenu()
-		self.__backMenu.aboutToShow.connect(self.__showBackMenu)
-		self.__backAct = QtGui.QAction(QtGui.QIcon('icons/back.png'), "Back", self)
-		self.__backAct.setShortcuts(QtGui.QKeySequence.Back)
-		self.__backAct.setMenu(self.__backMenu)
-		self.__backAct.triggered.connect(self.__history.back)
-		self.__forwardMenu = QtGui.QMenu()
-		self.__forwardMenu.aboutToShow.connect(self.__showForwardMenu)
-		self.__forwardAct = QtGui.QAction(QtGui.QIcon('icons/forward.png'), "Forward", self)
-		self.__forwardAct.setShortcuts(QtGui.QKeySequence.Forward)
-		self.__forwardAct.setMenu(self.__forwardMenu)
-		self.__forwardAct.triggered.connect(self.__history.forward)
-		self.__exitAct = QtGui.QAction("Close", self)
-		self.__exitAct.setShortcut("Ctrl+Q")
-		self.__exitAct.setStatusTip("Close the document")
-		self.__exitAct.triggered.connect(self.close)
+	def getView(self):
+		return self._view
 
-		self.__warpAct = QtGui.QAction("TimeWarp", self)
-		self.__warpAct.setCheckable(True)
-		self.__warpAct.toggled.connect(self.__warp)
+	def rev(self):
+		return self._view.rev()
 
-		self.__browseToolBar = self.addToolBar("Browse")
-		self.__browseToolBar.addAction(self.__backAct)
-		self.__browseToolBar.addAction(self.__forwardAct)
-		self.__browseToolBar.addAction(self.__warpAct)
+	def delete(self):
+		self._view.setParent(None)
+		self._main.menuBar().clear()
+		del self._main
 
-		self.__fileMenu = self.menuBar().addMenu("File")
-		self.__fileMenu.aboutToShow.connect(self.__showFileMenu)
-		self.__colMenu = self.menuBar().addMenu("Columns")
-		self.__colMenu.aboutToShow.connect(self.__columnsShow)
-
-	def closeEvent(self, event):
-		super(BrowserWindow, self).closeEvent(event)
-		self.__view.checkpoint("<<Changed by browser>>")
-
-	def open(self, argv):
-		usage = ("usage: %prog [options] <Document>\n\n"
-			"Document:\n"
-			"    doc:<document>  ...open the latest version of the given document\n"
-			"    rev:<revision>  ...display the given revision\n"
-			"    <hp-path-spec>  ...open by path spec")
-		parser = optparse.OptionParser(usage=usage)
-		parser.add_option("--referrer", dest="referrer", metavar="REF",
-			help="Document from which we're coming")
-		(options, args) = parser.parse_args(args=argv[1:])
-		if len(args) != 1:
-			parser.error("incorrect number of arguments")
-
-		# parse command line
-		try:
-			link = struct.Link(args[0])
-		except IOError as e:
-			parser.error(str(e))
-
-		# open the document
-		self.__history.push(link)
-
-	def __extractMetaData(self):
-		caption = self.__view.metaDataGetField(DocumentView.HPA_TITLE, "Unnamed")
-		if not self.__view.doc() and self.__view.rev():
+	def _extractMetaData(self):
+		caption = self._view.metaDataGetField(DocumentView.HPA_TITLE, "Unnamed")
+		if not self._view.doc() and self._view.rev():
 			try:
-				mtime = Connector().stat(self.__view.rev()).mtime()
+				mtime = Connector().stat(self._view.rev()).mtime()
 				caption = caption + " @ " + str(mtime)
 			except IOError:
 				pass
-		self.__history.currentItem().setText(caption)
-		self.setWindowTitle(caption)
+		self._main.setCaption(caption)
 
-	def __itemOpen(self, link, executable=None, state={}):
-		if not executable:
-			# default 'open' action -> browse containers, open externally otherwise
-			for rev in link.revs():
-				try:
-					type = Connector().stat(rev).type()
-					if type in ["org.hotchpotch.dict", "org.hotchpotch.store", "org.hotchpotch.set"]:
-						executable = "org.hotchpotch.containerbrowser.py"
-					break
-				except IOError:
-					pass
-		if executable == "org.hotchpotch.containerbrowser.py":
-			self.__history.push(link, state)
-			return True
-		else:
-			utils.showDocument(link, executable=executable,
-				referrer=self.__history.currentItem().link())
-			return False
 
-	def __leaveItem(self, item):
-		if self.__warpAct.isChecked():
-			self.__warpAct.setChecked(False)
-		self.__view.checkpoint("<<Changed by browser>>")
-		self.__view._saveSettings(item.state())
+class ContainerViewHandler(ViewHandler):
+	def __init__(self, mainWindow):
+		ViewHandler.__init__(self, mainWindow,
+			CollectionWidget(BrowserWindow.TYPES.keys()))
+		self._view.itemOpen.connect(self._main.itemOpen)
 
-	def __enterItem(self, item):
-		self.__view._loadSettings(item.state())
-		link = item.link()
-		if isinstance(link, struct.DocLink):
-			self.__view.docOpen(link.doc(), True)
-		else:
-			self.__view.docOpen(link.rev(), False)
+		self.__fileMenu = self._main.menuBar().addMenu("File")
+		self.__fileMenu.aboutToShow.connect(self.__showFileMenu)
+		self.__colMenu = self._main.menuBar().addMenu("Columns")
+		self.__colMenu.aboutToShow.connect(self.__columnsShow)
 
-		self.__backAct.setEnabled(self.__history.canGoBack())
-		self.__forwardAct.setEnabled(self.__history.canGoForward())
-
-	def __showBackMenu(self):
-		self.__backMenu.clear()
-		items = self.__history.backItems(10)[:]
-		items.reverse()
-		for item in items:
-			action = self.__backMenu.addAction(item.text())
-			action.triggered.connect(lambda x,item=item: self.__history.goToItem(item))
-
-	def __showForwardMenu(self):
-		self.__forwardMenu.clear()
-		for item in self.__history.forwardItems(10):
-			action = self.__forwardMenu.addAction(item.text())
-			action.triggered.connect(lambda x,item=item: self.__history.goToItem(item))
-
-	def __activeView(self):
-		if self.__warpAct.isChecked():
-			return self.centralWidget().getCurrentView()
-		else:
-			return self.__view
+	def getClass(self):
+		return CollectionWidget
 
 	def __showFileMenu(self):
 		self.__fileMenu.clear()
-		self.__activeView().fillContextMenu(self.__fileMenu)
+		self._main.activeView().fillContextMenu(self.__fileMenu)
 		self.__fileMenu.addSeparator()
-		self.__fileMenu.addAction(self.__exitAct)
+		self.__fileMenu.addAction(self.exitAct)
 
 	def __columnsShow(self):
 		self.__colMenu.clear()
 		reg = Registry()
-		model = self.__activeView().model()
+		model = self._main.activeView().model()
 		types = model.typeCodes().copy()
 		columns = model.getColumns()
 		for col in columns:
@@ -649,7 +571,7 @@ class BrowserWindow(QtGui.QMainWindow):
 				self.__columnsShowAddEntry(subMenu, columns, key, spec["display"])
 
 	def __columnsShowAddEntry(self, subMenu, columns, key, display):
-		model = self.__activeView().model()
+		model = self._main.activeView().model()
 		visible = key in columns
 		action = subMenu.addAction(display)
 		action.setCheckable(True)
@@ -659,44 +581,171 @@ class BrowserWindow(QtGui.QMainWindow):
 		else:
 			action.triggered.connect(lambda en, col=key: model.addColumn(col))
 
-	def __selectionChanged(self):
-		selected = self.__view.getSelectedLinks()
-		self.statusBar().showMessage("%d item(s) selected" % len(selected))
+
+class TextViewHandler(ViewHandler):
+	def __init__(self, mainWindow):
+		ViewHandler.__init__(self, mainWindow, TextEdit())
+		self.__fileMenu = self._main.menuBar().addMenu("File")
+		self.__fileMenu.addAction(self._main.exitAct)
+
+	def getClass(self):
+		return TextEdit
+
+
+class BrowserWindow(QtGui.QMainWindow):
+
+	TYPES = {
+		"org.hotchpotch.containerbrowser.py" : ContainerViewHandler,
+		"org.hotchpotch.textedit.py" : TextViewHandler
+	}
+
+	def __init__(self):
+		QtGui.QMainWindow.__init__(self)
+		self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+		self.setWindowIcon(QtGui.QIcon("icons/system-file-manager.png"))
+
+		self.__viewHandler = None
+
+		self.__history = History()
+		self.__history.leaveItem.connect(self.__leaveItem)
+		self.__history.enterItem.connect(self.__enterItem)
+
+		self.__backMenu = QtGui.QMenu()
+		self.__backMenu.aboutToShow.connect(self.__showBackMenu)
+		self.__backAct = QtGui.QAction(QtGui.QIcon('icons/back.png'), "Back", self)
+		self.__backAct.setShortcuts(QtGui.QKeySequence.Back)
+		self.__backAct.setMenu(self.__backMenu)
+		self.__backAct.triggered.connect(self.__history.back)
+		self.__forwardMenu = QtGui.QMenu()
+		self.__forwardMenu.aboutToShow.connect(self.__showForwardMenu)
+		self.__forwardAct = QtGui.QAction(QtGui.QIcon('icons/forward.png'), "Forward", self)
+		self.__forwardAct.setShortcuts(QtGui.QKeySequence.Forward)
+		self.__forwardAct.setMenu(self.__forwardMenu)
+		self.__forwardAct.triggered.connect(self.__history.forward)
+		self.exitAct = QtGui.QAction("Close", self)
+		self.exitAct.setShortcut("Ctrl+Q")
+		self.exitAct.setStatusTip("Close the document")
+		self.exitAct.triggered.connect(self.close)
+
+		self.__warpAct = QtGui.QAction("TimeWarp", self)
+		self.__warpAct.setCheckable(True)
+		self.__warpAct.toggled.connect(self.__warp)
+
+		self.__browseToolBar = self.addToolBar("Browse")
+		self.__browseToolBar.addAction(self.__backAct)
+		self.__browseToolBar.addAction(self.__forwardAct)
+		self.__browseToolBar.addAction(self.__warpAct)
+
+	def closeEvent(self, event):
+		super(BrowserWindow, self).closeEvent(event)
+		if self.__viewHandler:
+			self.__viewHandler.leave()
+
+	def open(self, argv):
+		usage = ("usage: %prog [options] <Document>\n\n"
+			"Document:\n"
+			"    doc:<document>  ...open the latest version of the given document\n"
+			"    rev:<revision>  ...display the given revision\n"
+			"    <hp-path-spec>  ...open by path spec")
+		parser = optparse.OptionParser(usage=usage)
+		parser.add_option("--referrer", dest="referrer", metavar="REF",
+			help="Document from which we're coming")
+		(options, args) = parser.parse_args(args=argv[1:])
+		if len(args) != 1:
+			parser.error("incorrect number of arguments")
+
+		# parse command line
+		try:
+			link = struct.Link(args[0])
+		except IOError as e:
+			parser.error(str(e))
+
+		# open the document
+		if not self.itemOpen(link):
+			parser.error("cannot browse item")
+
+	def setCaption(self, caption):
+		self.__history.currentItem().setText(caption)
+		self.setWindowTitle(caption)
+
+	def activeView(self):
+		if self.__warpAct.isChecked():
+			return self.centralWidget().getCurrentView()
+		else:
+			return self.centralWidget()
+
+	def itemOpen(self, link, executable=None, browseHint=True, state={}):
+		if browseHint:
+			self.__history.push(link, state)
+			return True
+		else:
+			utils.showDocument(link, executable=executable,
+				referrer=self.__history.currentItem().link())
+			return False
+
+	def __leaveItem(self, item):
+		if self.__warpAct.isChecked():
+			self.__warpAct.setChecked(False)
+		self.__viewHandler.leave(item.state())
+
+	def __enterItem(self, item):
+		link = item.link()
+		self.__setViewHandler(link)
+		self.__viewHandler.enter(link, item.state())
+		self.__backAct.setEnabled(self.__history.canGoBack())
+		self.__forwardAct.setEnabled(self.__history.canGoForward())
+
+	def __setViewHandler(self, link):
+		link.update()
+		executables = []
+		for rev in link.revs():
+			try:
+				type = Connector().stat(rev).type()
+				executables = Registry().getExecutables(type)
+				if executables:
+					break
+			except IOError:
+				pass
+		for executable in executables:
+			if executable in BrowserWindow.TYPES:
+				break
+		handler = BrowserWindow.TYPES[executable]
+		if self.__viewHandler:
+			if isinstance(self.__viewHandler, handler):
+				return
+			self.__viewHandler.delete()
+		self.__viewHandler = handler(self)
+		self.setCentralWidget(self.__viewHandler.getView())
+
+	def __showBackMenu(self):
+		self.__backMenu.clear()
+		items = self.__history.backItems(10)[:]
+		items.reverse()
+		for item in items:
+			action = self.__backMenu.addAction(item.text())
+			action.triggered.connect(lambda x,item=item: self.__history.goToItem(item))
+
+	def __showForwardMenu(self):
+		self.__forwardMenu.clear()
+		for item in self.__history.forwardItems(10):
+			action = self.__forwardMenu.addAction(item.text())
+			action.triggered.connect(lambda x,item=item: self.__history.goToItem(item))
 
 	def __warp(self, checked):
 		if checked:
+			self.centralWidget().setParent(None)
 			state = {}
-			self.__view.checkpoint("<<Changed by browser>>")
-			self.__view.setParent(None)
-			self.__view._saveSettings(state)
-			warp = WarpView(self.__view.rev(), state)
+			self.__viewHandler.leave(state)
+			warp = WarpView(self.__viewHandler.getClass(), self.__viewHandler.rev(), state)
 			warp.openItem.connect(self.__warpOpen)
 			self.setCentralWidget(warp)
 		else:
 			self.centralWidget().delete()
-			self.setCentralWidget(self.__view)
+			self.setCentralWidget(self.__viewHandler.getView())
 
 	def __warpOpen(self, link, state):
-		if self.__itemOpen(link, state=state):
+		if self.itemOpen(link, state=state):
 			self.__warpAct.setChecked(False)
-
-
-class BreadcrumBar(QtGui.QWidget):
-
-	def __init__(self, parent=None):
-		super(BreadcrumBar, self).__init__()
-		self.__history = None
-
-	def setHistory(self, history):
-		self.__history = history
-		self.__history.navigated.connect(self.__navigated)
-		self.__history.changed.connect(self.__changed)
-
-	def __navigated(self):
-		pass
-
-	def __changed(self):
-		pass
 
 
 if __name__ == '__main__':

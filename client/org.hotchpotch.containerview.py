@@ -22,7 +22,7 @@ from PyQt4 import QtGui
 from hotchpotch import struct, Registry
 from hotchpotch.gui import main, utils
 
-from container import CollectionWidget, CollectionModel
+from views.container import CollectionWidget, CollectionModel
 
 class CollectionWindow(main.MainWindow):
 
