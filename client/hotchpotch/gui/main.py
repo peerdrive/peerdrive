@@ -1,7 +1,7 @@
 # vim: set fileencoding=utf-8 :
 #
 # Hotchpotch
-# Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+# Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -53,6 +53,12 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			self.__saveAct.setStatusTip("Create checkpoint of document")
 			QtCore.QObject.connect(self.__saveAct, QtCore.SIGNAL("triggered()"), self.__checkpointFile)
 			self.__view.checkpointNeeded.connect(lambda e: self.__saveAct.setEnabled(e))
+
+			self.__revertAct = QtGui.QAction(QtGui.QIcon('icons/undo.png'), "Revert", self)
+			self.__revertAct.setEnabled(False)
+			self.__revertAct.setStatusTip("Revert to the last checkpoint")
+			self.__revertAct.triggered.connect(self.__revertFile)
+			self.__view.checkpointNeeded.connect(lambda e: self.__revertAct.setEnabled(e))
 
 			self.__mergeMenu = QtGui.QMenu()
 			self.__mergeMenu.aboutToShow.connect(self.__mergeShow)
@@ -127,6 +133,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.fileMenu = self.menuBar().addMenu("&Document")
 		if isEditor:
 			self.fileMenu.addAction(self.__saveAct)
+			self.fileMenu.addAction(self.__revertAct)
 			self.fileMenu.addAction(self.__mergeAct)
 		self.fileMenu.addAction(self.delAct)
 		if isEditor:
@@ -302,6 +309,13 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 	def __checkpointFile(self):
 		self.__commentPopup.popup(self.__view.metaDataGetField(DocumentView.HPA_COMMENT, "Enter comment"))
+
+	def __revertFile(self):
+		choice = QtGui.QMessageBox.question(self, 'Revert',
+			'Throw away all changes since the last checkpoint?',
+			QtGui.QMessageBox.Yes | QtGui.QMessageBox.No, QtGui.QMessageBox.No)
+		if choice == QtGui.QMessageBox.Yes:
+			self.__view.docRevert()
 
 	def __nameChanged(self, name):
 		self.__view.metaDataSetField(DocumentView.HPA_TITLE, str(self.__nameEdit.text()))

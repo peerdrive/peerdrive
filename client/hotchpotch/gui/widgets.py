@@ -1,7 +1,7 @@
 # vim: set fileencoding=utf-8 :
 #
 # Hotchpotch
-# Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+# Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -250,11 +250,11 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__open = True
 		self.__update()
 
-	def docClose(self):
+	def docClose(self, save=True):
 		if self.__open:
 			self.__open = False
 			if self.__state != DocumentView.STATE_NO_DOC:
-				if self.__state == DocumentView.STATE_EDITING:
+				if (self.__state == DocumentView.STATE_EDITING) and save:
 					self.__saveFile('<<Internal checkpoint>>')
 				self.__setState(DocumentView.STATE_NO_DOC)
 			if self.__chooseRevWidget:
@@ -267,6 +267,17 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__doc = None
 			self.__rev = None
 			self.__mutable = False
+
+	def docRevert(self):
+		if not (self.__open and self.__mutable):
+			return
+		doc = self.__doc
+		rev = self.__rev
+		pre = self.__preliminary
+		self.docClose(False)
+		if pre:
+			Connector().forget(doc, rev)
+		self.docOpen(doc, True)
 
 	def doc(self):
 		return self.__doc
