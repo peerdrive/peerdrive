@@ -18,11 +18,11 @@
 
 from __future__ import absolute_import
 
-import sys, os, subprocess
+from PyQt4 import QtCore
+import sys, subprocess
 
 from ..connector import Connector
 from ..registry import Registry
-from .. import struct
 
 
 def showDocument(link, executable=None, referrer=None):
@@ -40,7 +40,7 @@ def showDocument(link, executable=None, referrer=None):
 			subprocess.Popen([executable] + args, shell=True)
 		else:
 			executable = './' + executable
-			os.spawnv(os.P_NOWAIT, executable, [executable] + args)
+			QtCore.QProcess.startDetached(executable, args, '.')
 
 
 def showProperties(link):
@@ -48,6 +48,5 @@ def showProperties(link):
 	if sys.platform == "win32":
 		subprocess.Popen(['properties.py'] + args, shell=True)
 	else:
-		os.spawnv(os.P_NOWAIT, './properties.py', ['./properties.py'] + args)
-
+		QtCore.QProcess.startDetached('./properties.py', args, '.')
 
