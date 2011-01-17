@@ -1,4 +1,5 @@
 *.pyc
 client/.settings/
+client/.checkout/
 server/priv/stores/
 server/priv/snapshots/

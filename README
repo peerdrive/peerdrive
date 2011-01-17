@@ -17,10 +17,10 @@ directory for some infos and ideas.
 == Requirements ==
 
 Python 2.6
-	+ PyQt >=4.4.x
+	+ PyQt >=4.5.x
 	+ magic (optional)
 
-Erlang >= R12
+Erlang >= R14A
 	+ fuserl (http://code.google.com/p/fuserl/)
 
 == Try it out ==
