@@ -1,6 +1,22 @@
--module (fuse_client).
+%% Hotchpotch
+%% Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+%%
+%% This program is free software: you can redistribute it and/or modify
+%% it under the terms of the GNU General Public License as published by
+%% the Free Software Foundation, either version 3 of the License, or
+%% (at your option) any later version.
+%%
+%% This program is distributed in the hope that it will be useful,
+%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+%% GNU General Public License for more details.
+%%
+%% You should have received a copy of the GNU General Public License
+%% along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+-module(ifc_fuse_client).
 -ifndef(windows).
--behaviour (fuserl).
+-behaviour(fuserl).
 
 %-define(DEBUG(X), X).
 -define(DEBUG(X), ok).
@@ -839,9 +855,9 @@ stores_opendir(stores, Cache) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 doc_make_node({doc, Store, Doc} = Oid) ->
-	case fuse_store:lookup(Store, Doc) of
+	case ifc_fuse_store:lookup(Store, Doc) of
 		{ok, Rev} ->
-			case fuse_store:stat(Store, Rev) of
+			case ifc_fuse_store:stat(Store, Rev) of
 				{ok, #rev_stat{type=Type}} ->
 					case Type of
 						<<"org.hotchpotch.store">> ->
@@ -886,9 +902,9 @@ doc_make_node_dict(Oid) ->
 
 
 dict_getattr({doc, Store, Doc}) ->
-	case fuse_store:lookup(Store, Doc) of
+	case ifc_fuse_store:lookup(Store, Doc) of
 		{ok, Rev} ->
-			case fuse_store:stat(Store, Rev) of
+			case ifc_fuse_store:stat(Store, Rev) of
 				{ok, #rev_stat{mtime=Mtime}} ->
 					{ok, #stat{
 						st_mode  = ?S_IFDIR bor 8#0777,
@@ -1029,7 +1045,7 @@ dict_opendir_filter(_, _) ->
 
 
 dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
-	case fuse_store:lookup(Store, Doc) of
+	case ifc_fuse_store:lookup(Store, Doc) of
 		{ok, CacheRev} ->
 			{ok, CacheEntries, Cache};
 
@@ -1049,7 +1065,7 @@ dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 
 dict_link({doc, Store, Doc}, {doc, ChildStore, ChildDoc}, Name, Cache)
 	when Store =:= ChildStore ->
-	case fuse_store:lookup(Store, ChildDoc) of
+	case ifc_fuse_store:lookup(Store, ChildDoc) of
 		{ok, _ChildRev} ->
 			Update = fun(Entries) ->
 				dict:store(Name, {dlink, ChildDoc}, Entries)
@@ -1070,7 +1086,7 @@ dict_unlink({doc, Store, Doc}, Name, Cache) ->
 
 
 dict_update(Store, Doc, Cache, Fun) ->
-	case fuse_store:open_doc(Store, Doc, true) of
+	case ifc_fuse_store:open_doc(Store, Doc, true) of
 		{ok, Rev, Handle} ->
 			case dict_update_cache(Handle, Rev, Cache) of
 				{ok, Entries, NewCache} ->
@@ -1103,7 +1119,7 @@ dict_update_cache(Handle, Rev, _Cache) ->
 dict_write_entries(Handle, Entries, Cache) ->
 	case write_struct(Handle, <<"HPSD">>, Entries) of
 		ok ->
-			case fuse_store:close(Handle) of
+			case ifc_fuse_store:close(Handle) of
 				{ok, Rev} ->
 					{ok, {Rev, Entries}};
 				{error, Reason} ->
@@ -1111,7 +1127,7 @@ dict_write_entries(Handle, Entries, Cache) ->
 			end;
 
 		{error, Error} ->
-			fuse_store:abort(Handle),
+			ifc_fuse_store:abort(Handle),
 			{error, Error, Cache}
 	end.
 
@@ -1135,9 +1151,9 @@ doc_make_node_set(Oid) ->
 
 
 set_getattr({doc, Store, Doc}) ->
-	case fuse_store:lookup(Store, Doc) of
+	case ifc_fuse_store:lookup(Store, Doc) of
 		{ok, Rev} ->
-			case fuse_store:stat(Store, Rev) of
+			case ifc_fuse_store:stat(Store, Rev) of
 				{ok, #rev_stat{mtime=Mtime}} ->
 					{ok, #stat{
 						st_mode  = ?S_IFDIR bor 8#0555,
@@ -1211,7 +1227,7 @@ set_opendir_filter(_) ->
 
 
 set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
-	case fuse_store:lookup(Store, Doc) of
+	case ifc_fuse_store:lookup(Store, Doc) of
 		{ok, CacheRev} ->
 			{ok, CacheEntries, Cache};
 
@@ -1247,7 +1263,7 @@ set_read_title(Store, Doc) ->
 	end.
 
 set_read_title_meta(Store, Doc) ->
-	case fuse_store:lookup(Store, Doc) of
+	case ifc_fuse_store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case util:read_rev_struct(Rev, <<"META">>) of
 				{ok, Meta} ->
@@ -1310,7 +1326,7 @@ doc_make_node_file(Oid) ->
 
 
 file_getattr({doc, Store, Doc}) ->
-	case fuse_store:lookup(Store, Doc) of
+	case ifc_fuse_store:lookup(Store, Doc) of
 		{ok, Rev} ->
 			file_getattr_rev(Store, Rev);
 		error ->
@@ -1319,7 +1335,7 @@ file_getattr({doc, Store, Doc}) ->
 
 
 file_getattr_rev(Store, Rev) ->
-	case fuse_store:stat(Store, Rev) of
+	case ifc_fuse_store:stat(Store, Rev) of
 		{ok, #rev_stat{parts=Parts, mtime=Mtime}} ->
 			Size = case find_entry(
 				fun({FCC, Size, _Hash}) ->
@@ -1348,11 +1364,11 @@ file_getattr_rev(Store, Rev) ->
 
 
 file_truncate({doc, Store, Doc}, Size) ->
-	case fuse_store:open_doc(Store, Doc, true) of
+	case ifc_fuse_store:open_doc(Store, Doc, true) of
 		{ok, _Rev, Handle} ->
-			case fuse_store:truncate(Handle, <<"FILE">>, Size) of
+			case ifc_fuse_store:truncate(Handle, <<"FILE">>, Size) of
 				ok ->
-					case fuse_store:close(Handle) of
+					case ifc_fuse_store:close(Handle) of
 						{ok, CurRev} ->
 							file_getattr_rev(Store, CurRev);
 						Error ->
@@ -1360,7 +1376,7 @@ file_truncate({doc, Store, Doc}, Size) ->
 					end;
 
 				{error, _} = Error ->
-					fuse_store:close(Handle),
+					ifc_fuse_store:close(Handle),
 					Error
 			end;
 
@@ -1371,7 +1387,7 @@ file_truncate({doc, Store, Doc}, Size) ->
 
 file_open({doc, Store, Doc}, Flags) ->
 	Write = (Flags band ?O_ACCMODE) =/= ?O_RDONLY,
-	case fuse_store:open_doc(Store, Doc, Write) of
+	case ifc_fuse_store:open_doc(Store, Doc, Write) of
 		{ok, _Rev, Handle} ->
 			{ok, #handler{
 				read = fun(Size, Offset) ->
@@ -1391,7 +1407,7 @@ file_open({doc, Store, Doc}, Flags) ->
 
 
 file_read(Handle, Size, Offset) ->
-	case fuse_store:read(Handle, <<"FILE">>, Offset, Size) of
+	case ifc_fuse_store:read(Handle, <<"FILE">>, Offset, Size) of
 		{ok, _Data} = R  -> R;
 		{error, enoent}  -> {ok, <<>>};
 		{error, _}       -> {error, eio}
@@ -1399,7 +1415,7 @@ file_read(Handle, Size, Offset) ->
 
 
 file_write(Handle, Data, Offset) ->
-	fuse_store:write(Handle, <<"FILE">>, Offset, Data).
+	ifc_fuse_store:write(Handle, <<"FILE">>, Offset, Data).
 
 
 file_release(Handle, Changed, _Rewritten) ->
@@ -1408,9 +1424,9 @@ file_release(Handle, Changed, _Rewritten) ->
 	%	true  ->
 	%		if
 	%			Rewritten ->
-	%				case fuse_store:read(Handle, <<"FILE">>, 0, 4096) of
+	%				case ifc_fuse_store:read(Handle, <<"FILE">>, 0, 4096) of
 	%					{ok, Data} ->
-	%						fuse_store:set_type(Handle, registry:guess(Data));
+	%						ifc_fuse_store:set_type(Handle, registry:guess(Data));
 	%					_Else ->
 	%						ok
 	%				end;
@@ -1418,7 +1434,7 @@ file_release(Handle, Changed, _Rewritten) ->
 	%				ok
 	%		end
 	%end,
-	fuse_store:close(Handle).
+	ifc_fuse_store:close(Handle).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1497,7 +1513,7 @@ read_struct(Handle, Part) ->
 
 read_struct_loop(Handle, Part, Offset, Acc) ->
 	Length = 16#10000,
-	case fuse_store:read(Handle, Part, Offset, Length) of
+	case ifc_fuse_store:read(Handle, Part, Offset, Length) of
 		{ok, _Error, <<>>} ->
 			{ok, Acc};
 		{ok, _Errors, Data} ->
@@ -1509,9 +1525,9 @@ read_struct_loop(Handle, Part, Offset, Acc) ->
 
 write_struct(Handle, Part, Struct) ->
 	Data = struct:encode(Struct),
-	case fuse_store:truncate(Handle, Part, 0) of
+	case ifc_fuse_store:truncate(Handle, Part, 0) of
 		ok ->
-			fuse_store:write(Handle, Part, 0, Data);
+			ifc_fuse_store:write(Handle, Part, 0, Data);
 		{error, _} = Error ->
 			Error
 	end.

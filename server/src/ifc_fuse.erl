@@ -1,5 +1,5 @@
 %% Hotchpotch
-%% Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+%% Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 %%
 %% This program is free software: you can redistribute it and/or modify
 %% it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module (fuse).
+-module(ifc_fuse).
 -behaviour(supervisor).
 
 -export([get_supervisor_spec/2, start_link/1]).
@@ -24,11 +24,11 @@
 get_supervisor_spec(Id, Options) ->
 	{
 		Id,
-		{fuse, start_link, [Options]},
+		{ifc_fuse, start_link, [Options]},
 		permanent,
 		infinity,
 		supervisor,
-		[fuse]
+		[ifc_fuse]
 	}.
 
 
@@ -42,20 +42,20 @@ init(Options) ->
 	MaxTimeBetRestarts = 60,
 	ChildSpecs = [
 		{
-			fuse_store,
-			{fuse_store, start_link, []},
+			ifc_fuse_store,
+			{ifc_fuse_store, start_link, []},
 			permanent,
 			10000,
 			worker,
-			[fuse_store]
+			[ifc_fuse_store]
 		},
 		{
-			fuse_client,
-			{fuse_client, start_link, Options},
+			ifc_fuse_client,
+			{ifc_fuse_client, start_link, Options},
 			permanent,
 			10000,
 			worker,
-			[fuse_client]
+			[ifc_fuse_client]
 		}
 	],
 	{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}}.

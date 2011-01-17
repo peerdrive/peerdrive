@@ -1,5 +1,5 @@
 %% Hotchpotch
-%% Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+%% Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 %%
 %% This program is free software: you can redistribute it and/or modify
 %% it under the terms of the GNU General Public License as published by
@@ -16,7 +16,8 @@
 
 %% Simplifies the store interface to a level which is needed by the fuse
 %% module.  It will also try to merge consecutive commits.
--module(fuse_store).
+
+-module(ifc_fuse_store).
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,

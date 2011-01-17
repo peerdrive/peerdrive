@@ -29,12 +29,14 @@ main_sup
 	interfaces_sup
 		server_sup
 			servlet_sup
-				client_servlet
-				client_servlet
+				ifc_client
+				ifc_client
 				...
 			listener
 		server_sup
-			sup_servlet
-				net_servlet
-				net_servlet
+			servlet_sup
+				ifc_netstore
+				ifc_netstore
 				...
+			listener
+

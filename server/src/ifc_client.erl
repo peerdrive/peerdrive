@@ -14,7 +14,7 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(client_servlet).
+-module(ifc_client).
 -export([init/1, handle_packet/2, handle_info/2, terminate/1]).
 -include("store.hrl").
 

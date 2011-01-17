@@ -9,19 +9,19 @@
 			broker_io,
 			broker_syncer,
 			change_monitor,
-			client_servlet,
 			dispatcher,
 			file_store,
 			file_store_importer,
 			file_store_reader,
 			file_store_writer,
-			fuse_client,
-			fuse,
-			fuse_store,
 			gen_servlet,
 			hotchpotch_app,
 			hotchpotch,
 			hysteresis,
+			ifc_client,
+			ifc_fuse_client,
+			ifc_fuse,
+			ifc_fuse_store,
 			interfaces_sup,
 			listener,
 			main_sup,
@@ -43,7 +43,8 @@
 			volman,
 			vol_monitor,
 			worker_sup,
-			work_monitor
+			work_monitor,
+			work_tags
 		]},
 		{applications, [kernel, stdlib, crypto, sasl]},
 		{mod, {hotchpotch_app, []}},
@@ -86,7 +87,7 @@
 				}
 			]},
 			{interfaces, [
-				{"client", server_sup, [client_servlet, 4567]}
+				{"client", server_sup, [ifc_client, 4567]}
 			]}
 		]}
 	]
