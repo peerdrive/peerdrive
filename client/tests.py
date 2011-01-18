@@ -535,7 +535,7 @@ class TestGarbageCollector(CommonParts):
 		guid = store.encode('hex')
 		result = self.erlCall(
 			"""case volman:store(<<16#"""+guid+""":128>>) of
-				{ok, Pid} -> store:gc(Pid);
+				{ok, Pid} -> file_store:gc(Pid);
 				error     -> {error, enoent}
 			end.""")
 		self.assertEqual(result, '{ok, ok}')
