@@ -192,10 +192,10 @@ encode(Int) when is_integer(Int) ->
 
 merge(Base, Versions) ->
 	case check_type(Base, Versions) of
-		conflict -> {conflict, hd(Versions)};
-		dict     -> merge_dict(Base, Versions);
-		list     -> merge_list(Base, Versions);
-		literal  -> merge_literal(Base, Versions)
+		econflict -> {econflict, hd(Versions)};
+		dict      -> merge_dict(Base, Versions);
+		list      -> merge_list(Base, Versions);
+		literal   -> merge_literal(Base, Versions)
 	end.
 
 
@@ -217,7 +217,7 @@ merge_dict(Base, Versions) ->
 							% already added by another version; conflicting?
 							case cmp(VerValue, dict:fetch(Key, InAdd)) of
 								true  -> {InRes, InAdd};
-								false -> {conflict, InAdd}
+								false -> {econflict, InAdd}
 							end;
 
 						false ->
@@ -251,11 +251,11 @@ merge_dict(Base, Versions) ->
 								true ->
 									% the latest version still has it.. retain
 									{_, NewVal} = merge(BaseValue, OtherValues),
-									{conflict, dict:store(Key, NewVal, AccDict)};
+									{econflict, dict:store(Key, NewVal, AccDict)};
 
 								false ->
 									% the latest version deleted it.. bye bye
-									{conflict, AccDict}
+									{econflict, AccDict}
 							end;
 
 						false ->
@@ -312,7 +312,7 @@ merge_literal(Base, Versions) ->
 	case length(Unique) of
 		0 -> {ok, Base};
 		1 -> {ok, hd(Changes)};
-		_ -> {conflict, hd(Changes)}
+		_ -> {econflict, hd(Changes)}
 	end.
 
 
@@ -355,51 +355,51 @@ cmp(_, _) ->
 check_type(Base, Versions) when is_integer(Base) ->
 	case lists:all(fun is_integer/1, Versions) of
 		true  -> literal;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(Base, Versions) when is_float(Base) ->
 	case lists:all(fun is_float/1, Versions) of
 		true  -> literal;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(Base, Versions) when is_boolean(Base) ->
 	case lists:all(fun is_boolean/1, Versions) of
 		true  -> literal;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(Base, Versions) when is_binary(Base) ->
 	case lists:all(fun is_binary/1, Versions) of
 		true  -> literal;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(Base, Versions) when is_list(Base) ->
 	case lists:all(fun is_list/1, Versions) of
 		true  -> list;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(Base, Versions) when is_record(Base, dict, 9) ->
 	case lists:all(fun(V) -> is_record(V, dict, 9) end, Versions) of
 		true  -> dict;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(Base, Versions) when is_record(Base, rlink, 2) ->
 	case lists:all(fun(V) -> is_record(V, rlink, 2) end, Versions) of
 		true  -> literal;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(Base, Versions) when is_record(Base, dlink, 2) ->
 	case lists:all(fun(V) -> is_record(V, dlink, 2) end, Versions) of
 		true  -> literal;
-		false -> conflict
+		false -> econflict
 	end;
 
 check_type(_, _) ->
-	conflict.
+	econflict.
 

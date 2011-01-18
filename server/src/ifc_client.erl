@@ -98,9 +98,6 @@
 -define(PROGRESS_TYPE_REP_DOC, 1).
 -define(PROGRESS_TYPE_REP_REV, 2).
 
--define(EOK,       	0).
--define(EINVAL,    	3).
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Servlet callbacks
@@ -293,10 +290,10 @@ handle_packet(Packet, S) ->
 do_init(Body, RetPath) ->
 	<<_Minor:8, Major:8, 0:16>> = Body,
 	case Major of
-		0 -> send_reply(RetPath, ?INIT_CNF, <<?EOK:32, 0:32,
+		0 -> send_reply(RetPath, ?INIT_CNF, <<(util:err2int(ok)):32, 0:32,
 			16#1000:32>>);
-		_ -> send_reply(RetPath, ?INIT_CNF, <<?EINVAL:32, 0:32,
-			16#1000:32>>)
+		_ -> send_reply(RetPath, ?INIT_CNF, <<(util:err2int(erpcmismatch)):32,
+			0:32, 16#1000:32>>)
 	end.
 
 
@@ -795,19 +792,13 @@ encode_direct_result({error, Reason}) ->
 
 
 encode_error_code(Error) ->
-	Code = case Error of
-		conflict  -> 1;
-		enoent    -> 2;
-		einval    -> ?EINVAL;
-		ebadf     -> 4;
-		eambig    -> 5;
-		enosys    -> 6;
-
-		ok        -> 0;
-		_         ->
+	Code = util:err2int(Error),
+	if
+		Code == 16#ffffffff ->
 			error_logger:warning_report([{module, ?MODULE},
-				{reason, "Non-encodable error"}, {error, Error}]),
-			16#ffffffff
+				{reason, "Non-encodable error"}, {error, Error}]);
+		true ->
+			ok
 	end,
 	<<Code:32>>.
 

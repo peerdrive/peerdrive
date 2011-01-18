@@ -565,7 +565,7 @@ commit_prerev_loop(Store, Doc, Handle) ->
 		{ok, _ErrInfo, _Rev} ->
 			ok;
 
-		{error, conflict, _ErrInfo} ->
+		{error, econflict, _ErrInfo} ->
 			case broker:lookup_doc(Doc, broker:get_stores([Store])) of
 				{[{CurRev, _}], _PreRevs} ->
 					broker:set_parents(Handle, [CurRev]),

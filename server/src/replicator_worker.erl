@@ -221,7 +221,7 @@ do_replicate_doc(Backlog, Doc, Depth, SrcStores, DstStores, Important) ->
 				Important, true);
 
 		[] -> push_error(Backlog, enoent, Important);
-		_  -> push_error(Backlog, conflict, Important)
+		_  -> push_error(Backlog, econflict, Important)
 	end.
 
 

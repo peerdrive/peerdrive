@@ -41,7 +41,7 @@ sync(Doc, Depth, Stores) ->
 				{ok, DestRev} ->
 					do_sync(Doc, Depth, DestRev, lists:zip(AllStores, AllRevs));
 				error ->
-					{error, conflict, []}
+					{error, econflict, []}
 			end
 	end.
 

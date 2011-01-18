@@ -162,7 +162,7 @@ sync_doc(Doc, From, To, SyncFun) ->
 	%case Result of
 	%	ok ->
 	%		ok;
-	%	{error, conflict} ->
+	%	{error, econflict} ->
 	%		ok;
 	%	{error, _Reason} ->
 	%		% TODO: log error? where? inform user?
@@ -202,7 +202,7 @@ sync_doc_merge(Doc, {FromGuid, _} = From, {ToGuid, _} = To, Strategy) ->
 				{ok, _ErrInfo, _Rev} ->
 					ok;
 
-				{error, conflict, _ErrInfo} ->
+				{error, econflict, _ErrInfo} ->
 					{FromRev, _} = lists:keyfind([FromGuid], 2, Revs),
 					{ToRev, _} = lists:keyfind([ToGuid], 2, Revs),
 					FromStat = throws(broker:stat(FromRev, [From])),
@@ -415,7 +415,7 @@ merge_hpsd_parts(
 		{ok, Data} ->
 			merge_hpsd_parts(BaseData, FromData, ToData, [{Part, Data} | Acc]);
 
-		{conflict, Data} ->
+		{econflict, Data} ->
 			% ignore conflicts
 			merge_hpsd_parts(BaseData, FromData, ToData, [{Part, Data} | Acc]);
 

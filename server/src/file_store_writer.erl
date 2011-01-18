@@ -94,7 +94,7 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 	end,
 	{reply, Reply, S2};
 
-% returns `{ok, Hash} | conflict | {error, Reason}'
+% returns `{ok, Hash} | {error, Reason}'
 handle_call({commit, Mtime}, _From, S) ->
 	do_commit(fun file_store:commit/4, S, Mtime);
 

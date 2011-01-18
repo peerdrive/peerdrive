@@ -500,7 +500,7 @@ do_forget(#state{guid=Guid, uuids=Uuids} = S, Doc, PreRev) ->
 					{S2, ok};
 
 				false ->
-					{S, {error, conflict}}
+					{S, {error, econflict}}
 			end;
 
 		error ->
@@ -543,7 +543,7 @@ do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
 					{S#state{ uuids=dict:erase(Doc, Uuids), changed=true}, ok};
 
 				{ok, {_OtherRev, _PreRevs, _Gen}} ->
-					{S, {error, conflict}};
+					{S, {error, econflict}};
 
 				error ->
 					{S, {error, enoent}}
@@ -707,7 +707,7 @@ do_write_start_fork(S, Doc, StartRev, Creator, User) ->
 	end.
 
 
-% returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = conflict | enoent | ...'
+% returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = econflict | enoent | ...'
 do_write_start_update(S, Doc, StartRev, Creator, User) ->
 	case dict:is_key(Doc, S#state.uuids) of
 		true ->
@@ -781,7 +781,7 @@ do_write_start_resume(S, Doc, PreRev, Creator, User) ->
 					end;
 
 				false ->
-					{S, {error, conflict}}
+					{S, {error, econflict}}
 			end;
 
 		error ->
@@ -828,7 +828,7 @@ do_put_doc(#state{uuids=Uuids} = S, Doc, OldRev, NewRev) ->
 
 		% completely other rev
 		{ok, _} ->
-			{S, {error, conflict}};
+			{S, {error, econflict}};
 
 		% document does not exist (yet)...
 		error ->
@@ -898,7 +898,7 @@ do_commit(S, Doc, OldPreRev, Revision) ->
 						CurrentPreRevs),
 					{ok, NewRev, NewPreRevs};
 				false ->
-					{error, conflict}
+					{error, econflict}
 			end;
 		error ->
 			{ok, NewRev, []}
