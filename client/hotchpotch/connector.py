@@ -683,6 +683,7 @@ class Enum(object):
 	FLAG_MOUNTED   = 1
 	FLAG_REMOVABLE = 2
 	FLAG_SYSTEM    = 4
+	FLAG_NET       = 8
 
 	def __init__(self, packet):
 		self.__stores = { }
@@ -709,22 +710,16 @@ class Enum(object):
 		return self.__stores.keys()
 
 	def isMounted(self, store):
-		if store in self.__stores:
-			return (self.__stores[store][1] & Enum.FLAG_MOUNTED) != 0
-		else:
-			return False
+		return self.__testFlag(store, Enum.FLAG_MOUNTED)
 
 	def isSystem(self, store):
-		if store in self.__stores:
-			return (self.__stores[store][1] & Enum.FLAG_SYSTEM) != 0
-		else:
-			return False
+		return self.__testFlag(store, Enum.FLAG_SYSTEM)
 
 	def isRemovable(self, store):
-		if store in self.__stores:
-			return (self.__stores[store][1] & Enum.FLAG_REMOVABLE) != 0
-		else:
-			return False
+		return self.__testFlag(store, Enum.FLAG_REMOVABLE)
+
+	def isNet(self, store):
+		return self.__testFlag(store, Enum.FLAG_NET)
 
 	def store(self, doc):
 		for (store, info) in self.__stores.items():
@@ -737,6 +732,12 @@ class Enum(object):
 
 	def name(self, store):
 		return self.__stores[store][2]
+
+	def __testFlag(self, store, flag):
+		if store in self.__stores:
+			return (self.__stores[store][1] & flag) != 0
+		else:
+			return False
 
 
 class Lookup(object):

@@ -15,30 +15,30 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(gen_servlet).
--export([start_link/3]).
--export([init/4]).
+-export([start_link/4]).
+-export([init/5]).
 
 
-start_link(Module, Listener, ListenSock) ->
-	proc_lib:start_link(?MODULE, init, [self(), Module, Listener, ListenSock]).
+start_link(Module, Args, Listener, ListenSock) ->
+	proc_lib:start_link(?MODULE, init, [self(), Module, Listener, ListenSock, Args]).
 
 
-init(Parent, Module, Listener, ListenSocket) ->
+init(Parent, Module, Listener, ListenSocket, Args) ->
 	proc_lib:init_ack(Parent, {ok, self()}),
-	server(Module, Listener, ListenSocket).
+	server(Module, Listener, ListenSocket, Args).
 
 
-server(Module, Listener, ListenSocket) ->
+server(Module, Listener, ListenSocket, Args) ->
 	case gen_tcp:accept(ListenSocket) of
 		{ok, Socket} ->
 			try
 				listener:servlet_occupied(Listener),
-				State = Module:init(Socket),
+				State = apply(Module, init, [Socket]++Args),
 				loop(Module, Socket, State)
 			after
 				listener:servlet_idle(Listener)
 			end,
-			server(Module, Listener, ListenSocket);
+			server(Module, Listener, ListenSocket, Args);
 
 		_Other ->
 			%io:format("[~w] accept returned ~w - goodbye!~n", [self(), Other]),

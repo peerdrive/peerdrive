@@ -1,5 +1,5 @@
 %% Hotchpotch
-%% Copyright (C) 2010  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+%% Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 %%
 %% This program is free software: you can redistribute it and/or modify
 %% it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
 
 % specs:  [{Id, Disposition, Module, Args}]
 %           Id = atom()
-%           Disposition = [system | permanent | removable]
+%           Disposition = [system | removable | net]
 %           Module = atom()
 %           Path = string()
 %           Name = string()
@@ -59,7 +59,7 @@ reg_store(Id, Guid) ->
 %%       Id = atom()
 %%       Descr = string()
 %%       Guid = guid() | unknown
-%%       Tag = mounted | removable | system
+%%       Tag = mounted | removable | system | net
 enum() ->
 	gen_server:call(volman, enum).
 
@@ -254,12 +254,13 @@ check_store_spec({Id, Descr, Disposition, Module, _Args}) when
 		is_atom(Id) and
 		is_list(Disposition) and
 		is_list(Descr) ->
-	(Module == file_store) and
+	lists:member(Module, [file_store, net_store]) and
 	lists:foldl(
 		fun(Tag, Acc) ->
 			Acc and case Tag of
 				system    -> true;
 				removable -> true;
+				net       -> true;
 				_Else     -> false
 			end
 		end,

@@ -16,6 +16,11 @@
 
 -module(ifc_client).
 -export([init/1, handle_packet/2, handle_info/2, terminate/1]).
+-import(netencode, [parse_uuid/1, parse_string/1, parse_uuid_list/1,
+	parse_store/1, encode_list/1, encode_list/2, encode_list_32/1,
+	encode_list_32/2, encode_string/1, encode_direct_result/1,
+	encode_error_code/1, err2int/1]).
+
 -include("store.hrl").
 
 -record(state, {socket, cookies, next, progreg=false}).
@@ -288,11 +293,11 @@ handle_packet(Packet, S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 do_init(Body, RetPath) ->
-	<<_Minor:8, Major:8, 0:16>> = Body,
+	<<0:16, Major:8, _Minor:8>> = Body,
 	case Major of
-		0 -> send_reply(RetPath, ?INIT_CNF, <<(util:err2int(ok)):32, 0:32,
+		0 -> send_reply(RetPath, ?INIT_CNF, <<(err2int(ok)):32, 0:32,
 			16#1000:32>>);
-		_ -> send_reply(RetPath, ?INIT_CNF, <<(util:err2int(erpcmismatch)):32,
+		_ -> send_reply(RetPath, ?INIT_CNF, <<(err2int(erpcmismatch)):32,
 			0:32, 16#1000:32>>)
 	end.
 
@@ -307,6 +312,7 @@ do_enum(RetPath) ->
 						mounted   -> Bitset bor 1;
 						removable -> Bitset bor 2;
 						system    -> Bitset bor 4;
+						net       -> Bitset bor 8;
 						_         -> Bitset
 					end
 				end,
@@ -682,82 +688,6 @@ io_loop(Handle) ->
 %% Local helper functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-parse_uuid(<<Uuid:16/binary, Rest/binary>>) ->
-	{Uuid, Rest}.
-
-
-parse_string(<<Length:16, Body/binary>>) ->
-	<<String:Length/binary, Rest/binary>> = Body,
-	{String, Rest}.
-
-
-parse_list(ParseElement, <<Count:8, Body/binary>>) ->
-	parse_list_loop(Count, Body, [], ParseElement).
-
-
-parse_list_loop(0, Body, List, _ParseElement) ->
-	{lists:reverse(List), Body};
-
-parse_list_loop(Count, Body, List, ParseElement) ->
-	{Element, Rest} = ParseElement(Body),
-	parse_list_loop(Count-1, Rest, [Element|List], ParseElement).
-
-
-parse_uuid_list(Packet) ->
-	parse_list(fun(Body) -> parse_uuid(Body) end, Packet).
-
-
-parse_store(Packet) ->
-	{Store, <<>>} = parse_string(Packet),
-	case (catch binary_to_existing_atom(Store, utf8)) of
-		Id when is_atom(Id) ->
-			case lists:keysearch(Id, 1, volman:enum()) of
-				{value, StoreSpec} ->
-					{ok, StoreSpec};
-				false ->
-					{error, enoent}
-			end;
-
-		{'EXIT', _} ->
-			{error, enoent}
-	end.
-
-
-encode_list(List) ->
-	encode_list_n(8, fun(Element) -> Element end, List).
-
-encode_list(EncodeElement, List) ->
-	encode_list_n(8, EncodeElement, List).
-
-encode_list_32(List) ->
-	encode_list_n(32, fun(Element) -> Element end, List).
-
-encode_list_32(EncodeElement, List) ->
-	encode_list_n(32, EncodeElement, List).
-
-
-encode_list_n(Width, EncodeElement, List) ->
-	lists:foldl(
-		fun(Element, Acc) ->
-			Bin = EncodeElement(Element),
-			<<Acc/binary, Bin/binary>>
-		end,
-		<<(length(List)):Width>>,
-		List).
-
-
-encode_string(String) when is_binary(String) ->
-	<<(size(String)):16, String/binary>>;
-
-encode_string(String) when is_atom(String) ->
-	Bin = atom_to_binary(String, utf8),
-	<<(size(Bin)):16, Bin/binary>>;
-
-encode_string(String) when is_list(String) ->
-	Bin = list_to_binary(String),
-	<<(size(Bin)):16, Bin/binary>>.
-
-
 encode_broker_result({ok, Errors, _Result}) ->
 	encode_broker_result({ok, Errors});
 
@@ -779,28 +709,6 @@ encode_broker_result({error, Reason, Errors}) ->
 		end,
 		Errors),
 	<<2:8, (encode_error_code(Reason))/binary, ErrorList/binary>>.
-
-
-encode_direct_result(ok) ->
-	<<0:32>>;
-
-encode_direct_result({ok, _}) ->
-	<<0:32>>;
-
-encode_direct_result({error, Reason}) ->
-	encode_error_code(Reason).
-
-
-encode_error_code(Error) ->
-	Code = util:err2int(Error),
-	if
-		Code == 16#ffffffff ->
-			error_logger:warning_report([{module, ?MODULE},
-				{reason, "Non-encodable error"}, {error, Error}]);
-		true ->
-			ok
-	end,
-	<<Code:32>>.
 
 
 start_worker(S, Fun) ->

@@ -37,6 +37,10 @@ for store in enum.allStores():
 		state += 'R'
 	else:
 		state += '-'
+	if enum.isNet(store):
+		state += 'N'
+	else:
+		state += '-'
 
 	if enum.isMounted(store):
 		doc = enum.doc(store)

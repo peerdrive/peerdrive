@@ -17,7 +17,7 @@
 -module(server_sup).
 -behaviour(supervisor).
 
--export([get_supervisor_spec/2, start_link/3]).
+-export([get_supervisor_spec/2, start_link/3, start_link/4]).
 -export([init/1]).
 
 
@@ -33,13 +33,17 @@ get_supervisor_spec(Id, Options) ->
 
 
 start_link(Id, Module, Port) ->
+	start_link(Id, Module, Port, []).
+
+
+start_link(Id, Module, Port, ServletOpt) ->
 	supervisor:start_link(
 		{local, list_to_atom(Id ++ "_server_sup")},
 		?MODULE,
-		{Id, Module, Port}).
+		{Id, Module, Port, ServletOpt}).
 
 
-init({Id, Module, Port}) ->
+init({Id, Module, Port, ServletOpt}) ->
 	RestartStrategy    = one_for_all,
 	MaxRestarts        = 1,
 	MaxTimeBetRestarts = 60,
@@ -50,7 +54,7 @@ init({Id, Module, Port}) ->
 	ChildSpecs = [
 		{
 			ServletId,
-			{servlet_sup, start_link, [ServletId, Module]},
+			{servlet_sup, start_link, [ServletId, Module, ServletOpt]},
 			permanent,
 			infinity,
 			supervisor,

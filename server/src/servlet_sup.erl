@@ -17,17 +17,17 @@
 -module(servlet_sup).
 -behaviour(supervisor).
 
--export([start_link/2]).
+-export([start_link/3]).
 -export([spawn_servlet/2]).
 -export([init/1]).
 
-start_link(Id, Module) ->
-	supervisor:start_link({local, Id}, ?MODULE, Module).
+start_link(Id, Module, ServletOpt) ->
+	supervisor:start_link({local, Id}, ?MODULE, {Module, ServletOpt}).
 
-init(Module) ->
+init({Module, ServletOpt}) ->
 	{ok, {
 		{simple_one_for_one, 1, 10},
-		[{servlet, {gen_servlet, start_link, [Module]}, transient, brutal_kill, worker, []}]
+		[{servlet, {gen_servlet, start_link, [Module, ServletOpt]}, transient, brutal_kill, worker, []}]
 	}}.
 
 spawn_servlet(SupervisorPid, ListenSock) ->
