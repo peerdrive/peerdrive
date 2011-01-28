@@ -17,9 +17,10 @@
 -module(netencode).
 
 -export([parse_uuid/1, parse_string/1, parse_list/2, parse_list_32/2,
-	parse_uuid_list/1, parse_store/1]).
+	parse_uuid_list/1, parse_store/1, parse_linkmap/1, parse_direct_result/1]).
 -export([encode_list/1, encode_list/2, encode_list_32/1, encode_list_32/2,
-	encode_string/1, encode_direct_result/1, encode_error_code/1]).
+	encode_string/1, encode_direct_result/1, encode_error_code/1,
+	encode_linkmap/1]).
 -export([err2int/1, int2err/1]).
 
 
@@ -69,6 +70,28 @@ parse_store(Packet) ->
 
 		{'EXIT', _} ->
 			{error, enoent}
+	end.
+
+
+parse_linkmap(Body) ->
+	{SDL, Body1} = parse_list_32(fun netencode:parse_uuid/1, Body),
+	{WDL, Body2} = parse_list_32(fun netencode:parse_uuid/1, Body1),
+	{SRL, Body3} = parse_list_32(fun netencode:parse_uuid/1, Body2),
+	{WRL, Body4} = parse_list_32(fun netencode:parse_uuid/1, Body3),
+	{DocMap, Body5} = parse_list_32(
+		fun(ListBody1) ->
+			{Doc, ListBody2} = parse_uuid(ListBody1),
+			{Revs, ListBody3} = parse_uuid_list(ListBody2),
+			{{Doc, Revs}, ListBody3}
+		end,
+		Body4),
+	{{SDL, WDL, SRL, WRL, DocMap}, Body5}.
+
+
+parse_direct_result(<<Result:32, Body/binary>>) ->
+	case Result of
+		0     -> {ok, Body};
+		Error -> {error, int2err(Error)}
 	end.
 
 
@@ -127,6 +150,17 @@ encode_error_code(Error) ->
 			ok
 	end,
 	<<Code:32>>.
+
+
+encode_linkmap({SDL, WDL, SRL, WRL, DocMap}) ->
+	BinDocMap = encode_list_32(
+		fun ({Doc, Revs}) ->
+			<<Doc/binary, (encode_list(Revs))/binary>>
+		end,
+		DocMap),
+	<<(encode_list_32(SDL))/binary, (encode_list_32(WDL))/binary,
+		(encode_list_32(SRL))/binary, (encode_list_32(WRL))/binary,
+		BinDocMap/binary>>.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

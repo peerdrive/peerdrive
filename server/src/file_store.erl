@@ -532,7 +532,7 @@ do_delete_rev(#state{guid=Guid, revisions=Revisions} = S, Rev) ->
 do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
 	case Doc of
 		Guid ->
-			{S, {error, eaccess}};
+			{S, {error, eacces}};
 
 		_ ->
 			case dict:find(Doc, Uuids) of
@@ -1159,7 +1159,7 @@ do_sync_finish(#state{synclocks=SLocks} = S, PeerGuid, Caller) ->
 			unlink(Caller),
 			{S#state{synclocks=dict:erase(PeerGuid, SLocks)}, ok};
 		{ok, _Other} ->
-			{S, {error, eaccess}};
+			{S, {error, eacces}};
 		error ->
 			{S, {error, einval}}
 	end.
