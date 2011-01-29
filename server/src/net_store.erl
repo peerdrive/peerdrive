@@ -51,7 +51,7 @@ io_request(NetStore, Request, Body) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({Id, Address, Port, Name}) ->
-	case gen_tcp:connect(Address, Port, [binary, {packet, 2}]) of
+	case gen_tcp:connect(Address, Port, [binary, {packet, 2}, {active, false}]) of
 		{ok, Socket} ->
 			process_flag(trap_exit, true),
 			S = #state{
@@ -60,14 +60,7 @@ init({Id, Address, Port, Name}) ->
 				requests  = gb_trees:empty(),
 				synclocks = dict:new()
 			},
-			Body = <<0:32, (encode_string(Name))/binary>>,
-			case send_request_internal(?INIT_REQ, Body, fun cnf_init/2, S) of
-				{noreply, S2} ->
-					{ok, S2};
-				{stop, _Reason, Error, _S2} ->
-					gen_tcp:close(Socket),
-					{stop, Error}
-			end;
+			do_init(Name, S);
 
 		{error, _Reason} = Error ->
 			{stop, Error}
@@ -195,22 +188,39 @@ handle_cast(_Request, State) -> {noreply, State}.
 %% Request handlers
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-cnf_init(Body, #state{id=Id} = S) ->
-	case parse_direct_result(Body) of
-		{ok, <<Ver:32, MaxPacketSize:32, Guid:16/binary>>} ->
-			case Ver of
-				0 ->
-					volman:reg_store(Id, Guid),
-					{noreply, S#state{guid=Guid, mps=MaxPacketSize}};
-				_ ->
-					error_logger:warning_report([{module, ?MODULE},
-						{init_error, erpcmismatch}]),
-					{stop, normal, S}
-			end;
+do_init(Name, #state{id=Id, socket=Socket} = S) ->
+	InitReq = <<0:32, ?INIT_REQ:16, 0:32, (encode_string(Name))/binary>>,
+	try
+		InitCnf = case gen_tcp:send(Socket, InitReq) of
+			ok ->
+				case gen_tcp:recv(Socket, 0, 5000) of
+					{ok, Packet} -> Packet;
+					Error1       -> throw(Error1)
+				end;
+			Error2 ->
+				throw(Error2)
+		end,
+		InitCnfBody = case InitCnf of
+			<<0:32, ?INIT_CNF:16, Body/binary>> -> Body;
+			_ -> throw({error, einval})
+		end,
+		S2 = case parse_direct_result(InitCnfBody) of
+			{ok, <<Ver:32, MaxPacketSize:32, Guid:16/binary>>} ->
+				case Ver of
+					0 ->
+						volman:reg_store(Id, Guid),
+						S#state{guid=Guid, mps=MaxPacketSize};
+					_ ->
+						throw({error, erpcmismatch})
+				end;
 
-		Error ->
-			error_logger:warning_report([{module, ?MODULE}, {init_error, Error}]),
-			{stop, normal, S}
+			Error3 ->
+				throw(Error3)
+		end,
+		inet:setopts(Socket, [{active, true}]),
+		{ok, S2}
+	catch
+		throw:Error -> gen_tcp:close(Socket), {stop, Error}
 	end.
 
 

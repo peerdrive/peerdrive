@@ -43,6 +43,8 @@ spawn_store(Id, Disposition, Module, Arg) ->
 	case supervisor:start_child(store_sup, ChildSpec) of
 		{error, already_present} ->
 			supervisor:restart_child(store_sup, Id);
+		{error, {Reason, _ChildSpec}} ->
+			Reason;
 		Else ->
 			Else
 	end.
