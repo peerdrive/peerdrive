@@ -53,7 +53,11 @@ register_proc(Id) ->
 	gen_event:add_sup_handler(vol_monitor, {vol_monitor, Id}, self()).
 
 deregister_proc(Id) ->
-	gen_event:delete_handler(vol_monitor, {vol_monitor, Id}, []).
+	Handler = {vol_monitor, Id},
+	gen_event:delete_handler(vol_monitor, Handler, []),
+	receive
+		{gen_event_EXIT, Handler, normal} -> ok
+	end.
 
 
 

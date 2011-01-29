@@ -94,7 +94,11 @@ do_lock(Doc, {Caller, _} = From, #state{locks=Locks, peers=Peers} = S) ->
 	end.
 
 
-do_unlock(Doc, {Caller, _}, #state{locks=Locks, peers=Peers} = S) ->
+do_unlock(Doc, From, S) ->
+	{reply, ok, do_unlock_internal(Doc, From, S)}.
+
+
+do_unlock_internal(Doc, {Caller, _}, #state{locks=Locks, peers=Peers} = S) ->
 	NewPeers = case lists:delete(Doc, dict:fetch(Caller, Peers)) of
 		[] ->
 			unlink(Caller),
@@ -105,14 +109,14 @@ do_unlock(Doc, {Caller, _}, #state{locks=Locks, peers=Peers} = S) ->
 	case dict:fetch(Doc, Locks) of
 		[] ->
 			NewLocks = dict:erase(Doc, Locks),
-			{reply, ok, S#state{locks=NewLocks, peers=NewPeers}};
+			S#state{locks=NewLocks, peers=NewPeers};
 
 		[Next | Rest] ->
 			{NextPid, _} = Next,
 			RelockLocks = dict:store(Doc, Rest, Locks),
 			RelockPeers = dict:append(NextPid, Doc, NewPeers),
 			gen_server:reply(Next, ok),
-			{reply, ok, S#state{locks=RelockLocks, peers=RelockPeers}}
+			S#state{locks=RelockLocks, peers=RelockPeers}
 	end.
 
 
@@ -123,7 +127,7 @@ do_trap_exit(Pid, #state{peers=Peers} = S) ->
 
 		{ok, Docs} ->
 			lists:foldl(
-				fun(Doc, Acc) -> do_unlock(Doc, {Pid,0}, Acc) end,
+				fun(Doc, Acc) -> do_unlock_internal(Doc, {Pid,0}, Acc) end,
 				S,
 				Docs)
 	end.

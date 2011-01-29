@@ -274,6 +274,7 @@ class _Connector(QtCore.QObject):
 		self.socket.connectToHost(host, port)
 		if not self.socket.waitForConnected(1000):
 			raise IOError("Could not connect to server!")
+		self.socket.setSocketOption(QtNetwork.QAbstractSocket.LowDelayOption, 1)
 		self.next = 0
 		self.queue = []
 		self.buf = ''

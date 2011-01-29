@@ -145,7 +145,8 @@ encode_error_code(Error) ->
 	if
 		Code == 16#ffffffff ->
 			error_logger:warning_report([{module, ?MODULE},
-				{reason, "Non-encodable error"}, {error, Error}]);
+				{reason, 'Non-encodable error'}, {error, Error},
+				{backtrace, erlang:get_stacktrace()}]);
 		true ->
 			ok
 	end,

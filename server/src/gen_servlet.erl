@@ -34,6 +34,7 @@ server(Module, Listener, ListenSocket, Args) ->
 			try
 				listener:servlet_occupied(Listener),
 				State = apply(Module, init, [Socket]++Args),
+				inet:setopts(Socket, [{nodelay, true}]),
 				loop(Module, Socket, State)
 			after
 				listener:servlet_idle(Listener)

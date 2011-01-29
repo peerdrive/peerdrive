@@ -102,7 +102,10 @@ handle_info({trigger_add_store, _StoreGuid}, S) ->
 handle_info({'EXIT', From, Reason}, S) ->
 	error_logger:error_report(["Netstore servlet neighbour crashed", {from, From},
 		{reason, Reason}]),
-	{stop, S}.
+	{stop, S};
+
+handle_info({gen_event_EXIT, _Handler, _Reason}, S) ->
+	{ok, S}.
 
 
 handle_packet(Packet, #state{socket=Socket, store_pid=Store} = S) ->

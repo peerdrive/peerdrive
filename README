@@ -17,7 +17,7 @@ directory for some infos and ideas.
 == Requirements ==
 
 Python 2.6
-	+ PyQt >=4.5.x
+	+ PyQt >=4.6.x
 	+ magic (optional)
 
 Erlang >= R14A
@@ -34,8 +34,8 @@ out:
 	> cd server
 	> ./hotchpotch.sh
 
-	This will start the Hotchpotch server in the foreground. To stop the server
-	type "CTRL+g q".
+	This will start the Hotchpotch server in the foreground. To gracefully shut
+	down the server type "init:stop().".
 
 3. In the 2nd terminal type:
 	> cd client

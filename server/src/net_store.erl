@@ -51,7 +51,8 @@ io_request(NetStore, Request, Body) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({Id, Address, Port, Name}) ->
-	case gen_tcp:connect(Address, Port, [binary, {packet, 2}, {active, false}]) of
+	Options = [binary, {packet, 2}, {active, false}, {nodelay, true}],
+	case gen_tcp:connect(Address, Port, Options) of
 		{ok, Socket} ->
 			process_flag(trap_exit, true),
 			S = #state{
@@ -326,7 +327,7 @@ cnf_put_rev(Body, MaxPacketSize, User) ->
 
 
 req_sync_get_changes(PeerGuid, {Caller, _} = From, S) ->
-	case sync_lock(S, PeerGuid, Caller) of
+	case sync_lock(PeerGuid, Caller, S) of
 		{ok, S2} ->
 			send_request(From, ?SYNC_GET_CHANGES_REQ, PeerGuid,
 				fun cnf_sync_get_changes/1, S2);

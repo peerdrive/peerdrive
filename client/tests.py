@@ -5,6 +5,8 @@ from hotchpotch import Connector
 from hotchpotch import connector
 from hotchpotch import struct
 
+STORE1 = 'rem1'
+STORE2 = 'rem2'
 
 class CommonParts(unittest.TestCase):
 
@@ -32,14 +34,12 @@ class CommonParts(unittest.TestCase):
 			return self.__received
 
 	def setUp(self):
-		if not Connector().enum().isMounted('rem1'):
-			Connector().mount('rem1')
-		self.store1 = Connector().enum().doc('rem1')
-		self.store1Id = 'rem1'
-		if not Connector().enum().isMounted('rem2'):
-			Connector().mount('rem2')
-		self.store2 = Connector().enum().doc('rem2')
-		self.store2Id = 'rem2'
+		if not Connector().enum().isMounted(STORE1):
+			Connector().mount(STORE1)
+		self.store1 = Connector().enum().doc(STORE1)
+		if not Connector().enum().isMounted(STORE2):
+			Connector().mount(STORE2)
+		self.store2 = Connector().enum().doc(STORE2)
 
 		self._disposeHandles = []
 		self._disposeWatches = []
@@ -664,19 +664,19 @@ class TestSynchronization(CommonParts):
 
 	def setUp(self):
 		# make sure stores are unmounted to kill sync
-		if Connector().enum().isMounted('rem1'):
-			Connector().unmount('rem1')
-		if Connector().enum().isMounted('rem2'):
-			Connector().unmount('rem2')
+		if Connector().enum().isMounted(STORE1):
+			Connector().unmount(STORE1)
+		if Connector().enum().isMounted(STORE2):
+			Connector().unmount(STORE2)
 		CommonParts.setUp(self)
 
 	def tearDown(self):
 		CommonParts.tearDown(self)
 		# make sure stores are unmounted to kill sync
-		if Connector().enum().isMounted('rem1'):
-			Connector().unmount('rem1')
-		if Connector().enum().isMounted('rem2'):
-			Connector().unmount('rem2')
+		if Connector().enum().isMounted(STORE1):
+			Connector().unmount(STORE1)
+		if Connector().enum().isMounted(STORE2):
+			Connector().unmount(STORE2)
 
 	def startSync(self, mode, fromStore, toStore):
 		fromGuid = fromStore.encode('hex')
