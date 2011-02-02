@@ -37,10 +37,12 @@
 
 %% inode: integer number (for fuse) identifying a vnode
 %% vnode: structure describing the file system object
+%% OID: object identifier for hotchpotch doc/rev:
+%%      {doc, Store::guid(), Doc::guid()} | {rev, Store::guid(), Rev::guid()}
 
 -record(state, {
 	inodes,  % gb_trees: inode -> #vnode
-	cache,   % gb_trees: {ParentInode, OID} -> inode
+	imap,    % gb_trees: OID -> inode
 	dirs,    % gb_trees: id -> [#direntry]
 	files,   % gb_trees: id -> #handler
 	count,   % int: next free inode
@@ -168,7 +170,7 @@ symlink(_, Link, Ino, Name, _, S) ->
 init(Options) ->
 	State = #state{
 		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
-		cache  = gb_trees:empty(),
+		imap   = gb_trees:empty(),
 		dirs   = gb_trees:empty(),
 		files  = gb_trees:empty(),
 		count  = 2, % 1 is the root inode
@@ -412,19 +414,13 @@ release(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{files=Files} = S) ->
 
 
 setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
-	Reply = case Fi of
-		null ->
-			#vnode{timeout=Timeout} = VNode = gb_trees:get(Ino, Inodes),
-			case catch do_setattr(Ino, VNode, Attr, ToSet, S) of
-				{ok, NewAttr} ->
-					{#fuse_reply_attr{attr=NewAttr, attr_timeout_ms=Timeout}, S};
+	#vnode{timeout=Timeout} = VNode = gb_trees:get(Ino, Inodes),
+	Reply = case catch do_setattr(Ino, VNode, Attr, ToSet, S) of
+		{ok, NewAttr} ->
+			{#fuse_reply_attr{attr=NewAttr, attr_timeout_ms=Timeout}, S};
 
-				{error, Error} ->
-					{#fuse_reply_err{err=Error}, S}
-			end;
-
-		#fuse_file_info{} ->
-			{#fuse_reply_err{err = enosys}, S}
+		{error, Error} ->
+			{#fuse_reply_err{err=Error}, S}
 	end,
 	?DEBUG(io:format("setattr(~p, ~p, ~p, ~p) ->~n    ~p~n", [Ino, Attr, ToSet, Fi, element(1, Reply)])),
 	Reply.
@@ -485,29 +481,28 @@ link(_, Ino, NewParent, NewName, _, S) ->
 	#vnode{oid=ChildOid} = gb_trees:get(Ino, Inodes),
 	#vnode{
 		oid     = ParentOid,
-		ifc     = #ifc{link=Link, getnode=GetNode},
+		ifc     = #ifc{link=Link},
 		cache   = ParentCache,
 		timeout = Timeout
 	} = ParentNode = gb_trees:get(NewParent, Inodes),
 	Reply = case catch Link(ParentOid, ChildOid, NewName, ParentCache) of
 		{ok, NewCache} ->
-			S2 = S#state{inodes=gb_trees:update(NewParent,
-				ParentNode#vnode{cache=NewCache}, Inodes)},
-			case do_lookup_new(NewParent, ChildOid, GetNode, Timeout, S2) of
-				{ok, ChildIno, ChildNode, Timeout, S3} ->
-					case make_entry_param(ChildIno, ChildNode, Timeout, S3) of
+			Lookup = fun(_) -> {entry, ChildOid, NewCache} end,
+			case do_lookup(NewParent, Lookup, S) of
+				{ok, ChildIno, ChildNode, Timeout, S2} ->
+					case make_entry_param(ChildIno, ChildNode, Timeout, S2) of
 						{ok, EntryParam} ->
-							{#fuse_reply_entry{fuse_entry_param=EntryParam}, S3};
+							{#fuse_reply_entry{fuse_entry_param=EntryParam}, S2};
 
 						error ->
 							{
 								#fuse_reply_err{ err = enoent },
-								do_forget(ChildIno, 1, S3)
+								do_forget(ChildIno, 1, S2)
 							}
 					end;
 
-				{error, Error, S3} ->
-					{#fuse_reply_err{ err = Error }, S3}
+				{error, Error, S2} ->
+					{#fuse_reply_err{ err = Error }, S2}
 			end;
 
 		{error, Error, NewCache} ->
@@ -595,11 +590,12 @@ statfs(_, Ino, _, #state{inodes=Inodes}=S) ->
 		{ok, Stat} ->
 			{
 				#fuse_reply_statfs{statvfs=#statvfs{
-					f_bsize  = Stat#fs_stat.bsize,
-					f_frsize = Stat#fs_stat.bsize,
-					f_blocks = Stat#fs_stat.blocks,
-					f_bfree  = Stat#fs_stat.bfree,
-					f_bavail = Stat#fs_stat.bavail
+					f_bsize   = Stat#fs_stat.bsize,
+					f_frsize  = Stat#fs_stat.bsize,
+					f_blocks  = Stat#fs_stat.blocks,
+					f_bfree   = Stat#fs_stat.bfree,
+					f_bavail  = Stat#fs_stat.bavail,
+					f_namemax = 255
 				}},
 				S
 			};
@@ -637,14 +633,14 @@ do_unlink(Parent, Name, S) ->
 
 
 do_lookup(Parent, LookupOp, S) ->
-	#state{inodes=Inodes, cache=Cache} = S,
+	#state{inodes=Inodes, imap=IMap} = S,
 	ParentNode = gb_trees:get(Parent, Inodes),
 	case catch LookupOp(ParentNode) of
 		{entry, ChildOid, NewParentCache} ->
 			S2 = S#state{inodes=gb_trees:update(Parent,
 				ParentNode#vnode{cache=NewParentCache}, Inodes)},
 			#vnode{timeout=Timeout, ifc=#ifc{getnode=GetNode}} = ParentNode,
-			case gb_trees:lookup({Parent, ChildOid}, Cache) of
+			case gb_trees:lookup(ChildOid, IMap) of
 				{value, ChildIno} ->
 					do_lookup_cached(ChildIno, Timeout, S2);
 
@@ -677,7 +673,7 @@ do_lookup_cached(ChildIno, Timeout, #state{inodes=Inodes}=S) ->
 
 
 do_lookup_new(ParentIno, ChildOid, GetNode, Timeout, S) ->
-	#state{inodes=Inodes, cache=Cache, count=Count} = S,
+	#state{inodes=Inodes, imap=IMap, count=Count} = S,
 	NewCount = Count+1,
 	case catch GetNode(ChildOid) of
 		{ok, ChildNode} ->
@@ -686,7 +682,7 @@ do_lookup_new(ParentIno, ChildOid, GetNode, Timeout, S) ->
 					NewCount,
 					ChildNode#vnode{refcnt=1, parent=ParentIno},
 					Inodes),
-				cache = gb_trees:insert({ParentIno, ChildOid}, NewCount, Cache),
+				imap = gb_trees:insert(ChildOid, NewCount, IMap),
 				count = NewCount
 			},
 			{ok, NewCount, ChildNode, Timeout, S2};
@@ -721,15 +717,14 @@ make_entry_param(ChildIno, ChildNode, ParentTimeout, S) ->
 	end.
 
 
-do_forget(Ino, N, #state{inodes=Inodes, cache=Cache} = State) ->
-	#vnode{refcnt=RefCnt} = Node = gb_trees:get(Ino, Inodes),
+do_forget(Ino, N, #state{inodes=Inodes, imap=IMap} = State) ->
+	#vnode{refcnt=RefCnt, oid=OId} = Node = gb_trees:get(Ino, Inodes),
 	case RefCnt - N of
 		0 ->
 			?DEBUG(io:format("forget(~p)~n", [Ino])),
-			Key = {Node#vnode.parent, Node#vnode.oid},
 			State#state{
 				inodes = gb_trees:delete(Ino, Inodes),
-				cache  = gb_trees:delete(Key, Cache)
+				imap   = gb_trees:delete(OId, IMap)
 			};
 
 		NewRef ->
@@ -1514,12 +1509,12 @@ read_struct(Handle, Part) ->
 read_struct_loop(Handle, Part, Offset, Acc) ->
 	Length = 16#10000,
 	case ifc_fuse_store:read(Handle, Part, Offset, Length) of
-		{ok, _Error, <<>>} ->
+		{ok, <<>>} ->
 			{ok, Acc};
-		{ok, _Errors, Data} ->
+		{ok, Data} ->
 			read_struct_loop(Handle, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
-		{error, Reason, _Errors} ->
-			{error, Reason}
+		{error, _Reason} = Error ->
+			Error
 	end.
 
 
