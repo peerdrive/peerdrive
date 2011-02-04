@@ -830,7 +830,25 @@ stores_lookup(stores, Name, Cache) ->
 
 
 stores_getnode(Oid) ->
-	doc_make_node(Oid).
+	case doc_make_node(Oid) of
+		{ok, VNode} ->
+			#vnode{ifc=OldIfc} = VNode,
+			NewIfc = OldIfc#ifc{
+				lookup  = fun(ObjId, Name, Cache) ->
+					storewrap_lookup(ObjId, Name, Cache, OldIfc#ifc.lookup)
+				end,
+				getnode = fun(ObjId) ->
+					storewrap_getnode(ObjId, OldIfc#ifc.getnode)
+				end,
+				opendir = fun(ObjId, Cache) ->
+					storewrap_opendir(ObjId, Cache, OldIfc#ifc.opendir)
+				end
+			},
+			{ok, VNode#vnode{ifc=NewIfc}};
+
+		Error ->
+			Error
+	end.
 
 
 stores_opendir(stores, Cache) ->
@@ -844,6 +862,163 @@ stores_opendir(stores, Cache) ->
 			end,
 			volman:enum())),
 	{ok, Stores, Cache}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Store wrapper
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+storewrap_lookup({doc, Store, Store} = Oid, Name, Cache, Lookup) ->
+	case Name of
+		<<".docs">> ->
+			{entry, {docsdir, Store}, Cache};
+		_Else ->
+			Lookup(Oid, Name, Cache)
+	end.
+
+
+storewrap_getnode({docsdir, Store}, _GetNode) ->
+	docsdir_make_node(Store);
+
+storewrap_getnode(Oid, GetNode) ->
+	GetNode(Oid).
+
+
+storewrap_opendir(Oid, Cache, OpenDir) ->
+	case OpenDir(Oid, Cache) of
+		{ok, Entries, NewCache} ->
+			DocEntry = #direntry{ name = ".docs", stat = ?DIRATTR(0) },
+			{ok, [DocEntry | Entries], NewCache};
+
+		Else ->
+			Else
+	end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% .docs directory
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+docsdir_make_node(Store) ->
+	{ok, #vnode{
+		refcnt  = 1,
+		timeout = 30000,
+		oid     = {docsdir, Store},
+		ifc     = #ifc{
+			getattr = fun(_) -> {ok, ?DIRATTR} end,
+			lookup  = fun docsdir_lookup/3,
+			getnode = fun docsdir_getnode/1,
+			opendir = fun docsdir_opendir/2
+		}
+	}}.
+
+
+docsdir_lookup({docsdir, Store}, Name, Cache) ->
+	case parse_name_to_uuid(Name) of
+		{ok, Uuid} ->
+			{entry, {virtdoc, Store, Uuid}, Cache};
+		error ->
+			{error, enoent}
+	end.
+
+
+docsdir_getnode({virtdoc, Store, Uuid}) ->
+	docdir_make_node(Store, Uuid).
+
+
+docsdir_opendir({docsdir, Store}, Cache) ->
+	{ok, [], Cache}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Document virtual directory
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+docdir_make_node(Store, Uuid) ->
+	{ok, #vnode{
+		refcnt  = 1,
+		timeout = 1000,
+		oid     = {docdir, Store, Uuid},
+		cache   = {undefined, undefined},
+		ifc     = #ifc{
+			getattr = fun(_) -> {ok, ?DIRATTR} end,
+			lookup  = fun docdir_lookup/3,
+			getnode = fun docdir_getnode/1,
+			opendir = fun docdir_opendir/2
+		}
+	}}.
+
+
+docdir_lookup({docdir, Store, Doc}, Name, Cache) ->
+	case docdir_read_entry(Store, Doc, Cache) of
+		{ok, Name, NewCache} ->
+			{entry, {doc, Store, Doc}, NewCache};
+
+		{ok, _OtherName, NewCache} ->
+			{error, enoent, NewCache};
+
+		error ->
+			{error, enoent}
+	end.
+
+
+docdir_getnode(Oid) ->
+	doc_make_node(Oid).
+
+
+docdir_opendir({docdir, Store, Doc}, Cache) ->
+	case docdir_read_entry(Store, Doc, Cache) of
+		{ok, Name, NewCache} ->
+			Oid = {doc, Store, Doc},
+			case doc_make_node(Oid) of
+				{ok, #vnode{ifc=#ifc{getattr=GetAttr}}} ->
+					case catch GetAttr(Oid) of
+						{ok, Attr} ->
+							{ok, [#direntry{name=binary_to_list(Name), stat=Attr}], NewCache};
+						{error, _} ->
+							{ok, [], NewCache}
+					end;
+				error ->
+					{ok, [], NewCache}
+			end;
+
+		error ->
+			{ok, [], Cache}
+	end.
+
+
+docdir_read_entry(Store, Doc, {CacheRev, CacheEntry}=Cache) ->
+	case ifc_fuse_store:lookup(Store, Doc) of
+		{ok, CacheRev} ->
+			{ok, CacheEntry, Cache};
+
+		{ok, Rev} ->
+			case catch read_file_name(Store, Doc, Rev) of
+				{ok, Name} -> {ok, Name, {Rev, Name}};
+				error      -> error
+			end;
+
+		error ->
+			error
+	end.
+
+
+read_file_name(_Store, Doc, Rev) ->
+	Meta = case util:read_rev_struct(Rev, <<"META">>) of
+		{ok, Value1} when is_record(Value1, dict, 9) ->
+			Value1;
+		{ok, _} ->
+			throw(error);
+		{error, _} ->
+			throw(error)
+	end,
+	case meta_read_entry(Meta, [<<"org.hotchpotch.annotation">>, <<"title">>]) of
+		{ok, Title} when is_binary(Title) ->
+			{ok, Title};
+		{ok, _} ->
+			error;
+		error ->
+			error
+	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Documents
@@ -1593,5 +1768,17 @@ fixup_attr(Attr, Ino, #state{uid=Uid, gid=Gid, umask=Umask}) ->
 		st_gid  = Gid,
 		st_mode = Attr#stat.st_mode band Umask
 	}.
+
+
+parse_name_to_uuid(Name) when is_binary(Name) and (size(Name) == 32) ->
+	try
+		List = binary_to_list(Name),
+		{ok, <<(erlang:list_to_integer(List, 16)):128>>}
+	catch
+		error:_ -> error
+	end;
+
+parse_name_to_uuid(_Name) ->
+	error.
 
 -endif.
