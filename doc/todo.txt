@@ -7,19 +7,13 @@
 	- add search engine
 		- lucene
 		- add query API (virtual collections)
-	- FUSE binding
-		- direct access by Rev/Doc
 	- network stores
-		- network interface (remote interface)
-		- network store stub
 		- rev cache
 	- automatically detect/mount stores
 		- local stores when removable drive connected (inotify/WM_DEVICECHANGE)
 		- network stores (bonjour)
 
 - user interface
-	- pass referrer when opening document
-		- used for delete menu
 	- Additional file types
 		- contacts
 		- audio
