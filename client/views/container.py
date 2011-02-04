@@ -17,11 +17,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os.path
 from PyQt4 import QtCore, QtGui
 from datetime import datetime
 
 from hotchpotch import Connector, Registry
-from hotchpotch import struct, importer
+from hotchpotch import struct, importer, fuse
 from hotchpotch.connector import Watch
 from hotchpotch.gui import widgets, utils
 
@@ -558,20 +559,27 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		return types
 
 	def mimeData(self, indexes):
-		data = []
+		nativeData = []
+		fuseData = []
 		for index in indexes:
 			if index.isValid() and (index.column() == 0):
 				link = self.getItemLinkUser(index)
 				if isinstance(link, struct.DocLink):
-					data.append('doc:' + link.doc().encode('hex'))
+					nativeData.append('doc:' + link.doc().encode('hex'))
+					f = fuse.findFuseFile(link)
+					if f:
+						fuseData.append(f)
 				elif isinstance(link, struct.RevLink):
-					data.append('rev:' + link.rev().encode('hex'))
-		if data == []:
+					nativeData.append('rev:' + link.rev().encode('hex'))
+		if nativeData == []:
 			mimeData = None
 		else:
 			mimeData = QtCore.QMimeData()
 			mimeData.setData('application/x-hotchpotch-linklist',
-				reduce(lambda x,y: x+","+y, data))
+				reduce(lambda x,y: x+","+y, nativeData))
+			if fuseData:
+				fuseData = [QtCore.QUrl.fromLocalFile(f) for f in fuseData]
+				mimeData.setUrls(fuseData)
 		return mimeData
 
 	def dropMimeData(self, data, action, row, column, parent):

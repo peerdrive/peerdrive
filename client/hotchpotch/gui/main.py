@@ -23,7 +23,7 @@ import sys, os, subprocess, pickle, datetime, optparse
 
 from ..connector import Watch, Connector
 from ..registry import Registry
-from .. import struct
+from .. import struct, fuse
 from .widgets import DocumentView, DocButton
 from .utils import showProperties
 
@@ -473,10 +473,13 @@ class DragWidget(QtGui.QLabel):
 		mimeData = QtCore.QMimeData()
 		doc = self.__view.doc()
 		if doc:
-			struct.DocLink(doc, False).mimeData(mimeData)
+			link = struct.DocLink(doc)
 		else:
-			rev = self.__view.rev()
-			struct.RevLink(rev).mimeData(mimeData)
+			link = struct.RevLink(self.__view.rev())
+		link.mimeData(mimeData)
+		f = fuse.findFuseFile(link)
+		if f:
+			mimeData.setUrls([QtCore.QUrl.fromLocalFile(f)])
 
 		drag.setMimeData(mimeData)
 		drag.setPixmap(self.pixmap())

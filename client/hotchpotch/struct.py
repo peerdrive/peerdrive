@@ -622,7 +622,7 @@ class Set(object):
 
 	def __doCache(self):
 		if not self.__didCache:
-			self.__content = [ (_loadTitle(l), l) for (t, l) in self.__content ]
+			self.__content = [ (readTitle(l), l) for (t, l) in self.__content ]
 			self.__didCache = True
 
 	def create(self, name, stores):
@@ -696,7 +696,7 @@ class Set(object):
 		return self.__content[i][1]
 
 	def __setitem__(self, name, link):
-		self.__content.append( (_loadTitle(link), link) )
+		self.__content.append( (readTitle(link), link) )
 
 	def __delitem__(self, name):
 		self.__doCache()
@@ -725,7 +725,7 @@ class Set(object):
 		self.__content.remove((name, link))
 
 # tiny helper function
-def _loadTitle(link):
+def readTitle(link):
 	rev = link.rev()
 	if rev:
 		try:
