@@ -65,7 +65,7 @@ def __merge(old, new):
 
 
 # returns a commited writer, None or throws an IOError
-def importFile(store, path, name=""):
+def importFile(stores, path, name=""):
 	if not name:
 		name = os.path.basename(path)
 
@@ -94,7 +94,7 @@ def importFile(store, path, name=""):
 
 		#print 'META: ', repr(meta)
 		with open(path, "rb") as file:
-			writer = Connector().create(uti, "", [store])
+			writer = Connector().create(uti, "", stores)
 			try:
 				writer.write('FILE', file.read())
 				writer.write('META', struct.dumps(meta))
@@ -107,14 +107,14 @@ def importFile(store, path, name=""):
 		handles = []
 		try:
 			for entry in os.listdir(path):
-				handle = importFile(store, os.path.join(path, entry), entry)
+				handle = importFile(stores, os.path.join(path, entry), entry)
 				handles.append((entry, handle))
 
 			container = struct.Set()
 			for (entry, handle) in handles:
 				container[entry] = struct.DocLink(handle.getDoc())
 
-			return container.create(name, [store])
+			return container.create(name, stores)
 		finally:
 			for (entry, handle) in handles:
 				handle.close()
@@ -122,7 +122,7 @@ def importFile(store, path, name=""):
 		return None
 
 
-def overwriteFile(store, link, path):
+def overwriteFile(stores, link, path):
 	if not os.path.isfile(path):
 		return False
 
@@ -136,8 +136,10 @@ def overwriteFile(store, link, path):
 		uti  = Registry().getUtiFromExtension(ext)
 
 	doc = link.doc()
-	rev = Connector().lookup_doc(doc, [store]).rev(store)
-	with Connector().update(doc, rev, stores=[store]) as writer:
+	revs = Connector().lookup_doc(doc, stores).revs()
+	if len(revs) != 1:
+		return False
+	with Connector().update(doc, revs[0], stores=stores) as writer:
 		meta = struct.loads(writer.readAll('META'))
 		meta["org.hotchpotch.annotation"]["origin"] = path
 		meta["org.hotchpotch.annotation"]["comment"] = "Overwritten from external file system"
@@ -158,9 +160,9 @@ def overwriteFile(store, link, path):
 
 
 # returns a commited writer or None
-def importObject(store, uti, spec):
+def importObject(stores, uti, spec):
 	try:
-		writer = Connector().create(uti, "", [store])
+		writer = Connector().create(uti, "", stores)
 		try:
 			for (fourcc, data) in spec:
 				writer.writeAll(fourcc, data)
@@ -173,14 +175,17 @@ def importObject(store, uti, spec):
 	return None
 
 
-def overwriteObject(store, link, uti, spec):
+def overwriteObject(stores, link, uti, spec):
 	doc = link.doc()
-	rev = Connector().lookup_doc(doc, [store]).rev(store)
-	with Connector().update(doc, rev, stores=[store]) as writer:
+	revs = Connector().lookup_doc(doc, stores).revs()
+	if len(revs) != 1:
+		return False
+	with Connector().update(doc, revs[0], stores=stores) as writer:
 		for (fourcc, data) in spec:
 			writer.writeAll(fourcc, data)
 		writer.setType(uti)
 		writer.commit()
+	return True
 
 
 def importObjectByPath(path, uti, spec, overwrite=False):
@@ -191,13 +196,12 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 			if not overwrite:
 				return False
 			try:
-				overwriteObject(store, container[name], uti, spec)
-				return True
+				return overwriteObject([store], container[name], uti, spec)
 			except IOError:
 				pass
 
 		# create the object and add to dict
-		handle = importObject(store, uti, spec)
+		handle = importObject([store], uti, spec)
 		if not handle:
 			return False
 		try:
@@ -227,7 +231,7 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 					nn = "%s%d" % (name, counter)
 				if progress:
 					progress(f, nn)
-				handle = importFile(store, f)
+				handle = importFile([store], f)
 				if handle:
 					handles.append(handle)
 					container[nn] = struct.DocLink(handle.getDoc())
@@ -241,7 +245,7 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 		if (name in container) and (not overwrite):
 			raise ImporterError("Duplicate item name")
 
-		handle = importFile(store, impFile, name)
+		handle = importFile([store], impFile, name)
 		try:
 			if handle:
 				container[name] = struct.DocLink(handle.getDoc())

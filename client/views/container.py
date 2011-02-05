@@ -607,7 +607,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def __dropFile(self, data, onto):
 		# FIXME: find a better way than calling back to the parent
-		store = Connector().lookup_rev(self.__parent.rev())[0]
+		stores = Connector().lookup_rev(self.__parent.rev())
 		urlList = data.urls()
 		if onto.isValid():
 			if len(urlList) != 1:
@@ -636,8 +636,10 @@ class CollectionModel(QtCore.QAbstractTableModel):
 					link = self.getItemLinkUser(onto)
 					path = str(urlList[0].toLocalFile().toUtf8())
 					try:
-						return importer.overwriteFile(store, link, path)
-					except IOError, OSError:
+						return importer.overwriteFile(stores, link, path)
+					except IOError:
+						pass
+					except OSError:
 						pass
 					return False
 
@@ -645,7 +647,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		for url in urlList:
 			try:
 				path = str(url.toLocalFile().toUtf8())
-				handle = importer.importFile(store, path)
+				handle = importer.importFile(stores, path)
 				if handle:
 					try:
 						self.insertLink(struct.DocLink(handle.getDoc()))
