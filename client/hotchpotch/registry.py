@@ -85,6 +85,15 @@ class _Registry(connector.Watch):
 				result.append(i)
 		return result
 
+	def conformes(self, uti, superClass):
+		if uti == superClass:
+			return True
+		result = False
+		item = self.registry.get(uti, {})
+		for i in item.get("conforming", []):
+			result = result or self.conformes(i, superClass)
+		return result
+
 	def __getExecutables(self, uti):
 		item = self.registry.get(uti, {})
 		data = item.get("exec", [])

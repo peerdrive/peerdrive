@@ -190,6 +190,7 @@ class CollectionEntry(Watch):
 		self.__valid = False
 		self.__icon  = None
 		self.__uti   = None
+		self.__replacable = False
 		self.__columnValues = [ column.default() for column in columns ]
 		self.__columnDefs = columns[:]
 
@@ -202,6 +203,9 @@ class CollectionEntry(Watch):
 
 	def isValid(self):
 		return self.__valid
+
+	def overwritable(self):
+		return self.__valid and self.__replacable
 
 	def getColumnData(self, index):
 		return self.__columnValues[index]
@@ -284,6 +288,10 @@ class CollectionEntry(Watch):
 			self.__icon = QtGui.QIcon(QtGui.QPixmap.fromImage(image))
 		else:
 			self.__icon = QtGui.QIcon(Registry().getIcon(s.type()))
+
+		# overwritable by external files?
+		self.__replacable = (not needMerge) and (
+			not Registry().conformes(self.__uti, "org.hotchpotch.container"))
 
 		self.__valid = True
 		self.__updateColumns()
@@ -535,6 +543,8 @@ class CollectionModel(QtCore.QAbstractTableModel):
 			flags = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsDragEnabled
 			if self._columns[index.column()].editable() and self.__mutable:
 				flags |= QtCore.Qt.ItemIsEditable
+			if self._listing[index.row()].overwritable():
+				flags |= QtCore.Qt.ItemIsDropEnabled
 		else:
 			if self.__mutable:
 				flags = QtCore.Qt.ItemIsDropEnabled
@@ -546,7 +556,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def supportedDropActions(self):
 		if self.__mutable:
-			return QtCore.Qt.CopyAction | QtCore.Qt.MoveAction | QtCore.Qt.LinkAction
+			return QtCore.Qt.CopyAction# | QtCore.Qt.MoveAction | QtCore.Qt.LinkAction
 		else:
 			return 0
 
@@ -591,14 +601,47 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		if data.hasFormat('application/x-hotchpotch-linklist'):
 			return self.__dropLinkList(data)
 		if data.hasFormat('text/uri-list'):
-			return self.__dropFile(data)
+			return self.__dropFile(data, parent)
 		else:
 			return self.__dropLink(data)
 
-	def __dropFile(self, data):
+	def __dropFile(self, data, onto):
 		# FIXME: find a better way than calling back to the parent
 		store = Connector().lookup_rev(self.__parent.rev())[0]
 		urlList = data.urls()
+		if onto.isValid():
+			if len(urlList) != 1:
+				choice = QtGui.QMessageBox.question(self.__parent, "Overwrite",
+					"Cannot overwrite: more than one dragged file. Import instead?",
+					QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
+					QtGui.QMessageBox.No)
+				if choice != QtGui.QMessageBox.Yes:
+					return False
+			elif not os.path.isfile(str(urlList[0].toLocalFile().toUtf8())):
+				choice = QtGui.QMessageBox.question(self.__parent, "Overwrite",
+					"Cannot overwrite: dragged item is not a file. Import instead?",
+					QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
+					QtGui.QMessageBox.No)
+				if choice != QtGui.QMessageBox.Yes:
+					return False
+			else:
+				choice = QtGui.QMessageBox.question(self.__parent, "Overwrite",
+					"Do you want to overwrite the selected item? If not, the file will be imported as new item.",
+					QtGui.QMessageBox.Yes | QtGui.QMessageBox.No | QtGui.QMessageBox.Cancel,
+					QtGui.QMessageBox.No)
+
+				if choice == QtGui.QMessageBox.Cancel:
+					return False
+				elif choice == QtGui.QMessageBox.Yes:
+					link = self.getItemLinkUser(onto)
+					path = str(urlList[0].toLocalFile().toUtf8())
+					try:
+						return importer.overwriteFile(store, link, path)
+					except IOError, OSError:
+						pass
+					return False
+
+		# import and add to container
 		for url in urlList:
 			try:
 				path = str(url.toLocalFile().toUtf8())
@@ -832,6 +875,8 @@ class CollectionWidget(widgets.DocumentView):
 			QtGui.QAbstractItemView.SelectedClicked |
 			QtGui.QAbstractItemView.EditKeyPressed)
 		self.listView.setSortingEnabled(True)
+		self.listView.setDragDropOverwriteMode(True)
+		self.listView.setDropIndicatorShown(True)
 		self.listView.setModel(self.__filterModel)
 		self.listView.addAction(self.itemDelAct)
 		self.listView.activated.connect(self.__doubleClicked)

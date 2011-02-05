@@ -122,6 +122,41 @@ def importFile(store, path, name=""):
 		return None
 
 
+def overwriteFile(store, link, path):
+	if not os.path.isfile(path):
+		return False
+
+	# determine file type
+	uti = None
+	if mimeGuess:
+		mime = mimeGuess.file(path)
+		uti = Registry().getUtiFromMime(mime, None)
+	if not uti:
+		ext  = os.path.splitext(path)[1].lower()
+		uti  = Registry().getUtiFromExtension(ext)
+
+	doc = link.doc()
+	rev = Connector().lookup_doc(doc, [store]).rev(store)
+	with Connector().update(doc, rev, stores=[store]) as writer:
+		meta = struct.loads(writer.readAll('META'))
+		meta["org.hotchpotch.annotation"]["origin"] = path
+		meta["org.hotchpotch.annotation"]["comment"] = "Overwritten from external file system"
+
+		extractor = Registry().getExtractor(uti)
+		if extractor:
+			additionalMeta = __runExtractor(extractor, path)
+			if additionalMeta:
+				__merge(meta, additionalMeta)
+
+		with open(path, "rb") as file:
+			writer.write('FILE', file.read())
+		writer.write('META', struct.dumps(meta))
+		writer.setType(uti)
+		writer.commit()
+
+	return True
+
+
 # returns a commited writer or None
 def importObject(store, uti, spec):
 	try:
