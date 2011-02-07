@@ -44,7 +44,7 @@ init({State, User}) ->
 
 
 handle_call({put_part, Part, Data}, _From, S) ->
-	Reply = relay_request(?PUT_REV_PART_REQ, <<Part/binary, Data/binary>>, S),
+	Reply = do_put_part(Part, Data, S),
 	{reply, Reply, S};
 
 handle_call(commit, _From, S) ->
@@ -78,6 +78,19 @@ terminate(_, _)          -> ok.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+do_put_part(Part, Data, #state{mps=MaxPS} = S) when size(Data) =< MaxPS ->
+	relay_request(?PUT_REV_PART_REQ, <<Part/binary, Data/binary>>, S);
+
+do_put_part(Part, Data, #state{mps=MaxPS} = S) ->
+	<<Chunk1:MaxPS/binary, Chunk2/binary>> = Data,
+	case do_put_part(Part, Chunk1, S) of
+		ok ->
+			do_put_part(Part, Chunk2, S);
+		Error ->
+			Error
+	end.
+
 
 relay_request(Request, Body, #state{handle=Handle, store=Store}) ->
 	case net_store:io_request(Store, Request, <<Handle:32, Body/binary>>) of

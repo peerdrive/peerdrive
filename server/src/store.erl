@@ -437,7 +437,6 @@ call_store(Store, Request, FailReply) ->
 	try
 		gen_server:call(Store, Request)
 	catch
-		exit:noproc            -> FailReply;
-		exit:{nodedown, _Node} -> FailReply
+		exit:_ -> FailReply
 	end.
 
