@@ -31,10 +31,13 @@ class DocButton(QtGui.QToolButton, Watch):
 
 	def __init__(self, doc=None, withText=False):
 		QtGui.QToolButton.__init__(self)
+		self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
 		self.__watching = None
 		self.__withText = withText
+		self.__docName = ""
 		self.setAutoRaise(True)
 		self.clicked.connect(self.__clicked)
+		self.customContextMenuRequested.connect(self.__showContextMenu)
 		if withText:
 			self.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
 		self.setDocument(doc)
@@ -84,6 +87,7 @@ class DocButton(QtGui.QToolButton, Watch):
 		if len(docName) > 20:
 			docName = docName[:20] + '...'
 		self.setIcon(docIcon)
+		self.__docName = docName
 		if self.__withText:
 			self.setText(docName)
 		else:
@@ -92,6 +96,63 @@ class DocButton(QtGui.QToolButton, Watch):
 	def __clicked(self):
 		if self.__doc:
 			showDocument(struct.DocLink(self.__doc, False))
+
+	def __showContextMenu(self, pos):
+		executables = []
+		for rev in Connector().lookup_doc(self.__doc).revs():
+			try:
+				type = Connector().stat(rev).type()
+				executables = Registry().getExecutables(type)
+				if executables:
+					break
+			except IOError:
+				pass
+
+		menu = QtGui.QMenu()
+		action = menu.addAction("Open")
+		action.triggered.connect(self.__clicked)
+		menu.setDefaultAction(action)
+		if len(executables) > 1:
+			openMenu = menu.addMenu("Open with")
+			for e in executables:
+				action = openMenu.addAction(e)
+				action.triggered.connect(
+					lambda x,d=self.__doc,e=e: showDocument(struct.DocLink(d, False), executable=e))
+
+		if Registry().conformes(type, "org.hotchpotch.container"):
+			menu.addSeparator()
+			m = menu.addMenu(self.__docName)
+			l = struct.DocLink(self.__doc, False)
+			m.aboutToShow.connect(lambda m=m, l=l: self.__fillMenu(m, l))
+
+		menu.exec_(self.mapToGlobal(pos))
+
+	def __fillMenu(self, menu, menuLink):
+		menu.clear()
+		c = struct.Container(menuLink)
+		for (title, link) in c.items():
+			link.update()
+			type = None
+			for rev in link.revs():
+				try:
+					type = Connector().stat(rev).type()
+					break
+				except IOError:
+					pass
+
+			if not type:
+				continue
+
+			if len(title) > 40:
+				title = title[:40] + '...'
+
+			icon = QtGui.QIcon(Registry().getIcon(type))
+			if Registry().conformes(type, "org.hotchpotch.container"):
+				m = menu.addMenu(icon, title)
+				m.aboutToShow.connect(lambda m=m, l=link: self.__fillMenu(m, l))
+			else:
+				a = menu.addAction(icon, title)
+				a.triggered.connect(lambda x,l=link,r=menuLink: showDocument(l, referrer=r))
 
 
 class RevButton(QtGui.QToolButton):
