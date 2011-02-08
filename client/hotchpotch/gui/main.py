@@ -394,7 +394,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		stores = filter(lambda(name,store):name, stores)
 		for (name, store) in stores:
 			action = self.__delMenu.addAction("Delete item from '%s'" % name)
-			action.triggered.connect(lambda: delFun(store))
+			action.triggered.connect(lambda x,s=store: delFun(s))
 			action.setEnabled(doc != store)
 
 		if len(stores) > 1:
