@@ -18,13 +18,12 @@
 -behaviour(gen_server).
 
 -export([start_link/3]).
--export([servlet_occupied/1, servlet_idle/1]).
+-export([servlet_occupied/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 
--define(START_SERVLETS, 10).
--define(MIN_SERVLETS, 3).
--record(state, {socket, free, servletsup}).
+-define(START_SERVLETS, 3).
+-record(state, {socket, servletsup}).
 
 start_link(ListenerId, ServletSup, Port) ->
 	gen_server:start_link({local, ListenerId}, ?MODULE, {ServletSup, Port}, []).
@@ -33,15 +32,12 @@ start_link(ListenerId, ServletSup, Port) ->
 servlet_occupied(Pid) ->
 	gen_server:cast(Pid, occupied).
 
-servlet_idle(Pid) ->
-	gen_server:cast(Pid, idle).
-
 
 init({ServletSup, Port}) ->
 	case gen_tcp:listen(Port, [binary, {active, false}, {packet, 2}]) of
 		{ok, ListenSock} ->
 			start_servlets(ServletSup, ?START_SERVLETS, ListenSock),
-			{ok, #state{socket=ListenSock, free=?START_SERVLETS, servletsup=ServletSup}};
+			{ok, #state{socket=ListenSock, servletsup=ServletSup}};
 
 		{error, Reason} ->
 			{stop, Reason}
@@ -49,27 +45,21 @@ init({ServletSup, Port}) ->
 
 
 handle_cast(occupied, S) ->
-	Free = if
-		S#state.free =< ?MIN_SERVLETS ->
-			start_servlet(S#state.servletsup, S#state.socket),
-			S#state.free;
-		true ->
-			S#state.free-1
-	end,
-    {noreply, S#state{free=Free}};
-
-handle_cast(idle, S) ->
-	{noreply, S#state{free=S#state.free + 1}}.
+	start_servlet(S#state.servletsup, S#state.socket),
+	{noreply, S}.
 
 
 start_servlets(_ServletSup, 0, _) ->
 	ok;
+
 start_servlets(ServletSup, Num, ListenSock) ->
 	start_servlet(ServletSup, ListenSock),
 	start_servlets(ServletSup, Num-1, ListenSock).
 
+
 start_servlet(ServletSup, ListenSock) ->
 	servlet_sup:spawn_servlet(ServletSup, ListenSock).
+
 
 terminate(_Reason, State) ->
 	gen_tcp:close(State#state.socket).

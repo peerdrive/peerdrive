@@ -31,15 +31,10 @@ init(Parent, Module, Listener, ListenSocket, Args) ->
 server(Module, Listener, ListenSocket, Args) ->
 	case gen_tcp:accept(ListenSocket) of
 		{ok, Socket} ->
-			try
-				listener:servlet_occupied(Listener),
-				State = apply(Module, init, [Socket]++Args),
-				inet:setopts(Socket, [{nodelay, true}]),
-				loop(Module, Socket, State)
-			after
-				listener:servlet_idle(Listener)
-			end,
-			server(Module, Listener, ListenSocket, Args);
+			listener:servlet_occupied(Listener),
+			State = apply(Module, init, [Socket]++Args),
+			inet:setopts(Socket, [{nodelay, true}]),
+			loop(Module, Socket, State);
 
 		_Other ->
 			%io:format("[~w] accept returned ~w - goodbye!~n", [self(), Other]),
@@ -72,13 +67,15 @@ loop(Module, Socket, State) ->
 			loop(Module, Socket, NewState);
 		{stop, NewState} ->
 			gen_tcp:close(Socket),
-			Module:terminate(NewState);
+			Module:terminate(NewState),
+			normal;
 		closed ->
-			ok;
+			normal;
 		{error, Error} ->
 			error_logger:error_report([{module, Module}, {state, State},
 				{error, Error}]),
 			gen_tcp:close(Socket),
-			Module:terminate(State)
+			Module:terminate(State),
+			{error, Error}
 	end.
 
