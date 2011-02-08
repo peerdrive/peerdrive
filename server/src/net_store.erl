@@ -478,7 +478,7 @@ sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
 			end,
 			S2 = S#state{synclocks=dict:filter(fun(_, Pid) -> Pid =/= From end, SLocks)},
 			try
-				{noreply, lists:foldl(Cleanup, Found, S2)}
+				{noreply, lists:foldl(Cleanup, S2, Found)}
 			catch
 				throw:Error -> Error
 			end
