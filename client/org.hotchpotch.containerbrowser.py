@@ -542,7 +542,7 @@ class ContainerViewHandler(ViewHandler):
 		self.__fileMenu.clear()
 		self._main.activeView().fillContextMenu(self.__fileMenu)
 		self.__fileMenu.addSeparator()
-		self.__fileMenu.addAction(self.exitAct)
+		self.__fileMenu.addAction(self._main.exitAct)
 
 	def __columnsShow(self):
 		self.__colMenu.clear()

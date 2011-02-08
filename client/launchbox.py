@@ -428,6 +428,7 @@ class SyncEditor(QtGui.QDialog):
 		mainLayout = QtGui.QVBoxLayout()
 
 		layout = QtGui.QGridLayout()
+		layout.addWidget(QtGui.QLabel("From \\ To"), 0, 0)
 		for (pos, store) in stores:
 			button = DocButton(store, True)
 			self.__buttons.append(button)

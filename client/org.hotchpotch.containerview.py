@@ -96,14 +96,14 @@ class CollectionWindow(main.MainWindow):
 	def __setMutable(self, mutable):
 		self.__cleanAct.setEnabled(mutable)
 
-	def __itemOpen(self, link):
+	def __itemOpen(self, link, executable):
 		if self.viewWidget().doc():
 			ref = struct.DocLink(self.viewWidget().doc(), autoUpdate=False)
 		elif self.viewWidget().rev():
 			ref = struct.RevLink(self.viewWidget().rev())
 		else:
 			ref = None
-		utils.showDocument(link, referrer=ref)
+		utils.showDocument(link, executable=executable, referrer=ref)
 
 
 if __name__ == '__main__':

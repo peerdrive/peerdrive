@@ -1078,7 +1078,13 @@ class CollectionWidget(widgets.DocumentView):
 		try:
 			allVolumes = set(c.lookup_rev(self.rev()))
 			if isinstance(link, struct.DocLink):
-				curVolumes = set(c.lookup_doc(link.doc()).stores())
+				lookup = c.lookup_doc(link.doc())
+				curVolumes = set(lookup.stores())
+				try:
+					for rev in lookup.revs():
+						curVolumes = curVolumes & set(c.lookup_rev(rev, curVolumes))
+				except IOError:
+					curVolumes = set()
 			else:
 				curVolumes = set(c.lookup_rev(link.rev()))
 		except IOError:
