@@ -282,7 +282,7 @@ opendir(_, Ino, Fi, _Cont, #state{inodes=Inodes, dirs=Dirs} = S) ->
 	Reply.
 
 
-readdir(_Ctx, Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
+readdir(_Ctx, _Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
 	Id = Fi#fuse_file_info.fh,
 	Entries = gb_trees:get(Id, Dirs),
 	DirEntryList = take_while(
@@ -295,7 +295,7 @@ readdir(_Ctx, Ino, Size, Offset, Fi, _Cont, #state{dirs=Dirs} = S) ->
 		end,
 		{0, Size},
 		safe_nthtail(Offset, Entries)),
-	?DEBUG(io:format("readdir(~p) -> ~p~n", [Ino, DirEntryList])),
+	?DEBUG(io:format("readdir(~p) -> ~p~n", [_Ino, DirEntryList])),
 	{#fuse_reply_direntrylist{direntrylist = DirEntryList}, S}.
 
 
@@ -413,7 +413,7 @@ release(_, _Ino, #fuse_file_info{fh=Id}, _Cont, #state{files=Files} = S) ->
 	{#fuse_reply_err{err=ok}, S#state{files=gb_trees:delete(Id, Files)}}.
 
 
-setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
+setattr(_, Ino, Attr, ToSet, _Fi, _, #state{inodes=Inodes} = S) ->
 	#vnode{timeout=Timeout} = VNode = gb_trees:get(Ino, Inodes),
 	Reply = case catch do_setattr(Ino, VNode, Attr, ToSet, S) of
 		{ok, NewAttr} ->
@@ -422,7 +422,7 @@ setattr(_, Ino, Attr, ToSet, Fi, _, #state{inodes=Inodes} = S) ->
 		{error, Error} ->
 			{#fuse_reply_err{err=Error}, S}
 	end,
-	?DEBUG(io:format("setattr(~p, ~p, ~p, ~p) ->~n    ~p~n", [Ino, Attr, ToSet, Fi, element(1, Reply)])),
+	?DEBUG(io:format("setattr(~p, ~p, ~p, ~p) ->~n    ~p~n", [Ino, Attr, ToSet, _Fi, element(1, Reply)])),
 	Reply.
 
 
@@ -925,7 +925,7 @@ docsdir_getnode({virtdoc, Store, Uuid}) ->
 	docdir_make_node(Store, Uuid).
 
 
-docsdir_opendir({docsdir, Store}, Cache) ->
+docsdir_opendir({docsdir, _Store}, Cache) ->
 	{ok, [], Cache}.
 
 
@@ -1002,7 +1002,7 @@ docdir_read_entry(Store, Doc, {CacheRev, CacheEntry}=Cache) ->
 	end.
 
 
-read_file_name(_Store, Doc, Rev) ->
+read_file_name(_Store, _Doc, Rev) ->
 	Meta = case util:read_rev_struct(Rev, <<"META">>) of
 		{ok, Value1} when is_record(Value1, dict, 9) ->
 			Value1;
@@ -1588,7 +1588,7 @@ file_write(Handle, Data, Offset) ->
 	ifc_fuse_store:write(Handle, <<"FILE">>, Offset, Data).
 
 
-file_release(Handle, Changed, _Rewritten) ->
+file_release(Handle, _Changed, _Rewritten) ->
 	%case Changed of
 	%	false -> ok;
 	%	true  ->
