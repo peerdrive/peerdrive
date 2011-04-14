@@ -32,145 +32,80 @@ sync(Doc, Depth, Stores) ->
 		end,
 		{[], []},
 		Stores),
-	case AllRevs of
+	case lists:usort(AllRevs) of
 		[] ->
 			{error, enoent, []};
 
-		_ ->
-			case calc_dest_rev(AllRevs, AllStores) of
-				{ok, DestRev} ->
-					do_sync(Doc, Depth, DestRev, lists:zip(AllStores, AllRevs));
-				error ->
-					{error, econflict, []}
+		[DestRev] ->
+			{ok, [], DestRev};
+
+		Heads ->
+			Graph = mergebase:new(Heads, AllStores),
+			try
+				case mergebase:ff_head(Graph) of
+					{ok, DestRev} ->
+						do_sync(Doc, Depth, Graph, DestRev, AllRevs,
+							AllStores);
+
+					error ->
+						{error, econflict, []}
+				end
+			after
+				mergebase:delete(Graph)
 			end
 	end.
 
 
-%% To calculate the revision which is the parent of all other revisions
-%% (fast-forward head) the history of each revision is examined and recorded.
-%% After each step the algorithm looks if the so-far traversed history of any
-%% revision contains all other Revs. If this is the case then the fast-forward
-%% head was found.
-%%
-%% The algorithm ends with an error when no such revision was found yet and the
-%% ends of all revision histories were reached.
-calc_dest_rev(Revs, Stores) ->
-	% State :: [ {BaseRev::guid(), Heads::[guid()], Path::set()} ]
-	State = [ {Rev, [Rev], sets:from_list([Rev])} || Rev <- Revs ],
-	calc_dest_loop(Revs, State, Stores).
+do_sync(Doc, Depth, Graph, DestRev, Revs, Stores) ->
+	{Result, ErrInfo} = lists:foldl(
+		fun({CurRev, {Guid, _}=Store}, {Result, ErrInfo}) ->
+			case CurRev of
+				DestRev ->
+					% already on head, make sure parent revs are here too
+					replicator:replicate_rev_sync(DestRev, Depth, Stores, [Store]),
+					{Result, ErrInfo};
 
-
-calc_dest_loop(BaseRevs, State, Stores) ->
-	% go back in history another step
-	{NewState, AddedSth} = calc_dest_step(State, Stores),
-	% fast-forward head found?
-	case find_ff_head(BaseRevs, NewState) of
-		{ok, _Rev} = Result ->
-			Result;
-		error ->
-			% try another round, but only if we have some unknown heads left
-			if
-				AddedSth -> calc_dest_loop(BaseRevs, NewState, Stores);
-				true     -> error
-			end
-	end.
-
-
-find_ff_head(_BaseRevs, []) ->
-	error;
-
-find_ff_head(BaseRevs, [{Candidate, _Heads, Path} | Paths]) ->
-	case lists:all(fun(Rev) -> sets:is_element(Rev, Path) end, BaseRevs) of
-		true -> {ok, Candidate};
-		false -> find_ff_head(BaseRevs, Paths)
-	end.
-
-
-calc_dest_step(State, Stores) ->
-	lists:foldl(
-		fun(RevInfo, {AccState, AccAddedSth}) ->
-			{_BaseRev, Heads, _Path} = NewRevInfo = follow(RevInfo, Stores),
-			{[NewRevInfo|AccState], (Heads =/= []) or AccAddedSth}
-		end,
-		{[], false},
-		State).
-
-
-follow({BaseRev, Heads, Path}, Stores) ->
-	lists:foldl(
-		fun(Head, {AccBase, AccHeads, AccPath} = Acc) ->
-			case broker:stat(Head, Stores) of
-				{ok, _ErrInfo, #rev_stat{parents=Parents}} ->
-					{
-						AccBase,
-						Parents ++ AccHeads,
-						sets:union(sets:from_list(Parents), AccPath)
-					};
-
-				{error, _Reason, _ErrInfo} ->
-					Acc
+				_ ->
+					% need to forward
+					{ok, RevPath} = mergebase:ff_path(Graph, DestRev, CurRev),
+					case forward(Store, Doc, RevPath, Depth, Stores) of
+						ok              -> {ok, ErrInfo};
+						{error, Reason} -> {Result, [{Guid, Reason} | ErrInfo]}
+					end
 			end
 		end,
-		{BaseRev, [], Path},
-		Heads).
-
-
-do_sync(Doc, Depth, DestRev, AllStores) ->
-	{value, {{LeadStoreGuid, LeadStorePid}, DestRev}, _FollowStores} =
-		lists:keytake(DestRev, 2, AllStores),
-	% create/set temporary doc on lead store
-	case create_tmp(LeadStorePid, DestRev) of
-		{ok, TmpDoc} ->
-			% replicate temporary doc (with all parent revs) to all stores
-			Reply = case replicate_tmp_doc(TmpDoc, Depth, AllStores) of
-				{ok, _ErrInfo} -> % FIXME: merge ErrInfos
-					switch(Doc, DestRev, AllStores);
-
-				Error ->
-					Error
-			end,
-			cleanup(TmpDoc, DestRev, AllStores),
-			Reply;
-
-		{error, Reason} ->
-			{error, Reason, [{LeadStoreGuid, Reason}]}
+		{error, []},
+		lists:zip(Revs, Stores)),
+	case Result of
+		ok -> broker:consolidate_success(ErrInfo, DestRev);
+		error -> broker:consolidate_error(ErrInfo)
 	end.
 
 
-create_tmp(LeadStore, DestRev) ->
-	Doc = crypto:rand_bytes(16),
-	case store:put_doc(LeadStore, Doc, DestRev, DestRev) of
-		ok              -> {ok, Doc};
-		{error, Reason} -> {error, Reason}
+forward({_, DstPid} = DstStore, Doc, RevPath, Depth, SrcStores) ->
+	case store:forward_doc_start(DstPid, Doc, RevPath) of
+		ok ->
+			ok;
+
+		{ok, MissingRevs, Handle} ->
+			try
+				lists:foreach(
+					fun(Rev) -> replicate(Rev, Depth, DstStore, SrcStores) end,
+					MissingRevs),
+				store:forward_doc_commit(Handle)
+			catch
+				throw:Error -> store:forward_doc_abort(Handle), Error
+			end;
+
+		{error, _Reason} = Error ->
+			Error
 	end.
 
 
-replicate_tmp_doc(TmpDoc, Depth, RepStores) ->
-	Stores = [Store || {Store, _Rev} <- RepStores],
-	replicator:replicate_doc_sync(TmpDoc, Depth, Stores, Stores).
-
-
-switch(Doc, NewRev, Stores) ->
-	% point of no return: once we switch one store we have to do it for all
-	ErrInfo = lists:foldl(
-		fun({{Guid, Store}, OldRev}, Result) ->
-			case store:put_doc(Store, Doc, OldRev, NewRev) of
-				ok ->
-					Result;
-				{error, Reason} ->
-					[{Guid, Reason} | Result]
-			end
-		end,
-		[],
-		Stores),
-	case ErrInfo of
-		[] -> {ok, [], NewRev};
-		_  -> broker:consolidate_error(ErrInfo)
+replicate(Rev, Depth, DstStore, SrcStores) ->
+	% FIXME: This will traverse the history every time up to 'Depth'! Slooooow...
+	case replicator:replicate_rev_sync(Rev, Depth, SrcStores, [DstStore]) of
+		{ok, _} -> ok;
+		{error, Reason, _ErrInfo} -> throw({error, Reason})
 	end.
-
-
-cleanup(TmpDoc, DestRev, Stores) ->
-	lists:foreach(
-		fun({{_, Store}, _Rev}) -> store:delete_doc(Store, TmpDoc, DestRev) end,
-		Stores).
 

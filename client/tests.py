@@ -725,6 +725,7 @@ class TestSynchronization(CommonParts):
 
 		self.startSync(strategy, self.store1, self.store2)
 
+		# first wait until the doc gets changed
 		while True:
 			watch.reset()
 			self.assertTrue(watch.waitForWatch())
@@ -735,6 +736,13 @@ class TestSynchronization(CommonParts):
 		self.assertEqual(len(l.stores()), 2)
 		self.assertTrue(self.store1 in l.stores())
 		self.assertTrue(self.store2 in l.stores())
+
+		# wait until sync_worker moved on
+		result = self.erlCall(
+			"""sync_locks:lock(<<16#"""+doc.encode('hex')+""":128>>),
+			sync_locks:unlock(<<16#"""+doc.encode('hex')+""":128>>).""")
+		self.assertEqual(result, '{ok, ok}')
+
 		return l
 
 	# Checks if a document is synchronized via fast-forward

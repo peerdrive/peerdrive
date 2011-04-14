@@ -204,7 +204,7 @@ do_replicate_doc(Backlog, Doc, Depth, SrcStores, DstStores, Important) ->
 			% replicate doc to all stores, queue errors when failed
 			{NewBacklog, RepStores} = lists:foldl(
 				fun({DestGuid, DestPid}=Store, {AccBacklog, AccRepStores}) ->
-					case store:put_doc(DestPid, Doc, Rev, Rev) of
+					case store:put_doc(DestPid, Doc, Rev) of
 						ok ->
 							{AccBacklog, [Store|AccRepStores]};
 						{error, Reason} ->

@@ -17,7 +17,8 @@
 -module(store).
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2]).
--export([put_doc/4, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
+-export([put_doc/3, forward_doc_start/3, forward_doc_commit/1,
+	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
 -export([close/1, commit/2, create/4, fork/4, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
@@ -73,7 +74,7 @@ contains(Store, Rev) ->
 %% @spec stat(Store, Rev) -> {ok, Stat} | {error, Reason}
 %%       Store = pid()
 %%       Rev = guid()
-%%       Stat = #stat{}
+%%       Stat = #rev_stat{}
 %%       Reason = ecode()
 stat(Store, Rev) ->
 	call_store(Store, {stat, Rev}).
@@ -306,18 +307,67 @@ delete_doc(Store, Doc, Rev) ->
 delete_rev(Store, Rev) ->
 	call_store(Store, {delete_rev, Rev}).
 
-%% @doc Put/update a document in the store
+%% @doc Put a document in the store
 %%
-%% Let's a document point to a new revision. If the Doc does not exist yet then it
-%% is created and points to NewRev. If the Doc exits it must either point
-%% OldRev or NewRev, otherwise the call will fail.
+%% If the Doc does not exist yet then it is created and points to Rev. If the
+%% Doc exits it must point to Rev, otherwise the call will fail.
 %%
-%% @spec put_doc(Store, Doc, OldRev, NewRev) -> ok | {error, Reason}
+%% @spec put_doc(Store, Doc, Rev) -> ok | {error, Reason}
 %%       Store = pid()
-%%       Doc = OldRev = NewRev = guid()
+%%       Doc = Rev = guid()
 %%       Reason = ecode()
-put_doc(Store, Doc, OldRev, NewRev) ->
-	call_store(Store, {put_doc, Doc, OldRev, NewRev}).
+put_doc(Store, Doc, Rev) ->
+	call_store(Store, {put_doc, Doc, Rev}).
+
+
+%% @doc Fast-forward a document
+%%
+%% This function forwards Doc from the current revision to a new revision where
+%% the current revision must be an ancestor of the new revision. The current
+%% revision, all revisions in between and the final revision are given as a
+%% list in RevPath. The list must be ordered from the the current Rev to the
+%% final, latest Rev.
+%%
+%% If the store has already all involved revisions then the Doc is forwarded
+%% and the function just returns `ok'. Otherwise a list of missing revisions is
+%% returned which have to be uploaded in the correct order via put_rev_start/3
+%% before the forward can be committed by forward_doc_commit/1.
+%%
+%% @spec forward_doc_start(Store, Doc, RevPath) -> Result
+%%       Store = pid()
+%%       Doc = guid()
+%%       RevPath = MissingRevs = [guid()]
+%%       Result = ok | {ok, MissingRevs, Handle} | {error, Reason}
+%%       Handle = pid()
+%%       Reason = ecode()
+forward_doc_start(Store, Doc, RevPath) ->
+	call_store(Store, {forward_doc, Doc, RevPath}).
+
+
+%% @doc Commit a fast-forward operation
+%%
+%% Commits a document fast-forward operation after all requested revisions were
+%% uploaded. If the document has been updated in between then the operation
+%% will fail. Irregardless of the result the handle is invalid after the call.
+%%
+%% @spec forward_doc_commit(Handle) -> Result
+%%       Handle = pid()
+%%       Result = ok | {error, Reason}
+%%       Reason = ecode()
+forward_doc_commit(Handle) ->
+	call_store(Handle, commit).
+
+
+%% @doc Abort a fast-forward operation
+%%
+%% Invalidates the handle. Any revisions uploaded so far may be garbage
+%% collected.
+%%
+%% @spec forward_doc_abort(Handle) -> ok
+%%       Handle = pid()
+forward_doc_abort(Handle) ->
+	call_store(Handle, abort, ok).
+
 
 %% @doc Put/import a revision into the store.
 %%

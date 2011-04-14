@@ -119,7 +119,7 @@ lookup_rev(Rev, Stores) ->
 %%       Result = {ok, ErrInfo, Stat} | {error, Reason, ErrInfo}
 %%       Rev = guid()
 %%       SearchStores = [guid()]
-%%       Stat = #stat{}
+%%       Stat = #rev_stat{}
 %%       ErrInfo = [{Store::guid(), Reason::ecode()}]
 %%       Reason = ecode()
 stat(Rev, SearchStores) ->

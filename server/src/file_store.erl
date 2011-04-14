@@ -21,7 +21,8 @@
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % Functions used by helper processes (reader/writer/...)
--export([commit/4, suspend/4, insert_rev/3, lock/2, unlock/2, unhide/2]).
+-export([commit/4, suspend/4, forward_commit/3, insert_rev/3, lock/2, unlock/2,
+	unhide/2]).
 
 -include("store.hrl").
 -include("file_store.hrl").
@@ -115,6 +116,10 @@ commit(Store, Doc, PreRev, Revision) ->
 %%       Result = {ok, Rev::guid()} | {error, Error::ecode()}
 suspend(Store, Doc, PreRev, Revision) ->
 	gen_server:call(Store, {suspend, Doc, PreRev, Revision}).
+
+
+forward_commit(Store, Doc, RevPath) ->
+	gen_server:call(Store, {forward_commit, Doc, RevPath}).
 
 %% @doc Import a new revision into the store.
 %%
@@ -254,8 +259,13 @@ handle_call_internal({delete_doc, Doc, Rev}, _From, S) ->
 	{S2, Reply} = do_delete_doc(S, Doc, Rev),
 	{reply, Reply, S2};
 
-handle_call_internal({put_doc, Doc, OldRev, NewRev}, _From, S) ->
-	{S2, Reply} = do_put_doc(S, Doc, OldRev, NewRev),
+handle_call_internal({put_doc, Doc, Rev}, _From, S) ->
+	{S2, Reply} = do_put_doc(S, Doc, Rev),
+	{reply, Reply, S2};
+
+handle_call_internal({forward_doc, Doc, RevPath}, From, S) ->
+	{User, _} = From,
+	{S2, Reply} = do_forward_doc(S, Doc, RevPath, User),
 	{reply, Reply, S2};
 
 handle_call_internal({put_rev, Rev, Revision}, From, S) ->
@@ -283,6 +293,11 @@ handle_call_internal(gc, _From, S) ->
 handle_call_internal({lock, Hash}, _From, S) ->
 	S2 = S#state{locks = orddict:update_counter(Hash, 1, S#state.locks)},
 	{reply, ok, S2};
+
+% internal: ok | {error, Reason}
+handle_call_internal({forward_commit, Doc, RevPath}, _From, S) ->
+	{S2, Reply} = do_forward_doc_commit(S, Doc, RevPath),
+	{reply, Reply, S2};
 
 % internal: ok | {error, Reason}
 handle_call_internal({insert_rev, Rev, Revision}, _From, S) ->
@@ -805,45 +820,79 @@ start_writer(S, State, User) ->
 
 
 % ok | {error, Reason}
-do_put_doc(#state{uuids=Uuids} = S, Doc, OldRev, NewRev) ->
+do_put_doc(#state{uuids=Uuids} = S, Doc, Rev) ->
 	case dict:find(Doc, Uuids) of
-		% already pointing to requested rev
-		{ok, {NewRev, _, _}} ->
-			{S, ok};
-
-		% free old version, store new one
-		{ok, {OldRev, PreRevs, _}} ->
-			revision_ref_dec(OldRev),
-			vol_monitor:trigger_mod_doc(S#state.guid, Doc),
-			S21 = do_revisions_ref_inc(S, [NewRev]),
-			Gen = S21#state.gen,
+		% document does not exist (yet)...
+		error ->
+			vol_monitor:trigger_add_doc(S#state.guid, Doc),
+			S2 = do_revisions_ref_inc(S, [Rev]),
+			Gen = S2#state.gen,
 			{
-				S21#state{
+				S2#state{
 					gen     = Gen+1,
-					uuids   = dict:store(Doc, {NewRev, PreRevs, Gen}, S21#state.uuids),
+					uuids   = dict:store(Doc, {Rev, [], Gen}, S2#state.uuids),
 					changed = true
 				},
 				ok
 			};
 
+		% already pointing to requested rev
+		{ok, {Rev, _, _}} ->
+			{S, ok};
+
 		% completely other rev
 		{ok, _} ->
-			{S, {error, econflict}};
+			{S, {error, econflict}}
+	end.
 
+
+% ok | {ok, MissingRevs, Handle} | {error, Reason}
+do_forward_doc(#state{uuids=Uuids, revisions=Revs} = S, Doc, RevPath, User)
+when length(RevPath) >= 2 ->
+	[StartRev | Path] = RevPath,
+	FinalRev = lists:last(Path),
+	case dict:find(Doc, Uuids) of
 		% document does not exist (yet)...
 		error ->
-			vol_monitor:trigger_add_doc(S#state.guid, Doc),
-			S21 = do_revisions_ref_inc(S, [NewRev]),
-			Gen = S21#state.gen,
-			{
-				S21#state{
-					gen     = Gen+1,
-					uuids   = dict:store(Doc, {NewRev, [], Gen}, S21#state.uuids),
-					changed = true
-				},
-				ok
-			}
-	end.
+			{S, {error, enoent}};
+
+		{ok, {StartRev, _, _}} ->
+			% FIXME: make sure available revs are not deleted in between
+			Missing = lists:foldl(
+				fun(Rev, Acc) ->
+					case dict:find(Rev, Revs) of
+						error                  -> [Rev | Acc];
+						{ok, {_, stub}}        -> [Rev | Acc];
+						{ok, {_, #revision{}}} -> Acc
+					end
+				end,
+				[],
+				Path),
+			case Missing of
+				[] ->
+					do_forward_doc_commit(S, Doc, RevPath);
+
+				_ ->
+					TmpDoc = crypto:rand_bytes(16),
+					S2 = do_revisions_ref_inc(S, [FinalRev]),
+					Gen = S2#state.gen,
+					S3 = S2#state{
+						gen     = Gen+1,
+						uuids   = dict:store(TmpDoc, {FinalRev, [], Gen}, S2#state.uuids),
+						changed = true
+					},
+					S4 = do_hide(S3, TmpDoc),
+					{ok, Handle} = file_store_forwarder:start_link(self(),
+						Doc, TmpDoc, RevPath, User),
+					{S4, {ok, Missing, Handle}}
+			end;
+
+		{ok, _} ->
+			{S, {error, econflict}}
+	end;
+
+do_forward_doc(S, _Doc, _RevPath, _User) ->
+	{S, {error, einval}}.
 
 
 % ok | {ok, MissingParts, Importer} | {error, Reason}
@@ -961,6 +1010,63 @@ do_put_rev_commit(#state{revisions=Revisions} = S, Rev, Revision) ->
 		{ok, _} ->
 			{S, ok}
 	end.
+
+
+do_forward_doc_commit(#state{uuids=Uuids, revisions=Revisions} = S, Doc, RevPath) ->
+	try
+		% check if all revisions are known
+		lists:foreach(
+			fun(Rev) ->
+				case dict:find(Rev, Revisions) of
+					error                  -> throw(enoent);
+					{ok, {_, stub}}        -> throw(enoent);
+					{ok, {_, #revision{}}} -> ok
+				end
+			end,
+			RevPath),
+
+		% check if the revisions are all connected to each other
+		lists:foreach(
+			fun({Rev1, Rev2}) ->
+				{_, #revision{parents=Parents}} = dict:fetch(Rev2, Revisions),
+				case lists:member(Rev1, Parents) of
+					true  -> ok;
+					false -> throw(einval)
+				end
+			end,
+			zip_parent_child(RevPath)),
+
+		% try to update
+		[OldRev | Path] = RevPath,
+		NewRev = lists:last(Path),
+		case dict:find(Doc, Uuids) of
+			% already pointing to requested rev
+			{ok, {NewRev, _, _}} ->
+				{S, ok};
+
+			% free old version, store new one
+			{ok, {OldRev, PreRevs, _}} ->
+				revision_ref_dec(OldRev),
+				vol_monitor:trigger_mod_doc(S#state.guid, Doc),
+				S2 = do_revisions_ref_inc(S, [NewRev]),
+				Gen = S2#state.gen,
+				{
+					S2#state{
+						gen     = Gen+1,
+						uuids   = dict:store(Doc, {NewRev, PreRevs, Gen}, S2#state.uuids),
+						changed = true
+					},
+					ok
+				};
+
+			% errors
+			{ok, _} -> throw(econflict);
+			error   -> throw(enoent)
+		end
+	catch
+		throw:Reason -> {S, {error, Reason}}
+	end.
+
 
 %%% Reference counting %%%%%%%%%%%%%%%%
 
@@ -1464,4 +1570,15 @@ save_dict(Path, Name, Dict) ->
 			io:format("Failed to save ~w: ~s~n", [Name, Reason]),
 			ok
 	end.
+
+
+zip_parent_child([Head | Childs]) ->
+	lists:reverse(zip_parent_child(Head, Childs, [])).
+
+
+zip_parent_child(Parent, [Child], Acc) ->
+	[{Parent, Child} | Acc];
+
+zip_parent_child(Parent, [Child | Ancestors], Acc) ->
+	zip_parent_child(Child, Ancestors, [{Parent, Child} | Acc]).
 
