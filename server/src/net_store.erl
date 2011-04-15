@@ -160,9 +160,12 @@ handle_call({delete_rev, Rev}, From, S) ->
 handle_call({delete_doc, Doc, Rev}, From, S) ->
 	send_request(From, ?DELETE_DOC_REQ, <<Doc/binary, Rev/binary>>, S);
 
-handle_call({put_doc, Doc, OldRev, NewRev}, From, S) ->
-	Body = <<Doc/binary, OldRev/binary, NewRev/binary>>,
+handle_call({put_doc, Doc, Rev}, From, S) ->
+	Body = <<Doc/binary, Rev/binary>>,
 	send_request(From, ?PUT_DOC_REQ, Body, S);
+
+handle_call({forward_doc, Doc, RevPath}, From, S) ->
+	req_forward_doc(Doc, RevPath, From, S);
 
 handle_call({put_rev, Rev, Revision}, From, S) ->
 	req_put_rev(Rev, Revision, From, S);
@@ -281,6 +284,25 @@ req_start_io(Request, Body, From, #state{mps=MPS} = S) ->
 
 cnf_start_io(<<Handle:32>>, MaxPacketSize, User) ->
 	net_store_io:start_link(self(), Handle, MaxPacketSize, User).
+
+
+req_forward_doc(Doc, RevPath, From, S) ->
+	{User, _Tag} = From,
+	Body = <<Doc/binary, (encode_list(RevPath))/binary>>,
+	Handler = fun(B) -> cnf_forward_doc(B, User) end,
+	send_request(From, ?FF_DOC_START_REQ, Body, Handler, S).
+
+
+cnf_forward_doc(Body, User) ->
+	<<Handle:32, Body1/binary>> = Body,
+	{Missing, <<>>} = parse_uuid_list(Body1),
+	case Missing of
+		[] ->
+			ok;
+		_ ->
+			{ok, Importer} = net_store_forwarder:start_link(self(), Handle, User),
+			{ok, Missing, Importer}
+	end.
 
 
 req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->

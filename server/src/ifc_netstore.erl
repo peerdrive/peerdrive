@@ -163,6 +163,9 @@ handle_packet(Packet, #state{socket=Socket, store_pid=Store} = S) ->
 			do_put_doc(Body, RetPath, Store),
 			{ok, S};
 
+		?FF_DOC_START_REQ ->
+			do_forward_doc_start(RetPath, Body, S);
+
 		?PUT_REV_START_REQ ->
 			do_put_rev_start(RetPath, Body, S);
 
@@ -403,10 +406,37 @@ do_delete_rev(Body, RetPath, Store) ->
 
 do_put_doc(Body, RetPath, Store) ->
 	{Doc, Body1} = parse_uuid(Body),
-	{OldRev, Body2} = parse_uuid(Body1),
-	{NewRev, <<>>} = parse_uuid(Body2),
-	Reply = store:put_doc(Store, Doc, OldRev, NewRev),
+	{Rev, <<>>} = parse_uuid(Body1),
+	Reply = store:put_doc(Store, Doc, Rev),
 	send_reply(RetPath, ?PUT_DOC_CNF, encode_direct_result(Reply)).
+
+
+do_forward_doc_start(RetPath, Body, #state{store_pid=Store} = S) ->
+	{Doc, Body1} = parse_uuid(Body),
+	{RevPath, <<>>} = parse_uuid_list(Body1),
+	case store:forward_doc_start(Store, Doc, RevPath) of
+		ok ->
+			Reply = <<(encode_direct_result(ok))/binary, 0:32,
+				(encode_list([]))/binary>>,
+			send_reply(RetPath, ?FF_DOC_START_CNF, Reply),
+			{ok, S};
+
+		{ok, Missing, StoreHandle} ->
+			Fun = fun(NetHandle) ->
+				Reply = <<
+					(encode_direct_result(ok))/binary,
+					NetHandle:32,
+					(encode_list(Missing))/binary
+				>>,
+				send_reply(RetPath, ?FF_DOC_START_CNF, Reply),
+				forward_loop(StoreHandle)
+			end,
+			start_worker(S, Fun);
+
+		Error ->
+			send_reply(RetPath, ?FF_DOC_START_CNF, encode_direct_result(Error)),
+			{ok, S}
+	end.
 
 
 do_put_rev_start(RetPath, Body, #state{store_pid=Store} = S) ->
@@ -571,6 +601,21 @@ io_loop(Handle) ->
 
 		closed ->
 			store:close(Handle)
+	end.
+
+
+forward_loop(Handle) ->
+	receive
+		{?FF_DOC_COMMIT_REQ, <<>>, RetPath} ->
+			Reply = store:forward_doc_commit(Handle),
+			send_reply(RetPath, ?FF_DOC_COMMIT_CNF, encode_direct_result(Reply));
+
+		{?FF_DOC_ABORT_REQ, <<>>, RetPath} ->
+			Reply = store:forward_doc_abort(Handle),
+			send_reply(RetPath, ?FF_DOC_ABORT_CNF, encode_direct_result(Reply));
+
+		closed ->
+			store:forward_doc_abort(Handle)
 	end.
 
 
