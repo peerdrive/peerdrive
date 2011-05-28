@@ -88,7 +88,7 @@
 			]},
 			{interfaces, [
 				{"client", server_sup, [ifc_client, 4567]},
-				{"fuse", ifc_fuse, ["/tmp/hotchpotch", "default_permissions", []]}
+				{"fuse", ifc_vfs, ["/tmp/hotchpotch", "default_permissions", []]}
 			]}
 		]}
 	]

@@ -17,7 +17,7 @@
 %% Simplifies the store interface to a level which is needed by the fuse
 %% module.  It will also try to merge consecutive commits.
 
--module(ifc_fuse_store).
+-module(ifc_vfs_broker).
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
@@ -28,7 +28,7 @@
 -include("store.hrl").
 
 
--define(FUSE_CC, <<"org.hotchpotch.fuse">>).  % FUSE creator code
+-define(FUSE_CC, <<"org.hotchpotch.vfs">>).   % FUSE creator code
 -define(FUSE_WB_TIMEOUT, 5).                  % write back timeout in seconds
 
 % handles: dict: {wr, Store, Doc} | {ro, Store, Rev} -> {Rev, BrokerHandle, RefCnt}

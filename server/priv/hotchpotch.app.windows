@@ -88,6 +88,7 @@
 			]},
 			{interfaces, [
 				{"client", server_sup, [ifc_client, 4567]}
+				{"dokan", ifc_vfs, [ [] ]}
 			]}
 		]}
 	]
