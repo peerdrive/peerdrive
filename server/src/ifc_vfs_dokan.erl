@@ -44,6 +44,11 @@
 	childs    % gb_tree(): child inodes: Name::binary() -> {Ino::int(), Timeout::int()}
 }).
 
+% interval of the garbage collector
+-define(GC_INTERVAL, 60*1000).
+
+% child entries which have expired longer than this time ago are removed
+-define(GC_THRESHOLD, 3*60*1000).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -75,17 +80,24 @@ init(_Args) ->
 				handles   = gb_trees:from_orddict([{0, undefined}]),
 				re        = Re
 			},
+			erlang:send_after(?GC_INTERVAL, self(), gc),
 			{ok, State};
 
 		{error, Reason, _VfsState} ->
 			{stop, Reason}
 	end.
 
+
+handle_info(gc, State) ->
+	{noreply, do_gc(State)};
+
 handle_info(_Msg, State) ->
 	{noreply, State}.
 
+
 terminate(_Reason, _State) ->
 	ok.
+
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
@@ -640,7 +652,8 @@ inode_child_add(DirIno, Name, #vfs_entry{ino=ChildIno} = Entry, S) ->
 			NewChildVN = ChildVN#vnode{
 				nlookup  = ChildVN#vnode.nlookup + 1,
 				attr     = Entry#vfs_entry.attr,
-				attr_tmo = Entry#vfs_entry.attr_tmo + get_wallclock()
+				attr_tmo = Entry#vfs_entry.attr_tmo + get_wallclock(),
+				parents  = [{DirIno, Name} | ChildVN#vnode.parents]
 			},
 			S#state{vnodes=gb_trees:update(ChildIno, NewChildVN, NewVNodes)};
 
@@ -672,7 +685,7 @@ inode_parent_del(Ino, ParentIno, Name, S) ->
 	NewVN = VN#vnode{parents=NewParents},
 	S2 = S#state{vnodes=gb_trees:update(Ino, NewVN, S#state.vnodes)},
 	case NewParents of
-		%[] -> evict_inode(Ino, S2);
+		[] -> evict_inode(Ino, S2);
 		_  -> S2
 	end.
 
@@ -736,7 +749,7 @@ call_vfs_handle(Fun, Args, Ctx, S) ->
 
 get_wallclock() ->
 	{MegaSecs, Secs, MicroSecs} = now(),
-	MegaSecs*1000000000 + Secs*1000 + MicroSecs/1000.
+	MegaSecs*1000000000 + Secs*1000 + MicroSecs div 1000.
 
 
 add_handle(Parent, Name, Ino, VfsHandle, S) ->
@@ -746,30 +759,83 @@ add_handle(Parent, Name, Ino, VfsHandle, S) ->
 		ino        = Ino,
 		vfs_handle = VfsHandle
 	},
-	VN = gb_trees:get(Ino, S#state.vnodes),
-	NewVN = VN#vnode{refcnt=VN#vnode.refcnt+1},
 	{Max, _} = gb_trees:largest(S#state.handles), Ctx = Max+1,
-	S2 = S#state{
-		handles = gb_trees:enter(Ctx, Handle, S#state.handles),
-		vnodes  = gb_trees:update(Ino, NewVN, S#state.vnodes)
-	},
-	{Ctx, S2}.
+	S2 = S#state{ handles=gb_trees:enter(Ctx, Handle, S#state.handles) },
+	S3 = inc_refcnt(Parent, S2),
+	S4 = inc_refcnt(Ino, S3),
+	{Ctx, S4}.
+
+
+inc_refcnt(Ino, #state{vnodes=VNodes} = S) ->
+	VN = gb_trees:get(Ino, VNodes),
+	NewVN = VN#vnode{refcnt=VN#vnode.refcnt+1},
+	S#state{ vnodes=gb_trees:update(Ino, NewVN, VNodes) }.
 
 
 del_handle(Ctx, S) ->
 	{ok, ok, S2} = call_vfs_handle(close, [], Ctx, S),
-	Ino = (gb_trees:get(Ctx, S2#state.handles))#handle.ino,
+	#handle{
+		parent = Parent,
+		ino    = Ino
+	} = gb_trees:get(Ctx, S2#state.handles),
 	S3 = S2#state{handles=gb_trees:delete(Ctx, S2#state.handles)},
-	VN = gb_trees:get(Ino, S3#state.vnodes),
+	S4 = dec_refcnt(Ino, S3),
+	dec_refcnt(Parent, S4).
+
+
+dec_refcnt(Ino, #state{vnodes=VNodes} = S) ->
+	VN = gb_trees:get(Ino, VNodes),
 	if
-	%	(VN#vnode.refcnt == 1) and (VN#vnode.parents == []) ->
-	%		% End of life for this inode. Forget about it...
-	%		{_, _, S4} = call_vfs(forget, [Ino, VN#vnode.nlookup], S3),
-	%		S4;
+		(VN#vnode.refcnt == 1) and (VN#vnode.parents == []) ->
+			% End of life for this inode. Forget about it...
+			S2 = S#state{vnodes=gb_trees:delete(Ino, VNodes)},
+			{_, _, S3} = call_vfs(forget, [Ino, VN#vnode.nlookup], S2),
+			S3;
 
 		true ->
 			NewVN = VN#vnode{refcnt=VN#vnode.refcnt-1},
-			S3#state{vnodes=gb_trees:update(Ino, NewVN, S3#state.vnodes)}
+			S#state{vnodes=gb_trees:update(Ino, NewVN, VNodes)}
+	end.
+
+
+% scan all inodes and scan for very old, expired entries
+do_gc(S) ->
+	Clk = get_wallclock() - ?GC_THRESHOLD,
+	AllNodes = gb_trees:keys(S#state.vnodes),
+	S2 = lists:foldl(fun(Ino, AccS) -> do_gc_vnode(Ino, Clk, AccS) end, S, AllNodes),
+	erlang:send_after(?GC_INTERVAL, self(), gc),
+	S2.
+
+
+do_gc_vnode(Ino, Clk, S) ->
+	case gb_trees:lookup(Ino, S#state.vnodes) of
+		{value, VNode} ->
+			Expired = scan_expired_entries(gb_trees:iterator(VNode#vnode.childs),
+				Clk, []),
+			lists:foldl(
+				fun({ChildName, ChildIno}, S2) ->
+					inode_child_del(Ino, ChildName, ChildIno, S2)
+				end,
+				S,
+				Expired);
+
+		none ->
+			S
+	end.
+
+
+scan_expired_entries(Iter, Clk, Acc) ->
+	case gb_trees:next(Iter) of
+		{Name, {Ino, Timeout}, Iter2} ->
+			if
+				Timeout < Clk ->
+					scan_expired_entries(Iter2, Clk, [{Name, Ino} | Acc]);
+				true ->
+					scan_expired_entries(Iter2, Clk, Acc)
+			end;
+
+		none ->
+			Acc
 	end.
 
 
@@ -812,6 +878,6 @@ epoch2win(Epoch) ->
 
 
 win2epoch(Win) ->
-	Win / 10000000 - 134774*24*3600.
+	Win div 10000000 - 134774*24*3600.
 
 -endif.
