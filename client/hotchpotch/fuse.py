@@ -22,9 +22,13 @@ import os
 from . import struct
 from .connector import Connector
 
-root = "/tmp/hotchpotch"
 
-if os.name == 'posix':
+if os.name in ['posix', 'nt']:
+	if os.name == 'nt':
+		root = 'M:\\'
+	else:
+		root = "/tmp/hotchpotch"
+
 	def findFuseFile(link):
 		fn = struct.readTitle(link)
 		if not fn:
