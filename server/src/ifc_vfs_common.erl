@@ -18,7 +18,7 @@
 
 -export([init/0, getattr/2, lookup/3, forget/3, open/4, create/6, opendir/2,
 	close/2, read/4, write/4, readdir/2, setattr/3, unlink/3, rename/5, link/4,
-	mkdir/3]).
+	mkdir/3, statfs/2]).
 
 -include("store.hrl").
 -include("vfs.hrl").
@@ -416,6 +416,33 @@ mkdir(Parent, Name, S) ->
 
 		{error, Error} ->
 			{error, Error, S}
+	end.
+
+
+statfs(Ino, S) ->
+	#vnode{oid=Oid} = gb_trees:get(Ino, S#state.inodes),
+	Reply = case Oid of
+		{doc, Store, _Doc} ->
+			case volman:store(Store) of
+				{ok, Pid} -> store:statfs(Pid);
+				error     -> {error, enoent}
+			end;
+		{rev, Store, _Rev} ->
+			case volman:store(Store) of
+				{ok, Pid} -> store:statfs(Pid);
+				error     -> {error, enoent}
+			end;
+		_ ->
+			{ok, #fs_stat{
+				bsize  = 512,
+				blocks = 2048,
+				bfree  = 2048,
+				bavail = 2048
+			}}
+	end,
+	case Reply of
+		{ok, Stat}      -> {ok, Stat, S};
+		{error, Reason} -> {error, Reason, S}
 	end.
 
 

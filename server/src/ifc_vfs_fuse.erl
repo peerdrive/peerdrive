@@ -381,45 +381,24 @@ rmdir(_, Parent, Name, _, S) ->
 
 
 statfs(_, Ino, _, S) ->
-	{#fuse_reply_err{err = enosys}, S}.
-%	#vnode{oid=Oid} = gb_trees:get(Ino, Inodes),
-%	FsStat = case Oid of
-%		{doc, Store, _Doc} ->
-%			case volman:store(Store) of
-%				{ok, Pid} -> store:statfs(Pid);
-%				error     -> {error, enoent}
-%			end;
-%		{rev, Store, _Rev} ->
-%			case volman:store(Store) of
-%				{ok, Pid} -> store:statfs(Pid);
-%				error     -> {error, enoent}
-%			end;
-%		_ ->
-%			{ok, #fs_stat{
-%				bsize  = 512,
-%				blocks = 2048,
-%				bfree  = 2048,
-%				bavail = 2048
-%			}}
-%	end,
-%	Reply = case FsStat of
-%		{ok, Stat} ->
-%			{
-%				#fuse_reply_statfs{statvfs=#statvfs{
-%					f_bsize   = Stat#fs_stat.bsize,
-%					f_frsize  = Stat#fs_stat.bsize,
-%					f_blocks  = Stat#fs_stat.blocks,
-%					f_bfree   = Stat#fs_stat.bfree,
-%					f_bavail  = Stat#fs_stat.bavail,
-%					f_namemax = 255
-%				}},
-%				S
-%			};
-%		{error, Reason} ->
-%			{#fuse_reply_err{err=Reason}, S}
-%	end,
-%	?DEBUG(io:format("statfs(~p) -> ~w~n", [Ino, element(1, Reply)])),
-%	Reply.
+	Reply = case call_vfs(statfs, [Ino], S) of
+		{ok, Stat, S2} ->
+			{
+				#fuse_reply_statfs{statvfs=#statvfs{
+					f_bsize   = Stat#fs_stat.bsize,
+					f_frsize  = Stat#fs_stat.bsize,
+					f_blocks  = Stat#fs_stat.blocks,
+					f_bfree   = Stat#fs_stat.bfree,
+					f_bavail  = Stat#fs_stat.bavail,
+					f_namemax = 255
+				}},
+				S2
+			};
+		{error, Reason, S2} ->
+			{#fuse_reply_err{err=Reason}, S2}
+	end,
+	?DEBUG(io:format("statfs(~p) -> ~w~n", [Ino, element(1, Reply)])),
+	Reply.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Utility functions

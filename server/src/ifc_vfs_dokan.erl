@@ -19,15 +19,17 @@
 
 -export([start_link/1]).
 -export([init/1, handle_info/2, terminate/2, code_change/3]).
--export([create_file/8, open_directory/4, close_file/4, find_files/4,
-	get_file_information/4, read_file/6, write_file/6, set_end_of_file/5,
-	set_file_time/7, set_file_attributes/5, delete_file/4, delete_directory/4,
-	create_directory/4, move_file/6]).
+-export([close_file/4, create_directory/4, create_file/8, delete_directory/4,
+         delete_file/4, find_files/4, get_disk_free_space/3,
+         get_file_information/4, get_volume_information/3, move_file/6,
+         open_directory/4, read_file/6, set_end_of_file/5,
+         set_file_attributes/5, set_file_time/7, write_file/6]).
 
 
 -include_lib("erldokan/include/erldokan.hrl").
 -include_lib("erldokan/include/winerror.hrl").
 -include("vfs.hrl").
+-include("store.hrl").
 
 -record(state, {vfs_state, vnodes, handles, re}).
 -record(handle, {parent, name, ino, vfs_handle}).
@@ -302,6 +304,34 @@ move_file(S, _From, _OldPath, NewPath, Replace, DFI) ->
 		{error, Reason, S2} ->
 			{reply, {error, posix2win(Reason)}, S2}
 	end.
+
+
+get_disk_free_space(S, _From, _DFI) ->
+	case call_vfs(statfs, [1], S) of
+		{ok, Stat, S2} ->
+			Reply = #dokan_reply_diskspace{
+				available_bytes  = Stat#fs_stat.bsize * Stat#fs_stat.bavail,
+				total_bytes      = Stat#fs_stat.bsize * Stat#fs_stat.blocks,
+				total_free_bytes = Stat#fs_stat.bsize * Stat#fs_stat.bfree
+			},
+			{reply, Reply, S2};
+
+		{error, Reason, S2} ->
+			{reply, {error, posix2win(Reason)}, S2}
+	end.
+
+
+get_volume_information(S, _From, _DFI) ->
+	Reply = #dokan_reply_volinfo{
+		volume_name              = <<"Hotchpotch">>,
+		volume_serial_number     = 16#4b6e614a,
+		maximum_component_length = 256,
+		file_system_flags        = ?FILE_CASE_SENSITIVE_SEARCH bor
+		                           ?FILE_CASE_PRESERVED_NAMES bor
+		                           ?FILE_UNICODE_ON_DISK,
+		file_system_name         = <<"Hotchpotch Dokan VFS">>
+	},
+	{reply, Reply, S}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
