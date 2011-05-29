@@ -674,13 +674,13 @@ docsdir_make_node(Store) ->
 docsdir_lookup({docsdir, Store}, Name, Cache) ->
 	case parse_name_to_uuid(Name) of
 		{ok, Uuid} ->
-			{entry, {virtdoc, Store, Uuid}, Cache};
+			{entry, {docdir, Store, Uuid}, Cache};
 		error ->
 			{error, enoent}
 	end.
 
 
-docsdir_getnode({virtdoc, Store, Uuid}) ->
+docsdir_getnode({docdir, Store, Uuid}) ->
 	docdir_make_node(Store, Uuid).
 
 
