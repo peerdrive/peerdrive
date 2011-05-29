@@ -173,9 +173,9 @@ find_files(S, _From, _Path, DFI) ->
 							Attr#vfs_attr.dir -> ?FILE_ATTRIBUTE_DIRECTORY;
 							true  -> ?FILE_ATTRIBUTE_NORMAL
 						end,
-						creation_time    = Attr#vfs_attr.ctime,
-						last_access_time = Attr#vfs_attr.atime,
-						last_write_time  = Attr#vfs_attr.mtime,
+						creation_time    = epoch2win(Attr#vfs_attr.ctime),
+						last_access_time = epoch2win(Attr#vfs_attr.atime),
+						last_write_time  = epoch2win(Attr#vfs_attr.mtime),
 						file_size        = Attr#vfs_attr.size,
 						file_name        = Entry#vfs_direntry.name
 					}
@@ -198,9 +198,9 @@ get_file_information(S, _From, _FileName, DFI) ->
 					Attr#vfs_attr.dir -> ?FILE_ATTRIBUTE_DIRECTORY;
 					true  -> ?FILE_ATTRIBUTE_NORMAL
 				end,
-				creation_time    = Attr#vfs_attr.ctime,
-				last_access_time = Attr#vfs_attr.atime,
-				last_write_time  = Attr#vfs_attr.mtime,
+				creation_time    = epoch2win(Attr#vfs_attr.ctime),
+				last_access_time = epoch2win(Attr#vfs_attr.atime),
+				last_write_time  = epoch2win(Attr#vfs_attr.mtime),
 				file_size        = Attr#vfs_attr.size
 			},
 			{reply, Info, S2};
@@ -252,15 +252,15 @@ set_end_of_file(S, _From, _FileName, Offset, DFI) ->
 set_file_time(S, _From, _FileName, CTime, ATime, MTime, DFI) ->
 	Ino = (gb_trees:get(DFI#dokan_file_info.context, S#state.handles))#handle.ino,
 	Changes1 = if
-		CTime > 0 -> [{ctime, CTime}];
+		CTime > 0 -> [{ctime, win2epoch(CTime)}];
 		true -> []
 	end,
 	Changes2 = if
-		ATime > 0 -> [{atime, ATime} | Changes1];
+		ATime > 0 -> [{atime, win2epoch(ATime)} | Changes1];
 		true -> Changes1
 	end,
 	Changes3 = if
-		MTime > 0 -> [{mtime, MTime} | Changes2];
+		MTime > 0 -> [{mtime, win2epoch(MTime)} | Changes2];
 		true -> Changes2
 	end,
 	case call_vfs(setattr, [Ino, Changes3], S) of
@@ -776,5 +776,12 @@ posix2win(Error) ->
 	error_logger:warning_report([{module, ?MODULE},
 		{reason, 'Non-encodable error'}, {error, Error}]),
 	?ERROR_GEN_FAILURE.
+
+epoch2win(Epoch) ->
+	(Epoch + 134774*24*3600) * 10000000.
+
+
+win2epoch(Win) ->
+	Win / 10000000 - 134774*24*3600.
 
 -endif.
