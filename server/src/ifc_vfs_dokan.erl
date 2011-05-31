@@ -23,7 +23,8 @@
          delete_file/4, find_files/4, get_disk_free_space/3,
          get_file_information/4, get_volume_information/3, move_file/6,
          open_directory/4, read_file/6, set_end_of_file/5,
-         set_file_attributes/5, set_file_time/7, write_file/6]).
+         set_file_attributes/5, set_file_time/7, write_file/6,
+         lock_file/6, unlock_file/6]).
 
 
 -include_lib("erldokan/include/erldokan.hrl").
@@ -345,6 +346,13 @@ get_volume_information(S, _From, _DFI) ->
 	},
 	{reply, Reply, S}.
 
+
+lock_file(S, _From, _FileName, _Offset, _Length, _DFI) ->
+	{reply, ok, S}.
+
+
+unlock_file(S, _From, _FileName, _Offset, _Length, _DFI) ->
+	{reply, ok, S}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions
