@@ -15,7 +15,7 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(ifc_vfs_fuse).
--ifndef(windows).
+-ifdef(have_fuserl).
 %-behaviour(fuserl).
 
 %-define(DEBUG(X), X).

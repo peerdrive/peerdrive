@@ -15,7 +15,7 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(ifc_vfs_dokan).
--ifdef(windows).
+-ifdef(have_dokan).
 
 -export([start_link/1]).
 -export([init/1, handle_info/2, terminate/2, code_change/3]).
