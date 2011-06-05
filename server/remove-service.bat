@@ -13,11 +13,6 @@ GOTO :EOF
 
 :KnowErl
 
-REM Create store directories...
-IF NOT EXIST priv\stores\user MKDIR priv\stores\user
-IF NOT EXIST priv\stores\rem1 MKDIR priv\stores\rem1
-IF NOT EXIST priv\stores\rem2 MKDIR priv\stores\rem2
-IF NOT EXIST priv\stores\sys  MKDIR priv\stores\sys
+FOR /D %%D IN ("%ERL%\erts-*") DO IF EXIST "%%D\bin\erlsrv.exe" SET ERTS=%%D
 
-"%ERL%\bin\erl.exe" -pa "%CD%\ebin" +A4 +Ww -config hotchpotch -boot start_sasl -s crypto -s hotchpotch
-
+"%ERTS%\bin\erlsrv" remove "Hotchpotch"

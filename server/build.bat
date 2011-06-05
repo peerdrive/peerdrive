@@ -28,5 +28,5 @@ IF EXIST "%ERL%\lib\erldokan-*" (
 	ECHO DOKAN support disabled
 )
 
-%ERL%\bin\erl.exe -noshell -eval "make:all([%OPTIONS%]), erlang:halt()"
+"%ERL%\bin\erl.exe" -noshell -eval "make:all([%OPTIONS%]), erlang:halt()"
 
