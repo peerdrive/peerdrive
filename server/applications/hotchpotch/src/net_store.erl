@@ -51,7 +51,8 @@ io_request(NetStore, Request, Body) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init({Id, Address, Port, Name}) ->
-	Options = [binary, {packet, 2}, {active, false}, {nodelay, true}],
+	Options = [binary, {packet, 2}, {active, false}, {nodelay, true},
+		{keepalive, true}],
 	case gen_tcp:connect(Address, Port, Options) of
 		{ok, Socket} ->
 			process_flag(trap_exit, true),
