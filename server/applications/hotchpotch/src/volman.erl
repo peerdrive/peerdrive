@@ -61,18 +61,18 @@ reg_store(Id, Guid) ->
 %%       Guid = guid() | unknown
 %%       Tag = mounted | removable | system | net
 enum() ->
-	gen_server:call(volman, enum).
+	gen_server:call(volman, enum, infinity).
 
 %% @doc Get Guids/pid's of all currently mounted stores
 %% @spec stores() -> [{guid(), pid()}]
 stores() ->
-	gen_server:call(volman, stores).
+	gen_server:call(volman, stores, infinity).
 
 %% @doc Get pid of a specific store
 %% @spec store(Guid) -> {ok, pid()} | error
 %%       Guid = guid()
 store(Guid) ->
-	gen_server:call(volman, {store, Guid}).
+	gen_server:call(volman, {store, Guid}, infinity).
 
 %% @doc Mount store by ID
 %% @spec mount(StoreId) -> {ok, Guid} | {error, Reason}
@@ -80,13 +80,13 @@ store(Guid) ->
 %%       Guid = guid()
 %%       Reason = ecode()
 mount(StoreId) ->
-	gen_server:call(volman, {mount, StoreId}).
+	gen_server:call(volman, {mount, StoreId}, infinity).
 
 %% @doc Unmount store by ID
 %% @spec unmount(StoreId) -> ok | {error, Reason}
 %%       StoreId = atom()
 unmount(StoreGuid) ->
-	gen_server:call(volman, {unmount, StoreGuid}).
+	gen_server:call(volman, {unmount, StoreGuid}, infinity).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

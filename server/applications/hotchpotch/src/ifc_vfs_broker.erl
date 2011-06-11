@@ -45,37 +45,37 @@ start_link() ->
 
 
 lookup(Store, Doc) ->
-	gen_server:call(?MODULE, {lookup, Store, Doc}).
+	gen_server:call(?MODULE, {lookup, Store, Doc}, infinity).
 
 stat(Store, Rev) ->
 	make_reply(broker:stat(Rev, broker:get_stores([Store]))).
 
 open_rev(Store, Rev) ->
-	gen_server:call(?MODULE, {open_rev, Store, Rev}).
+	gen_server:call(?MODULE, {open_rev, Store, Rev}, infinity).
 
 open_doc(Store, Doc, Write) ->
-	gen_server:call(?MODULE, {open_doc, Store, Doc, Write}).
+	gen_server:call(?MODULE, {open_doc, Store, Doc, Write}, infinity).
 
 truncate(Handle, Part, Offset) ->
-	gen_server:call(?MODULE, {truncate, Handle, Part, Offset}).
+	gen_server:call(?MODULE, {truncate, Handle, Part, Offset}, infinity).
 
 read(Handle, Part, Offset, Length) ->
-	gen_server:call(?MODULE, {read, Handle, Part, Offset, Length}).
+	gen_server:call(?MODULE, {read, Handle, Part, Offset, Length}, infinity).
 
 write(Handle, Part, Offset, Data) ->
-	gen_server:call(?MODULE, {write, Handle, Part, Offset, Data}).
+	gen_server:call(?MODULE, {write, Handle, Part, Offset, Data}, infinity).
 
 get_type(Handle) ->
-	gen_server:call(?MODULE, {get_type, Handle}).
+	gen_server:call(?MODULE, {get_type, Handle}, infinity).
 
 set_type(Handle, Uti) ->
-	gen_server:call(?MODULE, {set_type, Handle, Uti}).
+	gen_server:call(?MODULE, {set_type, Handle, Uti}, infinity).
 
 close(Handle) ->
-	gen_server:call(?MODULE, {close, Handle}).
+	gen_server:call(?MODULE, {close, Handle}, infinity).
 
 abort(Handle) ->
-	gen_server:call(?MODULE, {abort, Handle}).
+	gen_server:call(?MODULE, {abort, Handle}, infinity).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

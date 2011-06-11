@@ -90,7 +90,7 @@ fsck(Store) ->
 	gen_server:cast(Store, fsck).
 
 gc(Store) ->
-	gen_server:call(Store, gc).
+	gen_server:call(Store, gc, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Functions used by helper processes...
@@ -105,7 +105,7 @@ gc(Store) ->
 %%       Revision = #revision
 %%       Result = {ok, Rev::guid()} | {error, Error::ecode()}
 commit(Store, Doc, PreRev, Revision) ->
-	gen_server:call(Store, {commit, Doc, PreRev, Revision}).
+	gen_server:call(Store, {commit, Doc, PreRev, Revision}, infinity).
 
 %% @doc Queue a preliminary revision.
 %%
@@ -115,11 +115,11 @@ commit(Store, Doc, PreRev, Revision) ->
 %%       Revision = #revision
 %%       Result = {ok, Rev::guid()} | {error, Error::ecode()}
 suspend(Store, Doc, PreRev, Revision) ->
-	gen_server:call(Store, {suspend, Doc, PreRev, Revision}).
+	gen_server:call(Store, {suspend, Doc, PreRev, Revision}, infinity).
 
 
 forward_commit(Store, Doc, RevPath) ->
-	gen_server:call(Store, {forward_commit, Doc, RevPath}).
+	gen_server:call(Store, {forward_commit, Doc, RevPath}, infinity).
 
 %% @doc Import a new revision into the store.
 %%
@@ -129,12 +129,12 @@ forward_commit(Store, Doc, RevPath) ->
 %%       Revision = #revision
 %%       Result = ok | {error, ecode()}
 insert_rev(Store, Rev, Revision) ->
-	gen_server:call(Store, {insert_rev, Rev, Revision}).
+	gen_server:call(Store, {insert_rev, Rev, Revision}, infinity).
 
 %% @doc Lock a part to prevent it from being evicted when getting
 %%      unreferenced.
 lock(Store, Hash) ->
-	gen_server:call(Store, {lock, Hash}).
+	gen_server:call(Store, {lock, Hash}, infinity).
 
 %% @doc Unlock a previously locked part. If the part is not referenced by any
 %%      revision it will be deleted.

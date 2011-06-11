@@ -44,18 +44,18 @@ start_link() ->
 %%       Type = doc | rev
 %%       Uuid = guid()
 watch(Type, Uuid) ->
-	gen_server:call(change_monitor, {watch, Type, Uuid}).
+	gen_server:call(change_monitor, {watch, Type, Uuid}, infinity).
 
 %% @doc Stop watching a UUID (Doc or Rev).
 %% @spec unwatch(Type, Uuid) -> ok
 %%       Type = doc | rev
 %%       Uuid = guid()
 unwatch(Type, Uuid) ->
-	gen_server:call(change_monitor, {unwatch, Type, Uuid}).
+	gen_server:call(change_monitor, {unwatch, Type, Uuid}, infinity).
 
 %% @doc Remove all watch hooks of the calling process.
 remove() ->
-	gen_server:call(change_monitor, remove).
+	gen_server:call(change_monitor, remove, infinity).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

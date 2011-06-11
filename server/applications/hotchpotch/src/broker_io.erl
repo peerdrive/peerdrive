@@ -34,34 +34,34 @@ start(Operation) ->
 	proc_lib:start_link(?MODULE, init, [self(), Operation]).
 
 read(Broker, Part, Offset, Length) ->
-	gen_server:call(Broker, {read, Part, Offset, Length}).
+	gen_server:call(Broker, {read, Part, Offset, Length}, infinity).
 
 write(Broker, Part, Offset, Data) ->
-	gen_server:call(Broker, {write, Part, Offset, Data}).
+	gen_server:call(Broker, {write, Part, Offset, Data}, infinity).
 
 truncate(Broker, Part, Offset) ->
-	gen_server:call(Broker, {truncate, Part, Offset}).
+	gen_server:call(Broker, {truncate, Part, Offset}, infinity).
 
 get_parents(Broker) ->
-	gen_server:call(Broker, get_parents).
+	gen_server:call(Broker, get_parents, infinity).
 
 set_parents(Broker, Parents) ->
-	gen_server:call(Broker, {set_parents, Parents}).
+	gen_server:call(Broker, {set_parents, Parents}, infinity).
 
 get_type(Broker) ->
-	gen_server:call(Broker, get_type).
+	gen_server:call(Broker, get_type, infinity).
 
 set_type(Broker, Type) ->
-	gen_server:call(Broker, {set_type, Type}).
+	gen_server:call(Broker, {set_type, Type}, infinity).
 
 commit(Broker) ->
-	gen_server:call(Broker, commit).
+	gen_server:call(Broker, commit, infinity).
 
 suspend(Broker) ->
-	gen_server:call(Broker, suspend).
+	gen_server:call(Broker, suspend, infinity).
 
 close(Broker) ->
-	gen_server:call(Broker, close).
+	gen_server:call(Broker, close, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% gen_server callbacks...

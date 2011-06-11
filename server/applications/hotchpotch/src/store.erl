@@ -485,7 +485,7 @@ call_store(Store, Request) ->
 
 call_store(Store, Request, FailReply) ->
 	try
-		gen_server:call(Store, Request)
+		gen_server:call(Store, Request, infinity)
 	catch
 		exit:_ -> FailReply
 	end.

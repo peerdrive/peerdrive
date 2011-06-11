@@ -43,7 +43,7 @@ start_link(Id, {Address, Port, Name}) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 io_request(NetStore, Request, Body) ->
-	gen_server:call(NetStore, {io_request, Request, Body}).
+	gen_server:call(NetStore, {io_request, Request, Body}, infinity).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
