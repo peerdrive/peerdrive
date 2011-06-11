@@ -63,8 +63,8 @@ init({Id, Address, Port, Name}) ->
 			},
 			do_init(Name, S);
 
-		{error, _Reason} = Error ->
-			{stop, Error}
+		{error, Reason} ->
+			{stop, Reason}
 	end.
 
 

@@ -77,7 +77,7 @@ init({Id, Path, Name}) ->
 			{ok, check_root_doc(State, Name)};
 			
 		false ->
-			{stop, {enoent, Path}}
+			{stop, enoent}
 	end.
 
 stop(Store) ->

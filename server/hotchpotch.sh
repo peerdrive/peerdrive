@@ -2,8 +2,8 @@
 
 set -e
 
-ERL="erl -pa $PWD/ebin"
-STORES="priv/stores/user/ priv/stores/rem1/ priv/stores/rem2/ priv/stores/sys/"
+ERL="erl -pa $PWD/applications/hotchpotch/ebin"
+STORES="stores/user/ stores/sys/"
 
 # some special options
 if [ $# -gt 0 ]; then
@@ -13,14 +13,14 @@ if [ $# -gt 0 ]; then
 			;;
 
 		save )
-			mkdir -p priv/snapshots
-			tar zcf "priv/snapshots/$2.tgz" $STORES
+			mkdir -p snapshots
+			tar zcf "snapshots/$2.tgz" $STORES
 			exit
 			;;
 
 		restore )
 			rm -rf $STORES
-			tar zxf "priv/snapshots/$2.tgz"
+			tar zxf "snapshots/$2.tgz"
 			;;
 
 		* )
@@ -33,6 +33,9 @@ fi
 # make sure store directories exist
 mkdir -p $STORES
 mkdir -p /tmp/hotchpotch
+
+# copy standard configuration if there is none
+[ -f hotchpotch.config ] || cp templates/hotchpotch.config.unix hotchpotch.config
 
 # start erlang
 $ERL +A 4 +W w -config hotchpotch -boot start_sasl -s crypto -s hotchpotch \

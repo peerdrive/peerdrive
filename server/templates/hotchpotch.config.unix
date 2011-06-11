@@ -6,28 +6,14 @@
 				"System mountpoint",
 				[system],
 				file_store,
-				{"priv/stores/sys",  "System store"}
+				{"stores/sys",  "System store"}
 			},
 			{
 				usr,
 				"Default user mount",
 				[],
 				file_store,
-				{"priv/stores/user", "User store"}
-			},
-			{
-				rem1,
-				"Rem1 mountpoint",
-				[removable],
-				file_store,
-				{"priv/stores/rem1", "1st removable store"}
-			},
-			{
-				rem2,
-				"Rem2 mountpoint",
-				[removable],
-				file_store,
-				{"priv/stores/rem2", "2nd removable store"}
+				{"stores/user", "User store"}
 			},
 			{
 				media,

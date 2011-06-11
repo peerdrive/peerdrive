@@ -1,0 +1,5 @@
+rel/hotchpotch/
+stores/
+snapshots/
+hotchpotch.config
+rebar.config
