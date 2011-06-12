@@ -21,7 +21,7 @@
 %-define(DEBUG(X), X).
 -define(DEBUG(X), ok).
 
--export([start_link/3]).
+-export([start_link/1]).
 -export([code_change/3, handle_info/2, init/1, terminate/2]).
 -export([create/7, forget/5, getattr/4, link/6, lookup/5, mkdir/6, open/5,
          opendir/5, read/7, readdir/7, release/5, releasedir/5, rename/7,
@@ -54,16 +54,39 @@
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Dir, MountOpts, Options) ->
+start_link(Options) ->
+	Dir = filename:nativename(filename:absname(
+		proplists:get_value(mountpoint,	Options, "vfs"))),
 	Server = case application:start(fuserl) of
 		ok                               -> ok;
 		{error,{already_started,fuserl}} -> ok;
 		{error, Reason}                  -> {fuserl, Reason}
 	end,
 	LinkedIn = proplists:get_value(linkedin, Options, false),
+	MountOpts1 = lists:foldl(
+		fun
+			(default_permissions, Acc) ->
+				",default_permissions" ++ Acc;
+			(allow_other, Acc) ->
+				",allow_other" ++ Acc;
+			({max_read, Size}, Acc) ->
+				",max_read=" ++ integer_to_list(Size) ++ Acc;
+			({user_id, UId}, Acc) ->
+				",user_id=" ++ integer_to_list(UId) ++ Acc;
+			({group_id, GId}, Acc) ->
+				",group_id=" ++ integer_to_list(GId) ++ Acc;
+			(_, Acc) ->
+				Acc
+		end,
+		"",
+		Options),
+	MountOpts2 = if
+		MountOpts1 == "" -> MountOpts1;
+		true             -> tl(MountOpts1)
+	end,
 	case Server of
 		ok ->
-			fuserlsrv:start_link(?MODULE, LinkedIn, MountOpts, Dir, {Dir, Options}, []);
+			fuserlsrv:start_link(?MODULE, LinkedIn, MountOpts2, Dir, {Dir, Options}, []);
 		Else ->
 			{error, Else}
 	end.

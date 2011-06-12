@@ -32,7 +32,7 @@ server(Module, Listener, ListenSocket, Args) ->
 	case gen_tcp:accept(ListenSocket) of
 		{ok, Socket} ->
 			listener:servlet_occupied(Listener),
-			State = apply(Module, init, [Socket]++Args),
+			State = Module:init(Socket, Args),
 			inet:setopts(Socket, [{nodelay, true}]),
 			loop(Module, Socket, State);
 

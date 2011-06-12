@@ -17,14 +17,14 @@
 -module(server_sup).
 -behaviour(supervisor).
 
--export([get_supervisor_spec/2, start_link/3, start_link/4]).
+-export([get_supervisor_spec/4, start_link/4]).
 -export([init/1]).
 
 
-get_supervisor_spec(Id, Options) ->
+get_supervisor_spec(Id, Module, Port, Options) ->
 	{
 		Id,
-		{server_sup, start_link, [Id] ++ Options},
+		{server_sup, start_link, [Id, Module, Port, Options]},
 		permanent,
 		infinity,
 		supervisor,
@@ -32,18 +32,14 @@ get_supervisor_spec(Id, Options) ->
 	}.
 
 
-start_link(Id, Module, Port) ->
-	start_link(Id, Module, Port, []).
-
-
-start_link(Id, Module, Port, ServletOpt) ->
+start_link(Id, Module, Port, Options) ->
 	supervisor:start_link(
 		{local, list_to_atom(Id ++ "_server_sup")},
 		?MODULE,
-		{Id, Module, Port, ServletOpt}).
+		{Id, Module, Port, Options}).
 
 
-init({Id, Module, Port, ServletOpt}) ->
+init({Id, Module, Port, Options}) ->
 	RestartStrategy    = one_for_all,
 	MaxRestarts        = 1,
 	MaxTimeBetRestarts = 60,
@@ -54,7 +50,7 @@ init({Id, Module, Port, ServletOpt}) ->
 	ChildSpecs = [
 		{
 			ServletId,
-			{servlet_sup, start_link, [ServletId, Module, ServletOpt]},
+			{servlet_sup, start_link, [ServletId, Module, Options]},
 			permanent,
 			infinity,
 			supervisor,
@@ -62,7 +58,7 @@ init({Id, Module, Port, ServletOpt}) ->
 		},
 		{
 			ListenerId,
-			{listener, start_link, [ListenerId, ServletId, Port]},
+			{listener, start_link, [ListenerId, ServletId, Port, Options]},
 			permanent,
 			1000,
 			worker,

@@ -32,10 +32,10 @@ fi
 
 # make sure store directories exist
 mkdir -p $STORES
-mkdir -p /tmp/hotchpotch
+mkdir -p vfs
 
 # copy standard configuration if there is none
-[ -f hotchpotch.config ] || cp templates/hotchpotch.config.unix hotchpotch.config
+[ -f hotchpotch.config ] || cp templates/hotchpotch.config hotchpotch.config
 
 # start erlang
 $ERL +A 4 +W w -config hotchpotch -boot start_sasl -s crypto -s hotchpotch \

@@ -30,9 +30,10 @@
 %% Servlet callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Socket, Stores) ->
+init(Socket, Options) ->
 	process_flag(trap_exit, true),
 	vol_monitor:register_proc(self()),
+	Stores = proplists:get_value(stores, Options, []),
 	#state{socket=Socket, handles=dict:new(), next=0, stores=Stores}.
 
 

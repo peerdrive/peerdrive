@@ -29,15 +29,48 @@ init([]) ->
 	MaxTimeBetRestarts = 60,
 	case application:get_env(hotchpotch, interfaces) of
 		{ok, Interfaces} ->
-			ChildSpecs = lists:map(
-				fun({Id, Module, Options}) ->
-					Module:get_supervisor_spec(Id, Options)
+			RealInterfaces = lists:filter(
+				fun(Spec) ->
+					case check_ifc_spec(Spec) of
+						true ->
+							true;
+						false ->
+							error_logger:warning_msg("Dropping invalid interface spec: ~p~n", [Spec]),
+							false
+					end
 				end,
 				Interfaces),
+			ChildSpecs = [map_ifc_spec(S) || S <- RealInterfaces],
 			{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}};
 
 		undefined ->
 			error_logger:error_msg("Interfaces section missing in configuration!~n"),
 			{error, nointerfaces}
 	end.
+
+
+check_ifc_spec({Mod, Options}) when is_atom(Mod) and is_list(Options) ->
+	lists:member(Mod, [native, netstore, vfs]) andalso
+	lists:all(
+		fun
+			({Tag, _Value}) when is_atom(Tag) -> true;
+			(Tag) when is_atom(Tag) -> true;
+			(_) -> false
+		end,
+		Options);
+
+check_ifc_spec(_) ->
+	false.
+
+
+map_ifc_spec({native, Options}) ->
+	Port = proplists:get_value(port, Options, 4567),
+	server_sup:get_supervisor_spec("native", ifc_client, Port, Options);
+
+map_ifc_spec({netstore, Options}) ->
+	Port = proplists:get_value(port, Options, 4568),
+	server_sup:get_supervisor_spec("netstore", ifc_netstore, Port, Options);
+
+map_ifc_spec({vfs, Options}) ->
+	ifc_vfs:get_supervisor_spec("vfs", Options).
 

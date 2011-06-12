@@ -245,7 +245,8 @@ start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs]) ->
 have_system_store(Specs) ->
 	lists:any(
 		fun({_Id, _Descr, Disposition, _Module, _Args}) ->
-			proplists:is_defined(system, Disposition)
+			proplists:is_defined(system, Disposition) andalso
+			not proplists:is_defined(removable, Disposition)
 		end,
 		Specs).
 

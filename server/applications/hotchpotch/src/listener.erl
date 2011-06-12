@@ -17,7 +17,7 @@
 -module(listener).
 -behaviour(gen_server).
 
--export([start_link/3]).
+-export([start_link/4]).
 -export([servlet_occupied/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
@@ -25,16 +25,31 @@
 -define(START_SERVLETS, 3).
 -record(state, {socket, servletsup}).
 
-start_link(ListenerId, ServletSup, Port) ->
-	gen_server:start_link({local, ListenerId}, ?MODULE, {ServletSup, Port}, []).
+start_link(ListenerId, ServletSup, Port, Options) ->
+	gen_server:start_link({local, ListenerId}, ?MODULE,
+		{ServletSup, Port, Options}, []).
 
 
 servlet_occupied(Pid) ->
 	gen_server:cast(Pid, occupied).
 
 
-init({ServletSup, Port}) ->
-	case gen_tcp:listen(Port, [binary, {active, false}, {packet, 2}]) of
+init({ServletSup, Port, Options}) ->
+	ListenOpt1 = case proplists:get_value(ip, Options) of
+		RawAddr when is_list(RawAddr) ->
+			case inet_parse:address(RawAddr) of
+				{ok, Addr} ->
+					[{ip, Addr}];
+				{error, _} ->
+					error_logger:warning_msg("Invalid listening IP address: ~s~n",
+						[RawAddr]),
+					[]
+			end;
+		_ ->
+			[]
+	end,
+	ListenOpt2 = [binary, {active, false}, {packet, 2} | ListenOpt1],
+	case gen_tcp:listen(Port, ListenOpt2) of
 		{ok, ListenSock} ->
 			start_servlets(ServletSup, ?START_SERVLETS, ListenSock),
 			{ok, #state{socket=ListenSock, servletsup=ServletSup}};

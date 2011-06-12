@@ -56,19 +56,26 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(MountOpts) ->
-	Path = proplists:get_value(mountpoint, MountOpts, <<"M:\\">>),
-	erldokan:start_link(?MODULE, Path, MountOpts).
+	Path = unicode:characters_to_binary(filename:nativename(
+		filename:absname(proplists:get_value(mountpoint, MountOpts, "vfs")))),
+	DokanOpts = [Opt || Opt <- MountOpts, filter_opt(Opt)],
+	erldokan:start_link(?MODULE, Path, [{mountpoint, Path} | DokanOpts]).
+
+
+filter_opt({Tag, _Value}) when (Tag == threads) or
+                               (Tag == debug_output) or
+                               (Tag == drive_type) ->
+	true;
+
+filter_opt(_) ->
+	false.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Management interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init(Dir) ->
-	BinDir = if
-		is_list(Dir)   -> unicode:characters_to_binary(Dir);
-		is_binary(Dir) -> Dir
-	end,
-	sys_info:publish(<<"vfs.mountpath">>, BinDir),
+	sys_info:publish(<<"vfs.mountpath">>, Dir),
 	case ifc_vfs_common:getattr(1, ifc_vfs_common:init()) of
 		{ok, {Attr, Tmo}, VfsState} ->
 			{ok, Re} = re:compile(<<"\\\\"/utf8>>),

@@ -44,7 +44,7 @@ init(Options) ->
 		"win32" ->
 			{
 				ifc_vfs_dokan,
-				{ifc_vfs_dokan, start_link, Options},
+				{ifc_vfs_dokan, start_link, [Options]},
 				permanent,
 				10000,
 				worker,
@@ -54,7 +54,7 @@ init(Options) ->
 		_ ->
 			{
 				ifc_vfs_fuse,
-				{ifc_vfs_fuse, start_link, Options},
+				{ifc_vfs_fuse, start_link, [Options]},
 				permanent,
 				10000,
 				worker,

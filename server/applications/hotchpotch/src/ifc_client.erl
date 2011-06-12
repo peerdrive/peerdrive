@@ -15,7 +15,7 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(ifc_client).
--export([init/1, handle_packet/2, handle_info/2, terminate/1]).
+-export([init/2, handle_packet/2, handle_info/2, terminate/1]).
 -import(netencode, [parse_uuid/1, parse_string/1, parse_uuid_list/1,
 	parse_store/1, encode_list/1, encode_list/2, encode_list_32/1,
 	encode_list_32/2, encode_string/1, encode_direct_result/1,
@@ -110,7 +110,7 @@
 %% Servlet callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Socket) ->
+init(Socket, _Options) ->
 	process_flag(trap_exit, true),
 	#state{socket=Socket, cookies=dict:new(), next=0}.
 
