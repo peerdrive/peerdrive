@@ -88,6 +88,8 @@
 -define(MOUNT_CNF,          16#01D1).
 -define(UNMOUNT_REQ,        16#01E0).
 -define(UNMOUNT_CNF,        16#01E1).
+-define(SYS_INFO_REQ,       16#01F0).
+-define(SYS_INFO_CNF,       16#01F1).
 -define(WATCH_IND,          16#0002).
 -define(PROGRESS_START_IND, 16#0012).
 -define(PROGRESS_IND,       16#0022).
@@ -279,6 +281,10 @@ handle_packet(Packet, S) ->
 		?WATCH_PROGRESS_REQ ->
 			S2 = do_watch_progress_req(Body, RetPath, S),
 			{ok, S2};
+
+		?SYS_INFO_REQ ->
+			do_sys_info_req(Body, RetPath),
+			{ok, S};
 
 		_ ->
 			<<Cookie:32, Data/binary>> = Body,
@@ -583,6 +589,16 @@ do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->
 	end,
 	send_reply(RetPath, ?WATCH_PROGRESS_CNF, encode_direct_result(ok)),
 	S2.
+
+do_sys_info_req(Body, RetPath) ->
+	{Param, <<>>} = parse_string(Body),
+	Reply = case sys_info:lookup(Param) of
+		{ok, Result} ->
+			<<(encode_direct_result(ok))/binary, (encode_string(Result))/binary>>;
+		{error, _} = Error ->
+			encode_direct_result(Error)
+	end,
+	send_reply(RetPath, ?SYS_INFO_CNF, Reply).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% IO handler loop

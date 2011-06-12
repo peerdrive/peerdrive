@@ -20,7 +20,7 @@
 import sys, itertools, os, os.path, hashlib, stat
 from PyQt4 import QtCore, QtGui, QtNetwork
 
-from hotchpotch import struct, Registry
+from hotchpotch import struct, Registry, fuse
 from hotchpotch.connector import Connector, Watch
 from hotchpotch.gui.widgets import DocButton, RevButton
 
@@ -233,23 +233,27 @@ class SyncManager(QtCore.QObject):
 		if doc in self.__docToSyncer:
 			return self.__docToSyncer[doc].getPath()
 		else:
-			syncer = DocSyncer(doc, self.__basePath)
-			syncer.startSync()
-			path = syncer.getPath()
-			self.__docToSyncer[doc] = syncer
-			self.__pathToSyncer[path] = syncer
-			self.__watcher.addPath(path)
-			syncer.fileNameChanged.connect(self.__pathChanged)
+			path = fuse.findFuseFile(struct.DocLink(doc, autoUpdate=False))
+			if not path:
+				syncer = DocSyncer(doc, self.__basePath)
+				syncer.startSync()
+				path = syncer.getPath()
+				self.__docToSyncer[doc] = syncer
+				self.__pathToSyncer[path] = syncer
+				self.__watcher.addPath(path)
+				syncer.fileNameChanged.connect(self.__pathChanged)
 			return path
 
 	def getRevFile(self, rev):
 		if rev in self.__revToPath:
 			return self.__revToPath[rev]
 		else:
-			syncer = RevSyncer(rev, self.__basePath)
-			syncer.sync()
-			path = syncer.getPath()
-			self.__revToPath[rev] = path
+			path = fuse.findFuseFile(struct.RevLink(rev))
+			if not path:
+				syncer = RevSyncer(rev, self.__basePath)
+				syncer.sync()
+				path = syncer.getPath()
+				self.__revToPath[rev] = path
 			return path
 
 	def quit(self):

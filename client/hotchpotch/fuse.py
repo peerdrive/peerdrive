@@ -22,32 +22,33 @@ import os
 from . import struct
 from .connector import Connector
 
+def findFuseFile(link):
+	global _root
 
-if os.name in ['posix', 'nt']:
-	if os.name == 'nt':
-		root = 'M:\\'
+	if '_root' not in globals():
+		try:
+			_root = Connector().sysInfo("vfs.mountpath")
+		except IOError:
+			_root = None
+
+	if _root is None:
+		return None
+
+	fn = struct.readTitle(link)
+	if not fn:
+		return None
+	if isinstance(link, struct.DocLink):
+		uuid = link.doc()
+		stores = Connector().lookup_doc(uuid).stores()
+		dir = ".docs"
 	else:
-		root = "/tmp/hotchpotch"
-
-	def findFuseFile(link):
-		fn = struct.readTitle(link)
-		if not fn:
-			return None
-		if isinstance(link, struct.DocLink):
-			uuid = link.doc()
-			stores = Connector().lookup_doc(uuid).stores()
-			dir = ".docs"
-		else:
-			uuid = link.rev()
-			stores = Connector().lookup_rev(uuid)
-			dir = ".revs"
-		enum = Connector().enum()
-		for store in stores:
-			path = os.path.join(root, enum.store(store), dir, uuid.encode("hex"), fn)
-			if os.path.exists(path):
-				return path
-		return None
-else:
-	def findFuseFile(link):
-		return None
+		uuid = link.rev()
+		stores = Connector().lookup_rev(uuid)
+		dir = ".revs"
+	enum = Connector().enum()
+	for store in stores:
+		path = os.path.join(_root, enum.store(store), dir, uuid.encode("hex"), fn)
+		if os.path.exists(path):
+			return path
+	return None
 

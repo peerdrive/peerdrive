@@ -30,6 +30,14 @@ init([]) ->
 
 	ChildSpecs = [
 		{
+			sys_info,
+			{sys_info, start_link, []},
+			permanent,
+			1000,
+			worker,
+			[sys_info]
+		},
+		{
 			pool_sup,
 			{pool_sup, start_link, []},
 			permanent,

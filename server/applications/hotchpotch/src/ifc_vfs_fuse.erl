@@ -63,7 +63,7 @@ start_link(Dir, MountOpts, Options) ->
 	LinkedIn = proplists:get_value(linkedin, Options, false),
 	case Server of
 		ok ->
-			fuserlsrv:start_link(?MODULE, LinkedIn, MountOpts, Dir, Options, []);
+			fuserlsrv:start_link(?MODULE, LinkedIn, MountOpts, Dir, {Dir, Options}, []);
 		Else ->
 			{error, Else}
 	end.
@@ -134,7 +134,12 @@ symlink(_, Link, Ino, Name, _, S) ->
 %% Fuserl callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Options) ->
+init({Dir, Options}) ->
+	BinDir = if
+		is_list(Dir)   -> unicode:characters_to_binary(Dir);
+		is_binary(Dir) -> Dir
+	end,
+	sys_info:publish(<<"vfs.mountpath">>, BinDir),
 	State = #state{
 		vfs_state = ifc_vfs_common:init(),
 		handles   = gb_trees:from_orddict([{0, undefined}]),

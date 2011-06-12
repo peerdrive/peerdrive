@@ -56,13 +56,19 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(MountOpts) ->
-	erldokan:start_link(?MODULE, [], MountOpts).
+	Path = proplists:get_value(mountpoint, MountOpts, <<"M:\\">>),
+	erldokan:start_link(?MODULE, Path, MountOpts).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Management interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(_Args) ->
+init(Dir) ->
+	BinDir = if
+		is_list(Dir)   -> unicode:characters_to_binary(Dir);
+		is_binary(Dir) -> Dir
+	end,
+	sys_info:publish(<<"vfs.mountpath">>, BinDir),
 	case ifc_vfs_common:getattr(1, ifc_vfs_common:init()) of
 		{ok, {Attr, Tmo}, VfsState} ->
 			{ok, Re} = re:compile(<<"\\\\"/utf8>>),
