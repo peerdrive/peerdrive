@@ -49,7 +49,8 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(Id, {Path, Name}) ->
-	gen_server:start_link({local, Id}, ?MODULE, {Id, Path, Name}, []).
+	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
+	gen_server:start_link({local, RegId}, ?MODULE, {Id, Path, Name}, []).
 
 
 init({Id, Path, Name}) ->
