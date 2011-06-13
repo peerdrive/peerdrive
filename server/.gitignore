@@ -1,6 +1,6 @@
-rel/hotchpotch/
-stores/
-snapshots/
-vfs/
+/rel/hotchpotch/
+/stores/
+/snapshots/
+/vfs/
 /hotchpotch.config
 /rebar.config
