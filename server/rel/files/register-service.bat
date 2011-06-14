@@ -17,7 +17,6 @@ REM Register Hotchpotch service
   -c "Hotchpotch daemon" ^
   -w "%CD%" ^
   -stopaction "init:stop()." ^
-  -debugtype reuse ^
   -args "-boot releases\%app_vsn%\hotchpotch -embedded -config etc\app.config -args_file etc\vm.args"
 
 REM Add dependency to DokanMounter service if installed
