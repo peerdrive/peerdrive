@@ -14,14 +14,29 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(hotchpotch_app).
--behaviour(application).
+-module(hotchpotch_servlet_sup).
+-behaviour(supervisor).
 
--export([start/2, stop/1]).
+-export([start_link/3]).
+-export([spawn_servlet/2]).
+-export([init/1]).
 
-start(normal, _Args) ->
-	hotchpotch_main_sup:start_link().
+start_link(Id, Module, ServletOpt) ->
+	supervisor:start_link({local, Id}, ?MODULE, {Module, ServletOpt}).
 
-stop([]) ->
-	ok.
+init({Module, ServletOpt}) ->
+	{ok, {
+		{simple_one_for_one, 1, 10},
+		[{
+			servlet,
+			{hotchpotch_gen_servlet, start_link, [Module, ServletOpt]},
+			transient,
+			brutal_kill,
+			worker,
+			[]
+		}]
+	}}.
+
+spawn_servlet(SupervisorPid, ListenSock) ->
+	supervisor:start_child(SupervisorPid, [self(), ListenSock]).
 

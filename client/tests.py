@@ -534,8 +534,8 @@ class TestGarbageCollector(CommonParts):
 	def gc(self, store):
 		guid = store.encode('hex')
 		result = self.erlCall(
-			"""case volman:store(<<16#"""+guid+""":128>>) of
-				{ok, Pid} -> file_store:gc(Pid);
+			"""case hotchpotch_volman:store(<<16#"""+guid+""":128>>) of
+				{ok, Pid} -> hotchpotch_file_store:gc(Pid);
 				error     -> {error, enoent}
 			end.""")
 		self.assertEqual(result, '{ok, ok}')
@@ -681,7 +681,7 @@ class TestSynchronization(CommonParts):
 	def startSync(self, mode, fromStore, toStore):
 		fromGuid = fromStore.encode('hex')
 		toGuid = toStore.encode('hex')
-		result = self.erlCall("synchronizer:sync(" + mode +
+		result = self.erlCall("hotchpotch_synchronizer:sync(" + mode +
 			", <<16#"+fromGuid+":128>>, <<16#"+toGuid+":128>>).")
 		self.assertTrue(result.startswith('{ok, {ok,'))
 
@@ -739,8 +739,8 @@ class TestSynchronization(CommonParts):
 
 		# wait until sync_worker moved on
 		result = self.erlCall(
-			"""sync_locks:lock(<<16#"""+doc.encode('hex')+""":128>>),
-			sync_locks:unlock(<<16#"""+doc.encode('hex')+""":128>>).""")
+			"""hotchpotch_sync_locks:lock(<<16#"""+doc.encode('hex')+""":128>>),
+			hotchpotch_sync_locks:unlock(<<16#"""+doc.encode('hex')+""":128>>).""")
 		self.assertEqual(result, '{ok, ok}')
 
 		return l

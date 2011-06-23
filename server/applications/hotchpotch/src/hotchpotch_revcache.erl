@@ -14,14 +14,24 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(hotchpotch_app).
--behaviour(application).
+-module(hotchpotch_revcache).
+-behaviour(gen_server).
 
--export([start/2, stop/1]).
+-export([start_link/0]).
+-export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
-start(normal, _Args) ->
-	hotchpotch_main_sup:start_link().
+start_link() ->
+	gen_server:start_link({local, hotchpotch_revcache}, ?MODULE, [], []).
 
-stop([]) ->
-	ok.
+
+
+init([]) ->
+	{ok, dummy_state}.
+
+
+handle_info(_Info, State) -> {noreply, State}.
+handle_call(_Request, _From, State) -> {noreply, State}.
+handle_cast(_Request, State) -> {noreply, State}.
+code_change(_, State, _) -> {ok, State}.
+terminate(_, _) -> ok.
 
