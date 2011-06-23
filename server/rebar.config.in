@@ -1,4 +1,4 @@
 %% Erlang compiler options
 {erl_opts, [debug_info, warn_obsolete_guard, warnings_as_errors]}.
 
-{sub_dirs, ["applications/hotchpotch", "rel"]}.
+{sub_dirs, ["apps/hotchpotch", "rel"]}.

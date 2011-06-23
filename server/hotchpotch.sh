@@ -2,7 +2,7 @@
 
 set -e
 
-ERL="erl -pa $PWD/applications/hotchpotch/ebin"
+ERL="erl -pa $PWD/apps/hotchpotch/ebin"
 STORES="stores/user/ stores/sys/"
 
 # some special options

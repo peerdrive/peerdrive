@@ -11,6 +11,6 @@ IF NOT EXIST hotchpotch.config (
 	COPY templates\hotchpotch.config hotchpotch.config
 )
 
-erl.exe -pa "%CD%\applications\hotchpotch\ebin" +A4 +Ww -config hotchpotch ^
+erl.exe -pa "%CD%\apps\hotchpotch\ebin" +A4 +Ww -config hotchpotch ^
   -boot start_sasl -s crypto -s hotchpotch
 
