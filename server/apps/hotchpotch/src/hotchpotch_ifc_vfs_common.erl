@@ -1103,10 +1103,11 @@ set_getattr({doc, Store, Doc}) ->
 	end.
 
 
-set_lookup({doc, Store, Doc}, Name, Cache) ->
+set_lookup({doc, Store, Doc}, FullName, Cache) ->
 	case set_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			case find_entry(fun(E) -> set_lookup_cmp(Name, E) end, Entries) of
+			{Name, DocId} = set_split_name(FullName),
+			case find_entry(fun(E) -> set_lookup_cmp(Name, DocId, E) end, Entries) of
 				{value, Oid} -> {entry, Oid, NewCache};
 				none         -> {error, enoent, NewCache} % TODO: look up alternative names
 			end;
@@ -1116,13 +1117,31 @@ set_lookup({doc, Store, Doc}, Name, Cache) ->
 	end.
 
 
-set_lookup_cmp(Name, {Oid, Title, _}) ->
-	case Title of
-		Name -> {ok, Oid};
-		_    -> error
+set_split_name(Name) ->
+	% FIXME: precompile
+	RegExp = <<"(.*)~([[:xdigit:]]+)(\\.\\w+)?">>,
+	case re:run(Name, RegExp, [{capture, all_but_first, binary}]) of
+		{match, [Title, DocId, Extension]} ->
+			{<<Title/binary, Extension/binary>>, unicode:characters_to_list(DocId)};
+		{match, [Title, DocId]} ->
+			{Title, unicode:characters_to_list(DocId)};
+		nomatch ->
+			{Name, ""}
+	end.
+
+
+set_lookup_cmp(Name, DocId, {Oid, _, Title, Suffix}) ->
+	case Name of
+		Title ->
+			case lists:prefix(DocId, Suffix) of
+				true  -> {ok, Oid};
+				false -> error
+			end;
+		_ ->
+			error
 	end;
 
-set_lookup_cmp(_, _) ->
+set_lookup_cmp(_, _, _) ->
 	error.
 
 
@@ -1143,7 +1162,7 @@ set_readdir({doc, Store, Doc}, Cache) ->
 	end.
 
 
-set_readdir_filter({{doc, _, _}=Oid, Name, _}) ->
+set_readdir_filter({{doc, _, _}=Oid, Name, _, _}) ->
 	case doc_make_node(Oid) of
 		{ok, #vnode{ifc=#ifc{getattr=GetAttr}}} ->
 			case catch GetAttr(Oid) of
@@ -1165,7 +1184,7 @@ set_readdir_filter(_) ->
 %% title if so. In any case we have to eliminate duplicates and sanitize the
 %% names.
 %%
-%% Entry list format: {Oid, Title, Suffix}
+%% Entry list format: {Oid, DispTitle, RealTitle, Suffix}
 %% Cache format: {Rev, Entries, [{Oid, Rev, Title::binary(), Suffix::list()}]}
 %%
 set_read_entries(Store, Doc, {CacheRev, _, _}=Cache) ->
@@ -1274,8 +1293,8 @@ set_sanitize_entries(Cache, SuffixLen) ->
 	dict:fold(
 		fun(Title, Entries, Acc) ->
 			case Entries of
-				[{Oid, _, _, Suffix}] ->
-					[{Oid, Title, Suffix} | Acc];
+				[{Oid, _, RealTitle, Suffix}] ->
+					[{Oid, Title, RealTitle, Suffix} | Acc];
 				_ ->
 					set_sanitize_entries(Entries, SuffixLen+4) ++ Acc
 			end
