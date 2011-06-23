@@ -1080,7 +1080,7 @@ doc_make_node_set(Oid) ->
 			getnode = fun set_getnode/1,
 			readdir = fun set_readdir/2
 		},
-		cache = {undefined, undefined}
+		cache = {undefined, undefined, undefined}
 	}}.
 
 
@@ -1116,7 +1116,7 @@ set_lookup({doc, Store, Doc}, Name, Cache) ->
 	end.
 
 
-set_lookup_cmp(Name, {Title, Oid}) ->
+set_lookup_cmp(Name, {Oid, Title, _}) ->
 	case Title of
 		Name -> {ok, Oid};
 		_    -> error
@@ -1143,7 +1143,7 @@ set_readdir({doc, Store, Doc}, Cache) ->
 	end.
 
 
-set_readdir_filter({Name, {doc, _, _}=Oid}) ->
+set_readdir_filter({{doc, _, _}=Oid, Name, _}) ->
 	case doc_make_node(Oid) of
 		{ok, #vnode{ifc=#ifc{getattr=GetAttr}}} ->
 			case catch GetAttr(Oid) of
@@ -1160,10 +1160,26 @@ set_readdir_filter(_) ->
 	skip.
 
 
-set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
+%% Sets are special. First we have to check if the set itself has changed. Then
+%% we have to lookup every child document if it has changed and re-read the
+%% title if so. In any case we have to eliminate duplicates and sanitize the
+%% names.
+%%
+%% Entry list format: {Oid, Title, Suffix}
+%% Cache format: {Rev, Entries, [{Oid, Rev, Title::binary(), Suffix::list()}]}
+%%
+set_read_entries(Store, Doc, {CacheRev, _, _}=Cache) ->
 	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, CacheRev} ->
-			{ok, CacheEntries, Cache};
+			{_, CacheEntries, CacheRaw} = Cache,
+			case set_update_entries(CacheRaw) of
+				uptodate ->
+					{ok, CacheEntries, Cache};
+
+				NewCacheRaw ->
+					NewEntries = set_sanitize_entries(NewCacheRaw, 0),
+					{ok, NewEntries, {CacheRev, NewEntries, NewCacheRaw}}
+			end;
 
 		{ok, Rev} ->
 			case hotchpotch_util:read_rev_struct(Rev, <<"HPSD">>) of
@@ -1171,80 +1187,121 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 					RawList = map_filter(
 						fun(E) -> set_read_entries_filter(Store, E) end,
 						Entries),
-					List = set_sanitize_entries(RawList, 4),
-					{ok, List, {Rev, List}};
+					List = set_sanitize_entries(RawList, 0),
+					{ok, List, {Rev, List, RawList}};
+
 				{ok, _} ->
 					error;
 				{error, _} ->
 					error
 			end;
+
 		error ->
 			error
 	end.
 
 
-set_read_entries_filter(Store, {dlink, Child}) ->
-	{ok, {{set_read_title(Store, Child), <<"">>}, {doc, Store, Child}}};
+set_update_entries(Cache) ->
+	case lists:foldl(fun set_find_update/2, [], Cache) of
+		[] ->
+			uptodate;
+		Updates ->
+			set_apply_updates(Cache, lists:reverse(Updates), [])
+	end.
+
+
+set_find_update({Oid, CacheRev, _, Suffix}, Acc) ->
+	{doc, Store, Doc} = Oid,
+	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
+		{ok, CacheRev} ->
+			Acc;
+		{ok, NewRev} ->
+			[{Oid, NewRev, set_read_title(NewRev), Suffix} | Acc];
+		error ->
+			[{Oid, error, <<"">>, ""} | Acc]
+	end.
+
+
+set_apply_updates([], _, Acc) ->
+	Acc;
+
+set_apply_updates([{Oid, _, _, _} | Cache], [{Oid, _, _, _}=New | Updates], Acc) ->
+	set_apply_updates(Cache, Updates, [New | Acc]);
+
+set_apply_updates([Entry | Cache], Updates, Acc) ->
+	set_apply_updates(Cache, Updates, [Entry | Acc]).
+
+
+set_read_entries_filter(Store, {dlink, Doc}) ->
+	Oid = {doc, Store, Doc},
+	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
+		{ok, Rev} ->
+			Suffix = hotchpotch_util:bin_to_hexstr(Doc),
+			Title = set_read_title(Rev),
+			{ok, {Oid, Rev, Title, Suffix}};
+
+		error ->
+			{ok, {Oid, error, <<"">>, ""}}
+	end;
 
 set_read_entries_filter(_, _) ->
 	skip.
 
 
-set_read_title(Store, Doc) ->
-	Result = case set_read_title_meta(Store, Doc) of
-		{ok, <<"">>} -> "." ++ hotchpotch_util:bin_to_hexstr(Doc);
-		{ok, Title}  -> sanitize(binary_to_list(Title));
-		error        -> "." ++ hotchpotch_util:bin_to_hexstr(Doc)
-	end,
-	unicode:characters_to_binary(Result).
-
-
-set_read_title_meta(Store, Doc) ->
-	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
-		{ok, Rev} ->
-			case hotchpotch_util:read_rev_struct(Rev, <<"META">>) of
-				{ok, Meta} ->
-					case meta_read_entry(Meta, [<<"org.hotchpotch.annotation">>, <<"title">>]) of
-						{ok, Title} when is_binary(Title) ->
-							{ok, Title};
-						{ok, _} ->
-							error;
-						error ->
-							error
-					end;
-				{error, _} ->
-					error
+set_read_title(Rev) ->
+	case hotchpotch_util:read_rev_struct(Rev, <<"META">>) of
+		{ok, Meta} ->
+			case meta_read_entry(Meta, [<<"org.hotchpotch.annotation">>, <<"title">>]) of
+				{ok, Title} when is_binary(Title) ->
+					unicode:characters_to_binary(sanitize(binary_to_list(Title)));
+				{ok, _} ->
+					<<"">>;
+				error ->
+					<<"">>
 			end;
-		error ->
-			error
+		{error, _} ->
+			<<"">>
 	end.
 
 
-set_sanitize_entries(Entries, SuffixLen) ->
+set_sanitize_entries(Cache, SuffixLen) ->
 	Dict = lists:foldl(
-		fun({Title, Oid}, Acc) -> dict:append(Title, Oid, Acc) end,
+		fun({_, _, Title, Suffix}=Entry, Acc) ->
+			dict:append(set_apply_suffix(Title, Suffix, SuffixLen), Entry, Acc)
+		end,
 		dict:new(),
-		Entries),
+		Cache),
 	dict:fold(
-		fun({Title, Suffix}, Oids, Acc) ->
-			case Oids of
-				[Oid] -> [{<<Title/binary, Suffix/binary>>, Oid} | Acc];
-				_     -> set_sanitize_entry(Title, Oids, SuffixLen) ++ Acc
+		fun(Title, Entries, Acc) ->
+			case Entries of
+				[{Oid, _, _, Suffix}] ->
+					[{Oid, Title, Suffix} | Acc];
+				_ ->
+					set_sanitize_entries(Entries, SuffixLen+4) ++ Acc
 			end
 		end,
 		[],
 		Dict).
 
 
-set_sanitize_entry(Title, Oids, SuffixLen) ->
-	NewEntries = lists:map(
-		fun({doc, _, Uuid} = Oid) ->
-			Suffix = unicode:characters_to_binary(
-				lists:sublist(hotchpotch_util:bin_to_hexstr(Uuid), SuffixLen)),
-			{{Title, <<"~", Suffix/binary>>}, Oid}
-		end,
-		Oids),
-	set_sanitize_entries(NewEntries, SuffixLen+4).
+set_apply_suffix(Title, _Suffix, 0) ->
+	Title;
+
+set_apply_suffix(Title, Suffix, Len) ->
+	BinSuffix = unicode:characters_to_binary(lists:sublist(Suffix, Len)),
+	Components = re:split(Title, <<"\\.">>),
+	set_join_components(Components, BinSuffix).
+
+
+set_join_components([Title], Suffix) ->
+	<<Title/binary, "~", Suffix/binary>>;
+
+set_join_components([Title, Ext], Suffix) ->
+	<<Title/binary, "~", Suffix/binary, ".", Ext/binary>>;
+
+set_join_components([Comp | Rest], Suffix) ->
+	Joined = set_join_components(Rest, Suffix),
+	<<Comp/binary, ".", Joined/binary>>.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
