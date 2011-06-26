@@ -55,7 +55,8 @@
 	create   = fun(_, _, _, _) -> {error, enotdir} end,
 	link     = fun(_, _, _, _) -> {error, enotdir} end,
 	unlink   = fun(_, _, _) -> {error, eacces} end,
-	mkdir    = fun(_, _, _) -> {error, enotdir} end
+	mkdir    = fun(_, _, _) -> {error, enotdir} end,
+	rename   = fun(_, _, _, _) -> {error, enotdir} end
 }).
 
 -record(handler, {read, write, release, changed=false, rewritten=false}).
@@ -281,6 +282,28 @@ setattr(Ino, Changes, #state{inodes=Inodes} = S) ->
 		throw:{error, Reason} -> {error, Reason, S}
 	end.
 
+
+rename(Parent, OldName, Parent, NewName, S) ->
+	Inodes = S#state.inodes,
+	#vnode{
+		oid   = ParentOid,
+		ifc   = #ifc{rename=Rename},
+		cache = ParentCache
+	} = ParentNode = gb_trees:get(Parent, Inodes),
+	case catch Rename(ParentOid, OldName, NewName, ParentCache) of
+		{ok, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(Parent,
+				ParentNode#vnode{cache=NewCache}, Inodes)},
+			{ok, ok, S2};
+
+		{error, Error, NewCache} ->
+			S2 = S#state{inodes=gb_trees:update(Parent,
+				ParentNode#vnode{cache=NewCache}, Inodes)},
+			{error, Error, S2};
+
+		{error, Error} ->
+			{error, Error, S}
+	end;
 
 rename(OldParent, OldName, NewParent, NewName, S) ->
 	Inodes = S#state.inodes,
@@ -824,7 +847,8 @@ doc_make_node_dict(Oid) ->
 			create  = fun dict_create/4,
 			link    = fun dict_link/4,
 			unlink  = fun dict_unlink/3,
-			mkdir   = fun dict_mkdir/3
+			mkdir   = fun dict_mkdir/3,
+			rename  = fun dict_rename/4
 		},
 		cache = {undefined, undefined}
 	}}.
@@ -997,14 +1021,13 @@ dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 	end.
 
 
-dict_link({doc, Store, Doc}, {doc, ChildStore, ChildDoc}, Name, Cache)
-	when Store =:= ChildStore ->
+dict_link({doc, Store, ParentDoc}, {doc, Store, ChildDoc}, Name, Cache) ->
 	case hotchpotch_ifc_vfs_broker:lookup(Store, ChildDoc) of
 		{ok, _ChildRev} ->
 			Update = fun(Entries) ->
 				dict:store(Name, {dlink, ChildDoc}, Entries)
 			end,
-			dict_update(Store, Doc, Cache, Update);
+			dict_update(Store, ParentDoc, Cache, Update);
 
 		error ->
 			{error, enoent}
@@ -1019,15 +1042,33 @@ dict_unlink({doc, Store, Doc}, Name, Cache) ->
 	dict_update(Store, Doc, Cache, Update).
 
 
+dict_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
+	Update = fun(Entries) ->
+		case dict:find(OldName, Entries) of
+			{ok, Entry} ->
+				dict:store(NewName, Entry, dict:erase(OldName, Entries));
+			error ->
+				{error, enoent}
+		end
+	end,
+	dict_update(Store, Doc, Cache, Update).
+
+
 dict_update(Store, Doc, Cache, Fun) ->
 	case hotchpotch_ifc_vfs_broker:open_doc(Store, Doc, true) of
 		{ok, Rev, Handle} ->
 			case dict_update_cache(Handle, Rev, Cache) of
 				{ok, Entries, NewCache} ->
-					NewEntries = Fun(Entries),
-					dict_write_entries(Handle, NewEntries, NewCache);
+					case Fun(Entries) of
+						{error, Reason} ->
+							hotchpotch_ifc_vfs_broker:abort(Handle),
+							{error, Reason, NewCache};
+						NewEntries ->
+							dict_write_entries(Handle, NewEntries, NewCache)
+					end;
 
 				Error ->
+					hotchpotch_ifc_vfs_broker:abort(Handle),
 					Error
 			end;
 
@@ -1040,13 +1081,13 @@ dict_update_cache(_Handle, Rev, {Rev, Struct} = Cache) ->
 	{ok, Struct, Cache};
 
 dict_update_cache(Handle, Rev, _Cache) ->
-	case read_struct(Handle, <<"HPSD">>) of
-		{ok, Struct} when is_record(Struct, dict, 9) ->
+	case catch read_struct(Handle, <<"HPSD">>) of
+		Struct when is_record(Struct, dict, 9) ->
 			{ok, Struct, {Rev, Struct}};
-		{ok, _} ->
-			{error, einval};
-		Error ->
-			Error
+		{error, _} = Error ->
+			Error;
+		_ ->
+			{error, einval}
 	end.
 
 
@@ -1070,6 +1111,8 @@ dict_write_entries(Handle, Entries, Cache) ->
 %% Set documents
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+-record(se, {oid, rev, disp, title, suffix}).
+
 doc_make_node_set(Oid) ->
 	{ok, #vnode{
 		timeout = 1000,
@@ -1078,9 +1121,14 @@ doc_make_node_set(Oid) ->
 			getattr = fun set_getattr/1,
 			lookup  = fun set_lookup/3,
 			getnode = fun set_getnode/1,
-			readdir = fun set_readdir/2
+			readdir = fun set_readdir/2,
+			create  = fun set_create/4,
+			link    = fun set_link/4,
+			unlink  = fun set_unlink/3,
+			mkdir   = fun set_mkdir/3,
+			rename  = fun set_rename/4
 		},
-		cache = {undefined, undefined, undefined}
+		cache = {undefined, undefined}
 	}}.
 
 
@@ -1103,46 +1151,17 @@ set_getattr({doc, Store, Doc}) ->
 	end.
 
 
-set_lookup({doc, Store, Doc}, FullName, Cache) ->
+set_lookup({doc, Store, Doc}, Name, Cache) ->
 	case set_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			{Name, DocId} = set_split_name(FullName),
-			case find_entry(fun(E) -> set_lookup_cmp(Name, DocId, E) end, Entries) of
-				{value, Oid} -> {entry, Oid, NewCache};
-				none         -> {error, enoent, NewCache} % TODO: look up alternative names
+			case set_find_name(Name, Entries) of
+				{ok, Oid} -> {entry, Oid, NewCache};
+				error     -> {error, enoent, NewCache}
 			end;
 
 		_ ->
 			{error, enoent}
 	end.
-
-
-set_split_name(Name) ->
-	% FIXME: precompile
-	RegExp = <<"(.*)~([[:xdigit:]]+)(\\.\\w+)?">>,
-	case re:run(Name, RegExp, [{capture, all_but_first, binary}]) of
-		{match, [Title, DocId, Extension]} ->
-			{<<Title/binary, Extension/binary>>, unicode:characters_to_list(DocId)};
-		{match, [Title, DocId]} ->
-			{Title, unicode:characters_to_list(DocId)};
-		nomatch ->
-			{Name, ""}
-	end.
-
-
-set_lookup_cmp(Name, DocId, {Oid, _, Title, Suffix}) ->
-	case Name of
-		Title ->
-			case lists:prefix(DocId, Suffix) of
-				true  -> {ok, Oid};
-				false -> error
-			end;
-		_ ->
-			error
-	end;
-
-set_lookup_cmp(_, _, _) ->
-	error.
 
 
 set_getnode({doc, _Store, _Doc} = Oid) ->
@@ -1162,7 +1181,216 @@ set_readdir({doc, Store, Doc}, Cache) ->
 	end.
 
 
-set_readdir_filter({{doc, _, _}=Oid, Name, _, _}) ->
+set_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
+	case set_read_entries(Store, Doc, Cache) of
+		{ok, Entries, NewCache} ->
+			case set_find_name(Name, Entries) of
+				{ok, {doc, _, _}=ChildOid} ->
+					case MustCreate of
+						true ->
+							{error, eexist, NewCache};
+						false ->
+							{entry, ChildOid, NewCache}
+					end;
+
+				{ok, _} ->
+					{error, eacces, NewCache};
+
+				error ->
+					case create_empty_file(Store, Name) of
+						{ok, Handle, NewDoc, NewRev} ->
+							try
+								NewSetEntry = #se{
+									oid    = {doc, Store, NewDoc},
+									rev    = NewRev,
+									title  = Name,
+									suffix = hotchpotch_util:bin_to_hexstr(NewDoc)
+								},
+								Update = fun(List) ->
+									[NewSetEntry | List]
+								end,
+								case set_update(Store, Doc, NewCache, Update) of
+									{ok, AddCache} ->
+										{entry, {doc, Store, NewDoc}, AddCache};
+									{error, _Reason, _AddCache} = Error ->
+										Error
+								end
+							after
+								hotchpotch_broker:close(Handle)
+							end;
+
+						{error, Reason} ->
+							{error, Reason, NewCache}
+					end
+			end;
+
+		_ ->
+			{error, enoent}
+	end.
+
+
+set_mkdir({doc, Store, Doc}, Name, Cache) ->
+	case set_read_entries(Store, Doc, Cache) of
+		{ok, Entries, NewCache} ->
+			case set_find_name(Name, Entries) of
+				{ok, _} ->
+					{error, eexist, NewCache};
+
+				error ->
+					case create_empty_directory(Store, Name) of
+						{ok, Handle, NewDoc, NewRev} ->
+							try
+								NewSetEntry = #se{
+									oid    = {doc, Store, NewDoc},
+									rev    = NewRev,
+									title  = Name,
+									suffix = hotchpotch_util:bin_to_hexstr(NewDoc)
+								},
+								Update = fun(List) ->
+									[NewSetEntry | List]
+								end,
+								case set_update(Store, Doc, NewCache, Update) of
+									{ok, AddCache} ->
+										{ok, {doc, Store, NewDoc}, AddCache};
+									{error, _Reason, _AddCache} = Error ->
+										Error
+								end
+							after
+								hotchpotch_broker:close(Handle)
+							end;
+
+						{error, Reason} ->
+							{error, Reason, NewCache}
+					end
+			end;
+
+		_ ->
+			{error, enoent}
+	end.
+
+
+set_link({doc, Store, ParentDoc}, {doc, Store, ChildDoc}, Name, Cache) ->
+	{Title, _DocId} = set_split_name(Name),
+	ChildRev = case hotchpotch_ifc_vfs_broker:lookup(Store, ChildDoc) of
+		{ok, Rev} ->
+			case set_read_title(Rev) of
+				Title -> Rev;
+				_     -> throw({error, eacces})
+			end;
+
+		error ->
+			throw({error, enoent})
+	end,
+	NewEntry = #se{
+		oid    = {doc, Store, ChildDoc},
+		rev    = ChildRev,
+		title  = Title,
+		suffix = hotchpotch_util:bin_to_hexstr(ChildDoc)
+	},
+	case set_read_entries(Store, ParentDoc, Cache) of
+		{ok, Entries, NewCache} ->
+			Update = case set_find_name(Name, Entries) of
+				{ok, Oid} ->
+					fun(List) -> [NewEntry | lists:keydelete(Oid, #se.oid, List)] end;
+				error ->
+					fun(List) -> [NewEntry | List] end
+			end,
+			set_update(Store, ParentDoc, NewCache, Update);
+
+		_ ->
+			{error, enoent}
+	end;
+
+set_link(_, _, _, _) ->
+	{error, eacces}.
+
+
+set_unlink({doc, Store, Doc}, Name, Cache) ->
+	case set_read_entries(Store, Doc, Cache) of
+		{ok, Entries, NewCache} ->
+			case set_find_name(Name, Entries) of
+				{ok, Oid} ->
+					Update = fun(List) -> lists:keydelete(Oid, #se.oid, List) end,
+					set_update(Store, Doc, NewCache, Update);
+
+				error ->
+					{error, enoent, NewCache}
+			end;
+
+		_ ->
+			{error, enoent}
+	end.
+
+
+set_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
+	case set_read_entries(Store, Doc, Cache) of
+		{ok, Entries, NewCache} ->
+			case set_find_name(OldName, Entries) of
+				{ok, {doc, Store, ChildDoc}} ->
+					case set_set_title(Store, ChildDoc, NewName) of
+						ok ->
+							% Did we replace a file?
+							case set_find_name(NewName, Entries) of
+								{ok, Oid} ->
+									Update = fun(List) -> lists:keydelete(Oid, #se.oid, List) end,
+									set_update(Store, Doc, NewCache, Update);
+
+								error ->
+									{ok, NewCache}
+							end;
+
+						{error, Reason} ->
+							{error, Reason, NewCache}
+					end;
+
+				{ok, _} ->
+					{error, eacces, NewCache};
+				error ->
+					{error, enoent, NewCache}
+			end;
+
+		_ ->
+			{error, enoent}
+	end.
+
+
+set_find_name(FullName, Entries) ->
+	{Name, DocId} = set_split_name(FullName),
+	case find_entry(fun(E) -> set_lookup_cmp(Name, DocId, E) end, Entries) of
+		{value, Oid} -> {ok, Oid};
+		none         -> error
+	end.
+
+
+set_split_name(Name) ->
+	% FIXME: precompile
+	RegExp = <<"(.*)~([[:xdigit:]]+)(\\.\\w+)?">>,
+	case re:run(Name, RegExp, [{capture, all_but_first, binary}]) of
+		{match, [Title, DocId, Extension]} ->
+			{<<Title/binary, Extension/binary>>, unicode:characters_to_list(DocId)};
+		{match, [Title, DocId]} ->
+			{Title, unicode:characters_to_list(DocId)};
+		nomatch ->
+			{Name, ""}
+	end.
+
+
+set_lookup_cmp(Name, DocId, #se{oid=Oid, title=Title, suffix=Suffix}) ->
+	case Name of
+		Title ->
+			case lists:prefix(DocId, Suffix) of
+				true  -> {ok, Oid};
+				false -> error
+			end;
+		_ ->
+			error
+	end;
+
+set_lookup_cmp(_, _, _) ->
+	error.
+
+
+set_readdir_filter(#se{oid={doc,_,_}=Oid, disp=Name}) ->
 	case doc_make_node(Oid) of
 		{ok, #vnode{ifc=#ifc{getattr=GetAttr}}} ->
 			case catch GetAttr(Oid) of
@@ -1184,30 +1412,20 @@ set_readdir_filter(_) ->
 %% title if so. In any case we have to eliminate duplicates and sanitize the
 %% names.
 %%
-%% Entry list format: {Oid, DispTitle, RealTitle, Suffix}
-%% Cache format: {Rev, Entries, [{Oid, Rev, Title::binary(), Suffix::list()}]}
+%% Entry list format: [{Oid, Rev, DispTitle, RealTitle, Suffix}]
+%% Cache format: {Rev, Entries}
 %%
-set_read_entries(Store, Doc, {CacheRev, _, _}=Cache) ->
+set_read_entries(Store, Doc, {CacheRev, CacheEntries}) ->
 	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, CacheRev} ->
-			{_, CacheEntries, CacheRaw} = Cache,
-			case set_update_entries(CacheRaw) of
-				uptodate ->
-					{ok, CacheEntries, Cache};
-
-				NewCacheRaw ->
-					NewEntries = set_sanitize_entries(NewCacheRaw, 0),
-					{ok, NewEntries, {CacheRev, NewEntries, NewCacheRaw}}
-			end;
+			NewCacheEntries = set_update_entries(CacheEntries),
+			{ok, NewCacheEntries, {CacheRev, NewCacheEntries}};
 
 		{ok, Rev} ->
 			case hotchpotch_util:read_rev_struct(Rev, <<"HPSD">>) of
-				{ok, Entries} when is_list(Entries) ->
-					RawList = map_filter(
-						fun(E) -> set_read_entries_filter(Store, E) end,
-						Entries),
-					List = set_sanitize_entries(RawList, 0),
-					{ok, List, {Rev, List, RawList}};
+				{ok, List} when is_list(List) ->
+					Entries = set_read_entries_list(Store, List),
+					{ok, Entries, {Rev, Entries}};
 
 				{ok, _} ->
 					error;
@@ -1223,44 +1441,52 @@ set_read_entries(Store, Doc, {CacheRev, _, _}=Cache) ->
 set_update_entries(Cache) ->
 	case lists:foldl(fun set_find_update/2, [], Cache) of
 		[] ->
-			uptodate;
+			Cache;
 		Updates ->
-			set_apply_updates(Cache, lists:reverse(Updates), [])
+			NewCache = set_apply_updates(Cache, lists:reverse(Updates), []),
+			set_sanitize_entries(NewCache, 0)
 	end.
 
 
-set_find_update({Oid, CacheRev, _, Suffix}, Acc) ->
-	{doc, Store, Doc} = Oid,
+set_find_update(#se{oid={doc, Store, Doc}, rev=CacheRev}=Entry, Acc) ->
 	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, CacheRev} ->
 			Acc;
 		{ok, NewRev} ->
-			[{Oid, NewRev, set_read_title(NewRev), Suffix} | Acc];
+			[Entry#se{rev=NewRev, title=set_read_title(NewRev)} | Acc];
 		error ->
-			[{Oid, error, <<"">>, ""} | Acc]
+			[Entry#se{rev=undefined, title= <<"">>} | Acc]
 	end.
 
 
 set_apply_updates([], _, Acc) ->
 	Acc;
 
-set_apply_updates([{Oid, _, _, _} | Cache], [{Oid, _, _, _}=New | Updates], Acc) ->
+set_apply_updates([#se{oid=Oid} | Cache], [#se{oid=Oid}=New | Updates], Acc) ->
 	set_apply_updates(Cache, Updates, [New | Acc]);
 
 set_apply_updates([Entry | Cache], Updates, Acc) ->
 	set_apply_updates(Cache, Updates, [Entry | Acc]).
 
 
+
+set_read_entries_list(Store, List) ->
+	RawEntries = map_filter(
+		fun(E) -> set_read_entries_filter(Store, E) end,
+		List),
+	set_sanitize_entries(RawEntries, 0).
+
+
 set_read_entries_filter(Store, {dlink, Doc}) ->
 	Oid = {doc, Store, Doc},
+	Suffix = hotchpotch_util:bin_to_hexstr(Doc),
 	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, Rev} ->
-			Suffix = hotchpotch_util:bin_to_hexstr(Doc),
 			Title = set_read_title(Rev),
-			{ok, {Oid, Rev, Title, Suffix}};
+			{ok, #se{oid=Oid, rev=Rev, title=Title, suffix=Suffix}};
 
 		error ->
-			{ok, {Oid, error, <<"">>, ""}}
+			{ok, #se{oid=Oid, title= <<"">>, suffix=Suffix}}
 	end;
 
 set_read_entries_filter(_, _) ->
@@ -1285,7 +1511,7 @@ set_read_title(Rev) ->
 
 set_sanitize_entries(Cache, SuffixLen) ->
 	Dict = lists:foldl(
-		fun({_, _, Title, Suffix}=Entry, Acc) ->
+		fun(#se{title=Title, suffix=Suffix}=Entry, Acc) ->
 			dict:append(set_apply_suffix(Title, Suffix, SuffixLen), Entry, Acc)
 		end,
 		dict:new(),
@@ -1293,8 +1519,8 @@ set_sanitize_entries(Cache, SuffixLen) ->
 	dict:fold(
 		fun(Title, Entries, Acc) ->
 			case Entries of
-				[{Oid, _, RealTitle, Suffix}] ->
-					[{Oid, Title, RealTitle, Suffix} | Acc];
+				[Entry] ->
+					[Entry#se{disp=Title} | Acc];
 				_ ->
 					set_sanitize_entries(Entries, SuffixLen+4) ++ Acc
 			end
@@ -1321,6 +1547,89 @@ set_join_components([Title, Ext], Suffix) ->
 set_join_components([Comp | Rest], Suffix) ->
 	Joined = set_join_components(Rest, Suffix),
 	<<Comp/binary, ".", Joined/binary>>.
+
+
+set_update(Store, Doc, Cache, Fun) ->
+	case hotchpotch_ifc_vfs_broker:open_doc(Store, Doc, true) of
+		{ok, Rev, Handle} ->
+			case set_update_cache(Store, Handle, Rev, Cache) of
+				{ok, Entries, NewCache} ->
+					case Fun(Entries) of
+						{error, Reason} ->
+							hotchpotch_ifc_vfs_broker:abort(Handle),
+							{error, Reason, NewCache};
+						NewEntries ->
+							set_write_entries(Handle, NewEntries, NewCache)
+					end;
+
+				Error ->
+					hotchpotch_ifc_vfs_broker:abort(Handle),
+					Error
+			end;
+
+		Error ->
+			Error
+	end.
+
+
+set_update_cache(_Store, _Handle, Rev, {Rev, Entries}) ->
+	NewEntries = set_update_entries(Entries),
+	{ok, NewEntries, {Rev, NewEntries}};
+
+set_update_cache(Store, Handle, Rev, _Cache) ->
+	case catch read_struct(Handle, <<"HPSD">>) of
+		List when is_list(List) ->
+			Entries = set_read_entries_list(Store, List),
+			{ok, Entries, {Rev, Entries}};
+		{error, _} = Error ->
+			Error;
+		_ ->
+			{error, einval}
+	end.
+
+
+set_write_entries(Handle, Entries, Cache) ->
+	List = [{dlink, Doc} || #se{oid={doc, _, Doc}} <- Entries],
+	case write_struct(Handle, <<"HPSD">>, List) of
+		ok ->
+			case hotchpotch_ifc_vfs_broker:close(Handle) of
+				{ok, Rev} ->
+					{ok, {Rev, set_sanitize_entries(Entries, 0)}};
+				{error, Reason} ->
+					{error, Reason, Cache}
+			end;
+
+		{error, Error} ->
+			hotchpotch_ifc_vfs_broker:abort(Handle),
+			{error, Error, Cache}
+	end.
+
+
+set_set_title(Store, Doc, NewTitle) ->
+	case hotchpotch_ifc_vfs_broker:open_doc(Store, Doc, true) of
+		{ok, _OldRev, Handle} ->
+			try
+				Meta1 = read_struct(Handle, <<"META">>),
+				Meta2 = meta_write_entry(Meta1,
+					[<<"org.hotchpotch.annotation">>, <<"title">>],
+					NewTitle),
+				case write_struct(Handle, <<"META">>, Meta2) of
+					ok    -> ok;
+					WrErr -> throw(WrErr)
+				end,
+				case hotchpotch_ifc_vfs_broker:close(Handle) of
+					{ok, _NewRev} -> ok;
+					CloseErr      -> CloseErr
+				end
+			catch
+				throw:Error ->
+					hotchpotch_ifc_vfs_broker:abort(Handle),
+					Error
+			end;
+
+		Error ->
+			Error
+	end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1496,22 +1805,31 @@ meta_read_entry(_Meta, _Path) ->
 	error.
 
 
+meta_write_entry(_Meta, [], Value) ->
+	Value;
+
+meta_write_entry(Meta, [Step|Path], Value) when is_record(Meta, dict, 9) ->
+	Sub = case dict:find(Step, Meta) of
+		{ok, V} -> V;
+		error   -> dict:new()
+	end,
+	dict:store(Step, meta_write_entry(Sub, Path, Value), Meta);
+
+meta_write_entry(_Meta, _Path, _Value) ->
+	throw({error, einval}).
+
+
 sanitize(S) ->
 	lists:filter(fun(C) -> (C /= $/) and (C >= 31) end, S).
 
 
 read_struct(Handle, Part) ->
-	case read_struct_loop(Handle, Part, 0, <<>>) of
-		{ok, Data} ->
-			case catch hotchpotch_struct:decode(Data) of
-				{'EXIT', _Reason} ->
-					{error, einval};
-				Struct ->
-					{ok, Struct}
-			end;
-
-		{error, Reason} ->
-			{error, Reason}
+	Data = read_struct_loop(Handle, Part, 0, <<>>),
+	case catch hotchpotch_struct:decode(Data) of
+		{'EXIT', _Reason} ->
+			throw({error, einval});
+		Struct ->
+			Struct
 	end.
 
 
@@ -1519,11 +1837,11 @@ read_struct_loop(Handle, Part, Offset, Acc) ->
 	Length = 16#10000,
 	case hotchpotch_ifc_vfs_broker:read(Handle, Part, Offset, Length) of
 		{ok, <<>>} ->
-			{ok, Acc};
+			Acc;
 		{ok, Data} ->
 			read_struct_loop(Handle, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
 		{error, _Reason} = Error ->
-			Error
+			throw(Error)
 	end.
 
 
