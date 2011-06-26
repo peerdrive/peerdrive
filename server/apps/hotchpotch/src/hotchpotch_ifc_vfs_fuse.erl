@@ -164,7 +164,7 @@ init({Dir, Options}) ->
 	end,
 	hotchpotch_sys_info:publish(<<"vfs.mountpath">>, BinDir),
 	State = #state{
-		vfs_state = hotchpotch_ifc_vfs_common:init(),
+		vfs_state = hotchpotch_ifc_vfs_common:init(Options),
 		handles   = gb_trees:from_orddict([{0, undefined}]),
 		uid       = proplists:get_value(uid, Options, 0),
 		gid       = proplists:get_value(gid, Options, 0),

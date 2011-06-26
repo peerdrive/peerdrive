@@ -16,7 +16,7 @@
 
 -module(hotchpotch_ifc_vfs_common).
 
--export([init/0, getattr/2, lookup/3, forget/3, open/4, create/6, opendir/2,
+-export([init/1, getattr/2, lookup/3, forget/3, open/4, create/6, opendir/2,
 	close/2, read/4, write/4, readdir/2, setattr/3, unlink/3, rename/5, link/4,
 	mkdir/3, statfs/2]).
 
@@ -65,7 +65,8 @@
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init() ->
+init(Options) ->
+	put(dir_type, proplists:get_value(dir_type, Options, set)),
 	#state{
 		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
 		imap   = gb_trees:empty(),
@@ -1895,10 +1896,20 @@ create_empty_directory(Store, Name) ->
 				<<"Created by FUSE interface">>,
 				dict:new())),
 		dict:new()),
-	case hotchpotch_broker:create(<<"org.hotchpotch.dict">>, ?VFS_CC, hotchpotch_broker:get_stores([Store])) of
+	case get(dir_type) of
+		dict ->
+			TypeCode = <<"org.hotchpotch.dict">>,
+			Hpsd = dict:new();
+		set ->
+			TypeCode = <<"org.hotchpotch.set">>,
+			Hpsd = []
+	end,
+	case hotchpotch_broker:create(TypeCode, ?VFS_CC, hotchpotch_broker:get_stores([Store])) of
 		{ok, _ErrInfo, {Doc, Handle}} ->
-			hotchpotch_broker:write(Handle, <<"META">>, 0, hotchpotch_struct:encode(MetaData)),
-			hotchpotch_broker:write(Handle, <<"HPSD">>, 0, hotchpotch_struct:encode(dict:new())),
+			hotchpotch_broker:write(Handle, <<"META">>, 0,
+				hotchpotch_struct:encode(MetaData)),
+			hotchpotch_broker:write(Handle, <<"HPSD">>, 0,
+				hotchpotch_struct:encode(Hpsd)),
 			case hotchpotch_broker:commit(Handle) of
 				{ok, _ErrInfo, Rev} ->
 					% leave handle open, the caller has to close it

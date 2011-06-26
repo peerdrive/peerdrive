@@ -59,7 +59,7 @@ start_link(MountOpts) ->
 	Path = unicode:characters_to_binary(filename:nativename(
 		filename:absname(proplists:get_value(mountpoint, MountOpts, "vfs")))),
 	DokanOpts = [Opt || Opt <- MountOpts, filter_opt(Opt)],
-	erldokan:start_link(?MODULE, Path, [{mountpoint, Path} | DokanOpts]).
+	erldokan:start_link(?MODULE, {Path, MountOpts}, [{mountpoint, Path} | DokanOpts]).
 
 
 filter_opt({Tag, _Value}) when (Tag == threads) or
@@ -74,9 +74,9 @@ filter_opt(_) ->
 %% Management interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Dir) ->
+init({Dir, Opt}) ->
 	hotchpotch_sys_info:publish(<<"vfs.mountpath">>, Dir),
-	case hotchpotch_ifc_vfs_common:getattr(1, hotchpotch_ifc_vfs_common:init()) of
+	case hotchpotch_ifc_vfs_common:getattr(1, hotchpotch_ifc_vfs_common:init(Opt)) of
 		{ok, {Attr, Tmo}, VfsState} ->
 			{ok, Re} = re:compile(<<"\\\\"/utf8>>),
 			RootNode = #vnode{
