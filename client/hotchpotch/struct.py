@@ -93,11 +93,10 @@ class RevLink(object):
 
 class DocLink(object):
 	MIME_TYPE = 'application/x-hotchpotch-doclink'
-	__slots__ = ['__doc', '__lookup', '__revs', '__updated']
+	__slots__ = ['__doc', '__revs', '__updated']
 
-	def __init__(self, doc=None, autoUpdate=True, lookup=None):
+	def __init__(self, doc=None, autoUpdate=True):
 		self.__doc = doc
-		self.__lookup = lookup
 		self.__revs = []
 		self.__updated = False
 		if doc and autoUpdate:
@@ -147,10 +146,7 @@ class DocLink(object):
 		mimeData.setData(DocLink.MIME_TYPE, self.__doc.encode('hex'))
 
 	def update(self):
-		if self.__lookup:
-			self.__revs = self.__lookup(self.__doc)
-		else:
-			self.__revs = connector.Connector().lookup_doc(self.__doc).revs()
+		self.__revs = connector.Connector().lookup_doc(self.__doc).revs()
 		self.__updated = True
 
 	def doc(self):
@@ -171,8 +167,8 @@ class DocLink(object):
 
 
 class Decoder(object):
-	def __init__(self, lookup=None):
-		self._lookup = lookup
+	def __init__(self):
+		pass
 
 	def decode(self, s):
 		self._s = s
@@ -204,7 +200,7 @@ class Decoder(object):
 			res = RevLink()
 			res._fromStruct(self)
 		elif tag == 0x41:
-			res = DocLink(lookup=self._lookup)
+			res = DocLink()
 			res._fromStruct(self)
 		elif tag == 0x50:
 			res = self._getInt('f')
@@ -345,8 +341,8 @@ def __encode_link(obj):
 		raise TypeError(repr(obj) + " is not serializable")
 
 
-def loads(s, lookup=None):
-	dec = Decoder(lookup)
+def loads(s):
+	dec = Decoder()
 	return dec.decode(s)
 
 

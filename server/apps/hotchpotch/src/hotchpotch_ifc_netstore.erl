@@ -19,7 +19,8 @@
 -import(hotchpotch_netencode, [encode_direct_result/1, encode_list/1, encode_list/2,
 	encode_list_32/1, encode_list_32/2, encode_string/1, parse_list/2,
 	parse_list_32/2, parse_store/1, parse_string/1, parse_uuid/1,
-	parse_uuid_list/1, encode_linkmap/1, parse_linkmap/1]).
+	parse_uuid_list/1]).
+
 -include("store.hrl").
 -include("netstore.hrl").
 
@@ -274,13 +275,14 @@ do_stat(Body, RetPath, Store) ->
 	Reply = case hotchpotch_store:stat(Store, Rev) of
 		{ok, Stat} ->
 			#rev_stat{
-				flags   = Flags,
-				parts   = Parts,
-				parents = Parents,
-				mtime   = Mtime,
-				type    = TypeCode,
-				creator = CreatorCode,
-				links   = Links
+				flags     = Flags,
+				parts     = Parts,
+				parents   = Parents,
+				mtime     = Mtime,
+				type      = TypeCode,
+				creator   = CreatorCode,
+				doc_links = DocLinks,
+				rev_links = RevLinks
 			} = Stat,
 			ReplyParts = encode_list(
 				fun ({FourCC, Size, Hash}) ->
@@ -295,7 +297,8 @@ do_stat(Body, RetPath, Store) ->
 				Mtime:64,
 				(encode_string(TypeCode))/binary,
 				(encode_string(CreatorCode))/binary,
-				(encode_linkmap(Links))/binary
+				(encode_list_32(DocLinks))/binary,
+				(encode_list_32(RevLinks))/binary
 			>>;
 
 		Error ->
@@ -550,16 +553,18 @@ io_loop(Handle) ->
 			io_loop(Handle);
 
 		{?SET_LINKS_REQ, Body, RetPath} ->
-			{Links, <<>>} = parse_linkmap(Body),
-			Reply = hotchpotch_store:set_links(Handle, Links),
+			{DocLinks, Body1} = parse_list_32(fun(B) -> parse_uuid(B) end, Body),
+			{RevLinks, <<>>} = parse_list_32(fun(B) -> parse_uuid(B) end, Body1),
+			Reply = hotchpotch_store:set_links(Handle, DocLinks, RevLinks),
 			send_reply(RetPath, ?SET_LINKS_CNF, encode_direct_result(Reply)),
 			io_loop(Handle);
 
 		{?GET_LINKS_REQ, <<>>, RetPath} ->
 			Reply = case hotchpotch_store:get_links(Handle) of
-				{ok, Links} ->
+				{ok, {DocLinks, RevLinks}} ->
 					<<(encode_direct_result(ok))/binary,
-						(encode_linkmap(Links))/binary>>;
+						(encode_list_32(DocLinks))/binary,
+						(encode_list_32(RevLinks))/binary>>;
 				Error ->
 					encode_direct_result(Error)
 			end,
@@ -691,15 +696,17 @@ parse_revision(Body) ->
 	<<Mtime:64, Body4/binary>> = Body3,
 	{Type, Body5} = parse_string(Body4),
 	{Creator, Body6} = parse_string(Body5),
-	{Links, Body7} = parse_linkmap(Body6),
+	{DocLinks, Body7} = parse_list_32(fun(B) -> parse_uuid(B) end, Body6),
+	{RevLinks, Body8} = parse_list_32(fun(B) -> parse_uuid(B) end, Body7),
 	Result = #revision{
-		flags   = Flags,
-		parts   = Parts,
-		parents = Parents,
-		mtime   = Mtime,
-		type    = Type,
-		creator = Creator,
-		links   = Links
+		flags     = Flags,
+		parts     = Parts,
+		parents   = Parents,
+		mtime     = Mtime,
+		type      = Type,
+		creator   = Creator,
+		doc_links = DocLinks,
+		rev_links = RevLinks
 	},
-	{Result, Body7}.
+	{Result, Body8}.
 

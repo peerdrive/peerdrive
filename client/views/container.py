@@ -337,9 +337,8 @@ class CollectionEntry(Watch):
 class CollectionModel(QtCore.QAbstractTableModel):
 	AUTOCLEAN = ["org.hotchpotch.container", "autoclean"]
 
-	def __init__(self, linkMap, parent = None):
+	def __init__(self, parent = None):
 		super(CollectionModel, self).__init__(parent)
-		self.__linkMap = linkMap
 		self.__parent = parent
 
 		self._listing = []
@@ -362,11 +361,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__autoClean = autoClean
 		self.__typeCodes = set()
 		self._listing = []
-		if self.__linkMap:
-			data = struct.loads(handle.readAll('HPSD'),
-				lookup=lambda doc: self.__linkMap.lookup(doc))
-		else:
-			data = struct.loads(handle.readAll('HPSD'))
+		data = struct.loads(handle.readAll('HPSD'))
 		listing = self.decode(data)
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
@@ -403,27 +398,12 @@ class CollectionModel(QtCore.QAbstractTableModel):
 	def isDoc(self):
 		return self.__mutable
 
-	def getItemLinkReal(self, index):
-		"""Returns the original link at the given position. Might point to nowhere."""
+	def getItemLink(self, index):
 		item = self.getItem(index)
 		if item:
 			return item.getLink()
 		else:
 			return None
-
-	def getItemLinkUser(self, index):
-		"""Returns the link as the user would expect it. Might return None!"""
-		link = self.getItemLinkReal(index)
-		if link:
-			if isinstance(link, struct.DocLink):
-				if self.isDoc():
-					return link
-				else:
-					if link.rev():
-						return struct.RevLink(link.rev())
-			elif isinstance(link, struct.RevLink):
-				return link
-		return None
 
 	def setAutoClean(self, autoClean):
 		self.__autoClean = autoClean
@@ -573,7 +553,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		fuseData = []
 		for index in indexes:
 			if index.isValid() and (index.column() == 0):
-				link = self.getItemLinkUser(index)
+				link = self.getItemLink(index)
 				if isinstance(link, struct.DocLink):
 					nativeData.append('doc:' + link.doc().encode('hex'))
 					f = fuse.findFuseFile(link)
@@ -633,7 +613,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 				if choice == QtGui.QMessageBox.Cancel:
 					return False
 				elif choice == QtGui.QMessageBox.Yes:
-					link = self.getItemLinkUser(onto)
+					link = self.getItemLink(onto)
 					path = str(urlList[0].toLocalFile().toUtf8())
 					try:
 						return importer.overwriteFile(stores, link, path)
@@ -741,8 +721,8 @@ class CollectionModel(QtCore.QAbstractTableModel):
 class DictModel(CollectionModel):
 	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
 
-	def __init__(self, linkMap, parent = None):
-		super(DictModel, self).__init__(linkMap, parent)
+	def __init__(self, parent = None):
+		super(DictModel, self).__init__(parent)
 
 	def setColumns(self, columns):
 		# make sure the static 'Name' column is included
@@ -795,8 +775,8 @@ class DictModel(CollectionModel):
 class SetModel(CollectionModel):
 	UTIs = ["org.hotchpotch.set"]
 
-	def __init__(self, linkMap, parent = None):
-		super(SetModel, self).__init__(linkMap, parent)
+	def __init__(self, parent = None):
+		super(SetModel, self).__init__(parent)
 
 	def setColumns(self, columns):
 		# make sure the 'Name' column is not included
@@ -891,14 +871,10 @@ class CollectionWidget(widgets.DocumentView):
 	def docRead(self, readWrite, handle):
 		stat = Connector().stat(self.rev())
 		uti = stat.type()
-		if readWrite:
-			linkMap = None
-		else:
-			linkMap = stat.linkMap()
 		if uti in DictModel.UTIs:
-			model = DictModel(linkMap, self)
+			model = DictModel(self)
 		elif uti in SetModel.UTIs:
-			model = SetModel(linkMap, self)
+			model = SetModel(self)
 		else:
 			raise TypeError('Unhandled type code: %s' % (uti))
 
@@ -1002,7 +978,7 @@ class CollectionWidget(widgets.DocumentView):
 			self._emitSaveNeeded()
 
 	def __doubleClicked(self, index):
-		link = self.model().getItemLinkUser(self.modelMapIndex(index))
+		link = self.model().getItemLink(self.modelMapIndex(index))
 		if link:
 			executables = []
 			revs = link.revs()
@@ -1018,7 +994,7 @@ class CollectionWidget(widgets.DocumentView):
 
 	def __showProperties(self):
 		index = self.listView.selectionModel().currentIndex()
-		link = self.model().getItemLinkUser(self.modelMapIndex(index))
+		link = self.model().getItemLink(self.modelMapIndex(index))
 		if link:
 			utils.showProperties(link)
 
@@ -1047,13 +1023,13 @@ class CollectionWidget(widgets.DocumentView):
 			return acc
 
 	def getSelectedLinks(self):
-		return [self.model().getItemLinkReal(self.modelMapIndex(row)) for row in
+		return [self.model().getItemLink(self.modelMapIndex(row)) for row in
 			self.listView.selectionModel().selectedRows()]
 
 	def fillContextMenu(self, menu):
 		# get selected items
 		isDoc = self.model().isDoc()
-		links = [self.model().getItemLinkReal(self.modelMapIndex(row)) for row in
+		links = [self.model().getItemLink(self.modelMapIndex(row)) for row in
 			self.listView.selectionModel().selectedRows()]
 
 		# selected an item?

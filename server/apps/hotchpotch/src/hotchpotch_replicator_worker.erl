@@ -369,8 +369,8 @@ meta_read_int(_Meta, _Path) ->
 % extract all document links
 read_doc_references(Rev, SearchStores) ->
 	case stat(Rev, SearchStores) of
-		{ok, #rev_stat{links=Links}} ->
-			element(1, Links);
+		{ok, #rev_stat{doc_links=DocLinks}} ->
+			DocLinks;
 
 		{error, _} ->
 			[]
@@ -380,19 +380,8 @@ read_doc_references(Rev, SearchStores) ->
 % extract all revision links
 read_rev_references(Rev, SearchStores) ->
 	case stat(Rev, SearchStores) of
-		{ok, #rev_stat{links=Links}} ->
-			DocLinks = element(1, Links) ++ element(2, Links),
-			SRL = sets:from_list(element(3, Links)),
-			DocMap = dict:from_list(element(5, Links)),
-			sets:to_list(lists:foldl(
-				fun(Doc, Acc) ->
-					case dict:find(Doc, DocMap) of
-						{ok, Revs} -> sets:subtract(Acc, sets:from_list(Revs));
-						error      -> Acc
-					end
-				end,
-				SRL,
-				DocLinks));
+		{ok, #rev_stat{rev_links=RevLinks}} ->
+			RevLinks;
 
 		{error, _} ->
 			[]

@@ -94,7 +94,7 @@ Body ::=
 	LOOKUP_REV_REQ      Rev::UUID, Stores::List(Store::UUID)
 	LOOKUP_REV_CNF      Stores::List(Store::UUID)
 	STAT_REQ            Rev::UUID, Stores::List(Store::UUID)
-	STAT_CNF            Result::BrokerCnf, (Flags::RevFlags, Parts::List(FourCC::UINT32, Size:UINT64, Hash::UINT128), Parents::List(Parent::UUID), Mtime:Time, TypeCode::String, CreatorCode::String, LinkMap::LinkMap)?
+	STAT_CNF            Result::BrokerCnf, (Flags::RevFlags, Parts::List(FourCC::UINT32, Size:UINT64, Hash::UINT128), Parents::List(Parent::UUID), Mtime:Time, TypeCode::String, CreatorCode::String, DocLinks::List32(Doc::UUID), RevLinks::List32(Rev::UUID))?
 
 	PEEK_REQ            Rev::UUID, Stores::List(Store::UUID)
 	PEEK_CNF            Result::BrokerCnf, (Handle::UINT32)?
@@ -463,13 +463,4 @@ Version ::= UINT32
 
 Time ::= UINT64
 	Seconds since epoch, UTC
-
-LinkMap ::=
-	StrongDocLinks::List32(Doc::UUID),
-	WeakDocLinks::List32(Doc::UUID),
-	StrongRevLinks::List32(Rev::UUID),
-	WeakRevLinks::List32(Rev::UUID),
-	DocMap::List32(Doc::UUID, Revs::List(UUID))
-
-
 

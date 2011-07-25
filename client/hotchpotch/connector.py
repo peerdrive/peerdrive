@@ -814,54 +814,7 @@ class Lookup(object):
 
 class Stat(object):
 	__slots__ = ['__flags', '__parts', '__parents', '__mtime', '__type',
-		'__creator', '__links']
-
-	class StatLinkMap(object):
-		__slots__ = ['__sdl', '__wdl', '__srl', '__wrl', '__map']
-
-		def __init__(self, packet, pos):
-			(self.__sdl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
-			(self.__wdl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
-			(self.__srl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
-			(self.__wrl, pos) = Stat.StatLinkMap.__extractList(packet, pos)
-			(count,) = struct.unpack_from('>L', packet, pos)
-			pos += 4
-			self.__map = {}
-			for i in xrange(count):
-				doc = packet[pos:pos+16]
-				pos += 16
-				revs = []
-				(revCount,) = struct.unpack_from('>B', packet, pos)
-				pos += 1
-				for i in xrange(revCount):
-					revs.append(packet[pos:pos+16])
-					pos += 16
-				self.__map[doc] = revs
-
-		def strongDocLinks(self):
-			return self.__sdl
-
-		def weakDocLinks(self):
-			return self.__wdl
-
-		def strongRevLinks(self):
-			return self.__srl
-
-		def weakRevLinks(self):
-			return self.__wrl
-
-		def lookup(self, doc):
-			return self.__map[doc]
-
-		@staticmethod
-		def __extractList(packet, pos):
-			(count,) = struct.unpack_from('>L', packet, pos)
-			pos += 4
-			l = []
-			for i in xrange(count):
-				l.append(packet[pos:pos+16])
-				pos += 16
-			return (l, pos)
+		'__creator', '__docLinks', '__revLinks']
 
 	def __init__(self, packet):
 		# Packet format:
@@ -870,6 +823,8 @@ class Stat(object):
 		#   ParentCount:8, [Parent:128],
 		#   TypeLen:16,    [Type],
 		#   CreatorLen:16, [Creator]
+		#   DocLinksCount:32, [DocLink:128]
+		#   RevLinksCount:32, [RevLink:128]
 		(flags, count) = struct.unpack_from('>LB', packet, 0)
 		pos = 5
 		self.__flags = flags
@@ -882,7 +837,7 @@ class Stat(object):
 		count = struct.unpack_from('>B', packet, pos)[0]
 		pos += 1
 		self.__parents = []
-		for i in range(count):
+		for i in xrange(count):
 			self.__parents.append(packet[pos:pos+16])
 			pos += 16
 
@@ -896,7 +851,19 @@ class Stat(object):
 		pos += 2
 		self.__creator = packet[pos:pos+count]
 		pos += count
-		self.__links = Stat.StatLinkMap(packet, pos)
+
+		(count,) = struct.unpack_from('>L', packet, pos)
+		pos += 4
+		self.__docLinks = []
+		for i in xrange(count):
+			self.__docLinks.append(packet[pos:pos+16])
+			pos += 16
+		(count,) = struct.unpack_from('>L', packet, pos)
+		pos += 4
+		self.__revLinks = []
+		for i in xrange(count):
+			self.__revLinks.append(packet[pos:pos+16])
+			pos += 16
 
 	def size(self, part):
 		return self.__parts[part][0]
@@ -919,8 +886,11 @@ class Stat(object):
 	def creator(self):
 		return self.__creator
 
-	def linkMap(self):
-		return self.__links
+	def docLinks(self):
+		return self.__docLinks
+
+	def revLinks(self):
+		return self.__revLinks
 
 
 class Handle(object):

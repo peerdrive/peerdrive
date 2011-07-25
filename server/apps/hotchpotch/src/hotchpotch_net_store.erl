@@ -21,8 +21,8 @@
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 -export([io_request/3]).
 
--import(hotchpotch_netencode, [encode_linkmap/1, encode_list/1, encode_list/2,
-	encode_string/1, parse_direct_result/1, parse_linkmap/1, parse_list/2,
+-import(hotchpotch_netencode, [encode_list/1, encode_list/2, encode_list_32/1,
+	encode_string/1, parse_direct_result/1, parse_list/2,
 	parse_list_32/2, parse_string/1, parse_uuid/1, parse_uuid_list/1]).
 
 -include("store.hrl").
@@ -265,15 +265,17 @@ cnf_stat(Body) ->
 	<<Mtime:64, Body4/binary>> = Body3,
 	{Type, Body5} = parse_string(Body4),
 	{Creator, Body6} = parse_string(Body5),
-	{Links, <<>>} = parse_linkmap(Body6),
+	{DocLinks, Body7} = parse_list_32(fun(B) -> parse_uuid(B) end, Body6),
+	{RevLinks, <<>>} = parse_list_32(fun(B) -> parse_uuid(B) end, Body7),
 	Stat = #rev_stat{
-		flags   = Flags,
-		parts   = Parts,
-		parents = Parents,
-		mtime   = Mtime,
-		type    = Type,
-		creator = Creator,
-		links   = Links
+		flags     = Flags,
+		parts     = Parts,
+		parents   = Parents,
+		mtime     = Mtime,
+		type      = Type,
+		creator   = Creator,
+		doc_links = DocLinks,
+		rev_links = RevLinks
 	},
 	{ok, Stat}.
 
@@ -310,13 +312,14 @@ cnf_forward_doc(Body, User) ->
 req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
 	{User, _Tag} = From,
 	#revision{
-		flags   = Flags,
-		parts   = Parts,
-		parents = Parents,
-		mtime   = Mtime,
-		type    = TypeCode,
-		creator = CreatorCode,
-		links   = Links
+		flags     = Flags,
+		parts     = Parts,
+		parents   = Parents,
+		mtime     = Mtime,
+		type      = TypeCode,
+		creator   = CreatorCode,
+		doc_links = DocLinks,
+		rev_links = RevLinks
 	} = Revision,
 	ReqParts = encode_list(
 		fun ({FourCC, Hash}) -> <<FourCC/binary, Hash/binary>> end,
@@ -329,7 +332,8 @@ req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
 		Mtime:64,
 		(encode_string(TypeCode))/binary,
 		(encode_string(CreatorCode))/binary,
-		(encode_linkmap(Links))/binary
+		(encode_list_32(DocLinks))/binary,
+		(encode_list_32(RevLinks))/binary
 	>>,
 	Handler = fun(B) -> cnf_put_rev(B, MPS, User) end,
 	send_request(From, ?PUT_REV_START_REQ, Body, Handler, S).

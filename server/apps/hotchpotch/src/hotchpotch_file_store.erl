@@ -411,12 +411,14 @@ check_root_doc(S, Name) ->
 			RootMeta3 = dict:store(<<"org.hotchpotch.sync">>, Sync, RootMeta2),
 			{S3, MetaHash} = crd_write_part(S2, RootMeta3),
 			Revision = #revision{
-				parts   = [{<<"HPSD">>, ContentHash}, {<<"META">>, MetaHash}],
-				parents = [],
-				mtime   = hotchpotch_util:get_time(),
-				type    = <<"org.hotchpotch.store">>,
-				creator = <<"org.hotchpotch.file-store">>,
-				links   = {[], [], [], [], []}},
+				parts     = [{<<"HPSD">>, ContentHash}, {<<"META">>, MetaHash}],
+				parents   = [],
+				mtime     = hotchpotch_util:get_time(),
+				type      = <<"org.hotchpotch.store">>,
+				creator   = <<"org.hotchpotch.file-store">>,
+				doc_links = [],
+				rev_links = []
+			},
 			Rev = hotchpotch_store:hash_revision(Revision),
 			S4 = S3#state{revisions=dict:store(Rev, {1, Revision}, S3#state.revisions)},
 			Gen = S4#state.gen,
@@ -468,13 +470,14 @@ do_stat(Rev, #state{revisions=Revisions, path=Path}) ->
 				[],
 				Revision#revision.parts),
 			{ok, #rev_stat{
-				flags   = Revision#revision.flags,
-				parts   = Parts,
-				parents = Revision#revision.parents,
-				mtime   = Revision#revision.mtime,
-				type    = Revision#revision.type,
-				creator = Revision#revision.creator,
-				links   = Revision#revision.links
+				flags     = Revision#revision.flags,
+				parts     = Parts,
+				parents   = Revision#revision.parents,
+				mtime     = Revision#revision.mtime,
+				type      = Revision#revision.type,
+				creator   = Revision#revision.creator,
+				doc_links = Revision#revision.doc_links,
+				rev_links = Revision#revision.rev_links
 			}};
 
 		% completely unknown...
@@ -618,13 +621,14 @@ do_dump(S) ->
 
 
 % #revision{
-%   flags:   integer()
-%   parts:   [{PartFourCC, Hash}]*
-%   parents: [Revision]*
-%   mitme:   {MegaSecs, Secs, MicroSecs}
-%   type:    Binary
-%   creator: Binary
-%   links:   {SDL, WDL, SRL, WRL, DocMap}
+%   flags:     integer()
+%   parts:     [{PartFourCC, Hash}]
+%   parents:   [Rev]
+%   mitme:     {MegaSecs, Secs, MicroSecs}
+%   type:      Binary
+%   creator:   Binary
+%   doc_links: [Doc]
+%   rev_links: [Rev]
 % }
 do_dump_revision(Revision) ->
 	if
@@ -645,33 +649,18 @@ do_dump_revision(Revision) ->
 					io:format("            ~s~n", [hotchpotch_util:bin_to_hexstr(Rev)])
 				end,
 				Revision#revision.parents),
-			{SDL, WDL, SRL, _WRL, DocMap} = Revision#revision.links,
-			io:format("        Strong Doc Links:~n"),
+			io:format("        Doc Links:~n"),
 			lists:foreach(
 				fun (Rev) ->
 					io:format("            ~s~n", [hotchpotch_util:bin_to_hexstr(Rev)])
 				end,
-				SDL),
-			io:format("        Weak Doc Links:~n"),
+				Revision#revision.doc_links),
+			io:format("        Rev Links:~n"),
 			lists:foreach(
 				fun (Rev) ->
 					io:format("            ~s~n", [hotchpotch_util:bin_to_hexstr(Rev)])
 				end,
-				WDL),
-			io:format("        Strong Rev Links:~n"),
-			lists:foreach(
-				fun (Rev) ->
-					io:format("            ~s~n", [hotchpotch_util:bin_to_hexstr(Rev)])
-				end,
-				SRL),
-			io:format("        Document -> Revs map:~n"),
-			HexDocMap = lists:map(
-				fun({Doc, Revs}) ->
-					{hotchpotch_util:bin_to_hexstr(Doc),
-					lists:map(fun(R) -> hotchpotch_util:bin_to_hexstr(R) end, Revs)}
-				end,
-				DocMap),
-			io:format("            ~p~n", [HexDocMap])
+				Revision#revision.rev_links)
 	end.
 
 
@@ -690,7 +679,8 @@ do_write_start_create(S, Doc, Type, Creator, User) ->
 		orig      = dict:new(),
 		new       = dict:new(),
 		readers   = dict:new(),
-		links     = {[], [], [], [], []},
+		doc_links = [],
+		rev_links = [],
 		locks     = []},
 	{S2, Writer} = start_writer(S, State, User),
 	{do_hide(S2, Doc), {ok, Writer}}.
@@ -719,7 +709,8 @@ do_write_start_fork(S, Doc, StartRev, Creator, User) ->
 				orig      = Parts,
 				new       = dict:new(),
 				readers   = dict:new(),
-				links     = Revision#revision.links,
+				doc_links = Revision#revision.doc_links,
+				rev_links = Revision#revision.rev_links,
 				locks     = []},
 			{S2, Writer} = start_writer(S, State, User),
 			{do_hide(S2, Doc), {ok, Writer}}
@@ -753,7 +744,8 @@ do_write_start_update(S, Doc, StartRev, Creator, User) ->
 						orig      = Parts,
 						new       = dict:new(),
 						readers   = dict:new(),
-						links     = Revision#revision.links,
+						doc_links = Revision#revision.doc_links,
+						rev_links = Revision#revision.rev_links,
 						locks     = []},
 					{S2, Writer} = start_writer(S, State, User),
 					{S2, {ok, Writer}}
@@ -793,7 +785,8 @@ do_write_start_resume(S, Doc, PreRev, Creator, User) ->
 								orig      = Parts,
 								new       = dict:new(),
 								readers   = dict:new(),
-								links     = Revision#revision.links,
+								doc_links = Revision#revision.doc_links,
+								rev_links = Revision#revision.rev_links,
 								locks     = []},
 							{S2, Writer} = start_writer(S, State, User),
 							{S2, {ok, Writer}}
@@ -1152,14 +1145,14 @@ dispose_revision(Revision) ->
 	end.
 
 
-get_rev_references(#revision{parents=Parents, links=Links}) ->
+get_rev_references(#revision{parents=Parents, rev_links=RevLinks}) ->
 	ParentSet = sets:from_list(Parents),
-	LinkSet = sets:from_list(element(3, Links)), % Strong Rev Links
+	LinkSet = sets:from_list(RevLinks),
 	sets:to_list(sets:union(ParentSet, LinkSet)).
 
 
-get_doc_references(#revision{links=Links}) ->
-	element(1, Links).
+get_doc_references(#revision{doc_links=DocLinks}) ->
+	DocLinks.
 
 
 do_part_ref_dec(S, PartHash) ->

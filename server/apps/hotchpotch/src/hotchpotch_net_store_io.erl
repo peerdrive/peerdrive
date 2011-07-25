@@ -19,8 +19,8 @@
 
 -export([start_link/4]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
--import(hotchpotch_netencode, [encode_linkmap/1, encode_list/1, encode_string/1,
-	parse_linkmap/1, parse_string/1, parse_uuid/1, parse_uuid_list/1]).
+-import(hotchpotch_netencode, [encode_list/1, encode_list_32/1, encode_string/1,
+	parse_string/1, parse_uuid/1, parse_uuid_list/1, parse_list_32/2]).
 
 -record(state, {store, handle, mps}).
 
@@ -76,8 +76,8 @@ handle_call({suspend, Mtime}, _From, S) ->
 handle_call({set_type, Type}, _From, S) ->
 	{reply, do_set_type(Type, S), S};
 
-handle_call({set_links, Links}, _From, S) ->
-	{reply, do_set_links(Links, S), S};
+handle_call({set_links, DocLinks, RevLinks}, _From, S) ->
+	{reply, do_set_links(DocLinks, RevLinks, S), S};
 
 handle_call({set_parents, Parents}, _From, S) ->
 	{reply, do_set_parents(Parents, S), S}.
@@ -184,8 +184,9 @@ do_get_parents(S) ->
 do_get_links(S) ->
 	case relay_request(?GET_LINKS_REQ, <<>>, S) of
 		{ok, Body} ->
-			{Links, <<>>} = parse_linkmap(Body),
-			{ok, Links};
+			{DocLinks, Body1} = parse_list_32(fun(B) -> parse_uuid(B) end, Body),
+			{RevLinks, <<>>} = parse_list_32(fun(B) -> parse_uuid(B) end, Body1),
+			{ok, {DocLinks, RevLinks}};
 
 		Error ->
 			Error
@@ -222,8 +223,12 @@ do_set_type(Type, S) ->
 	relay_request_noresult(?SET_TYPE_REQ, encode_string(Type), S).
 
 
-do_set_links(Links, S) ->
-	relay_request_noresult(?SET_LINKS_REQ, encode_linkmap(Links), S).
+do_set_links(DocLinks, RevLinks, S) ->
+	Body = <<
+		(encode_list_32(DocLinks))/binary,
+		(encode_list_32(RevLinks))/binary
+	>>,
+	relay_request_noresult(?SET_LINKS_REQ, Body, S).
 
 
 do_set_parents(Parents, S) ->

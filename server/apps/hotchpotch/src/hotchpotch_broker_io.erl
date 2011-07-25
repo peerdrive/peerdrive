@@ -24,7 +24,7 @@
 -export([init/1, init/2, handle_call/3, handle_cast/2, code_change/3,
 	handle_info/2, terminate/2]).
 
--record(state, {handles, user, doc, links, stores}).
+-record(state, {handles, user, doc, stores}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public broker operations...
@@ -118,7 +118,9 @@ handle_call(get_parents, _From, S) ->
 		S));
 
 handle_call({set_parents, Parents}, _From, S) ->
-	do_set_parents(Parents, S);
+	make_reply(distribute_write(
+		fun(Handle) -> hotchpotch_store:set_parents(Handle, Parents) end,
+		S));
 
 handle_call(get_type, _From, S) ->
 	make_reply(distribute_read(
@@ -191,10 +193,7 @@ do_peek_loop(_Rev, [], Errors) ->
 do_peek_loop(Rev, [{Guid, Pid} | Stores], Errors) ->
 	case hotchpotch_store:peek(Pid, Rev) of
 		{ok, Handle} ->
-			State = #state{
-				handles=[{Guid, Handle}],
-				links={sets:new(), sets:new()}
-			},
+			State = #state{ handles=[{Guid, Handle}] },
 			hotchpotch_broker:consolidate_success(Errors, State);
 		{error, Reason} ->
 			do_peek_loop(Rev, Stores, [{Guid, Reason} | Errors])
@@ -209,80 +208,24 @@ do_create(Doc, Type, Creator, Stores) ->
 
 
 do_fork(Doc, StartRev, Creator, Stores) ->
-	Startup = start_handles(
+	start_handles(
 		fun(Pid) -> hotchpotch_store:fork(Pid, Doc, StartRev, Creator) end,
 		Doc,
-		Stores),
-	case Startup of
-		{ok, ErrInfo1, S} ->
-			case distribute_read(fun(H) -> hotchpotch_store:get_links(H) end, S) of
-				{ok, ErrInfo2, {SDL, _WDL, _SRL, _WRL, _DocMap}, S2} ->
-					{
-						ok,
-						ErrInfo1++ErrInfo2,
-						S2#state{links={sets:from_list(SDL), sets:new()}}
-					};
-
-				{error, ErrInfo2, S2} ->
-					do_close(S2#state.handles),
-					hotchpotch_broker:consolidate_error(ErrInfo1++ErrInfo2)
-			end;
-
-		Error ->
-			Error
-	end.
+		Stores).
 
 
 do_update(Doc, StartRev, Creator, Stores) ->
-	Startup = start_handles(
+	start_handles(
 		fun(Pid) -> hotchpotch_store:update(Pid, Doc, StartRev, Creator) end,
 		Doc,
-		Stores),
-	case Startup of
-		{ok, ErrInfo1, S} ->
-			case distribute_read(fun(H) -> hotchpotch_store:get_links(H) end, S) of
-				{ok, ErrInfo2, {SDL, _WDL, _SRL, _WRL, _DocMap}, S2} ->
-					{
-						ok,
-						ErrInfo1++ErrInfo2,
-						S2#state{links={sets:from_list(SDL), sets:new()}}
-					};
-
-				{error, ErrInfo2, S2} ->
-					do_close(S2#state.handles),
-					hotchpotch_broker:consolidate_error(ErrInfo1++ErrInfo2)
-			end;
-
-		Error ->
-			Error
-	end.
+		Stores).
 
 
 do_resume(Doc, PreRev, Creator, Stores) ->
-	Startup = start_handles(
+	start_handles(
 		fun(Pid) -> hotchpotch_store:resume(Pid, Doc, PreRev, Creator) end,
 		Doc,
-		Stores),
-	case Startup of
-		{ok, ErrInfo1, S} ->
-			case distribute_read(fun(H) -> hotchpotch_store:get_links(H) end, S) of
-				{ok, ErrInfo2, {SDL, WDL, _SRL, _WRL, _DocMap}, S2} ->
-					{
-						ok,
-						ErrInfo1++ErrInfo2,
-						S2#state{
-							links={sets:from_list(SDL), sets:from_list(WDL)}
-						}
-					};
-
-				{error, ErrInfo2, S2} ->
-					do_close(S2#state.handles),
-					hotchpotch_broker:consolidate_error(ErrInfo1++ErrInfo2)
-			end;
-
-		Error ->
-			Error
-	end.
+		Stores).
 
 
 do_commit(Fun, S) ->
@@ -299,54 +242,15 @@ do_commit(Fun, S) ->
 do_commit_prepare(S) ->
 	case distribute_read(fun read_rev_refs/1, S) of
 		{ok, ErrInfo, {DocRefs, RevRefs}, S2} ->
-			Links = do_commit_prepare_get_links(DocRefs, RevRefs, S2),
 			merge_errors(
-				distribute_write(fun(H) -> hotchpotch_store:set_links(H, Links) end, S2),
+				distribute_write(
+					fun(H) -> hotchpotch_store:set_links(H, DocRefs, RevRefs) end,
+					S2),
 				ErrInfo);
 
 		Error ->
 			Error
 	end.
-
-
-do_commit_prepare_get_links(DocRefs, RevRefs, S) ->
-	#state{links={OldStrongRefs, OldWeakRefs}, stores=Stores} = S,
-	% Strong Document Links
-	SDL = DocRefs,
-	% Weak Document Links
-	WDL = sets:union(sets:subtract(OldStrongRefs, DocRefs), OldWeakRefs),
-	% Doc -> [Rev] map of all strong/weak documents
-	DocMap = sets:fold(
-		fun(Doc, MapAcc) ->
-			Revs = lists:foldl(
-				fun({_Guid, Store}, DocAcc) ->
-					case hotchpotch_store:lookup(Store, Doc) of
-						{ok, Rev, _PreRevs} ->
-							sets:add_element(Rev, DocAcc);
-						error ->
-							DocAcc
-					end
-				end,
-				sets:new(),
-				Stores),
-			dict:store(Doc, Revs, MapAcc)
-		end,
-		dict:new(),
-		sets:union(SDL, WDL)),
-	WeakDocRevRefs = sets:fold(
-		fun(Doc, AccRevs) ->
-			sets:union(dict:fetch(Doc, DocMap), AccRevs)
-		end,
-		sets:new(),
-		sets:union(SDL, WDL)),
-	SRL = sets:union(RevRefs, WeakDocRevRefs),
-	{
-		sets:to_list(SDL),
-		sets:to_list(WDL),
-		sets:to_list(SRL),
-		[], % WRL
-		dict:to_list(dict:map(fun(_, Revs) -> sets:to_list(Revs) end, DocMap))
-	}.
 
 
 do_commit_store(Fun, S) ->
@@ -395,19 +299,6 @@ do_close(Handles) ->
 	lists:foreach(fun({_Guid, Handle}) -> hotchpotch_store:close(Handle) end, Handles).
 
 
-do_set_parents(Parents, S) ->
-	case read_references(Parents) of
-		{error, Reason} ->
-			{reply, {error, Reason, []}, S};
-
-		{DocSet, _RevSet} ->
-			S2 = S#state{links={DocSet, sets:new()}},
-			make_reply(distribute_write(
-				fun(Handle) -> hotchpotch_store:set_parents(Handle, Parents) end,
-				S2))
-	end.
-
-
 start_handles(Fun, Doc, Stores) ->
 	case start_handles_loop(Fun, Stores, [], []) of
 		{ok, ErrInfo, Handles} ->
@@ -417,8 +308,7 @@ start_handles(Fun, Doc, Stores) ->
 				#state{
 					doc     = Doc,
 					handles = Handles,
-					stores  = Stores,
-					links   = {sets:new(), sets:new()}
+					stores  = Stores
 				}
 			};
 		Error ->
@@ -520,53 +410,17 @@ merge_errors(Result, AddErrors) ->
 %% Reference reading
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% {DocRefs::set(), RevRefs::set()} | error
-read_references(Revs) ->
-	try
-		lists:foldl(
-			fun(Rev, {AccDocs, AccRevs}) ->
-				{DocRefs, RevRefs} = read_references_step(Rev, hotchpotch_volman:stores()),
-				{sets:union(DocRefs, AccDocs), sets:union(RevRefs, AccRevs)}
-			end,
-			{sets:new(), sets:new()},
-			Revs)
-	catch
-		throw:Term -> Term
-	end.
-
-
-read_references_step(_Rev, []) ->
-	throw({error, einval});
-
-read_references_step(Rev, [{_Guid, Pid} | Stores]) ->
-	case hotchpotch_store:peek(Pid, Rev) of
-		{ok, Handle} ->
-			case read_rev_refs(Handle) of
-				{ok, Result} ->
-					hotchpotch_store:close(Handle),
-					Result;
-
-				{error, _} ->
-					hotchpotch_store:close(Handle),
-					read_references_step(Rev, Stores)
-			end;
-
-		{error, _Reason} ->
-			read_references_step(Rev, Stores)
-	end.
-
-
 read_rev_refs(Handle) ->
 	try
-		{ok, lists:foldl(
+		{DocSet, RevSet} = lists:foldl(
 			fun(FourCC, {AccDocRefs, AccRevRefs}) ->
 				{NewDR, NewRR} = read_rev_extract(read_rev_part(Handle,
 					FourCC)),
 				{sets:union(NewDR, AccDocRefs), sets:union(NewRR, AccRevRefs)}
 			end,
 			{sets:new(), sets:new()},
-			[<<"HPSD">>, <<"META">>])
-		}
+			[<<"HPSD">>, <<"META">>]),
+		{ok, {sets:to_list(DocSet), sets:to_list(RevSet)}}
 	catch
 		throw:Term -> Term
 	end.

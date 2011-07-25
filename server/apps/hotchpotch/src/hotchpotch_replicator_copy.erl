@@ -50,11 +50,12 @@ replicate(Rev, SourceStore, DestStore) ->
 					lists:map(
 						fun({FCC, _Size, Hash}) -> {FCC, Hash} end,
 						Stat#rev_stat.parts)),
-				parents = lists:sort(Stat#rev_stat.parents),
-				mtime   = Stat#rev_stat.mtime,
-				type    = Stat#rev_stat.type,
-				creator = Stat#rev_stat.creator,
-				links   = Stat#rev_stat.links
+				parents   = lists:sort(Stat#rev_stat.parents),
+				mtime     = Stat#rev_stat.mtime,
+				type      = Stat#rev_stat.type,
+				creator   = Stat#rev_stat.creator,
+				doc_links = Stat#rev_stat.doc_links,
+				rev_links = Stat#rev_stat.rev_links
 			},
 			case hotchpotch_store:put_rev_start(DestStore, Rev, Revision) of
 				ok ->

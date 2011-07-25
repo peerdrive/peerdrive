@@ -29,16 +29,17 @@ Even though these effects can be mitigated by good user interfaces and
 additional software layers they are not solvable on the file system level.
 Furthermore only strict categorization schemes are supported as organizing
 principle. A file can only live in one category (folder) at the same time. Hard
-links can overcome this situation but they only work on the same volume and are
-rarely used. Symlinks are used but break as soon as the original file is moved.
+links can overcome this situation but they only work for files on the same
+volume and not for directories. Symlinks work for both files and directories
+but break as soon as the original file is moved.
 
 In Hotchpotch every document (file) is identified by a 128 bit random unique id
-(UUID). Any document can "point" to another document by it's UUID, even across
+(DId). Any document can "point" to another document by it's DId, even across
 volume boundaries. This allows for arbitrary organization schemes via
 "container" documents. The documents can be moved even between volumes (called
 'stores' in Hotchpotch) without breaking the links between them.
 
-The same document (UUID) may also exist on more than one store simultaneously.
+The same document (DId) may also exist on more than one store simultaneously.
 This is no error and is a common state when documents are replicated between
 different stores. In conjunction with versioning Hotchpotch is later able to
 synchronize the replicas on the different stores.
@@ -102,6 +103,12 @@ annotation of documents by the user or applications. Together with indexing of
 this meta data the user is able to quickly find documents based on this meta
 data.
 
+All meta data, that is including the file name, is stored with the document. In
+traditional file systems the file name is given by the directory whereas
+extended attributes are stored in the inode (the file itself). Furthermore each
+additional hardlink created a new file name. Renaming one of the hard links is
+not visible on the other hard links.
+
 == Additional concepts ==
 
 === Uniform type identifier ===
@@ -127,5 +134,13 @@ the 'META' part. TODO
 
 === Preliminary revisions ===
 
-=== Indexing ===
+Once a new revision of a document is created it cannot be overwritten anymore.
+It can just be superseeded by another, newer revision while the old revision is still
+kept. But sometimes it is desireable to just replace a revision, though.
+
+This can be done by saving the current document state as a preliminary revision. Such
+revisions will never be replicated because they will eventually be replaced or deleted.
+There can be also be more than one preliminary revision per document.
+
+
 

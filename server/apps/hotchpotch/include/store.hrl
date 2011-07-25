@@ -16,18 +16,14 @@
 
 -record(revision,
 	{
-		flags=0,  % integer(): reserved (0)
-		parts,    % [{FourCC::binary(), Hash::guid()}]
-		parents,  % [Rev::guid()]: Parent revisions
-		mtime,    % interger(): Seconds since epoch (unix date, UTC)
-		type,     % binary()
-		creator,  % binary()
-		links     % {SDL, WDL, SRL, WRL, DocMap}
-		          %  SDL = [Doc::guid()]: Strong document links
-		          %  WDL = [Doc::guid()]: Weak document links
-		          %  SRL = [Rev::guid()]: Strong revision links
-		          %  WRL = [Rev::guid()]: Weak revision links
-		          %  DocMap = orddict(Doc->[Rev]): Document map snapshot
+		flags=0,   % integer(): reserved (0)
+		parts,     % [{FourCC::binary(), Hash::guid()}]
+		parents,   % [Rev::guid()]: Parent revisions
+		mtime,     % interger(): Seconds since epoch (unix date, UTC)
+		type,      % binary()
+		creator,   % binary()
+		doc_links, % [Doc::guid()]
+		rev_links  % [Rev::guid()]
 	}).
 
 
@@ -47,6 +43,7 @@
 		mtime,
 		type,
 		creator,
-		links
+		doc_links,
+		rev_links
 	}).
 

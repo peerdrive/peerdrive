@@ -22,7 +22,7 @@
 	put_rev_commit/1]).
 -export([close/1, commit/2, create/4, fork/4, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
-	write/4, suspend/2, get_links/1, set_links/2]).
+	write/4, suspend/2, get_links/1, set_links/3]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/2, sync_set_anchor/3, sync_finish/2]).
 -export([hash_revision/1]).
@@ -209,13 +209,13 @@ get_parents(Handle) ->
 set_parents(Handle, Parents) ->
 	call_store(Handle, {set_parents, Parents}).
 
-% {ok, {SDL, WDL, SRL, WRL, DocMap}} | {error, Reason}
+% {ok, {DocLinks, RevLinks}} | {error, Reason}
 get_links(Handle) ->
 	call_store(Handle, get_links).
 
 % ok | {error, Reason}
-set_links(Handle, Links) ->
-	call_store(Handle, {set_links, Links}).
+set_links(Handle, DocLinks, RevLinks) ->
+	call_store(Handle, {set_links, DocLinks, RevLinks}).
 
 %% @doc Commit a new revision
 %%
@@ -451,21 +451,12 @@ hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
 	BinParents = hash_revision_list(Revision#revision.parents),
 	BinType = hash_revision_string(Revision#revision.type),
 	BinCreator = hash_revision_string(Revision#revision.creator),
-	{SDL, WDL, SRL, WRL, DocMap} = Revision#revision.links,
-	BinSDL = hash_revision_list(SDL),
-	BinWDL = hash_revision_list(WDL),
-	BinSRL = hash_revision_list(SRL),
-	BinWRL = hash_revision_list(WRL),
-	BinDocMap = lists:foldl(
-		fun({Doc, RevList}, Acc) ->
-			<<Acc/binary, Doc/binary, (hash_revision_list(RevList))/binary>>
-		end,
-		<<(length(DocMap)):32/little>>,
-		DocMap),
+	BinDL = hash_revision_list(Revision#revision.doc_links),
+	BinRL = hash_revision_list(Revision#revision.rev_links),
 	binary_part(
 		crypto:sha(<<Flags:32/little, BinParts/binary, BinParents/binary,
-			Mtime:64/little, BinType/binary, BinCreator/binary, BinSDL/binary,
-			BinWDL/binary, BinSRL/binary, BinWRL/binary, BinDocMap/binary>>),
+			Mtime:64/little, BinType/binary, BinCreator/binary, BinDL/binary,
+			BinRL/binary>>),
 		0,
 		16).
 

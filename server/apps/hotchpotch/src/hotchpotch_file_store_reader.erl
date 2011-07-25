@@ -30,10 +30,11 @@
 
 start_link(Path, Revision, User) ->
 	#revision{
-		parts   = Parts,
-		parents = Parents,
-		type    = Type,
-		links   = Links
+		parts     = Parts,
+		parents   = Parents,
+		type      = Type,
+		doc_links = DocLinks,
+		rev_links = RevLinks
 	} = Revision,
 	State = #state{
 		handles = dict:new(),
@@ -42,7 +43,7 @@ start_link(Path, Revision, User) ->
 		user    = User,
 		type    = Type,
 		parents = Parents,
-		links   = Links
+		links   = {DocLinks, RevLinks}
 	},
 	gen_server:start_link(?MODULE, State, []).
 

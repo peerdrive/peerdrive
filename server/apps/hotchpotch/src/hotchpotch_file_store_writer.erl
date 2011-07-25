@@ -65,7 +65,7 @@ handle_call(get_parents, _From, S) ->
 	{reply, {ok, S#ws.baserevs}, S};
 
 handle_call(get_links, _From, S) ->
-	{reply, {ok, S#ws.links}, S};
+	{reply, {ok, {S#ws.doc_links, S#ws.rev_links}}, S};
 
 % the following calls are only allowed when still writable
 handle_call(_Request, _From, S = #ws{readonly=true}) ->
@@ -105,8 +105,8 @@ handle_call({suspend, Mtime}, _From, S) ->
 handle_call({set_type, Type}, _From, S) ->
 	{reply, ok, S#ws{type=Type}};
 
-handle_call({set_links, Links}, _From, S) ->
-	{reply, ok, S#ws{links=Links}};
+handle_call({set_links, DocLinks, RevLinks}, _From, S) ->
+	{reply, ok, S#ws{doc_links=DocLinks, rev_links=RevLinks}};
 
 handle_call({set_parents, Parents}, _From, S) ->
 	{reply, ok, S#ws{baserevs=Parents}}.
@@ -248,13 +248,15 @@ close_reader(ClosePart, Readers) ->
 do_commit(Fun, S, Mtime) ->
 	S2 = close_and_move(S),
 	Revision = #revision{
-		flags   = S2#ws.flags,
-		parts   = lists:usort(dict:to_list(S2#ws.orig)),
-		parents = lists:usort(S2#ws.baserevs),
-		mtime   = Mtime,
-		type    = S2#ws.type,
-		creator = S2#ws.creator,
-		links   = S2#ws.links},
+		flags     = S2#ws.flags,
+		parts     = lists:usort(dict:to_list(S2#ws.orig)),
+		parents   = lists:usort(S2#ws.baserevs),
+		mtime     = Mtime,
+		type      = S2#ws.type,
+		creator   = S2#ws.creator,
+		doc_links = S2#ws.doc_links,
+		rev_links = S2#ws.rev_links
+	},
 	case Fun(S2#ws.server, S2#ws.doc, S2#ws.prerev, Revision) of
 		{ok, _Rev} = Reply ->
 			{reply, Reply, S2#ws{readonly=true}};

@@ -370,38 +370,30 @@ do_stat(Body, RetPath) ->
 	Reply = case hotchpotch_broker:stat(Rev, hotchpotch_broker:get_stores(Stores)) of
 		{ok, _Errors, Stat} = Result ->
 			#rev_stat{
-				flags   = Flags,
-				parts   = Parts,
-				parents = Parents,
-				mtime   = Mtime,
-				type    = TypeCode,
-				creator = CreatorCode,
-				links   = {SDL, WDL, SRL, WRL, DocMap}
+				flags     = Flags,
+				parts     = Parts,
+				parents   = Parents,
+				mtime     = Mtime,
+				type      = TypeCode,
+				creator   = CreatorCode,
+				doc_links = DocLinks,
+				rev_links = RevLinks
 			} = Stat,
 			ReplyParts = encode_list(
 				fun ({FourCC, Size, Hash}) ->
 					<<FourCC/binary, Size:64, Hash/binary>>
 				end,
 				Parts),
-			BinDocMap = encode_list_32(
-				fun ({Doc, Revs}) ->
-					<<Doc/binary, (encode_list(Revs))/binary>>
-				end,
-				DocMap),
-			ReplyLinks = <<
-				(encode_list_32(SDL))/binary, (encode_list_32(WDL))/binary,
-				(encode_list_32(SRL))/binary, (encode_list_32(WRL))/binary,
-				BinDocMap/binary>>,
-			ReplyParents = encode_list(Parents),
 			<<
 				(encode_broker_result(Result))/binary,
 				Flags:32,
 				ReplyParts/binary,
-				ReplyParents/binary,
+				(encode_list(Parents))/binary,
 				Mtime:64,
 				(encode_string(TypeCode))/binary,
 				(encode_string(CreatorCode))/binary,
-				ReplyLinks/binary
+				(encode_list_32(DocLinks))/binary,
+				(encode_list_32(RevLinks))/binary
 			>>;
 
 		Error ->
