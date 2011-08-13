@@ -16,14 +16,14 @@
 
 -record(revision,
 	{
-		flags=0,   % integer(): reserved (0)
-		parts,     % [{FourCC::binary(), Hash::guid()}]
-		parents,   % [Rev::guid()]: Parent revisions
-		mtime,     % interger(): Seconds since epoch (unix date, UTC)
-		type,      % binary()
-		creator,   % binary()
-		doc_links, % [Doc::guid()]
-		rev_links  % [Rev::guid()]
+		flags = 0,      % integer(): reserved (0)
+		parts = [],     % [{FourCC::binary(), Hash::guid()}]
+		parents = [],   % [Rev::guid()]: Parent revisions
+		mtime = 0,      % interger(): Seconds since epoch (unix date, UTC)
+		type = <<>>,    % binary()
+		creator = <<>>, % binary()
+		doc_links = [], % [Doc::guid()]
+		rev_links = []  % [Rev::guid()]
 	}).
 
 

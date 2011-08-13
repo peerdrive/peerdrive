@@ -14,25 +14,22 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(hotchpotch_file_store_forwarder).
+-module(hotchpotch_file_store_fwd).
 -behaviour(gen_server).
 
--export([start_link/5]).
+-export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--include("store.hrl").
-
--record(state, {store, doc, tmpdoc, revpath}).
+-record(state, {store, did, revpath}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Store, Doc, TmpDoc, RevPath, User) ->
+start_link(DId, RevPath, User) ->
 	State = #state{
-		store   = Store,
-		doc     = Doc,
-		tmpdoc  = TmpDoc,
+		store   = self(),
+		did     = DId,
 		revpath = RevPath
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
@@ -54,39 +51,35 @@ handle_call(commit, _From, S) ->
 
 % returns nothing
 handle_call(abort, _From, S) ->
-	do_abort(S),
 	{stop, normal, ok, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
-	do_abort(S),
 	case From of
 		Store -> {stop, {orphaned, Reason}, S};
 		_User -> {stop, normal, S}
 	end.
+
+
+terminate(_Reason, #state{store=Store, revpath=RevPath}) ->
+	lists:foreach(
+		fun(RId) -> hotchpotch_file_store:rev_unlock(Store, RId) end,
+		RevPath).
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-handle_cast(_, State)    -> {stop, enotsup, State}.
+handle_cast(_, State)    -> {noreply, State}.
 code_change(_, State, _) -> {ok, State}.
-terminate(_, _)          -> ok.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_commit(#state{store=Store, revpath=RevPath} = S) ->
-	[Rev | _] = RevPath,
-	Reply = hotchpotch_file_store:forward_commit(Store, S#state.doc, RevPath),
-	hotchpotch_store:delete_doc(Store, S#state.tmpdoc, Rev),
-	Reply.
-
-
-do_abort(#state{store=Store, tmpdoc=TmpDoc, revpath=RevPath}) ->
-	[Rev | _] = RevPath,
-	hotchpotch_store:delete_doc(Store, TmpDoc, Rev).
+do_commit(#state{store=Store, did=DId, revpath=RevPath}) ->
+	hotchpotch_file_store:forward_commit(Store, DId, RevPath).
 

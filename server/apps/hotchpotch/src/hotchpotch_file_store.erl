@@ -17,32 +17,34 @@
 -module(hotchpotch_file_store).
 -behaviour(gen_server).
 
--export([start_link/2, stop/1, dump/1, fsck/1, gc/1]).
+-export([start_link/2, stop/1, fsck/1, gc/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
-% Functions used by helper processes (reader/writer/...)
--export([commit/4, suspend/4, forward_commit/3, insert_rev/3, lock/2, unlock/2,
-	unhide/2]).
+% Functions used by helper processes (io/forwarder/importer)
+-export([commit/4, doc_unlock/2, forward_commit/3, part_get/2, part_lock/2,
+	part_put/3, part_unlock/2, put_rev_commit/3, rev_unlock/2, suspend/4,
+	tmp_name/1]).
 
 -include("store.hrl").
--include("file_store.hrl").
 -include_lib("kernel/include/file.hrl").
 
 -record(state, {
-	path,       % string,  base directory
-	guid,       % binary,  GUID of the store
-	gen,        % integer, Generation of the store
-	uuids,      % dict: Document --> {Revision, PreRevs, Generation}
-	revisions,  % dict: Revision --> {refcount, #revision{} | stub}
-	parts,      % dict: PartHash --> refcount
-	peers,      % dict: GUID --> Generation
-	synclocks,  % dict: GUID --> pid()
-	locks,      % orddict: PartHash --> LockCount
-	hidden=[],  % list, documents exempted from garbage collection
-	changed=false
+	path,
+	sid,
+	gen,
+	gc_tmr,
+	gc_gen,
+	doc_tbl,  % ets: {Doc::DId, Rev::RId, [PreRev::RId], Generation}
+	rev_tbl,  % ets: {Rev::RId, #revision{}}
+	part_tbl, % dets: {Part::PId, Content::binary() | Size::int()}
+	peer_tbl, % ets: {Store::Sid, Generation}
+	objlocks, % dict: {doc, DId} | {part, PId} -> Count::int()
+	synclocks % dict: SId --> pid()
 }).
 
--define(SYNC_INTERVAL, 5000).
+-define(GC_SLACK_TIME, 60*1000). % delay until gc runs (reset on new activity)
+-define(GC_MIN_UPDATES, 100).    % gc will be scheduled after this number of updates
+-define(GC_MAX_UPDATES, 1000).   % gc is forced after this number of updates
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Server state management...
@@ -56,36 +58,23 @@ start_link(Id, {Path, Name}) ->
 init({Id, Path, Name}) ->
 	case filelib:is_dir(Path) of
 		true ->
-			Guid      = load_guid(Path),
-			Gen       = load_gen(Path),
-			Uuids     = load_uuids(Path),
-			Revisions = load_revisions(Path),
-			Parts     = load_parts(Path),
-			Peers     = load_peers(Path),
-			State     = #state{
+			S = #state{
 				path      = Path,
-				guid      = Guid,
-				gen       = Gen,
-				uuids     = Uuids,
-				revisions = Revisions,
-				parts     = Parts,
-				peers     = Peers,
 				synclocks = dict:new(),
-				locks     = orddict:new()
+				objlocks  = dict:new()
 			},
-			hotchpotch_volman:reg_store(Id, Guid),
+			S2 = load_store(Id, S),
+			S3 = check_root_doc(Name, S2),
+			hotchpotch_volman:reg_store(Id, S3#state.sid),
 			process_flag(trap_exit, true),
-			{ok, check_root_doc(State, Name)};
-			
+			{ok, S3};
+
 		false ->
 			{stop, enoent}
 	end.
 
 stop(Store) ->
 	gen_server:cast(Store, stop).
-
-dump(Store) ->
-	gen_server:cast(Store, dump).
 
 fsck(Store) ->
 	gen_server:cast(Store, fsck).
@@ -97,268 +86,184 @@ gc(Store) ->
 %% Functions used by helper processes...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% @doc Commit a new revision into the store and update the Doc to point to the
-%%      new revision instead.
-%%
-%% @spec commit(Store, Doc, PreRev, Revision) -> Result
-%%       Store = pid()
-%%       Doc, PreRev = guid()
-%%       Revision = #revision
-%%       Result = {ok, Rev::guid()} | {error, Error::ecode()}
+tmp_name(Store) ->
+	gen_server:call(Store, tmp_name, infinity).
+
+doc_unlock(Store, DId) ->
+	gen_server:cast(Store, {unlock, {doc, DId}}).
+
+rev_unlock(Store, RId) ->
+	gen_server:cast(Store, {unlock, {rev, RId}}).
+
+part_lock(Store, PId) ->
+	gen_server:call(Store, {lock, {part, PId}}, infinity).
+
+part_unlock(Store, PId) ->
+	gen_server:cast(Store, {unlock, {part, PId}}).
+
+part_put(Store, PId, Content) ->
+	gen_server:call(Store, {part_put, PId, Content}, infinity).
+
+part_get(Store, PId) ->
+	gen_server:call(Store, {part_get, PId}, infinity).
+
 commit(Store, Doc, PreRev, Revision) ->
 	gen_server:call(Store, {commit, Doc, PreRev, Revision}, infinity).
 
-%% @doc Queue a preliminary revision.
-%%
-%% @spec suspend(Store, Doc, PreRev, Revision) -> Result
-%%       Store = pid()
-%%       Doc, PreRev = guid()
-%%       Revision = #revision
-%%       Result = {ok, Rev::guid()} | {error, Error::ecode()}
 suspend(Store, Doc, PreRev, Revision) ->
 	gen_server:call(Store, {suspend, Doc, PreRev, Revision}, infinity).
-
 
 forward_commit(Store, Doc, RevPath) ->
 	gen_server:call(Store, {forward_commit, Doc, RevPath}, infinity).
 
-%% @doc Import a new revision into the store.
-%%
-%% @spec insert_rev(Store, Rev, Revision) -> Result
-%%       Store = pid()
-%%       Rev = guid()
-%%       Revision = #revision
-%%       Result = ok | {error, ecode()}
-insert_rev(Store, Rev, Revision) ->
-	gen_server:call(Store, {insert_rev, Rev, Revision}, infinity).
-
-%% @doc Lock a part to prevent it from being evicted when getting
-%%      unreferenced.
-lock(Store, Hash) ->
-	gen_server:call(Store, {lock, Hash}, infinity).
-
-%% @doc Unlock a previously locked part. If the part is not referenced by any
-%%      revision it will be deleted.
-unlock(Store, Hash) ->
-	gen_server:cast(Store, {unlock, Hash}).
-
-%% @doc Expose a document to garbage collection
-unhide(Store, Doc) ->
-	gen_server:cast(Store, {unhide, Doc}).
-
+put_rev_commit(Store, RId, Rev) ->
+	gen_server:call(Store, {put_rev_commit, RId, Rev}, infinity).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-handle_call(Request, From, State) ->
-	case handle_call_internal(Request, From, State) of
-		{reply, Reply, NewState} = Result ->
-			case NewState#state.changed of
-				true  -> {reply, Reply, NewState, ?SYNC_INTERVAL};
-				false -> Result
-			end;
+handle_call(guid, _From, S) ->
+	{reply, S#state.sid, S};
 
-		{noreply, NewState} = Result ->
-			case NewState#state.changed of
-				true  -> {noreply, NewState, ?SYNC_INTERVAL};
-				false -> Result
-			end;
-
-		Result ->
-			Result
-	end.
-
-handle_cast(Request, State) ->
-	case handle_cast_internal(Request, State) of
-		{noreply, NewState} = Result ->
-			case NewState#state.changed of
-				true  -> {noreply, NewState, ?SYNC_INTERVAL};
-				false -> Result
-			end;
-
-		Result ->
-			Result
-	end.
-
-
-handle_info(Info, State) ->
-	case handle_info_internal(Info, State) of
-		{noreply, NewState} = Result ->
-			case NewState#state.changed of
-				true  -> {noreply, NewState, ?SYNC_INTERVAL};
-				false -> Result
-			end;
-
-		Result ->
-			Result
-	end.
-
-
-handle_call_internal(guid, _From, S) ->
-	{reply, S#state.guid, S};
-
-handle_call_internal(statfs, _From, S) ->
+handle_call(statfs, _From, S) ->
 	{reply, do_statfs(S), S};
 
-% returns `{ok, Rev} | error'
-handle_call_internal({lookup, Doc}, _From, S) ->
-	case dict:find(Doc, S#state.uuids) of
-		{ok, {Rev, PreRevs, _Gen}} ->
-			{reply, {ok, Rev, PreRevs}, S};
-		error ->
+handle_call({lookup, DId}, _From, S) ->
+	case ets:lookup(S#state.doc_tbl, DId) of
+		[{_DId, RId, PreRIds, _Gen}] ->
+			{reply, {ok, RId, PreRIds}, S};
+		[] ->
 			{reply, error, S}
 	end;
 
-handle_call_internal({contains, Rev}, _From, S) ->
-	Reply = case dict:find(Rev, S#state.revisions) of
-		{ok, {_, stub}} -> false;
-		{ok, {_, _}}    -> true;
-		error           -> false
-	end,
+handle_call({contains, RId}, _From, S) ->
+	Reply = ets:member(S#state.rev_tbl, RId),
 	{reply, Reply, S};
 
-handle_call_internal({stat, Rev}, _From, S) ->
+handle_call({stat, Rev}, _From, S) ->
 	Reply = do_stat(Rev, S),
 	{reply, Reply, S};
 
-% returns `{ok, Handle} | {error, Reason}'
-handle_call_internal({peek, Rev}, From, S) ->
+handle_call({peek, RId}, From, S) ->
 	{User, _} = From,
-	Reply = do_peek(S, Rev, User),
-	{reply, Reply, S};
+	{Reply, S2} = do_peek(RId, User, S),
+	{reply, Reply, S2};
 
-handle_call_internal({create, Doc, Type, Creator}, From, S) ->
+handle_call({create, DId, Type, Creator}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_create(S, Doc, Type, Creator, User),
+	{Reply, S2} = do_create(DId, Type, Creator, User, S),
 	{reply, Reply, S2};
 
-handle_call_internal({fork, Doc, StartRev, Creator}, From, S) ->
+handle_call({fork, DId, StartRId, Creator}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_fork(S, Doc, StartRev, Creator, User),
+	{Reply, S2} = do_fork(DId, StartRId, Creator, User, S),
 	{reply, Reply, S2};
 
-handle_call_internal({update, Doc, StartRev, Creator}, From, S) ->
+handle_call({update, DId, StartRId, Creator}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_update(S, Doc, StartRev, Creator, User),
+	{Reply, S2} = do_update(DId, StartRId, Creator, User, S),
 	{reply, Reply, S2};
 
-handle_call_internal({resume, Doc, PreRev, Creator}, From, S) ->
+handle_call({resume, DId, PreRId, Creator}, From, S) ->
 	{User, _} = From,
-	{S2, Reply} = do_write_start_resume(S, Doc, PreRev, Creator, User),
+	{Reply, S2} = do_resume(DId, PreRId, Creator, User, S),
 	{reply, Reply, S2};
 
-handle_call_internal({forget, Doc, PreRev}, _From, S) ->
-	{S2, Reply} = do_forget(S, Doc, PreRev),
+handle_call({forget, DId, PreRId}, _From, S) ->
+	{Reply, S2} = do_forget(DId, PreRId, S),
 	{reply, Reply, S2};
 
-handle_call_internal({delete_rev, Rev}, _From, S) ->
-	{S2, Reply} = do_delete_rev(S, Rev),
+handle_call({delete_rev, RId}, _From, S) ->
+	{Reply, S2} = do_delete_rev(RId, S),
 	{reply, Reply, S2};
 
-handle_call_internal({delete_doc, Doc, Rev}, _From, S) ->
-	{S2, Reply} = do_delete_doc(S, Doc, Rev),
+handle_call({delete_doc, DId, RId}, _From, S) ->
+	{Reply, S2} = do_delete_doc(DId, RId, S),
 	{reply, Reply, S2};
 
-handle_call_internal({put_doc, Doc, Rev}, _From, S) ->
-	{S2, Reply} = do_put_doc(S, Doc, Rev),
+handle_call({put_doc, DId, RId}, _From, S) ->
+	{Reply, S2} = do_put_doc(DId, RId, S),
 	{reply, Reply, S2};
 
-handle_call_internal({forward_doc, Doc, RevPath}, From, S) ->
-	{User, _} = From,
-	{S2, Reply} = do_forward_doc(S, Doc, RevPath, User),
+handle_call({forward_doc, DId, RevPath}, {User, _}, S) ->
+	{Reply, S2} = do_forward_doc(DId, RevPath, User, S),
 	{reply, Reply, S2};
 
-handle_call_internal({put_rev, Rev, Revision}, From, S) ->
-	{User, _} = From,
-	{S2, Reply} = do_put_rev(S, Rev, Revision, User),
+handle_call({put_rev, RId, Rev}, {User, _}, S) ->
+	{Reply, S2} = do_put_rev(RId, Rev, User, S),
 	{reply, Reply, S2};
 
-handle_call_internal({sync_get_changes, PeerGuid}, {Caller, _}, S) ->
-	{S2, Reply} = do_sync_get_changes(S, PeerGuid, Caller),
+handle_call({sync_get_changes, PeerSId}, {Caller, _}, S) ->
+	{Reply, S2} = do_sync_get_changes(PeerSId, Caller, S),
 	{reply, Reply, S2};
 
-handle_call_internal({sync_set_anchor, PeerGuid, SeqNum}, _From, S) ->
-	S2 = do_sync_set_anchor(S, PeerGuid, SeqNum),
+handle_call({sync_set_anchor, PeerSId, SeqNum}, _From, S) ->
+	do_sync_set_anchor(PeerSId, SeqNum, S),
+	{reply, ok, S};
+
+handle_call({sync_finish, PeerSId}, {Caller, _}, S) ->
+	{Reply, S2} = do_sync_finish(PeerSId, Caller, S),
+	{reply, Reply, S2};
+
+handle_call(gc, _From, S) ->
+	do_gc(S),
+	{reply, ok, S};
+
+% internal: lock object
+handle_call({lock, ObjId}, _From, S) ->
+	S2 = do_lock(ObjId, S),
 	{reply, ok, S2};
 
-handle_call_internal({sync_finish, PeerGuid}, {Caller, _}, S) ->
-	{S2, Reply} = do_sync_finish(S, PeerGuid, Caller),
-	{reply, Reply, S2};
-
-handle_call_internal(gc, _From, S) ->
-	S2 = do_gc(S),
-	{reply, ok, S2};
-
-% internal
-handle_call_internal({lock, Hash}, _From, S) ->
-	S2 = S#state{locks = orddict:update_counter(Hash, 1, S#state.locks)},
-	{reply, ok, S2};
-
-% internal: ok | {error, Reason}
-handle_call_internal({forward_commit, Doc, RevPath}, _From, S) ->
-	{S2, Reply} = do_forward_doc_commit(S, Doc, RevPath),
-	{reply, Reply, S2};
-
-% internal: ok | {error, Reason}
-handle_call_internal({insert_rev, Rev, Revision}, _From, S) ->
-	{S2, Reply} = do_put_rev_commit(S, Rev, Revision),
-	{reply, Reply, S2};
+% internal: generate tmp filename
+handle_call(tmp_name, _From, S) ->
+	{reply, hotchpotch_util:gen_tmp_name(S#state.path), S};
 
 % internal: commit a new revision
-handle_call_internal({commit, Doc, PreRev, Revision}, _From, S) ->
-	{S2, Reply} = do_commit(S, Doc, PreRev, Revision),
+handle_call({commit, DId, PreRId, Rev}, _From, S) ->
+	{Reply, S2} = do_commit(DId, PreRId, Rev, S),
 	{reply, Reply, S2};
 
 % internal: queue a preliminary revision
-handle_call_internal({suspend, Doc, PreRev, Revision}, _From, S) ->
-	{S2, Reply} = do_suspend(S, Doc, PreRev, Revision),
+handle_call({suspend, DId, PreRId, Rev}, _From, S) ->
+	{Reply, S2} = do_suspend(DId, PreRId, Rev, S),
 	{reply, Reply, S2};
 
-% internal: add part refcount
-handle_call_internal({parts_ref_inc, PartHashes}, _From, S) ->
-	S2 = do_parts_ref_inc(S, PartHashes),
-	{reply, ok, S2}.
+% internal: ok | {error, Reason}
+handle_call({forward_commit, DId, RevPath}, _From, S) ->
+	{Reply, S2} = do_forward_doc_commit(DId, RevPath, S),
+	{reply, Reply, S2};
 
+% internal: ok | {error, Reason}
+handle_call({put_rev_commit, RId, Rev}, _From, S) ->
+	{Reply, S2} = do_put_rev_commit(RId, Rev, S),
+	{reply, Reply, S2};
 
-% internal: decrease part refcount
-handle_cast_internal({part_ref_dec, PartHash}, S) ->
-	S2 = do_part_ref_dec(S, PartHash),
-	{noreply, S2};
+% internal: put part into database
+handle_call({part_put, PId, Content}, _From, S) ->
+	Reply = do_part_put(PId, Content, S),
+	{reply, Reply, S};
+
+% internal: get part
+handle_call({part_get, PId}, _From, S) ->
+	Reply = do_part_get(PId, S),
+	{reply, Reply, S}.
+
 
 % internal: unlock a part
-handle_cast_internal({unlock, Hash}, S) ->
-	S2 = do_unlock(S, Hash),
+handle_cast({unlock, ObjId}, S) ->
+	S2 = do_unlock(ObjId, S),
 	{noreply, S2};
 
-% internal: expose to gc
-handle_cast_internal({unhide, Doc}, S) ->
-	S2 = do_unhide(S, Doc),
-	{noreply, S2};
-
-% internal: decrease refcount of a revision
-handle_cast_internal({revision_ref_dec, Rev}, S) ->
-	S2 = do_revision_ref_dec(S, Rev),
-	{noreply, S2};
-
-handle_cast_internal(dump, S) ->
-	do_dump(S),
-	{noreply, S};
-
-handle_cast_internal(fsck, S) ->
+handle_cast(fsck, S) ->
 	do_fsck(S),
 	{noreply, S};
 
-handle_cast_internal(stop, S) ->
+handle_cast(stop, S) ->
 	{stop, normal, S}.
 
 
-handle_info_internal(timeout, S) ->
-	S2 = do_gc(S),
-	do_checkpoint(S2),
-	{noreply, S2#state{changed=false}};
-
-handle_info_internal({'EXIT', From, Reason}, S) ->
+handle_info({'EXIT', From, Reason}, S) ->
 	case sync_trap_exit(From, S) of
 		{ok, S2} ->
 			% a sync process went away
@@ -371,73 +276,27 @@ handle_info_internal({'EXIT', From, Reason}, S) ->
 				shutdown -> {noreply, S};
 				_ ->        {stop, {eunexpected, Reason}, S}
 			end
-	end.
+	end;
+
+handle_info({timeout, _, gc}, S) ->
+	do_gc(S),
+	{noreply, S#state{gc_gen=S#state.gen}}.
 
 
-terminate(Reason, State) ->
-	case Reason of
-		shutdown -> do_checkpoint(State);
-		normal   -> do_checkpoint(State);
-		_        ->
-			error_logger:error_msg("store: Unexpected termination, not syncing~n")
-	end.
+terminate(_Reason, S) ->
+	save_store(clean, S),
+	close_store(S).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
 code_change(_, State, _) -> {ok, State}.
 
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Local functions...
+%% Service implementations...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-check_root_doc(S, Name) ->
-	case dict:is_key(S#state.guid, S#state.uuids) of
-		true ->
-			S;
-		false ->
-			RootContent = dict:new(),
-			{S2, ContentHash} = crd_write_part(S, RootContent),
-			Annotation1 = dict:new(),
-			Annotation2 = dict:store(<<"title">>, list_to_binary(Name), Annotation1),
-			Annotation3 = dict:store(<<"comment">>, list_to_binary("<<Initial store creation>>"), Annotation2),
-			Sync = dict:store(<<"sticky">>, true, dict:new()),
-			RootMeta1 = dict:new(),
-			RootMeta2 = dict:store(<<"org.hotchpotch.annotation">>, Annotation3, RootMeta1),
-			RootMeta3 = dict:store(<<"org.hotchpotch.sync">>, Sync, RootMeta2),
-			{S3, MetaHash} = crd_write_part(S2, RootMeta3),
-			Revision = #revision{
-				parts     = [{<<"HPSD">>, ContentHash}, {<<"META">>, MetaHash}],
-				parents   = [],
-				mtime     = hotchpotch_util:get_time(),
-				type      = <<"org.hotchpotch.store">>,
-				creator   = <<"org.hotchpotch.file-store">>,
-				doc_links = [],
-				rev_links = []
-			},
-			Rev = hotchpotch_store:hash_revision(Revision),
-			S4 = S3#state{revisions=dict:store(Rev, {1, Revision}, S3#state.revisions)},
-			Gen = S4#state.gen,
-			S4#state{
-				gen     = Gen+1,
-				uuids   = dict:store(S4#state.guid, {Rev, [], Gen}, S4#state.uuids),
-				changed = true
-			}
-	end.
-
-crd_write_part(S, RawContent) ->
-	Content = hotchpotch_struct:encode(RawContent),
-	Hash = binary_part(crypto:sha(Content), 0, 16),
-	Name = hotchpotch_util:build_path(S#state.path, Hash),
-	filelib:ensure_dir(Name),
-	file:write_file(Name, Content),
-	S2 = do_parts_ref_inc(S, [Hash]),
-	{S2, Hash}.
-
 
 do_statfs(_S) ->
 	% TODO: implement
@@ -449,826 +308,467 @@ do_statfs(_S) ->
 	}}.
 
 
-% returns `{ok, #stat{}} | {error, Reason}'
-do_stat(Rev, #state{revisions=Revisions, path=Path}) ->
-	case dict:find(Rev, Revisions) of
-		% revision doesn't exist anymore on this store
-		{ok, {_, stub}} ->
-			{error, enoent};
-
-		% got'ya
-		{ok, {_, Revision}} ->
-			Parts = lists:foldl(
-				fun ({FourCC, Hash}, AccIn) ->
-					case file:read_file_info(hotchpotch_util:build_path(Path, Hash)) of
-						{ok, FileInfo} ->
-							[{FourCC, FileInfo#file_info.size, Hash} | AccIn];
-						{error, _} ->
-							AccIn
-					end
-				end,
-				[],
-				Revision#revision.parts),
+do_stat(RId, #state{rev_tbl=RevTbl} = S) ->
+	case ets:lookup(RevTbl, RId) of
+		[{_, Rev}] ->
+			Parts = [ {FourCC, part_size(PId, S), PId} ||
+				{FourCC, PId} <- Rev#revision.parts ],
 			{ok, #rev_stat{
-				flags     = Revision#revision.flags,
+				flags     = Rev#revision.flags,
 				parts     = Parts,
-				parents   = Revision#revision.parents,
-				mtime     = Revision#revision.mtime,
-				type      = Revision#revision.type,
-				creator   = Revision#revision.creator,
-				doc_links = Revision#revision.doc_links,
-				rev_links = Revision#revision.rev_links
+				parents   = Rev#revision.parents,
+				mtime     = Rev#revision.mtime,
+				type      = Rev#revision.type,
+				creator   = Rev#revision.creator,
+				doc_links = Rev#revision.doc_links,
+				rev_links = Rev#revision.rev_links
 			}};
 
-		% completely unknown...
-		error ->
+		[] ->
 			{error, enoent}
 	end.
 
-do_peek(#state{revisions=Revisions, path=Path}, Rev, User) ->
-	case dict:find(Rev, Revisions) of
-		{ok, {_, stub}} ->
-			{error, enoent};
 
-		{ok, {_, Revision}} ->
-			% TODO: lock parts
-			hotchpotch_file_store_reader:start_link(Path, Revision, User);
+do_peek(RId, User, #state{rev_tbl=RevTbl} = S) ->
+	case ets:lookup(RevTbl, RId) of
+		[{_, Rev}] ->
+			S2 = lists:foldl(
+				fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+				S,
+				Rev#revision.parts),
+			{ok, _} = Reply = hotchpotch_file_store_io:start_link(Rev, User),
+			{Reply, S2};
 
-		error ->
-			{error, enoent}
+		[] ->
+			{{error, enoent}, S}
 	end.
 
-%%% Delete %%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_forget(#state{guid=Guid, uuids=Uuids} = S, Doc, PreRev) ->
-	case dict:find(Doc, Uuids) of
-		{ok, {Rev, PreRevs, _Gen}} ->
-			case lists:member(PreRev, PreRevs) of
-				true ->
-					revision_ref_dec(PreRev),
-					NewPreRevs = lists:filter(
-						fun(R) -> R =/= PreRev end,
-						PreRevs),
-					hotchpotch_vol_monitor:trigger_mod_doc(Guid, Doc),
-					Gen = S#state.gen,
-					S2 = S#state{
-						gen     = Gen+1,
-						uuids   = dict:store(Doc, {Rev, NewPreRevs, Gen}, Uuids),
-						changed = true
+do_create(DId, Type, Creator, User, S) ->
+	Rev = #revision{type=Type, creator=Creator},
+	start_writer(DId, undefined, Rev, User, S).
+
+
+do_fork(DId, StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
+	case ets:lookup(RevTbl, StartRId) of
+		[{_, Rev}] ->
+			NewRev = Rev#revision{
+				parents = [StartRId],
+				creator = Creator
+			},
+			start_writer(DId, undefined, NewRev, User, S);
+
+		[] ->
+			{{error, enoent}, S}
+	end.
+
+
+do_update(DId, StartRId, Creator, User, S) ->
+	#state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S,
+	case ets:member(DocTbl, DId) of
+		true ->
+			case ets:lookup(RevTbl, StartRId) of
+				[{_, Rev}] ->
+					NewCreator = case Creator of
+						keep -> Rev#revision.creator;
+						_    -> Creator
+					end,
+					NewRev = Rev#revision{
+						parents = [StartRId],
+						creator = NewCreator
 					},
-					{S2, ok};
+					start_writer(DId, undefined, NewRev, User, S);
 
-				false ->
-					{S, {error, econflict}}
+				[] ->
+					{{error, enoent}, S}
 			end;
 
-		error ->
-			{S, {error, enoent}}
+		false ->
+			{{error, enoent}, S}
 	end.
 
 
-do_delete_rev(#state{guid=Guid, revisions=Revisions} = S, Rev) ->
-	case dict:find(Rev, Revisions) of
-		{ok, {_, stub}} ->
-			{S, {error, enoent}};
+do_resume(DId, PreRId, Creator, User, S) ->
+	#state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S,
+	case ets:lookup(DocTbl, DId) of
+		[{_, _, PreRevs, _}] ->
+			case lists:member(PreRId, PreRevs) of
+				true ->
+					case ets:lookup(RevTbl, PreRId) of
+						[{_, Rev}] ->
+							NewCreator = case Creator of
+								keep -> Rev#revision.creator;
+								_    -> Creator
+							end,
+							NewRev = Rev#revision{creator = NewCreator},
+							start_writer(DId, PreRId, NewRev, User, S);
 
-		{ok, {RefCount, Revision}} ->
-			hotchpotch_vol_monitor:trigger_rm_rev(Guid, Rev),
-			dispose_revision(Revision),
-			{
-				S#state{
-					revisions=dict:store(Rev, {RefCount, stub}, Revisions),
-					changed=true
-				},
-				ok
-			};
+						[] ->
+							{{error, enoent}, S}
+					end;
 
-		error ->
-			{S, {error, enoent}}
+				false ->
+					{{error, econflict}, S}
+			end;
+
+		[] ->
+			{{error, enoent}, S}
 	end.
 
 
-do_delete_doc(#state{guid=Guid, uuids=Uuids} = S, Doc, Rev) ->
-	case Doc of
-		Guid ->
-			{S, {error, eacces}};
+do_forget(DId, PreRId, #state{sid=SId, doc_tbl=DocTbl, gen=Gen} = S) ->
+	case ets:lookup(DocTbl, DId) of
+		[{_, RId, CurPreRIds, _Gen}] ->
+			case lists:member(PreRId, CurPreRIds) of
+				true ->
+					NewPreRIds = [ R || R <- CurPreRIds, R =/= PreRId ],
+					hotchpotch_vol_monitor:trigger_mod_doc(SId, DId),
+					ets:insert(DocTbl, {DId, RId, NewPreRIds, Gen}),
+					{ok, next_gen(S)};
+
+				false ->
+					{{error, econflict}, S}
+			end;
+
+		[] ->
+			{{error, enoent}, S}
+	end.
+
+
+do_delete_rev(RId, #state{sid=SId, rev_tbl=RevTbl} = S) ->
+	case ets:member(RevTbl, RId) of
+		true ->
+			hotchpotch_vol_monitor:trigger_rm_rev(SId, RId),
+			ets:delete(RevTbl, RId),
+			{ok, next_gen(S)};
+
+		false ->
+			{{error, enoent}, S}
+	end.
+
+
+do_delete_doc(DId, RId, #state{doc_tbl=DocTbl, sid=SId} = S) ->
+	case DId of
+		SId ->
+			{{error, eacces}, S};
 
 		_ ->
-			case dict:find(Doc, Uuids) of
-				{ok, {Rev, PreRevs, _Gen}} ->
-					hotchpotch_vol_monitor:trigger_rm_doc(Guid, Doc),
-					revision_ref_dec(Rev),
-					lists:foreach(fun(R) -> revision_ref_dec(R) end, PreRevs),
-					{S#state{ uuids=dict:erase(Doc, Uuids), changed=true}, ok};
+			case ets:lookup(DocTbl, DId) of
+				[{_, RId, _PreRevs, _Gen}] ->
+					hotchpotch_vol_monitor:trigger_rm_doc(SId, DId),
+					ets:delete(DocTbl, DId),
+					{ok, next_gen(S)};
 
-				{ok, {_OtherRev, _PreRevs, _Gen}} ->
-					{S, {error, econflict}};
+				[{_, _OtherRev, _PreRevs, _Gen}] ->
+					{{error, econflict}, S};
 
-				error ->
-					{S, {error, enoent}}
+				[] ->
+					{{error, enoent}, S}
 			end
 	end.
 
 
-%%% Dump %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-% #state{
-%   path:    base directory
-%   gen:     integer
-%   uuids:   dict: Document --> {Rev, PreRevs, Generation}
-%   revisions: dict: Revision --> {refcount, #revision | stub}
-%   parts:   dict: PartHash --> refcount
-%   peers:   dict: GUID --> Generation
-%   changed: Bool
-% }
-do_dump(S) ->
-	io:format("Guid: ~s~n", [hotchpotch_util:bin_to_hexstr(S#state.guid)]),
-	io:format("Gen:  ~p~n", [S#state.gen]),
-	io:format("Path: ~s~n", [S#state.path]),
-	io:format("Documents:~n"),
-	dict:fold(
-		fun (Doc, {Rev, PreRevs, Gen}, _) ->
-			io:format("    ~s -> ~s @ ~p~n", [
-				hotchpotch_util:bin_to_hexstr(Doc),
-				hotchpotch_util:bin_to_hexstr(Rev), Gen]),
-			lists:foreach(
-				fun(PreRev) ->
-					io:format("                                      + ~s~n",
-						[hotchpotch_util:bin_to_hexstr(PreRev)])
-				end,
-				PreRevs)
-		end,
-		ok, S#state.uuids),
-	io:format("Revisions:~n"),
-	dict:fold(
-		fun (Rev, {RefCount, Revision}, _) ->
-			io:format("    ~s #~w~n", [hotchpotch_util:bin_to_hexstr(Rev), RefCount]),
-			do_dump_revision(Revision)
-		end,
-		ok, S#state.revisions),
-	io:format("Parts:~n"),
-	dict:fold(
-		fun (Hash, RefCount, _) ->
-			io:format("    ~s #~w~n", [hotchpotch_util:bin_to_hexstr(Hash), RefCount])
-		end,
-		ok, S#state.parts),
-	io:format("Peers:~n"),
-	dict:fold(
-		fun (Guid, Gen, _) ->
-			io:format("    ~s @ ~w~n", [hotchpotch_util:bin_to_hexstr(Guid), Gen])
-		end,
-		ok, S#state.peers).
-
-
-% #revision{
-%   flags:     integer()
-%   parts:     [{PartFourCC, Hash}]
-%   parents:   [Rev]
-%   mitme:     {MegaSecs, Secs, MicroSecs}
-%   type:      Binary
-%   creator:   Binary
-%   doc_links: [Doc]
-%   rev_links: [Rev]
-% }
-do_dump_revision(Revision) ->
-	if
-		Revision == stub ->
-			ok;
-		true ->
-			%io:format("        Flags:~w~n", [Revision#revision.flags]),
-			io:format("        Parts:~n"),
-			lists:foreach(
-				fun ({FourCC, Hash}) ->
-					io:format("            ~s -> ~s~n", [FourCC,
-						hotchpotch_util:bin_to_hexstr(Hash)])
-				end,
-				Revision#revision.parts),
-			io:format("        Parents:~n"),
-			lists:foreach(
-				fun (Rev) ->
-					io:format("            ~s~n", [hotchpotch_util:bin_to_hexstr(Rev)])
-				end,
-				Revision#revision.parents),
-			io:format("        Doc Links:~n"),
-			lists:foreach(
-				fun (Rev) ->
-					io:format("            ~s~n", [hotchpotch_util:bin_to_hexstr(Rev)])
-				end,
-				Revision#revision.doc_links),
-			io:format("        Rev Links:~n"),
-			lists:foreach(
-				fun (Rev) ->
-					io:format("            ~s~n", [hotchpotch_util:bin_to_hexstr(Rev)])
-				end,
-				Revision#revision.rev_links)
-	end.
-
-
-%%% Creating & Writing %%%%%%%%%%%%%%%%
-
-% returns `{S2, {ok, Writer} | {error, Reason}}'
-do_write_start_create(S, Doc, Type, Creator, User) ->
-	State = #ws{
-		path      = S#state.path,
-		server    = self(),
-		flags     = 0,
-		doc       = Doc,
-		baserevs  = [],
-		type      = Type,
-		creator   = Creator,
-		orig      = dict:new(),
-		new       = dict:new(),
-		readers   = dict:new(),
-		doc_links = [],
-		rev_links = [],
-		locks     = []},
-	{S2, Writer} = start_writer(S, State, User),
-	{do_hide(S2, Doc), {ok, Writer}}.
-
-
-% returns `{S2, {ok, Writer} | {error, Reason}}'
-do_write_start_fork(S, Doc, StartRev, Creator, User) ->
-	case dict:find(StartRev, S#state.revisions) of
-		% err, don't known that one...
-		error ->
-			{S, {error, enoent}};
-		{ok, {_, stub}} ->
-			{S, {error, enoent}};
-
-		% load old values and start writer process
-		{ok, {_, Revision}} ->
-			Parts = dict:from_list(Revision#revision.parts),
-			State = #ws{
-				path      = S#state.path,
-				server    = self(),
-				flags     = Revision#revision.flags,
-				doc       = Doc,
-				baserevs  = [StartRev],
-				type      = Revision#revision.type,
-				creator   = Creator,
-				orig      = Parts,
-				new       = dict:new(),
-				readers   = dict:new(),
-				doc_links = Revision#revision.doc_links,
-				rev_links = Revision#revision.rev_links,
-				locks     = []},
-			{S2, Writer} = start_writer(S, State, User),
-			{do_hide(S2, Doc), {ok, Writer}}
-	end.
-
-
-% returns `{S2, {ok, Writer} | {error, Reason}}' where `Reason = econflict | enoent | ...'
-do_write_start_update(S, Doc, StartRev, Creator, User) ->
-	case dict:is_key(Doc, S#state.uuids) of
-		true ->
-			case dict:find(StartRev, S#state.revisions) of
-				error ->
-					{S, {error, enoent}};
-				{ok, {_, stub}} ->
-					{S, {error, enoent}};
-
-				{ok, {_, Revision}} ->
-					Parts = dict:from_list(Revision#revision.parts),
-					NewCreator = case Creator of
-						keep -> Revision#revision.creator;
-						_    -> Creator
-					end,
-					State = #ws{
-						path      = S#state.path,
-						server    = self(),
-						flags     = Revision#revision.flags,
-						doc       = Doc,
-						baserevs  = [StartRev],
-						type      = Revision#revision.type,
-						creator   = NewCreator,
-						orig      = Parts,
-						new       = dict:new(),
-						readers   = dict:new(),
-						doc_links = Revision#revision.doc_links,
-						rev_links = Revision#revision.rev_links,
-						locks     = []},
-					{S2, Writer} = start_writer(S, State, User),
-					{S2, {ok, Writer}}
-			end;
-
-		false ->
-			% unknown document
-			{S, {error, enoent}}
-	end.
-
-
-% returns `{S2, {ok, Writer} | {error, Reason}}'
-do_write_start_resume(S, Doc, PreRev, Creator, User) ->
-	case dict:find(Doc, S#state.uuids) of
-		{ok, {_Rev, PreRevs, _Gen}} ->
-			case lists:member(PreRev, PreRevs) of
-				true ->
-					case dict:fetch(PreRev, S#state.revisions) of
-						{_, stub} ->
-							{S, {error, enoent}};
-
-						{_, Revision} ->
-							Parts = dict:from_list(Revision#revision.parts),
-							NewCreator = case Creator of
-								keep -> Revision#revision.creator;
-								_    -> Creator
-							end,
-							State = #ws{
-								path      = S#state.path,
-								server    = self(),
-								flags     = Revision#revision.flags,
-								doc       = Doc,
-								prerev    = PreRev,
-								baserevs  = Revision#revision.parents,
-								type      = Revision#revision.type,
-								creator   = NewCreator,
-								orig      = Parts,
-								new       = dict:new(),
-								readers   = dict:new(),
-								doc_links = Revision#revision.doc_links,
-								rev_links = Revision#revision.rev_links,
-								locks     = []},
-							{S2, Writer} = start_writer(S, State, User),
-							{S2, {ok, Writer}}
-					end;
-
-				false ->
-					{S, {error, econflict}}
-			end;
-
-		error ->
-			% unknown document
-			{S, {error, enoent}}
-	end.
-
-
-% lock part hashes, then start writer process
-start_writer(S, State, User) ->
-	WriterLocks = dict:fold(
-		fun(_Part, Hash, Acc) -> [Hash | Acc] end,
-		[],
-		State#ws.orig),
-	ServerLocks = lists:foldl(
-		fun(Hash, Acc) -> orddict:update_counter(Hash, 1, Acc) end,
-		S#state.locks,
-		WriterLocks),
-	{ok, Writer} = hotchpotch_file_store_writer:start_link(
-		State#ws{locks=WriterLocks}, User),
-	{S#state{locks=ServerLocks}, Writer}.
-
-
-% ok | {error, Reason}
-do_put_doc(#state{uuids=Uuids} = S, Doc, Rev) ->
-	case dict:find(Doc, Uuids) of
+do_put_doc(DId, RId, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
+	case ets:lookup(DocTbl, DId) of
 		% document does not exist (yet)...
-		error ->
-			hotchpotch_vol_monitor:trigger_add_doc(S#state.guid, Doc),
-			S2 = do_revisions_ref_inc(S, [Rev]),
-			Gen = S2#state.gen,
-			{
-				S2#state{
-					gen     = Gen+1,
-					uuids   = dict:store(Doc, {Rev, [], Gen}, S2#state.uuids),
-					changed = true
-				},
-				ok
-			};
+		[] ->
+			hotchpotch_vol_monitor:trigger_add_doc(S#state.sid, DId),
+			ets:insert(DocTbl, {DId, RId, [], Gen}),
+			{ok, next_gen(S)};
 
 		% already pointing to requested rev
-		{ok, {Rev, _, _}} ->
-			{S, ok};
+		[{_, RId, _, _}] ->
+			{ok, S};
 
 		% completely other rev
-		{ok, _} ->
-			{S, {error, econflict}}
+		[_] ->
+			{{error, econflict}, S}
+	end.
+
+
+do_commit(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
+	RId = hotchpotch_store:hash_revision(Rev),
+	case ets:lookup(DocTbl, DId) of
+		[{_, CurrentRId, CurrentPreRIds, _Gen}] ->
+			case lists:member(CurrentRId, Rev#revision.parents) of
+				true  ->
+					NewPreRIds = [R || R <- CurrentPreRIds, R =/= OldPreRId],
+					ets:insert(S#state.rev_tbl, {RId, Rev}),
+					ets:insert(DocTbl, {DId, RId, NewPreRIds, Gen}),
+					hotchpotch_vol_monitor:trigger_mod_doc(S#state.sid, DId),
+					{{ok, RId}, next_gen(S)};
+
+				false ->
+					{{error, econflict}, S}
+			end;
+
+		[] ->
+			ets:insert(S#state.rev_tbl, {RId, Rev}),
+			ets:insert(DocTbl, {DId, RId, [], Gen}),
+			hotchpotch_vol_monitor:trigger_add_doc(S#state.sid, DId),
+			{{ok, RId}, next_gen(S)}
+	end.
+
+
+do_suspend(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
+	RId = hotchpotch_store:hash_revision(Rev),
+	case ets:lookup(DocTbl, DId) of
+		[{_, CurrentRId, CurrentPreRIds, _Gen}] ->
+			NewPreRIds = lists:usort(
+				[RId] ++ [R || R <- CurrentPreRIds, R =/= OldPreRId]
+			),
+			ets:insert(S#state.rev_tbl, {RId, Rev}),
+			ets:insert(DocTbl, {DId, CurrentRId, NewPreRIds, Gen}),
+			hotchpotch_vol_monitor:trigger_mod_doc(S#state.sid, DId),
+			{{ok, RId}, next_gen(S)};
+
+		[] ->
+			{{error, enoent}, S}
+	end.
+
+
+do_part_put(PId, Data, #state{part_tbl=PartTbl}) when is_binary(Data) ->
+	ok = dets:insert(PartTbl, {PId, Data}),
+	ok;
+
+do_part_put(PId, TmpName, #state{part_tbl=PartTbl} = S) ->
+	case file:read_file_info(TmpName) of
+		{ok, #file_info{size=Size}} ->
+			NewName = hotchpotch_util:build_path(S#state.path, PId),
+			Placed = filelib:ensure_dir(NewName) == ok andalso
+				file:rename(TmpName, NewName) == ok,
+			case Placed of
+				true ->
+					ok = dets:insert(PartTbl, {PId, Size}),
+					ok;
+				false ->
+					{error, eio}
+			end;
+
+		{error, _} = Error ->
+			Error
+	end.
+
+
+do_part_get(PId, #state{part_tbl=PartTbl} = S) ->
+	case dets:lookup(PartTbl, PId) of
+		[{_, Data}] when is_binary(Data) ->
+			{ok, Data};
+		[{_, Size}] when is_integer(Size) ->
+			{ok, hotchpotch_util:build_path(S#state.path, PId)};
+		[] ->
+			{error, enoent}
 	end.
 
 
 % ok | {ok, MissingRevs, Handle} | {error, Reason}
-do_forward_doc(#state{uuids=Uuids, revisions=Revs} = S, Doc, RevPath, User)
-when length(RevPath) >= 2 ->
-	[StartRev | Path] = RevPath,
-	FinalRev = lists:last(Path),
-	case dict:find(Doc, Uuids) of
-		% document does not exist (yet)...
-		error ->
-			{S, {error, enoent}};
-
-		{ok, {StartRev, _, _}} ->
-			% FIXME: make sure available revs are not deleted in between
-			Missing = lists:foldl(
-				fun(Rev, Acc) ->
-					case dict:find(Rev, Revs) of
-						error                  -> [Rev | Acc];
-						{ok, {_, stub}}        -> [Rev | Acc];
-						{ok, {_, #revision{}}} -> Acc
-					end
-				end,
-				[],
-				Path),
-			case Missing of
+do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
+	StartRId = hd(RevPath),
+	case ets:lookup(S#state.doc_tbl, DId) of
+		[{_, StartRId, _, _}] ->
+			RevTbl = S#state.rev_tbl,
+			case [RId || RId <- RevPath, not ets:member(RevTbl, RId)] of
 				[] ->
-					do_forward_doc_commit(S, Doc, RevPath);
+					do_forward_doc_commit(DId, RevPath, S);
 
-				_ ->
-					TmpDoc = crypto:rand_bytes(16),
-					S2 = do_revisions_ref_inc(S, [FinalRev]),
-					Gen = S2#state.gen,
-					S3 = S2#state{
-						gen     = Gen+1,
-						uuids   = dict:store(TmpDoc, {FinalRev, [], Gen}, S2#state.uuids),
-						changed = true
-					},
-					S4 = do_hide(S3, TmpDoc),
-					{ok, Handle} = hotchpotch_file_store_forwarder:start_link(self(),
-						Doc, TmpDoc, RevPath, User),
-					{S4, {ok, Missing, Handle}}
+				Missing ->
+					% Some Revs are missing and need to be uploaded. Make sure
+					% nothing gets garbage collected in between...
+					S2 = lists:foldl(
+						fun(RId, AccS) -> do_lock({rev, RId}, AccS) end,
+						S,
+						RevPath),
+					{ok, Handle} = hotchpotch_file_store_fwd:start_link(DId,
+						RevPath, User),
+					{{ok, Missing, Handle}, S2}
 			end;
 
-		{ok, _} ->
-			{S, {error, econflict}}
+		[_] ->
+			{{error, econflict}, S};
+		[] ->
+			{{error, enoent}, S}
 	end;
 
-do_forward_doc(S, _Doc, _RevPath, _User) ->
-	{S, {error, einval}}.
+do_forward_doc(_DId, _RevPath, _User, S) ->
+	{{error, einval}, S}.
 
 
-% ok | {ok, MissingParts, Importer} | {error, Reason}
-do_put_rev(S, Rev, Revision, User) ->
-	case dict:find(Rev, S#state.revisions) of
-		error ->
-			{S, {error, enotref}};
-
-		{ok, {_, stub}} ->
-			AllParts = S#state.parts,
-			{PartsDone, PartsNeeded} = lists:foldl(
-				fun({FourCC, Hash}, {AccDone, AccNeed}) ->
-					case dict:is_key(Hash, AllParts) of
-						true  -> {[Hash|AccDone], AccNeed};
-						false -> {AccDone, [{FourCC, Hash}|AccNeed]}
-					end
-				end,
-				{[], []},
-				Revision#revision.parts),
-			case PartsNeeded of
-				[] ->
-					do_put_rev_commit(S, Rev, Revision);
-
-				_ ->
-					{ok, Importer} = hotchpotch_file_store_importer:start_link(self(),
-						S#state.path, Rev, Revision, PartsDone, PartsNeeded,
-						User),
-					NeededFourCCs = lists:map(fun({FCC, _Hash}) -> FCC end, PartsNeeded),
-					{S, {ok, NeededFourCCs, Importer}}
-			end;
-
-		{ok, _} ->
-			{S, ok}
-	end.
-
-%%% Commit %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-do_commit(S, Doc, OldPreRev, Revision) ->
-	NewRev = hotchpotch_store:hash_revision(Revision),
-	Result = case dict:find(Doc, S#state.uuids) of
-		{ok, {CurrentRev, CurrentPreRevs, _Gen}} ->
-			case lists:member(CurrentRev, Revision#revision.parents) of
-				true  ->
-					revision_ref_dec(CurrentRev),
-					NewPreRevs = lists:filter(
-						fun(R) ->
-							case R of
-								OldPreRev -> revision_ref_dec(R), false;
-								_         -> true
-							end
-						end,
-						CurrentPreRevs),
-					{ok, NewRev, NewPreRevs};
-				false ->
-					{error, econflict}
-			end;
-		error ->
-			{ok, NewRev, []}
-	end,
-	case Result of
-		{ok, Rev, PreRevs} ->
-			hotchpotch_vol_monitor:trigger_mod_doc(S#state.guid, Doc),
-			Gen = S#state.gen,
-			S2 = S#state{
-				gen     = Gen+1,
-				uuids   = dict:store(Doc, {Rev, PreRevs, Gen}, S#state.uuids)
-			},
-			S3 = add_revision(S2, Rev, 1, Revision),
-			{S3, {ok, Rev}};
-
-		Error ->
-			{S, Error}
-	end.
-
-
-do_suspend(S, Doc, OldPreRev, Revision) ->
-	NewRev = hotchpotch_store:hash_revision(Revision),
-	case dict:find(Doc, S#state.uuids) of
-		{ok, {Rev, PreRevs, _Gen}} ->
-			NewPreRevs = lists:usort(
-				[NewRev] ++
-				lists:filter(
-					fun(R) ->
-						case R of
-							OldPreRev -> revision_ref_dec(R), false;
-							_         -> true
-						end
-					end,
-					PreRevs)
-			),
-			hotchpotch_vol_monitor:trigger_mod_doc(S#state.guid, Doc),
-			Gen = S#state.gen,
-			S2 = S#state{
-				gen     = Gen+1,
-				uuids   = dict:store(Doc, {Rev, NewPreRevs, Gen}, S#state.uuids)
-			},
-			S3 = add_revision(S2, NewRev, 1, Revision),
-			{S3, {ok, NewRev}};
-
-		error ->
-			{S, {error, enoent}}
-	end.
-
-
-do_put_rev_commit(#state{revisions=Revisions} = S, Rev, Revision) ->
-	case dict:find(Rev, Revisions) of
-		error ->
-			{S, {error, enotref}};
-
-		{ok, {_RefCount, stub}} ->
-			S2 = add_revision(S, Rev, 0, Revision),
-			hotchpotch_vol_monitor:trigger_add_rev(S#state.guid, Rev),
-			{S2, ok};
-
-		{ok, _} ->
-			{S, ok}
-	end.
-
-
-do_forward_doc_commit(#state{uuids=Uuids, revisions=Revisions} = S, Doc, RevPath) ->
+do_forward_doc_commit(DId, RevPath, #state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S) ->
 	try
 		% check if all revisions are known
 		lists:foreach(
-			fun(Rev) ->
-				case dict:find(Rev, Revisions) of
-					error                  -> throw(enoent);
-					{ok, {_, stub}}        -> throw(enoent);
-					{ok, {_, #revision{}}} -> ok
-				end
-			end,
+			fun(RId) -> ets:member(RevTbl, RId) orelse throw(enoent) end,
 			RevPath),
 
 		% check if the revisions are all connected to each other
 		lists:foreach(
-			fun({Rev1, Rev2}) ->
-				{_, #revision{parents=Parents}} = dict:fetch(Rev2, Revisions),
-				case lists:member(Rev1, Parents) of
-					true  -> ok;
-					false -> throw(einval)
-				end
+			fun({RId1, RId2}) ->
+				[{_, #revision{parents=Parents}}] = ets:lookup(RevTbl, RId2),
+				lists:member(RId1, Parents) orelse throw(einval)
 			end,
 			zip_parent_child(RevPath)),
 
 		% try to update
-		[OldRev | Path] = RevPath,
-		NewRev = lists:last(Path),
-		case dict:find(Doc, Uuids) of
+		[OldRId | Path] = RevPath,
+		NewRId = lists:last(Path),
+		case ets:lookup(DocTbl, DId) of
 			% already pointing to requested rev
-			{ok, {NewRev, _, _}} ->
-				{S, ok};
+			[{_, NewRId, _, _}] ->
+				{ok, S};
 
-			% free old version, store new one
-			{ok, {OldRev, PreRevs, _}} ->
-				revision_ref_dec(OldRev),
-				hotchpotch_vol_monitor:trigger_mod_doc(S#state.guid, Doc),
-				S2 = do_revisions_ref_inc(S, [NewRev]),
-				Gen = S2#state.gen,
-				{
-					S2#state{
-						gen     = Gen+1,
-						uuids   = dict:store(Doc, {NewRev, PreRevs, Gen}, S2#state.uuids),
-						changed = true
-					},
-					ok
-				};
+			% forward old version
+			[{_, OldRId, PreRIds, _}] ->
+				ets:insert(DocTbl, {DId, NewRId, PreRIds, S#state.gen}),
+				hotchpotch_vol_monitor:trigger_mod_doc(S#state.sid, DId),
+				{ok, next_gen(S)};
 
 			% errors
-			{ok, _} -> throw(econflict);
-			error   -> throw(enoent)
+			[_] -> throw(econflict);
+			[]  -> throw(enoent)
 		end
 	catch
-		throw:Reason -> {S, {error, Reason}}
+		throw:Reason -> {{error, Reason}, S}
 	end.
 
 
-%%% Reference counting %%%%%%%%%%%%%%%%
+% ok | {ok, MissingParts, Handle} | {error, Reason}
+do_put_rev(RId, Rev, User, S) ->
+	case ets:member(S#state.rev_tbl, RId) of
+		false ->
+			Parts = Rev#revision.parts,
+			PartTbl = S#state.part_tbl,
+			case [P || {_, PId} = P <- Parts, not dets:member(PartTbl, PId)] of
+				[] ->
+					do_put_rev_commit(RId, Rev, S);
 
-% do_revisions_ref_inc(S, [Rev]) -> S2
-do_revisions_ref_inc(S, Revs) ->
-	Revisions1 = S#state.revisions,
-	Revisions2 = lists:foldl(
-		fun (Rev, Revisions) ->
-			case dict:find(Rev, Revisions) of
-				{ok, {RefCount, Value}} ->
-					dict:store(Rev, {RefCount+1, Value}, Revisions);
-				error ->
-					dict:store(Rev, {1, stub}, Revisions)
-			end
-		end,
-		Revisions1,
-		Revs),
-	S#state{revisions=Revisions2, changed=true}.
+				Missing ->
+					% Some parts are missing and need to be uploaded. Make sure
+					% nothing gets garbage collected in between...
+					S2 = lists:foldl(
+						fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+						S,
+						Parts),
+					{ok, Handle} = hotchpotch_file_store_imp:start_link(RId,
+						Rev, Missing, User),
+					NeededFourCCs = [FCC || {FCC, _} <- Missing],
+					{{ok, NeededFourCCs, Handle}, S2}
+			end;
 
-% do_parts_ref_inc(S, [Hash]) -> S2
-do_parts_ref_inc(#state{parts=Parts1} = S, Hashes) ->
-	Parts2 = lists:foldl(
-		fun(PartHash, PartsAcc) ->
-			RefCount = case dict:find(PartHash, PartsAcc) of
-				{ok, Count} -> Count+1;
-				error       -> 1
-			end,
-			dict:store(PartHash, RefCount, PartsAcc)
-		end,
-		Parts1,
-		Hashes),
-	S#state{parts=Parts2, changed=true}.
-
-
-add_revision(S, Rev, RefCountInc, Revision) ->
-	case dict:find(Rev, S#state.revisions) of
-		error when (RefCountInc > 0) ->
-			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
-			S2 = do_revisions_ref_inc(S, get_rev_references(Revision)),
-			S3 = do_parts_ref_inc(S2, Parts),
-			S3#state{
-				revisions=dict:store(Rev, {RefCountInc, Revision}, S3#state.revisions),
-				changed=true};
-
-		{ok, {RefCount, stub}} ->
-			Parts = lists:map(fun({_FCC, Hash}) -> Hash end, Revision#revision.parts),
-			S2 = do_revisions_ref_inc(S, get_rev_references(Revision)),
-			S3 = do_parts_ref_inc(S2, Parts),
-			S3#state{
-				revisions=dict:store(Rev, {RefCount+RefCountInc, Revision},
-					S3#state.revisions),
-				changed=true};
-
-		{ok, {RefCount, Revision}} ->
-			S#state{
-				revisions=dict:store(Rev, {RefCount+RefCountInc, Revision},
-					S#state.revisions),
-				changed=true}
-	end.
-
-
-revision_ref_dec(Rev) ->
-	gen_server:cast(self(), {revision_ref_dec, Rev}).
-
-
-dispose_revision(Revision) ->
-	case Revision of
-		stub ->
-			ok;
-
-		#revision{parts=Parts} ->
-			lists:foreach(
-				fun (Rev) -> revision_ref_dec(Rev) end,
-				get_rev_references(Revision)),
-			lists:foreach(
-				fun({_, Hash}) -> gen_server:cast(self(), {part_ref_dec, Hash}) end,
-				Parts)
-	end.
-
-
-get_rev_references(#revision{parents=Parents, rev_links=RevLinks}) ->
-	ParentSet = sets:from_list(Parents),
-	LinkSet = sets:from_list(RevLinks),
-	sets:to_list(sets:union(ParentSet, LinkSet)).
-
-
-get_doc_references(#revision{doc_links=DocLinks}) ->
-	DocLinks.
-
-
-do_part_ref_dec(S, PartHash) ->
-	RefCount = dict:fetch(PartHash, S#state.parts)-1,
-	Parts = if
-		RefCount == 0 ->
-			% defer deletion if currently locked
-			case orddict:find(PartHash, S#state.locks) of
-				{ok, Value} when Value > 0 ->
-					ok;
-				_ ->
-					file:delete(hotchpotch_util:build_path(S#state.path, PartHash))
-			end,
-			dict:erase(PartHash, S#state.parts);
 		true ->
-			dict:store(PartHash, RefCount, S#state.parts)
-	end,
-	S#state{parts=Parts, changed=true}.
+			{ok, S}
+	end.
 
 
-do_unlock(#state{locks=Locks, parts=Parts} = S, Hash) ->
-	Depth = orddict:fetch(Hash, Locks)-1,
-	Refs = case dict:find(Hash, Parts) of
-		{ok, Value} -> Value;
-		error       -> 0
-	end,
-	NewLocks = case Depth of
-		0 ->
-			if
-				Refs == 0 ->
-					file:delete(hotchpotch_util:build_path(S#state.path, Hash));
-				true ->
-					ok
-			end,
-			orddict:erase(Hash, Locks);
-
-		_ ->
-			orddict:store(Hash, Depth, Locks)
-	end,
-	S#state{locks=NewLocks}.
+do_put_rev_commit(RId, Rev, #state{sid=SId, rev_tbl=RevTbl} = S) ->
+	ets:insert(RevTbl, {RId, Rev}),
+	hotchpotch_vol_monitor:trigger_add_rev(SId, RId),
+	{ok, S}.
 
 
-do_revision_ref_dec(S, Rev) ->
-	{RefCount, Revision} = dict:fetch(Rev, S#state.revisions),
-	Revisions = if
-		RefCount == 1 ->
-			dispose_revision(Revision),
-			case Revision of
-				stub  -> ok;
-				_Else -> hotchpotch_vol_monitor:trigger_rm_rev(S#state.guid, Rev)
-			end,
-			dict:erase(Rev, S#state.revisions);
-		true ->
-			dict:store(Rev, {RefCount-1, Revision}, S#state.revisions)
-	end,
-	S#state{revisions=Revisions, changed=true}.
-
-
-%%% Synching %%%%%%%%%%%%%%%%
-
-% returns {ok, [{Doc, SeqNum}]} | {error, Reason}
-do_sync_get_changes(S, PeerGuid, Caller) ->
-	case do_sync_lock(S, PeerGuid, Caller) of
+do_sync_get_changes(PeerSId, Caller, S) ->
+	case sync_lock(PeerSId, Caller, S) of
 		{ok, S2} ->
-			#state{uuids=Uuids, peers=Peers} = S2,
-			Anchor = case dict:find(PeerGuid, Peers) of
-				{ok, Value} -> Value;
-				error       -> 0
+			#state{doc_tbl=DocTbl, peer_tbl=PeerTbl} = S2,
+			Anchor = case ets:lookup(PeerTbl, PeerSId) of
+				[{_, Value}] -> Value;
+				[] -> 0
 			end,
-			Changes = dict:fold(
-				fun(Doc, {_Rev, _PreRevs, SeqNum}, Acc) ->
-					if
-						SeqNum > Anchor -> [{Doc, SeqNum} | Acc];
-						true            -> Acc
-					end
-				end,
-				[],
-				Uuids),
+			Changes = ets:select(DocTbl,
+				[{{'$1','_','_','$2'},[{'>','$2',Anchor}],[{{'$1','$2'}}]}]),
 			Backlog = lists:sort(
 				fun({_Doc1, Seq1}, {_Doc2, Seq2}) -> Seq1 =< Seq2 end,
 				Changes),
-			{S2, {ok, Backlog}};
+			{{ok, Backlog}, S2};
 
 		error ->
-			{S, {error, ebusy}}
+			{{error, ebusy}, S}
 	end.
 
 
-do_sync_lock(#state{synclocks=SLocks} = S, PeerGuid, Caller) ->
-	case dict:find(PeerGuid, SLocks) of
-		{ok, Caller} ->
-			{ok, S};
-		{ok, _Other} ->
-			error;
-		error ->
-			link(Caller),
-			{ok, S#state{synclocks=dict:store(PeerGuid, Caller, SLocks)}}
-	end.
+do_sync_set_anchor(PeerSId, SeqNum, #state{peer_tbl=PeerTbl}) ->
+	ets:insert(PeerTbl, {PeerSId, SeqNum}).
 
 
-do_sync_set_anchor(#state{peers=Peers} = S, PeerGuid, SeqNum) ->
-	NewPeers = dict:store(PeerGuid, SeqNum, Peers),
-	S#state{peers=NewPeers, changed=true}.
-
-
-do_sync_finish(#state{synclocks=SLocks} = S, PeerGuid, Caller) ->
-	case dict:find(PeerGuid, SLocks) of
+do_sync_finish(PeerSId, Caller, #state{synclocks=SLocks} = S) ->
+	case dict:find(PeerSId, SLocks) of
 		{ok, Caller} ->
 			unlink(Caller),
-			{S#state{synclocks=dict:erase(PeerGuid, SLocks)}, ok};
+			{ok, S#state{synclocks=dict:erase(PeerSId, SLocks)}};
 		{ok, _Other} ->
-			{S, {error, eacces}};
+			{{error, eacces}, S};
 		error ->
-			{S, {error, einval}}
+			{{error, einval}, S}
 	end.
 
+
+do_lock(ObjId, #state{objlocks=ObjLocks} = S) ->
+	S#state{objlocks = dict:update_counter(ObjId, 1, ObjLocks)}.
+
+
+do_unlock(ObjId, #state{objlocks=ObjLocks} = S) ->
+	NewObjLocks = case dict:fetch(ObjId, ObjLocks) of
+		1     -> dict:erase(ObjId, ObjLocks);
+		Depth -> dict:store(ObjId, Depth-1, ObjLocks)
+	end,
+	S#state{objlocks=NewObjLocks}.
+
+
+do_gc(S) ->
+	save_store(dirty, S),
+	GcObj1 = ets:foldl(
+		fun({DId, RId, PreRIds, _}, Acc) ->
+			dict:store({doc, DId}, [{rev, R} || R <- [RId | PreRIds]], Acc)
+		end,
+		dict:new(),
+		S#state.doc_tbl),
+	GcObj2 = ets:foldl(
+		fun({RId, Rev}, Acc) ->
+			DRefs = [{doc, D} || D <- Rev#revision.doc_links],
+			RRefs = [{rev, R} || R <- Rev#revision.parents ++ Rev#revision.rev_links],
+			PRefs = [{part, P} || {_, P} <- Rev#revision.parts],
+			dict:store({rev, RId}, DRefs++RRefs++PRefs, Acc)
+		end,
+		GcObj1,
+		S#state.rev_tbl),
+	AllObj = dets:foldl(
+		fun({PId, _}, Acc) ->
+			dict:store({part, PId}, [], Acc)
+		end,
+		GcObj2,
+		S#state.part_tbl),
+	GreyList = [{doc, S#state.sid} | dict:fetch_keys(S#state.objlocks)],
+	DelObj = dict:fetch_keys(gc_step(GreyList, AllObj)),
+	{GcDocs, GcRevs, GcParts} = lists:foldl(
+		fun
+			({doc, _}, {AccD, AccR, AccP}) -> {AccD+1, AccR, AccP};
+			({rev, _}, {AccD, AccR, AccP}) -> {AccD, AccR+1, AccP};
+			({part, _}, {AccD, AccR, AccP}) -> {AccD, AccR, AccP+1}
+		end,
+		{0, 0, 0},
+		DelObj),
+	error_logger:info_report([
+		{'store', hotchpotch_util:bin_to_hexstr(S#state.sid)},
+		{'type', 'hotchpotch_file_store'},
+		{'gc_docs', GcDocs},
+		{'gc_revs', GcRevs},
+		{'gc_parts', GcParts} ]),
+	gc_cleanup(DelObj, S).
+
+
+do_fsck(_S) ->
+	% TODO: implement. But what to do with broken objects? Deleting might
+	% be a bad idea.
+	%
+	% Steps:
+	%   * do all revs have their parts?
+	%   * do all parts files exist
+	%   * are the file hashes correct?
+	ok.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Local helpers...
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
 	Found = dict:fold(
@@ -1284,293 +784,140 @@ sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
 	end.
 
 
-%%% Fsck %%%%%%%%%%%%%%%%
-
-do_fsck(#state{uuids=Uuids, revisions=Revisions, parts=Parts, path=Path}) ->
-	% check if all parts exist and hashes are correct
-	io:format("Checking parts...~n"),
-	fsck_check_parts(Parts, Path),
-	% calculate Hash refcounts and check excessive/missing Parts and if
-	% refcounts correct
-	io:format("Check part refcounts...~n"),
-	PartRefCounts = fsck_calc_part_refcounts(Revisions),
-	fsc_check_part_refcounts(Parts, PartRefCounts),
-	% calculate Rev refcounts and check if correct
-	io:format("Check rev refcounts...~n"),
-	RevRefCounts = fsck_calc_rev_refcounts(Uuids, Revisions),
-	fsck_check_rev_refcounts(Revisions, RevRefCounts),
-	io:format("Done.~n").
-
-
-fsck_check_parts(Parts, Path) ->
-	dict:fold(
-		fun(Hash, _RefCount, Acc) -> fsck_check_hash(Hash, Path), Acc end,
-		ok,
-		Parts).
-
-fsck_check_hash(Hash, Path) ->
-	case file:open(hotchpotch_util:build_path(Path, Hash), [read, binary]) of
-		{ok, IoDevice} ->
-			case hotchpotch_util:hash_file(IoDevice) of
-				{ok, Hash} ->
-					ok;
-				{ok, OtherHash} ->
-					io:format("  Wrong part contents. Expected ~s, got ~s~n", [
-						hotchpotch_util:bin_to_hexstr(Hash),
-						hotchpotch_util:bin_to_hexstr(OtherHash)]),
-					error;
-				{error, Reason} ->
-					io:format("  Could not hash ~s: ~p~n",
-						[hotchpotch_util:bin_to_hexstr(Hash), Reason]),
-					error
-			end,
-			file:close(IoDevice);
-
-		{error, Reason} ->
-			io:format("  Missing part ~s: ~p~n", [hotchpotch_util:bin_to_hexstr(Hash),
-				Reason])
-	end.
-
-fsck_calc_part_refcounts(Revisions) ->
-	dict:fold(
-		fun
-			(_Rev, {_RefCount, stub}, Acc) -> Acc ;
-			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_obj_refs(Obj, Acc)
-		end,
-		dict:new(),
-		Revisions).
-
-fsck_add_obj_refs(Revision, Acc) ->
-	lists:foldl(
-		fun({_FCC, Hash}, HashDict) ->
-			dict:update_counter(Hash, 1, HashDict)
-		end,
-		Acc,
-		Revision#revision.parts).
-
-fsc_check_part_refcounts(Parts, PartRefCounts) ->
-	Remaining = dict:fold(
-		fun(Hash, RefCount, Acc) ->
-			case dict:find(Hash, Acc) of
-				{ok, RefCount} ->
-					dict:erase(Hash, Acc);
-				{ok, Wrong} ->
-					io:format("  Wrong part refcount ~s: ~p <> ~p~n",
-						[hotchpotch_util:bin_to_hexstr(Hash), RefCount, Wrong]),
-					dict:erase(Hash, Acc);
-				error ->
-					io:format("  Missing part ~s # ~p~n", [
-						hotchpotch_util:bin_to_hexstr(Hash), RefCount]),
-					Acc
-			end
-		end,
-		Parts,
-		PartRefCounts),
-	dict:fold(
-		fun(Hash, RefCount, Acc) ->
-			io:format("  Excessive part ~s # ~p~n", [hotchpotch_util:bin_to_hexstr(Hash),
-				RefCount]),
-			Acc
-		end,
-		ok,
-		Remaining).
-
-fsck_calc_rev_refcounts(Uuids, Revisions) ->
-	UCount = dict:fold(
-		fun(_Doc, {Rev, PreRevs, _Gen}, Acc1) ->
-			Acc2 = lists:foldl(
-				fun(R, A) -> dict:update_counter(R, 1, A) end,
-				Acc1,
-				PreRevs),
-			dict:update_counter(Rev, 1, Acc2)
-		end,
-		dict:new(),
-		Uuids),
-	dict:fold(
-		fun
-			(_Rev, {_RefCount, stub}, Acc) -> Acc;
-			(_Rev, {_RefCount, Obj}, Acc) -> fsck_add_rev_refs(Obj, Acc)
-		end,
-		UCount,
-		Revisions).
-
-fsck_add_rev_refs(Obj, RevDict) ->
-	Refs = get_rev_references(Obj),
-	lists:foldl(
-		fun(Rev, Acc) -> dict:update_counter(Rev, 1, Acc) end,
-		RevDict,
-		Refs).
-
-fsck_check_rev_refcounts(Revisions, RevRefCounts) ->
-	Remaining = dict:fold(
-		fun(Rev, RefCount, Acc) ->
-			case dict:find(Rev, Acc) of
-				{ok, {RefCount, _}} ->
-					dict:erase(Rev, Acc);
-				{ok, {Wrong, _}} ->
-					io:format("  Wrong revision refcount ~s: ~p <> ~p~n",
-						[hotchpotch_util:bin_to_hexstr(Rev), RefCount, Wrong]),
-					dict:erase(Rev, Acc);
-				error ->
-					io:format("  Missing revision ~s # ~p~n", [
-						hotchpotch_util:bin_to_hexstr(Rev), RefCount]),
-					Acc
-			end
-		end,
-		Revisions,
-		RevRefCounts),
-	dict:fold(
-		fun(Rev, {RefCount, _}, Acc) ->
-			io:format("  Excessive revision ~s # ~p~n",
-				[hotchpotch_util:bin_to_hexstr(Rev), RefCount]),
-			Acc
-		end,
-		ok,
-		Remaining).
-
-%%% Garbage collection %%%%%%%%%%%%%%%%
-
-do_gc(S) ->
-	#state{
-		guid      = Guid,
-		uuids     = Uuids,
-		revisions = Revisions,
-		path      = Path,
-		hidden    = Hidden
-	} = S,
-	GreyList = lists:foldl(
-		fun(HiddenDoc, Acc) ->
-			case dict:find(HiddenDoc, Uuids) of
-				{ok, {Rev, PreRevs, _Gen}} -> [Rev | PreRevs] ++ Acc;
-				error                      -> Acc
-			end
-		end,
-		[],
-		[Guid | Hidden]),
-	WhiteSet = lists:foldl(
-		fun(HiddenDoc, Acc) -> dict:erase(HiddenDoc, Acc) end,
-		Uuids,
-		[Guid | Hidden]),
-	DelDocs = dict:fetch_keys(gc_step(GreyList, WhiteSet, Revisions, Path)),
-	NumCollected = length(DelDocs),
-	if
-		NumCollected > 0 ->
-			NewUuids = lists:foldl(
-				fun(Doc, Acc) ->
-					{Rev, PreRevs, _Gen} = dict:fetch(Doc, Acc),
-					hotchpotch_vol_monitor:trigger_rm_doc(Guid, Doc),
-					revision_ref_dec(Rev),
-					lists:foreach(fun(R) -> revision_ref_dec(R) end, PreRevs),
-					dict:erase(Doc, Acc)
-				end,
-				Uuids,
-				DelDocs),
-			error_logger:info_report([{store, hotchpotch_util:bin_to_hexstr(Guid)},
-				{'garbage_collected', NumCollected}]),
-			S#state{uuids=NewUuids, changed=true};
-		true ->
-			S
-	end.
-
-
-gc_step([], WhiteSet, _Revisions, _Path) ->
-	WhiteSet;
-
-gc_step([Rev | GreyList], WhiteSet, Revisions, Path) ->
-	case dict:find(Rev, Revisions) of
-		{ok, {_RefCnt, stub}} ->
-			gc_step(GreyList, WhiteSet, Revisions, Path);
-
-		{ok, {_RefCnt, Revision}} ->
-			Refs = get_doc_references(Revision),
-			{NewGreyList, NewWhiteSet} = lists:foldl(
-				fun gc_step_eval/2,
-				{GreyList, WhiteSet},
-				Refs),
-			gc_step(NewGreyList, NewWhiteSet, Revisions, Path);
-
+sync_lock(PeerSId, Caller, #state{synclocks=SLocks} = S) ->
+	case dict:find(PeerSId, SLocks) of
+		{ok, Caller} ->
+			{ok, S};
+		{ok, _Other} ->
+			error;
 		error ->
-			gc_step(GreyList, WhiteSet, Revisions, Path)
+			link(Caller),
+			{ok, S#state{synclocks=dict:store(PeerSId, Caller, SLocks)}}
 	end.
 
 
-gc_step_eval(Doc, {GreyList, WhiteSet}=Acc) ->
-	case dict:find(Doc, WhiteSet) of
-		{ok, {Rev, PreRevs, _Gen}} ->
-			{[Rev | PreRevs] ++ GreyList, dict:erase(Doc, WhiteSet)};
-		error ->
-			Acc
+% lock document and part hashes, then start writer process
+start_writer(DId, PreRId, Rev, User, S) ->
+	S2 = lists:foldl(
+		fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+		S,
+		Rev#revision.parts),
+	S3 = do_lock({doc, DId}, S2),
+	{ok, _} = Reply =
+		hotchpotch_file_store_io:start_link(DId, PreRId, Rev, User),
+	{Reply, S3}.
+
+
+part_size(PId, #state{part_tbl=PartTbl}) ->
+	case dets:lookup(PartTbl, PId) of
+		[{_, Size}] when is_integer(Size) ->
+			Size;
+		[{_, Data}] when is_binary(Data) ->
+			size(Data)
 	end.
 
 
-do_hide(#state{hidden=Hidden} = S, Doc) ->
-	NewHidden = [Doc | Hidden],
-	S#state{hidden=NewHidden}.
+load_store(Id, #state{path=Path} = S) ->
+	IdStr = atom_to_list(Id),
+	S2 = case ets:file2tab(Path ++ "/docs.ets") of
+		{ok, DocTbl} ->
+			S#state{doc_tbl=DocTbl};
+		{error,{read_error,{file_error,_,enoent}}} ->
+			S#state{doc_tbl=ets:new(list_to_atom(IdStr ++ "_docs"), [])}
+	end,
+	S3 = case ets:file2tab(Path ++ "/revs.ets") of
+		{ok, RevTbl} ->
+			S2#state{rev_tbl=RevTbl};
+		{error,{read_error,{file_error,_,enoent}}} ->
+			S2#state{rev_tbl=ets:new(list_to_atom(IdStr ++ "_revs"), [])}
+	end,
+	PartTbl = list_to_atom(IdStr ++ "_parts"),
+	{ok, _} = dets:open_file(PartTbl, [{file, Path ++ "/parts.dets"}]),
+	S4 = S3#state{part_tbl=PartTbl},
+	S5 = case ets:file2tab(Path ++ "/peers.ets") of
+		{ok, PeerTbl} ->
+			S4#state{peer_tbl=PeerTbl};
+		{error,{read_error,{file_error,_,enoent}}} ->
+			S4#state{peer_tbl=ets:new(list_to_atom(IdStr ++ "_peers"), [])}
+	end,
+	case file:consult(Path ++ "/info") of
+		{ok, Info} ->
+			{sid, Sid} = lists:keyfind(sid, 1, Info),
+			{gen, Gen} = lists:keyfind(gen, 1, Info),
+			S5#state{gen=Gen, gc_gen=Gen, sid=Sid};
 
-
-do_unhide(#state{hidden=Hidden} = S, Doc) ->
-	NewHidden = lists:delete(Doc, Hidden),
-	S#state{hidden=NewHidden}.
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Low level file management...
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-load_uuids(Path) ->
-	load_dict(Path, "documents.dict").
-
-load_revisions(Path) ->
-	load_dict(Path, "revisions.dict").
-
-load_parts(Path) ->
-	load_dict(Path, "parts.dict").
-
-load_guid(Path) ->
-	case file:read_file(Path ++ "/guid") of
-		{ok, Data}      -> binary_to_term(Data);
-		{error, enoent} -> crypto:rand_bytes(16)
+		{error, enoent} ->
+			S5#state{gen=0, gc_gen=0, sid=crypto:rand_bytes(16)}
 	end.
 
-load_gen(Path) ->
-	case file:read_file(Path ++ "/generation") of
-		{ok, Data}      -> binary_to_term(Data);
-		{error, enoent} -> 0
-	end.
 
-load_peers(Path) ->
-	load_dict(Path, "peers.dict").
+save_store(MountState, #state{path=Path} = S) ->
+	ok = dets:sync(S#state.part_tbl),
+	ok = ets:tab2file(S#state.doc_tbl, Path ++ "/docs.ets.new"),
+	ok = ets:tab2file(S#state.rev_tbl, Path ++ "/revs.ets.new"),
+	ok = ets:tab2file(S#state.peer_tbl, Path ++ "/peers.ets.new"),
+	{ok, File} = file:open(Path ++ "/info.new", [write]),
+	try
+		ok = file:write(File, "{version, 1}.\n"),
+		ok = file:write(File, io_lib:print({state, MountState})),
+		ok = file:write(File, ".\n"),
+		ok = file:write(File, io_lib:print({sid, S#state.sid})),
+		ok = file:write(File, ".\n"),
+		ok = file:write(File, io_lib:print({gen, S#state.gen})),
+		ok = file:write(File, ".\n"),
+		ok = file:sync(File)
+	after
+		file:close(File)
+	end,
+	ok = file:rename(Path ++ "/docs.ets.new", Path ++ "/docs.ets"),
+	ok = file:rename(Path ++ "/revs.ets.new", Path ++ "/revs.ets"),
+	ok = file:rename(Path ++ "/peers.ets.new", Path ++ "/peers.ets"),
+	ok = file:rename(Path ++ "/info.new", Path ++ "/info").
 
-do_checkpoint(S) ->
-	case S#state.changed of
+
+close_store(S) ->
+	ets:delete(S#state.doc_tbl),
+	ets:delete(S#state.rev_tbl),
+	dets:close(S#state.part_tbl),
+	ets:delete(S#state.peer_tbl).
+
+
+check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
+	case ets:member(S#state.doc_tbl, SId) of
 		true ->
-			file:write_file(S#state.path ++ "/guid", term_to_binary(S#state.guid)),
-			file:write_file(S#state.path ++ "/generation", term_to_binary(S#state.gen)),
-			save_dict(S#state.path, "documents.dict", S#state.uuids),
-			save_dict(S#state.path, "revisions.dict", S#state.revisions),
-			save_dict(S#state.path, "parts.dict",     S#state.parts),
-			save_dict(S#state.path, "peers.dict",     S#state.peers);
-
+			S;
 		false ->
-			ok
+			RootContent = dict:new(),
+			ContentPId = crd_write_part(RootContent, S),
+			Annotation1 = dict:new(),
+			Annotation2 = dict:store(<<"title">>, list_to_binary(Name), Annotation1),
+			Annotation3 = dict:store(<<"comment">>, list_to_binary("<<Initial store creation>>"), Annotation2),
+			Sync = dict:store(<<"sticky">>, true, dict:new()),
+			RootMeta1 = dict:new(),
+			RootMeta2 = dict:store(<<"org.hotchpotch.annotation">>, Annotation3, RootMeta1),
+			RootMeta3 = dict:store(<<"org.hotchpotch.sync">>, Sync, RootMeta2),
+			MetaPId = crd_write_part(RootMeta3, S),
+			RootRev = #revision{
+				parts     = [{<<"HPSD">>, ContentPId}, {<<"META">>, MetaPId}],
+				parents   = [],
+				mtime     = hotchpotch_util:get_time(),
+				type      = <<"org.hotchpotch.store">>,
+				creator   = <<"org.hotchpotch.file-store">>,
+				doc_links = [],
+				rev_links = []
+			},
+			RId = hotchpotch_store:hash_revision(RootRev),
+			ets:insert(S#state.rev_tbl, {RId, RootRev}),
+			ets:insert(S#state.doc_tbl, {SId, RId, [], Gen}),
+			S#state{gen=Gen+1}
 	end.
 
-load_dict(Path, Name) ->
-	case file:read_file(Path ++ "/" ++ Name) of
-		{ok, Data} ->
-			binary_to_term(Data);
-		{error, _} ->
-			dict:new()
-	end.
 
-save_dict(Path, Name, Dict) ->
-	case file:write_file(Path ++ "/" ++ Name, term_to_binary(Dict)) of
-		ok ->
-			ok;
-		{error, Reason} ->
-			io:format("Failed to save ~w: ~s~n", [Name, Reason]),
-			ok
-	end.
+crd_write_part(Data, S) ->
+	BinData = hotchpotch_struct:encode(Data),
+	PId = binary_part(crypto:sha(BinData), 0, 16),
+	ok = dets:insert(S#state.part_tbl, {PId, BinData}),
+	PId.
 
 
 zip_parent_child([Head | Childs]) ->
@@ -1582,4 +929,69 @@ zip_parent_child(Parent, [Child], Acc) ->
 
 zip_parent_child(Parent, [Child | Ancestors], Acc) ->
 	zip_parent_child(Child, Ancestors, [{Parent, Child} | Acc]).
+
+
+gc_step([], WhiteSet) ->
+	WhiteSet;
+
+gc_step([ObjId | GreyList], WhiteSet) ->
+	NewWhiteSet = dict:erase(ObjId, WhiteSet),
+	NewGreyList = case dict:find(ObjId, WhiteSet) of
+		{ok, Refs} -> Refs ++ GreyList;
+		error -> GreyList
+	end,
+	gc_step(NewGreyList, NewWhiteSet).
+
+
+gc_cleanup(DelObj, S) ->
+	lists:foreach(
+		fun(ObjId) -> gc_cleanup_obj(ObjId, S) end,
+		DelObj).
+
+
+gc_cleanup_obj({doc, DId}, #state{doc_tbl=DocTbl}) ->
+	ets:delete(DocTbl, DId);
+
+gc_cleanup_obj({rev, RId}, #state{rev_tbl=RevTbl}) ->
+	ets:delete(RevTbl, RId);
+
+gc_cleanup_obj({part, PId}, #state{path=Path, part_tbl=PartTbl}) ->
+	case dets:lookup(PartTbl, PId) of
+		[{_, Size}] when is_integer(Size) ->
+			file:delete(hotchpotch_util:build_path(Path, PId));
+		_ ->
+			ok
+	end,
+	dets:delete(PartTbl, PId).
+
+
+next_gen(#state{gc_tmr=GcTmr, gc_gen=GcGen, gen=Gen} = S) ->
+	Updates = Gen-GcGen,
+	S2 = if
+		Updates >= ?GC_MAX_UPDATES ->
+			case erlang:cancel_timer(GcTmr) of
+				Remain when is_integer(Remain) ->
+					erlang:start_timer(0, self(), gc);
+				false ->
+					ok % already expired, message should be in queue
+			end,
+			S#state{gc_gen=Gen}; % prevent multiple schedules
+
+		Updates > ?GC_MIN_UPDATES ->
+			case erlang:cancel_timer(GcTmr) of
+				Remain when is_integer(Remain) ->
+					Timer = erlang:start_timer(?GC_SLACK_TIME, self(), gc),
+					S#state{gc_tmr=Timer};
+				false ->
+					S % already expired, message should be in queue
+			end;
+
+		Updates == ?GC_MIN_UPDATES ->
+			Timer = erlang:start_timer(?GC_SLACK_TIME, self(), gc),
+			S#state{gc_tmr=Timer};
+
+		true ->
+			S
+	end,
+	S2#state{gen=Gen+1}.
 
