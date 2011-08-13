@@ -297,7 +297,7 @@ readdir(_Ctx, _Ino, Size, Offset, Fi, _Cont, S) ->
 	{ok, Entries, S2} = call_vfs_handle(readdir, [], Fi#fuse_file_info.fh, S),
 	DirEntryList = take_while_map(
 		fun (Entry, {Total, Max}, Num) ->
-			FuseEntry = make_dir_entry(Entry, Num, S2),
+			FuseEntry = make_dir_entry(Entry, Offset+Num, S2),
 			Cur = fuserlsrv:dirent_size(FuseEntry),
 			if
 				Total + Cur =< Max -> {continue, FuseEntry, {Total + Cur, Max}};

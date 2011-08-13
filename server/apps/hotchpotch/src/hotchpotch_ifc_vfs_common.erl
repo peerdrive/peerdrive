@@ -1868,19 +1868,19 @@ create_empty_file(Store, Name) ->
 				dict:new())),
 		dict:new()),
 	case hotchpotch_broker:create(<<"public.text">>, ?VFS_CC, hotchpotch_broker:get_stores([Store])) of
-		{ok, _ErrInfo, {Doc, Handle}} ->
+		{ok, _CreateErrInfo, {Doc, Handle}} ->
 			hotchpotch_broker:write(Handle, <<"META">>, 0, hotchpotch_struct:encode(MetaData)),
 			hotchpotch_broker:write(Handle, <<"FILE">>, 0, <<>>),
 			case hotchpotch_broker:commit(Handle) of
-				{ok, _ErrInfo, Rev} ->
+				{ok, _CommitErrInfo, Rev} ->
 					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};
-				{error, Reason, _ErrInfo} ->
+				{error, Reason, _CommitErrInfo} ->
 					hotchpotch_broker:close(Handle),
 					{error, Reason}
 			end;
 
-		{error, Reason, _ErrInfo} ->
+		{error, Reason, _CreateErrInfo} ->
 			{error, Reason}
 	end.
 
@@ -1915,21 +1915,21 @@ create_empty_directory(Store, Name) ->
 			Hpsd = []
 	end,
 	case hotchpotch_broker:create(TypeCode, ?VFS_CC, hotchpotch_broker:get_stores([Store])) of
-		{ok, _ErrInfo, {Doc, Handle}} ->
+		{ok, _CreateErrInfo, {Doc, Handle}} ->
 			hotchpotch_broker:write(Handle, <<"META">>, 0,
 				hotchpotch_struct:encode(MetaData2)),
 			hotchpotch_broker:write(Handle, <<"HPSD">>, 0,
 				hotchpotch_struct:encode(Hpsd)),
 			case hotchpotch_broker:commit(Handle) of
-				{ok, _ErrInfo, Rev} ->
+				{ok, _CommitErrInfo, Rev} ->
 					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};
-				{error, Reason, _ErrInfo} ->
+				{error, Reason, _CommitErrInfo} ->
 					hotchpotch_broker:close(Handle),
 					{error, Reason}
 			end;
 
-		{error, Reason, _ErrInfo} ->
+		{error, Reason, _CreateErrInfo} ->
 			{error, Reason}
 	end.
 
