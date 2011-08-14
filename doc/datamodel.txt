@@ -215,10 +215,10 @@ fork(Rev, Creator, Stores) -- Create a new document from an existing one
 
 update(Doc, Rev, Creator, Stores) -- Update a document
 	Doc: Document to be updated
-	Rev: Current revision of the document which will be updated. At least one
-		store must point to this revision or the operation will fail
-		immediately.  Any store which points to another revision will not be
-		updated.
+	Rev: Old or current revision of the document from which the update will
+		start. At least one store must have this revision or the operation will
+		fail immediately. The document can only be committed when one of the
+		parent revisions is the current document revision.
 	Creator: Optional new creator code. Keep the previous value if left empty
 	Stores: Optional set of stores where to update the document. If empty try
 		on all mounted stores where Doc exists and is currently pointing to
