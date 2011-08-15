@@ -1,6 +1,7 @@
 import unittest
 import time
 import subprocess
+import datetime
 from hotchpotch import Connector
 from hotchpotch import connector
 from hotchpotch import struct
@@ -109,6 +110,29 @@ class TestReadWrite(CommonParts):
 			dataRead = r.readAll('FILE')
 
 		self.assertEqual(dataOrig, dataRead)
+
+	def test_readback_big(self):
+		dataOrig = 'abcdefghijklmnopqrstuvwxyz' * 1024
+		w = self.create("public.data", "test.foo", [self.store1])
+		w.writeAll('FILE', dataOrig)
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
+
+		with Connector().peek(rev) as r:
+			dataRead = r.readAll('FILE')
+
+		self.assertEqual(dataOrig, dataRead)
+
+	def test_mtime(self):
+		w = self.create("public.data", "test.foo", [self.store1])
+		w.writeAll('FILE', "fubar")
+		w.commit()
+		rev = w.getRev()
+		s = Connector().stat(rev)
+		now = datetime.datetime.now()
+		self.assertTrue(s.mtime() <= now)
+		self.assertTrue(s.mtime() > now - datetime.timedelta(seconds=3))
 
 
 class TestCreatorCode(CommonParts):
