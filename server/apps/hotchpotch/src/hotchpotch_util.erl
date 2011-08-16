@@ -119,8 +119,8 @@ read_rev_struct(Rev, Part) ->
 
 get_time() ->
 	% Thanks to http://www.epochconverter.com/ :)
-	calendar:datetime_to_gregorian_seconds(calendar:universal_time()) -
-	719528*24*3600.
+	(calendar:datetime_to_gregorian_seconds(calendar:universal_time()) -
+	719528*24*3600) * 1000000.
 
 
 % returns {ok, Sha1} | {error, Reason}

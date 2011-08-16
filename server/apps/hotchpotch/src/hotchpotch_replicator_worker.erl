@@ -280,7 +280,8 @@ sticky_handling(Backlog, Rev, SrcStores, DstStores, true) ->
 		{ok, MetaData} ->
 			case meta_read_bool(MetaData, ?SYNC_STICKY) of
 				true ->
-					Depth = hotchpotch_util:get_time() - meta_read_int(MetaData, ?SYNC_HISTORY),
+					Depth = hotchpotch_util:get_time() -
+						meta_read_int(MetaData, ?SYNC_HISTORY) * 1000000,
 					NewBacklog = lists:foldl(
 						fun(Reference, BackAcc) ->
 							push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)

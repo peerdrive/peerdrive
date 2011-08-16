@@ -339,13 +339,13 @@ setattr(_, Ino, Attr, ToSet, _Fi, _, S) ->
 			end,
 			Changes2 = if
 				(ToSet band ?FUSE_SET_ATTR_ATIME) =/= 0 ->
-					[{atime, Attr#stat.st_atime} | Changes1];
+					[{atime, fuse2epoch(Attr#stat.st_atime)} | Changes1];
 				true ->
 					Changes1
 			end,
 			Changes3 = if
 				(ToSet band ?FUSE_SET_ATTR_MTIME) =/= 0 ->
-					[{mtime, Attr#stat.st_mtime} | Changes2];
+					[{mtime, fuse2epoch(Attr#stat.st_mtime)} | Changes2];
 				true ->
 					Changes2
 			end,
@@ -471,9 +471,9 @@ make_fuse_attr(Ino, #vfs_attr{dir=Dir, size=Size, mtime=MTime}, S) ->
 		st_uid   = S#state.uid,
 		st_gid   = S#state.gid,
 		st_size  = Size,
-		st_atime = MTime,
-		st_mtime = MTime,
-		st_ctime = MTime
+		st_atime = epoch2fuse(MTime),
+		st_mtime = epoch2fuse(MTime),
+		st_ctime = epoch2fuse(MTime)
 	}.
 
 
@@ -517,5 +517,12 @@ do_take_while_map(F, Acc, [ Head | Tail ], Id) ->
 		stop ->
 			[]
 	end.
+
+
+epoch2fuse(Epoch) ->
+	Epoch div 1000000.
+
+fuse2epoch(Fuse) ->
+	Fuse * 1000000.
 
 -endif.

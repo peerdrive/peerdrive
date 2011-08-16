@@ -20,9 +20,9 @@
 -record(vfs_attr, {
 	dir,     % bool(): true if node is directory
 	size=0,  % int(): size in bytes
-	mtime=0, % int(): seconds since epoch
-	atime=0, % int(): seconds since epoch
-	ctime=0  % int(): seconds since epoch
+	mtime=0, % int(): microseconds since epoch
+	atime=0, % int(): microseconds since epoch
+	ctime=0  % int(): microseconds since epoch
 }).
 
 -record(vfs_entry, {

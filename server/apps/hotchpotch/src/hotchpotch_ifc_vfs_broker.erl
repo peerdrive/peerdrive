@@ -29,7 +29,7 @@
 
 
 -define(VFS_CC, <<"org.hotchpotch.vfs">>).   % FUSE creator code
--define(VFS_WB_TIMEOUT, 5).                  % write back timeout in seconds
+-define(VFS_WB_TIMEOUT, 5000).               % write back timeout in ms
 
 % handles: dict: {wr, Store, Doc} | {ro, Store, Rev} -> {Rev, BrokerHandle, RefCnt}
 % known:   dict: {Store, Doc} -> {PreRev, Timestamp, Open}
@@ -488,14 +488,14 @@ forget(Store, Doc, #state{known=Known}=S) ->
 
 
 ts() ->
-	hotchpotch_util:get_time() + ?VFS_WB_TIMEOUT.
+	hotchpotch_util:get_time() div 1000 + ?VFS_WB_TIMEOUT.
 
 
 check_timer_running(#state{timref=TimRef}=S, Ts) ->
 	case TimRef of
 		undefined ->
-			Now = hotchpotch_util:get_time(),
-			NewTim = erlang:start_timer((Ts-Now)*1000, self(), check),
+			Now = hotchpotch_util:get_time() div 1000,
+			NewTim = erlang:start_timer(Ts-Now, self(), check),
 			S#state{timref=NewTim};
 
 		_ ->
@@ -510,7 +510,7 @@ check_timer_expired(S) ->
 
 
 check_expired(#state{known=Known}=S) ->
-	Now = hotchpotch_util:get_time(),
+	Now = hotchpotch_util:get_time() div 1000,
 	{Expired, Timeout} = dict:fold(
 		fun
 			(_, {_Rev, _Ts, true}, Acc) ->
@@ -533,7 +533,7 @@ check_expired(#state{known=Known}=S) ->
 	end,
 	NewTimRef = case Timeout of
 		never -> undefined;
-		_     -> erlang:start_timer((Timeout-Now)*1000, self(), check)
+		_     -> erlang:start_timer(Timeout-Now, self(), check)
 	end,
 	{Expired, S#state{timref=NewTimRef, known=NewKnown}}.
 

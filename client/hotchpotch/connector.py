@@ -841,7 +841,8 @@ class Stat(object):
 			self.__parents.append(packet[pos:pos+16])
 			pos += 16
 
-		self.__mtime = datetime.fromtimestamp(struct.unpack_from('>Q', packet, pos)[0])
+		self.__mtime = datetime.fromtimestamp(
+			struct.unpack_from('>Q', packet, pos)[0] / 1000000.0)
 		pos += 8
 		(count,) = struct.unpack_from('>H', packet, pos)
 		pos += 2

@@ -896,10 +896,10 @@ posix2win(Error) ->
 	?ERROR_GEN_FAILURE.
 
 epoch2win(Epoch) ->
-	(Epoch + 134774*24*3600) * 10000000.
+	(Epoch + 134774*24*3600*1000000) * 10.
 
 
 win2epoch(Win) ->
-	Win div 10000000 - 134774*24*3600.
+	Win div 10 - 134774*24*3600*1000000.
 
 -endif.

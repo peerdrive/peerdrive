@@ -462,5 +462,5 @@ Version ::= UINT32
 	    0 = Current
 
 Time ::= UINT64
-	Seconds since epoch, UTC
+	Microseconds since UNIX epoch, UTC
 
