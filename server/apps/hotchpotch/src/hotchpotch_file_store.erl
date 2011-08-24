@@ -32,7 +32,7 @@
 	path,
 	sid,
 	gen,
-	gc_tmr,
+	wb_tmr,
 	gc_gen,
 	doc_tbl,  % ets: {Doc::DId, Rev::RId, [PreRev::RId], Generation}
 	rev_tbl,  % ets: {Rev::RId, #revision{}}
@@ -42,9 +42,9 @@
 	synclocks % dict: SId --> pid()
 }).
 
--define(GC_SLACK_TIME, 60*1000). % delay until gc runs (reset on new activity)
--define(GC_MIN_UPDATES, 100).    % gc will be scheduled after this number of updates
--define(GC_MAX_UPDATES, 1000).   % gc is forced after this number of updates
+-define(WB_DIRTY_TIME, 60*1000). % delay until write back (reset on new activity)
+-define(GC_MIN_UPDATES, 1000).   % gc will be scheduled after this number of updates
+-define(GC_MAX_UPDATES, 10000).  % gc is forced after this number of updates
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Server state management...
@@ -278,9 +278,17 @@ handle_info({'EXIT', From, Reason}, S) ->
 			end
 	end;
 
-handle_info({timeout, _, gc}, S) ->
-	do_gc(S),
-	{noreply, S#state{gc_gen=S#state.gen}}.
+handle_info({timeout, _, dirty}, #state{gen=Gen, gc_gen=GcGen} = S) ->
+	S2 = if
+		Gen - GcGen > ?GC_MIN_UPDATES ->
+			do_gc(S), % implies a write back
+			S#state{wb_tmr=undefined, gc_gen=Gen};
+
+		true ->
+			save_store(dirty, S),
+			S#state{wb_tmr=undefined}
+	end,
+	{noreply, S2}.
 
 
 terminate(_Reason, S) ->
@@ -715,6 +723,7 @@ do_unlock(ObjId, #state{objlocks=ObjLocks} = S) ->
 
 do_gc(S) ->
 	save_store(dirty, S),
+	{StartMS, StartS, StartUS} = now(),
 	GcObj1 = ets:foldl(
 		fun({DId, RId, PreRIds, _}, Acc) ->
 			dict:store({doc, DId}, [{rev, R} || R <- [RId | PreRIds]], Acc)
@@ -746,13 +755,17 @@ do_gc(S) ->
 		end,
 		{0, 0, 0},
 		DelObj),
+	gc_cleanup(DelObj, S),
+	{EndMS, EndS, EndUS} = now(),
+	Duration = (EndMS-StartMS) * 1000000 + (EndS-StartS) +
+		(EndUS-StartUS) / 1000000,
 	error_logger:info_report([
 		{'store', hotchpotch_util:bin_to_hexstr(S#state.sid)},
 		{'type', 'hotchpotch_file_store'},
 		{'gc_docs', GcDocs},
 		{'gc_revs', GcRevs},
-		{'gc_parts', GcParts} ]),
-	gc_cleanup(DelObj, S).
+		{'gc_parts', GcParts},
+		{'duration', Duration} ]).
 
 
 do_fsck(_S) ->
@@ -965,33 +978,29 @@ gc_cleanup_obj({part, PId}, #state{path=Path, part_tbl=PartTbl}) ->
 	dets:delete(PartTbl, PId).
 
 
-next_gen(#state{gc_tmr=GcTmr, gc_gen=GcGen, gen=Gen} = S) ->
-	Updates = Gen-GcGen,
+next_gen(#state{wb_tmr=WbTmr, gc_gen=GcGen, gen=Gen} = S) ->
 	S2 = if
-		Updates >= ?GC_MAX_UPDATES ->
-			case erlang:cancel_timer(GcTmr) of
+		Gen-GcGen == ?GC_MAX_UPDATES ->
+			case erlang:cancel_timer(WbTmr) of
 				Remain when is_integer(Remain) ->
-					erlang:start_timer(0, self(), gc);
+					self() ! {timeout, WbTmr, dirty}; % trigger immediately
 				false ->
 					ok % already expired, message should be in queue
 			end,
-			S#state{gc_gen=Gen}; % prevent multiple schedules
+			S;
 
-		Updates > ?GC_MIN_UPDATES ->
-			case erlang:cancel_timer(GcTmr) of
-				Remain when is_integer(Remain) ->
-					Timer = erlang:start_timer(?GC_SLACK_TIME, self(), gc),
-					S#state{gc_tmr=Timer};
-				false ->
-					S % already expired, message should be in queue
-			end;
-
-		Updates == ?GC_MIN_UPDATES ->
-			Timer = erlang:start_timer(?GC_SLACK_TIME, self(), gc),
-			S#state{gc_tmr=Timer};
+		WbTmr == undefined ->
+			Timer = erlang:start_timer(?WB_DIRTY_TIME, self(), dirty),
+			S#state{wb_tmr=Timer};
 
 		true ->
-			S
+			case erlang:cancel_timer(WbTmr) of
+				Remain when is_integer(Remain) ->
+					Timer = erlang:start_timer(?WB_DIRTY_TIME, self(), dirty),
+					S#state{wb_tmr=Timer};
+				false ->
+					S % already expired, message should be in queue
+			end
 	end,
 	S2#state{gen=Gen+1}.
 
