@@ -48,7 +48,7 @@ lookup(Store, Doc) ->
 	gen_server:call(?MODULE, {lookup, Store, Doc}, infinity).
 
 stat(Store, Rev) ->
-	make_reply(hotchpotch_broker:stat(Rev, hotchpotch_broker:get_stores([Store]))).
+	hotchpotch_broker:stat(Rev, [Store]).
 
 open_rev(Store, Rev) ->
 	gen_server:call(?MODULE, {open_rev, Store, Rev}, infinity).
@@ -154,12 +154,12 @@ do_open_rev(Store, Rev, S) ->
 			{{ok, Rev, FuseHandle}, S2};
 
 		error ->
-			case hotchpotch_broker:peek(Rev, hotchpotch_broker:get_stores([Store])) of
-				{ok, _ErrInfo, Handle} ->
+			case hotchpotch_broker:peek(Store, Rev) of
+				{ok, Handle} ->
 					S2 = create_handle(FuseHandle, Rev, Handle, S),
 					{{ok, Rev, FuseHandle}, S2};
 
-				{error, Reason, _ErrInfo} ->
+				{error, Reason} ->
 					{{error, Reason}, S}
 			end
 	end.
@@ -187,14 +187,12 @@ do_open_doc(Store, Doc, true, S) ->
 				{ok, Rev, IsPre, false, S2} ->
 					StoreReply = if
 						IsPre ->
-							hotchpotch_broker:resume(Doc, Rev, keep,
-								hotchpotch_broker:get_stores([Store]));
+							hotchpotch_broker:resume(Store, Doc, Rev, keep);
 						true ->
-							hotchpotch_broker:update(Doc, Rev, ?VFS_CC,
-								hotchpotch_broker:get_stores([Store]))
+							hotchpotch_broker:update(Store, Doc, Rev, ?VFS_CC)
 					end,
 					case StoreReply of
-						{ok, _ErrInfo, Handle} ->
+						{ok, Handle} ->
 							S3 = create_handle(FuseHandle, Rev, Handle, S2),
 							S4 = if
 								IsPre -> mark_open(Store, Doc, S3);
@@ -202,7 +200,7 @@ do_open_doc(Store, Doc, true, S) ->
 							end,
 							{{ok, Rev, FuseHandle}, S4};
 
-						{error, Reason, _ErrInfo} ->
+						{error, Reason} ->
 							{{error, Reason}, S2}
 					end;
 
@@ -219,7 +217,7 @@ do_open_doc(Store, Doc, true, S) ->
 do_truncate(FuseHandle, Part, Offset, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			make_reply(hotchpotch_broker:truncate(Handle, Part, Offset));
+			hotchpotch_broker:truncate(Handle, Part, Offset);
 		error ->
 			{error, ebadf}
 	end.
@@ -228,7 +226,7 @@ do_truncate(FuseHandle, Part, Offset, S) ->
 do_get_type(FuseHandle, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			make_reply(hotchpotch_broker:get_type(Handle));
+			hotchpotch_broker:get_type(Handle);
 		error ->
 			{error, ebadf}
 	end.
@@ -237,7 +235,7 @@ do_get_type(FuseHandle, S) ->
 do_set_type(FuseHandle, Uti, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			make_reply(hotchpotch_broker:set_type(Handle, Uti));
+			hotchpotch_broker:set_type(Handle, Uti);
 		error ->
 			{error, ebadf}
 	end.
@@ -246,7 +244,7 @@ do_set_type(FuseHandle, Uti, S) ->
 do_read(FuseHandle, Part, Offset, Length, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			make_reply(hotchpotch_broker:read(Handle, Part, Offset, Length));
+			hotchpotch_broker:read(Handle, Part, Offset, Length);
 		error ->
 			{error, ebadf}
 	end.
@@ -255,7 +253,7 @@ do_read(FuseHandle, Part, Offset, Length, S) ->
 do_write(FuseHandle, Part, Offset, Data, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			make_reply(hotchpotch_broker:write(Handle, Part, Offset, Data));
+			hotchpotch_broker:write(Handle, Part, Offset, Data);
 		error ->
 			{error, ebadf}
 	end.
@@ -267,19 +265,19 @@ do_close({rw, Store, Doc}=FuseHandle, S) ->
 			Result = hotchpotch_broker:suspend(Handle),
 			hotchpotch_broker:close(Handle),
 			case Result of
-				{ok, _ErrInfo, Rev} ->
+				{ok, Rev} ->
 					S3 = mark_committed(Store, Doc, Rev, S2),
 					case State of
 						closed ->
 							{{ok, Rev}, S3};
 
 						keep ->
-							case hotchpotch_broker:resume(Doc, Rev, keep, hotchpotch_broker:get_stores([Store])) of
-								{ok, _, NewHandle} ->
+							case hotchpotch_broker:resume(Store, Doc, Rev, keep) of
+								{ok, NewHandle} ->
 									S4 = reopen_handle(FuseHandle, Rev, NewHandle, S3),
 									{{ok, Rev}, mark_open(Store, Doc, S4)};
 
-								{error, _Reason, _} ->
+								{error, _} ->
 									% Could create the checkpoint but not
 									% reopen the broker handle.  This means the
 									% 'close' has succeeded but all other
@@ -288,7 +286,7 @@ do_close({rw, Store, Doc}=FuseHandle, S) ->
 							end
 					end;
 
-				{error, Reason, _ErrInfo} ->
+				{error, Reason} ->
 					% close failed, mark internal state as closed and forget
 					S3 = mark_closed(Store, Doc, S2),
 					S4 = forget_handle(FuseHandle, S3),
@@ -337,7 +335,7 @@ do_abort(FuseHandle, S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 lookup_internal(Store, Doc, S) ->
-	case hotchpotch_broker:lookup_doc(Doc, hotchpotch_broker:get_stores([Store])) of
+	case hotchpotch_broker:lookup_doc(Doc, [Store]) of
 		{[{Rev, _}], BrokerPreRevs} ->
 			PreRevs = lists:map(fun({PreRev, _}) -> PreRev end, BrokerPreRevs),
 			case check_known(Store, Doc, Rev, PreRevs, S) of
@@ -388,13 +386,13 @@ check_prerevs(_Store, _Doc, _Rev, []) ->
 	none;
 
 check_prerevs(Store, Doc, Rev, [PreRev | PreRevs]) ->
-	case hotchpotch_broker:stat(PreRev, hotchpotch_broker:get_stores([Store])) of
-		{ok, _ErrInfo, #rev_stat{creator=?VFS_CC, parents=Parents}} ->
+	case hotchpotch_broker:stat(PreRev, [Store]) of
+		{ok, #rev_stat{creator=?VFS_CC, parents=Parents}} ->
 			case lists:member(Rev, Parents) of
 				true ->
 					{ok, PreRev};
 				false ->
-					hotchpotch_broker:forget(Doc, PreRev, hotchpotch_broker:get_stores([Store])),
+					hotchpotch_broker:forget(Store, Doc, PreRev),
 					check_prerevs(Store, Doc, Rev, PreRevs)
 			end;
 
@@ -545,47 +543,39 @@ commit_prerevs(Expired) ->
 
 
 commit_prerev(Store, Doc, Rev) ->
-	case hotchpotch_broker:resume(Doc, Rev, keep, hotchpotch_broker:get_stores([Store])) of
-		{ok, _ErrInfo, Handle} ->
+	case hotchpotch_broker:resume(Store, Doc, Rev, keep) of
+		{ok, Handle} ->
 			try
 				commit_prerev_loop(Store, Doc, Handle)
 			after
 				hotchpotch_broker:close(Handle)
 			end;
 
-		{error, enoent, _ErrInfo} ->
+		{error, enoent} ->
 			% has been deleted in between
 			ok;
 
-		{error, Reason, _ErrInfo} ->
+		{error, Reason} ->
 			error_logger:warning_msg("FUSE: Could not resume: ~w~n", [Reason])
 	end.
 
 
 commit_prerev_loop(Store, Doc, Handle) ->
 	case hotchpotch_broker:commit(Handle) of
-		{ok, _ErrInfo, _Rev} ->
+		{ok, _Rev} ->
 			ok;
 
-		{error, econflict, _ErrInfo} ->
-			case hotchpotch_broker:lookup_doc(Doc, hotchpotch_broker:get_stores([Store])) of
+		{error, econflict} ->
+			case hotchpotch_broker:lookup_doc(Doc, [Store]) of
 				{[{CurRev, _}], _PreRevs} ->
-					hotchpotch_broker:set_parents(Handle, [CurRev]),
+					hotchpotch_broker:rebase(Handle, CurRev),
 					commit_prerev_loop(Store, Doc, Handle);
 				{[], []} ->
 					% doesn't exist anymore
 					ok
 			end;
 
-		{error, Reason, _ErrInfo} ->
+		{error, Reason} ->
 			error_logger:warning_msg("FUSE: Could not commit: ~w~n", [Reason])
-	end.
-
-
-make_reply(Reply) ->
-	case Reply of
-		{ok, _ErrInfo}            -> ok;
-		{ok, _ErrInfo, Result}    -> {ok, Result};
-		{error, Reason, _ErrInfo} -> {error, Reason}
 	end.
 

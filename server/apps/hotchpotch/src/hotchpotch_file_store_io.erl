@@ -91,13 +91,13 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | {error, Reason}'
-handle_call({commit, Mtime}, _From, S) ->
-	{Reply, S2} = do_commit(fun hotchpotch_file_store:commit/4, S, Mtime),
+handle_call(commit, _From, S) ->
+	{Reply, S2} = do_commit(fun hotchpotch_file_store:commit/4, S),
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | {error, Reason}'
-handle_call({suspend, Mtime}, _From, S) ->
-	{Reply, S2} = do_commit(fun hotchpotch_file_store:suspend/4, S, Mtime),
+handle_call(suspend, _From, S) ->
+	{Reply, S2} = do_commit(fun hotchpotch_file_store:suspend/4, S),
 	{reply, Reply, S2};
 
 handle_call({set_type, Type}, _From, S) ->
@@ -111,9 +111,8 @@ handle_call({set_links, DocLinks, RevLinks}, _From, S) ->
 	{reply, ok, S#state{rev=NewRev}};
 
 handle_call({set_parents, Parents}, _From, S) ->
-	Rev = S#state.rev,
-	NewRev = Rev#revision{parents=Parents},
-	{reply, ok, S#state{rev=NewRev}}.
+	S2 = do_set_parents(Parents, S),
+	{reply, ok, S2}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store}=S) ->
@@ -123,11 +122,15 @@ handle_info({'EXIT', From, Reason}, #state{store=Store}=S) ->
 	end.
 
 
-terminate(_Reason, #state{did=DId, store=Store} = S) ->
+terminate(_Reason, #state{did=DId, rev=Rev, store=Store} = S) ->
 	% unlock hashes
 	lists:foreach(
 		fun(PId) -> hotchpotch_file_store:part_unlock(Store, PId) end,
 		S#state.locks),
+	% unlock parents
+	lists:foreach(
+		fun(RId) -> hotchpotch_file_store:rev_unlock(Store, RId) end,
+		Rev#revision.parents),
 	% expose document to garbage collector
 	DId == undefined orelse hotchpotch_file_store:doc_unlock(Store, DId),
 	% clean up files
@@ -211,11 +214,11 @@ do_truncate(Part, Offset, S) ->
 	end.
 
 
-do_commit(Fun, S, Mtime) ->
+do_commit(Fun, S) ->
 	case close_and_writeback(S) of
 		{ok, S2} ->
 			Rev = S2#state.rev,
-			NewRev = Rev#revision{mtime=Mtime},
+			NewRev = Rev#revision{mtime=hotchpotch_util:get_time()},
 			case Fun(S2#state.store, S2#state.did, S2#state.prerid, NewRev) of
 				{ok, _Rev} = Ok ->
 					{Ok, S2#state{rev=NewRev, readonly=true}};
@@ -226,6 +229,19 @@ do_commit(Fun, S, Mtime) ->
 		{{error, _}, _S2} = Error ->
 			Error
 	end.
+
+
+do_set_parents(Parents, #state{rev=Rev, store=Store} = S) ->
+	% lock new parents
+	lists:foreach(
+		fun(RId) -> hotchpotch_file_store:rev_lock(Store, RId) end,
+		Parents),
+	% unlock old parents
+	lists:foreach(
+		fun(RId) -> hotchpotch_file_store:rev_unlock(Store, RId) end,
+		Rev#revision.parents),
+	NewRev = Rev#revision{parents=Parents},
+	S#state{rev=NewRev}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

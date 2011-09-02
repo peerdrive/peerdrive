@@ -19,36 +19,10 @@
 -export([
 	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_parents/1,
 	get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2, replicate_rev/4,
-	replicate_doc/4, resume/4, set_parents/2, set_type/2, stat/2, suspend/1,
-	update/4, close/1, commit/1, write/4, truncate/3, sync/3]).
+	replicate_doc/4, resume/4, set_type/2, stat/2, suspend/1, forward_doc/6,
+	update/4, close/1, commit/1, write/4, truncate/3, rebase/2, merge/4]).
 
--export([consolidate_error/1, consolidate_success/2, consolidate_success/1,
-	consolidate_filter/1, get_stores/1]).
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Hotchpotch operations...
-%%
-%% The broker does normally work on more than one store simultaneously. The
-%% operations result is therefore not a success/fail condition anymore. Instead
-%% the operation could succeed on some stores and fail on others.
-%%
-%% All operations which can exhibit this behaviour will return their result in
-%% the following form:
-%%
-%%   {ok, ErrInfo} | {ok, ErrInfo, Result} -- (partial) success
-%%   {error, Error, ErrInfo}               -- failed
-%%
-%% Error is the primary error which caused the operation to fail. `ErrInfo' is
-%% a list of {Store, Error} tuples which indicate the failure code on a
-%% specific store.
-%%
-%% If there is no unambiguous error then Error will be `eambig' and ErrInfo
-%% should be inspected for individual error causes.  The list will typically
-%% not contain `enoent' errors as these are not treated as error on the broker
-%% level. OTOH if all stores return `enoent' then the primary error will be
-%% enoent.
-%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+-include("store.hrl").
 
 %% @doc Lookup a document.
 %%
@@ -58,12 +32,13 @@
 %%
 %% @spec lookup_doc(Doc, Stores) -> {[{Rev, [Store]}], [{PreRev, [Store]}]}
 %%       Doc, Rev, PreRev, Store = guid()
-%%       Stores = [guid()]
+%%       Stores = [pid()]
 lookup_doc(Doc, Stores) ->
 	{RevDict, PreRevDict} = lists:foldl(
-		fun({StoreGuid, StorePid}, {AccRev, AccPreRev}) ->
+		fun(StorePid, {AccRev, AccPreRev}) ->
 			case hotchpotch_store:lookup(StorePid, Doc) of
 				{ok, Rev, PreRevs} ->
+					StoreGuid = hotchpotch_store:guid(StorePid),
 					NewAccPreRev = lists:foldl(
 						fun(PreRev, Acc) -> dict:append(PreRev, StoreGuid, Acc) end,
 						AccPreRev,
@@ -87,12 +62,12 @@ lookup_doc(Doc, Stores) ->
 %%
 %% @spec lookup_rev(Rev, Stores) -> [Store]
 %%       Rev, Store = guid()
-%%       Stores = [guid]
+%%       Stores = [pid()]
 lookup_rev(Rev, Stores) ->
 	lists:foldl(
-		fun({StoreGuid, StorePid}, Acc) ->
-			case hotchpotch_store:contains(StorePid, Rev) of
-				true  -> [StoreGuid | Acc];
+		fun(Store, Acc) ->
+			case hotchpotch_store:contains(Store, Rev) of
+				true  -> [hotchpotch_store:guid(Store) | Acc];
 				false -> Acc
 			end
 		end,
@@ -103,63 +78,57 @@ lookup_rev(Rev, Stores) ->
 %% @doc Get status information about a revision.
 %%
 %% Returns information about a revision if it is found on any of the specified
-%% stores, or `error' if no such revision is found. The returned information is
-%% a #stat{} record containing the following fields:
+%% stores, or `{error, enoent}' if no such revision is found. The returned
+%% information is a #rev_stat{} record containing the following fields:
 %%
 %%   flags = integer()
-%%   parts = [{FourCC::binary(), Size::interger(), Hash::guid()}]
+%%   parts = [{FourCC::binary(), Size::interger(), PId::guid()}]
 %%   parents = [guid()]
 %%   mtime = integer()
 %%   type = binary()
 %%   creator = binary()
+%%   doc_links = [DId::guid()]
+%%   rev_links = [RId::guid()]
 %%
 %% If an empty list of stores was given then all mounted stores are searched.
 %%
 %% @spec stat(Rev, SearchStores) -> Result
-%%       Result = {ok, ErrInfo, Stat} | {error, Reason, ErrInfo}
+%%       Result = {ok, Stat} | {error, enoent}
 %%       Rev = guid()
-%%       SearchStores = [guid()]
+%%       SearchStores = [pid()]
 %%       Stat = #rev_stat{}
 %%       ErrInfo = [{Store::guid(), Reason::ecode()}]
 %%       Reason = ecode()
 stat(Rev, SearchStores) ->
-	{Stat, ErrInfo} = lists:foldl(
-		fun({Guid, Pid}, {SoFar, ErrInfo} = Acc) ->
-			case SoFar of
-				undef ->
-					case hotchpotch_store:stat(Pid, Rev) of
-						{ok, Stat} ->
-							{Stat, ErrInfo};
-						{error, Reason} ->
-							{undef, [{Guid, Reason} | ErrInfo]}
-					end;
-
-				_Stat ->
-					Acc
-			end
-		end,
-		{undef, []},
-		SearchStores),
-	case Stat of
-		undef -> consolidate_error(ErrInfo);
-		_     -> consolidate_success(ErrInfo, Stat)
+	try
+		lists:foreach(
+			fun(Store) ->
+				case hotchpotch_store:stat(Store, Rev) of
+					{ok, Stat} -> throw(Stat);
+					{error, _Reason} -> ok
+				end
+			end,
+			SearchStores),
+		{error, enoent}
+	catch
+		throw:Result -> {ok, Result}
 	end.
 
 
 %% @doc Start reading a specific revision.
-%% @spec peek(Rev, Stores) -> Result
-%%       Result = {ok, ErrInfo, Handle} | {error, Reason, ErrInfo}
+%% @spec peek(Store, Rev) -> Result
+%%       Result = {ok, Handle} | {error, Reason}
 %%       Rev = guid()
-%%       Stores = [guid()]
+%%       Store = pid()
 %%       Handle = handle()
 %%       Reason = ecode()
-peek(Rev, Stores) ->
-	hotchpotch_broker_io:start({peek, Rev, Stores}).
+peek(Store, Rev) ->
+	hotchpotch_broker_io:peek(Store, Rev).
 
 
 %% @doc Create a new, empty document.
 %%
-%% Returns a `{Doc, Handle}' which represents the created document and a
+%% Returns `{ok, Doc, Handle}' which represents the created document and a
 %% handle for the subsequent write calls to fill the revision. The initial
 %% revision identifier will be returned by commit/1 which will always succeed
 %% for newly created documents (despite IO errors).
@@ -167,21 +136,15 @@ peek(Rev, Stores) ->
 %% The handle can only be commited but not suspended because the new document
 %% will not show up in the store until a successful commit.
 %%
-%% @spec create(Type, Creator, Stores) -> Result
-%%       Result = {ok, ErrInfo, {Doc, Handle}} | {error, Reason, ErrInfo}
-%%       Stores = [guid()]
+%% @spec create(Store, Type, Creator) -> Result
+%%       Result = {ok, Doc, Handle} | {error, Reason}
+%%       Store = pid()
 %%       Doc = guid()
 %%       Type, Creator = binary()
 %%       Handle = handle()
 %%       Reason = ecode()
-create(Type, Creator, Stores) ->
-	Doc = crypto:rand_bytes(16),
-	case hotchpotch_broker_io:start({create, Doc, Type, Creator, Stores}) of
-		{ok, ErrInfo, Handle} ->
-			{ok, ErrInfo, {Doc, Handle}};
-		{error, _, _} = Error ->
-			Error
-	end.
+create(Store, Type, Creator) ->
+	hotchpotch_broker_io:create(Store, Type, Creator).
 
 
 %% @doc Fork a new document from an existing revision.
@@ -193,38 +156,33 @@ create(Type, Creator, Stores) ->
 %% The handle can only be commited but not suspended because the new document
 %% will not show up in the store until a successful commit.
 %%
-%% @spec fork(StartRev, Creator, Stores) -> Result
-%%       Result = {ok, ErrInfo, {Doc, Handle}} | {error, Reason, ErrInfo}
-%%       Stores = [guid()]
+%% @spec fork(Store, StartRev, Creator) -> Result
+%%       Result = {ok, Doc, Handle} | {error, ErrInfo}
+%%       Store = pid()
 %%       StartRev, Doc = guid()
 %%       Creator = binary()
 %%       Handle = handle()
 %%       Reason = ecode()
-fork(StartRev, Creator, Stores) ->
-	Doc = crypto:rand_bytes(16),
-	case hotchpotch_broker_io:start({fork, Doc, StartRev, Creator, Stores}) of
-		{ok, ErrInfo, Handle} ->
-			{ok, ErrInfo, {Doc, Handle}};
-		{error, _} = Error ->
-			Error
-	end.
+fork(Store, StartRev, Creator) ->
+	hotchpotch_broker_io:fork(Store, StartRev, Creator).
 
 
 %% @doc Update a document.
 %%
-%% Write to the document identified by Doc. If the document exists on more
-%% than one store then only the stores pointing to Rev will be updated. All
-%% affected stores are updated simultaniously.
+%% Write to the document identified by Doc starting from StartRev. The StartRev
+%% does not need to be the current revision of the document, e.g. when you want
+%% to save the current state as preliminary revision even if the document was
+%% updated in between.
 %%
-%% @spec update(Doc, StartRev, Creator, Stores) -> Result
-%%       Result = {ok, ErrInfo, Handle} | {error, Reason, ErrInfo}
+%% @spec update(Store, Doc, StartRev, Creator) -> Result
+%%       Result = {ok, Handle} | {error, Reason}
 %%       Doc, StartRev = guid()
 %%       Creator = keep | binary()
-%%       Stores = [guid()]
+%%       Store = pid()
 %%       Handle = handle()
 %%       Reason = ecode()
-update(Doc, StartRev, Creator, Stores) ->
-	hotchpotch_broker_io:start({update, Doc, StartRev, Creator, Stores}).
+update(Store, Doc, StartRev, Creator) ->
+	hotchpotch_broker_io:update(Store, Doc, StartRev, Creator).
 
 
 %% @doc Resume writing to a document
@@ -232,18 +190,17 @@ update(Doc, StartRev, Creator, Stores) ->
 %% This will open a preliminary revision that was previously suspended. The
 %% content will be exactly the same as when it was suspended, including its
 %% parents. StartRev will be kept as pending preliminary revision (until
-%% overwritten by either commit/1 or suspend/1). All affected stores are
-%% updated simultaniously.
+%% overwritten by either commit/1 or suspend/1).
 %%
-%% @spec resume(Doc, PreRev, Creator, Stores) -> Result
-%%       Result = {ok, ErrInfo, Handle} | {error, Reason, ErrInfo}
+%% @spec resume(Store, Doc, PreRev, Creator) -> Result
+%%       Result = {ok, Handle} | {error, Reason}
 %%       Doc, PreRev = guid()
 %%       Creator = keep | binary()
-%%       Stores = [guid()]
+%%       Store = pid()
 %%       Handle = handle()
 %%       Reason = ecode()
-resume(Doc, PreRev, Creator, Stores) ->
-	hotchpotch_broker_io:start({resume, Doc, PreRev, Creator, Stores}).
+resume(Store, Doc, PreRev, Creator) ->
+	hotchpotch_broker_io:resume(Store, Doc, PreRev, Creator).
 
 
 %% @doc Read a part of a document
@@ -252,7 +209,7 @@ resume(Doc, PreRev, Creator, Stores) ->
 %% {error, enoent}. May return less data if the end of the part was hit.
 %%
 %% @spec read(Handle, Part, Offset, Length) ->  Result
-%%       Result = {ok, ErrInfo, Data} | {error, Reason, ErrInfo}
+%%       Result = {ok, Data} | {error, Reason}
 %%       Handle = handle()
 %%       Part, Offset, Length = int()
 %%       Data = binary()
@@ -267,7 +224,7 @@ read(Handle, Part, Offset, Length) ->
 %% not exist yet it will be created.
 %%
 %% @spec write(Handle, Part, Offset, Data) -> Result
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
+%%       Result = ok | {error, Reason}
 %%       Handle = handle()
 %%       Part = Data = binary()
 %%       Offset = integer()
@@ -282,7 +239,7 @@ write(Handle, Part, Offset, Data) ->
 %% be created.
 %%
 %% @spec truncate(Handle, Part, Offset) -> Result
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
+%%       Result = ok | {error, Reason}
 %%       Handle = handle()
 %%       Part = binary()
 %%       Offset = integer()
@@ -300,8 +257,27 @@ set_type(Handle, Uti) ->
 get_parents(Handle) ->
 	hotchpotch_broker_io:get_parents(Handle).
 
-set_parents(Handle, Parents) ->
-	hotchpotch_broker_io:set_parents(Handle, Parents).
+
+%% @doc Merge document with another revision
+%%
+%% Add `Rev' from `Store' as another parent of the document. The revision is
+%% replicated asynchronously to the store of the document. If the revision is a
+%% successor of any parent then this(these) parent(s) will be replaced by the
+%% new revision.
+%%
+%% @spec merge(Handle, Store, Rev, Depth) -> Result
+%%       Result = ok | {error, Reason}
+%%       Handle = handle()
+%%       Store = pid()
+%%       Rev = guid()
+%%       Depth = integer()
+%%       Reason = ecode()
+merge(Handle, Store, Rev, Depth) ->
+	hotchpotch_broker_io:merge(Handle, Store, Rev, Depth).
+
+
+rebase(Handle, Parent) ->
+	hotchpotch_broker_io:rebase(Handle, Parent).
 
 
 %% @doc Commit a new revision
@@ -320,7 +296,7 @@ set_parents(Handle, Parents) ->
 %% the commit fails, e.g. due to a conflict the handle will still be writable.
 %%
 %% @spec commit(Handle) -> Result
-%%       Result = {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
+%%       Result = {ok, Rev} | {error, Reason}
 %%       Handle = handle()
 %%       Rev = guid()
 %%       Reason = ecode()
@@ -344,7 +320,7 @@ commit(Handle) ->
 %% case the operation fails the handle will still be writable.
 %%
 %% @spec suspend(Handle) -> Result
-%%       Result = {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
+%%       Result = {ok, Rev} | {error, Reason}
 %%       Handle = handle()
 %%       Rev = guid()
 %%       Reason = ecode()
@@ -357,7 +333,7 @@ suspend(Handle) ->
 %% Discards the handle and throws away any changes. The handle will be invalid
 %% after the call.
 %%
-%% @spec close(Handle) -> {ok, ErrInfo}
+%% @spec close(Handle) -> ok
 %%       Handle = #handle{}
 close(Handle) ->
 	hotchpotch_broker_io:close(Handle).
@@ -365,25 +341,13 @@ close(Handle) ->
 
 %% @doc Remove a pending preliminary revision from a document.
 %%
-%% @spec forget(Doc, PreRev, Stores) -> Result
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
+%% @spec forget(Store, Doc, PreRev) -> Result
+%%       Result = ok | {error, Reason}
 %%       Doc, PreRev = guid()
-%%       Stores = [guid()]
+%%       Store = pid()
 %%       Reason = ecode()
-forget(Doc, PreRev, Stores) ->
-	{Result, ErrInfo} = lists:foldl(
-		fun({Guid, Store}, {Result, ErrInfo}) ->
-			case hotchpotch_store:forget(Store, Doc, PreRev) of
-				ok              -> {ok, ErrInfo};
-				{error, Reason} -> {Result, [{Guid, Reason} | ErrInfo]}
-			end
-		end,
-		{error, []},
-		Stores),
-	case Result of
-		ok -> consolidate_success(ErrInfo);
-		error -> consolidate_error(ErrInfo)
-	end.
+forget(Store, Doc, PreRev) ->
+	hotchpotch_store:forget(Store, Doc, PreRev).
 
 
 %% @doc Delete a document and release any referenced revisions.
@@ -392,25 +356,13 @@ forget(Doc, PreRev, Stores) ->
 %% automatic garbage collection when they are no longer referenced inside the
 %% store.
 %%
-%% @spec delete_doc(Doc, Rev, Stores) -> Result
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
-%%       Stores = [guid()]
+%% @spec delete_doc(Store, Doc, Rev) -> Result
+%%       Result = ok | {error, Reason}
+%%       Store = pid()
 %%       Doc, Rev = guid()
 %%       Reason = ecode()
-delete_doc(Doc, Rev, Stores) ->
-	{Result, ErrInfo} = lists:foldl(
-		fun({Guid, Store}, {Result, ErrInfo}) ->
-			case hotchpotch_store:delete_doc(Store, Doc, Rev) of
-				ok              -> {ok, ErrInfo};
-				{error, Reason} -> {Result, [{Guid, Reason} | ErrInfo]}
-			end
-		end,
-		{error, []},
-		Stores),
-	case Result of
-		ok -> consolidate_success(ErrInfo);
-		error -> consolidate_error(ErrInfo)
-	end.
+delete_doc(Store, Doc, Rev) ->
+	hotchpotch_store:delete_doc(Store, Doc, Rev).
 
 
 %% @doc Delete a revision and release any referenced parent revisions
@@ -418,41 +370,38 @@ delete_doc(Doc, Rev, Stores) ->
 %% This is normally used to explicitly delete old, unused revisions of a
 %% document.
 %%
-%% @spec delete_rev(Rev, Stores) -> Result
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
-%%       Stores = [guid()]
+%% @spec delete_rev(Store, Rev) -> Result
+%%       Result = ok | {error, Reason}
+%%       Store = pid()
 %%       Rev = guid()
 %%       Reason = ecode()
-delete_rev(Rev, Stores) ->
-	{Result, ErrInfo} = lists:foldl(
-		fun({Guid, Store}, {Result, ErrInfo}) ->
-			case hotchpotch_store:delete_rev(Store, Rev) of
-				ok              -> {ok, ErrInfo};
-				{error, Reason} -> {Result, [{Guid, Reason} | ErrInfo]}
-			end
-		end,
-		{error, []},
-		Stores),
-	case Result of
-		ok -> consolidate_success(ErrInfo);
-		error -> consolidate_error(ErrInfo)
-	end.
+delete_rev(Store, Rev) ->
+	hotchpotch_store:delete_rev(Store, Rev).
 
 
-%% @doc Synchronize a document between different stores to the same revision.
+%% @doc Forward a document revision
 %%
-%% Tries to perform a fast-forward merge for the document on the given stores
-%% if the revisions differ. Returns the new, common head if the operation
-%% succeeds.
+%% Forwards the document Doc from FromRev to ToRev. Any intermediate revisions
+%% are searched on SrcStore and replicated to the documents store.
 %%
-%% @spec sync(Doc, Depth, Stores) -> Result
+%% @spec forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) -> Result
 %%       Result = {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
 %%       Doc, Rev = guid()
 %%       Depth = interger()
 %%       Stores = [guid()]
 %%       Reason = ecode()
-sync(Doc, Depth, Stores) ->
-	hotchpotch_broker_syncer:sync(Doc, Depth, Stores).
+forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) ->
+	case search_path([SrcStore, Store], FromRev, ToRev) of
+		{ok, Path} ->
+			case replicate_rev(SrcStore, ToRev, Store, Depth) of
+				ok ->
+					do_forward_doc(Store, Doc, SrcStore, Path);
+				Error ->
+					Error
+			end;
+		error ->
+			{error, enoent}
+	end.
 
 
 %% @doc Replicate a document to new stores.
@@ -461,13 +410,13 @@ sync(Doc, Depth, Stores) ->
 %% source stores. The Doc may already exist on the destination stores. An empty
 %% (src- or dst-)stores list is replaced by the list of all mounted stores.
 %%
-%% @spec replicate_doc(Doc, Depth, SrcStores, DstStores) -> Result
+%% @spec replicate_doc(SrcStore, Doc, DstStore, Depth) -> Result
 %%       Doc = guid()
 %%       Depth = integer()
-%%       SrcStores, DstStores = [guid()]
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
-replicate_doc(Doc, Depth, SrcStores, DstStores) ->
-	hotchpotch_replicator:replicate_doc_sync(Doc, Depth, SrcStores, DstStores).
+%%       SrcStore, DstStore = guid()
+%%       Result = ok | {error, Reason}
+replicate_doc(SrcStore, Doc, DstStore, Depth) ->
+	hotchpotch_replicator:replicate_doc_sync(SrcStore, Doc, DstStore, Depth).
 
 
 %% @doc Replicate a revision to another store.
@@ -476,52 +425,65 @@ replicate_doc(Doc, Depth, SrcStores, DstStores) ->
 %% stores, otherwise the revision is immediately eligible for garbage collection
 %% or the destination store may refuse to replicate the revision entirely.
 %%
-%% @spec replicate_rev(Doc, Depth, SrcStores, DstStores) -> Result
-%%       Doc = guid()
+%% @spec replicate_rev(SrcStore, Rev, DstStore, Depth) -> Result
+%%       Rev = guid()
 %%       Depth = integer()
-%%       SrcStores, DstStores = [guid()]
-%%       Result = {ok, ErrInfo} | {error, Reason, ErrInfo}
-replicate_rev(Doc, Depth, SrcStores, DstStores) ->
-	hotchpotch_replicator:replicate_rev_sync(Doc, Depth, SrcStores, DstStores).
+%%       SrcStore, DstStore = guid()
+%%       Result = {ok, ErrInfo} | {error, Reason}
+replicate_rev(SrcStore, Rev, DstStore, Depth) ->
+	hotchpotch_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Depth).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Utility functions...
+%% Local functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-get_stores(StoreList) ->
-	case StoreList of
-		[] ->
-			hotchpotch_volman:stores();
+search_path(Stores, FromRev, ToRev) ->
+	search_path(Stores, FromRev, ToRev, [ToRev]).
 
-		_ ->
+
+search_path(_Stores, FromRev, FromRev, Path) ->
+	{ok, Path};
+
+search_path(Stores, FromRev, ToRev, Path) ->
+	case stat(ToRev, Stores) of
+		{ok, #rev_stat{parents=Parents}} ->
 			lists:foldl(
-				fun(Guid, Acc) ->
-					case hotchpotch_volman:store(Guid) of
-						{ok, Pid} -> [{Guid, Pid} | Acc];
-						error     -> Acc
-					end
+				fun
+					(Rev, error) ->
+						search_path(Stores, FromRev, Rev, [Rev | Path]);
+					(_Rev, Found) ->
+						Found
 				end,
-				[],
-				StoreList)
+				error,
+				Parents);
+
+		{error, _} ->
+			error
 	end.
 
 
-consolidate_error(ErrInfo) ->
-	case consolidate_filter(ErrInfo) of
-		[]                    -> {error, enoent, []};
-		[{_, Error}] = Single -> {error, Error, Single};
-		Multiple              -> {error, eambig, Multiple}
+do_forward_doc(DstStore, Doc, SrcStore, RevPath) ->
+	case hotchpotch_store:forward_doc_start(DstStore, Doc, RevPath) of
+		ok ->
+			ok;
+
+		{ok, MissingRevs, Handle} ->
+			try
+				lists:foreach(
+					fun(Rev) ->
+						case replicate_rev(SrcStore, Rev, DstStore, 0) of
+							ok    -> ok;
+							Error -> throw(Error)
+						end
+					end,
+					MissingRevs),
+				hotchpotch_store:forward_doc_commit(Handle)
+			catch
+				throw:Error -> hotchpotch_store:forward_doc_abort(Handle), Error
+			end;
+
+		{error, _Reason} = Error ->
+			Error
 	end.
-
-
-consolidate_success(ErrInfo, Result) ->
-	{ok, consolidate_filter(ErrInfo), Result}.
-
-consolidate_success(ErrInfo) ->
-	{ok, consolidate_filter(ErrInfo)}.
-
-
-consolidate_filter(ErrInfo) ->
-	lists:filter(fun({_S, E}) -> E =/= enoent end, ErrInfo).
 

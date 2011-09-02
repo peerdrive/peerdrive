@@ -18,78 +18,52 @@
 -export([init/2, handle_packet/2, handle_info/2, terminate/1]).
 -import(hotchpotch_netencode, [parse_uuid/1, parse_string/1, parse_uuid_list/1,
 	parse_store/1, encode_list/1, encode_list/2, encode_list_32/1,
-	encode_list_32/2, encode_string/1, encode_direct_result/1,
+	encode_list_32/2, encode_string/1, encode_result/1,
 	encode_error_code/1, err2int/1]).
 
 -include("store.hrl").
 
 -record(state, {socket, cookies, next, progreg=false}).
--record(retpath, {socket, ref}).
+-record(retpath, {socket, req, ref}).
+
+-define(FLAG_REQ, 0).
+-define(FLAG_CNF, 1).
+-define(FLAG_IND, 2).
+-define(FLAG_RSP, 3).
 
 -define(INIT_REQ,           16#0000).
--define(INIT_CNF,           16#0001).
 -define(ENUM_REQ,           16#0010).
--define(ENUM_CNF,           16#0011).
 -define(LOOKUP_DOC_REQ,     16#0020).
--define(LOOKUP_DOC_CNF,     16#0021).
 -define(LOOKUP_REV_REQ,     16#0030).
--define(LOOKUP_REV_CNF,     16#0031).
 -define(STAT_REQ,           16#0040).
--define(STAT_CNF,           16#0041).
 -define(PEEK_REQ,           16#0050).
--define(PEEK_CNF,           16#0051).
 -define(CREATE_REQ,         16#0060).
--define(CREATE_CNF,         16#0061).
 -define(FORK_REQ,           16#0070).
--define(FORK_CNF,           16#0071).
 -define(UPDATE_REQ,         16#0080).
--define(UPDATE_CNF,         16#0081).
 -define(RESUME_REQ,         16#0090).
--define(RESUME_CNF,         16#0091).
 -define(READ_REQ,           16#00A0).
--define(READ_CNF,           16#00A1).
 -define(TRUNC_REQ,          16#00B0).
--define(TRUNC_CNF,          16#00B1).
 -define(WRITE_REQ,          16#00C0).
--define(WRITE_CNF,          16#00C1).
 -define(GET_TYPE_REQ,       16#00D0).
--define(GET_TYPE_CNF,       16#00D1).
 -define(SET_TYPE_REQ,       16#00E0).
--define(SET_TYPE_CNF,       16#00E1).
 -define(GET_PARENTS_REQ,    16#00F0).
--define(GET_PARENTS_CNF,    16#00F1).
--define(SET_PARENTS_REQ,    16#0100).
--define(SET_PARENTS_CNF,    16#0101).
--define(COMMIT_REQ,         16#0110).
--define(COMMIT_CNF,         16#0111).
--define(SUSPEND_REQ,        16#0120).
--define(SUSPEND_CNF,        16#0121).
--define(CLOSE_REQ,          16#0130).
--define(CLOSE_CNF,          16#0131).
--define(WATCH_ADD_REQ,      16#0140).
--define(WATCH_ADD_CNF,      16#0141).
--define(WATCH_REM_REQ,      16#0150).
--define(WATCH_REM_CNF,      16#0151).
--define(WATCH_PROGRESS_REQ, 16#0160).
--define(WATCH_PROGRESS_CNF, 16#0161).
--define(FORGET_REQ,         16#0170).
--define(FORGET_CNF,         16#0171).
--define(DELETE_DOC_REQ,     16#0180).
--define(DELETE_DOC_CNF,     16#0181).
--define(DELETE_REV_REQ,     16#0190).
--define(DELETE_REV_CNF,     16#0191).
--define(SYNC_DOC_REQ,       16#01A0).
--define(SYNC_DOC_CNF,       16#01A1).
--define(REPLICATE_DOC_REQ,  16#01B0).
--define(REPLICATE_DOC_CNF,  16#01B1).
--define(REPLICATE_REV_REQ,  16#01C0).
--define(REPLICATE_REV_CNF,  16#01C1).
--define(MOUNT_REQ,          16#01D0).
--define(MOUNT_CNF,          16#01D1).
--define(UNMOUNT_REQ,        16#01E0).
--define(UNMOUNT_CNF,        16#01E1).
--define(SYS_INFO_REQ,       16#01F0).
--define(SYS_INFO_CNF,       16#01F1).
+-define(MERGE_REQ,          16#0100).
+-define(REBASE_REQ,         16#0110).
+-define(COMMIT_REQ,         16#0120).
+-define(SUSPEND_REQ,        16#0130).
+-define(CLOSE_REQ,          16#0140).
+-define(WATCH_ADD_REQ,      16#0150).
+-define(WATCH_REM_REQ,      16#0160).
+-define(WATCH_PROGRESS_REQ, 16#0170).
+-define(FORGET_REQ,         16#0180).
+-define(DELETE_DOC_REQ,     16#0190).
+-define(DELETE_REV_REQ,     16#01A0).
+-define(FORWARD_DOC_REQ,    16#01B0).
+-define(REPLICATE_DOC_REQ,  16#01C0).
+-define(REPLICATE_REV_REQ,  16#01D0).
+-define(MOUNT_REQ,          16#01E0).
+-define(UNMOUNT_REQ,        16#01F0).
+-define(SYS_INFO_REQ,       16#0200).
 -define(WATCH_IND,          16#0002).
 -define(PROGRESS_START_IND, 16#0012).
 -define(PROGRESS_IND,       16#0022).
@@ -137,19 +111,11 @@ handle_info({work_event, Event, Tag, Info}, S) ->
 				{sync, FromGuid, ToGuid} ->
 					<<?PROGRESS_TYPE_SYNC:8, FromGuid/binary, ToGuid/binary>>;
 
-				{rep_doc, Doc, Stores} ->
-					BinStores = lists:foldl(
-						fun(Store, Acc) -> <<Acc/binary, Store/binary>> end,
-						<<>>,
-						Stores),
-					<<?PROGRESS_TYPE_REP_DOC:8, Doc/binary, BinStores/binary>>;
+				{rep_doc, Doc, Store} ->
+					<<?PROGRESS_TYPE_REP_DOC:8, Doc/binary, Store/binary>>;
 
-				{rep_rev, Rev, Stores} ->
-					BinStores = lists:foldl(
-						fun(Store, Acc) -> <<Acc/binary, Store/binary>> end,
-						<<>>,
-						Stores),
-					<<?PROGRESS_TYPE_REP_REV:8, Rev/binary, BinStores/binary>>
+				{rep_rev, Rev, Store} ->
+					<<?PROGRESS_TYPE_REP_REV:8, Rev/binary, Store/binary>>
 			end,
 			send_indication(S#state.socket, ?PROGRESS_START_IND,
 				<<Tag:16, Data/binary>>);
@@ -188,7 +154,7 @@ handle_info({'EXIT', From, Reason}, S) ->
 
 handle_packet(Packet, S) ->
 	<<Ref:32, Request:16, Body/binary>> = Packet,
-	RetPath = #retpath{socket=S#state.socket, ref=Ref},
+	RetPath = #retpath{socket=S#state.socket, req=Request, ref=Ref},
 	%io:format("[~w] Ref:~w Request:~w Body:~w~n", [self(), Ref, Request, Body]),
 	case Request of
 		?INIT_REQ ->
@@ -233,7 +199,7 @@ handle_packet(Packet, S) ->
 				1 -> rev
 			end,
 			hotchpotch_change_monitor:watch(Type, Hash),
-			send_reply(RetPath, ?WATCH_ADD_CNF, encode_error_code(ok)),
+			send_reply(RetPath, encode_error_code(ok)),
 			{ok, S};
 
 		?WATCH_REM_REQ ->
@@ -243,7 +209,7 @@ handle_packet(Packet, S) ->
 				1 -> rev
 			end,
 			hotchpotch_change_monitor:unwatch(Type, Hash),
-			send_reply(RetPath, ?WATCH_REM_CNF, encode_error_code(ok)),
+			send_reply(RetPath, encode_error_code(ok)),
 			{ok, S};
 
 		?FORGET_REQ ->
@@ -258,8 +224,8 @@ handle_packet(Packet, S) ->
 			spawn_link(fun () -> do_delete_rev(Body, RetPath) end),
 			{ok, S};
 
-		?SYNC_DOC_REQ ->
-			spawn_link(fun () -> do_sync(Body, RetPath) end),
+		?FORWARD_DOC_REQ ->
+			spawn_link(fun () -> do_forward(Body, RetPath) end),
 			{ok, S};
 
 		?REPLICATE_DOC_REQ ->
@@ -301,10 +267,8 @@ handle_packet(Packet, S) ->
 do_init(Body, RetPath) ->
 	<<0:16, Major:8, _Minor:8>> = Body,
 	case Major of
-		0 -> send_reply(RetPath, ?INIT_CNF, <<(err2int(ok)):32, 0:32,
-			16#1000:32>>);
-		_ -> send_reply(RetPath, ?INIT_CNF, <<(err2int(erpcmismatch)):32,
-			0:32, 16#1000:32>>)
+		0 -> send_reply(RetPath, <<(err2int(ok)):32, 0:32, 16#1000:32>>);
+		_ -> send_reply(RetPath, <<(err2int(erpcmismatch)):32, 0:32, 16#1000:32>>)
 	end.
 
 
@@ -328,20 +292,16 @@ do_enum(RetPath) ->
 				(encode_string(Descr))/binary>>
 		end,
 		Stores),
-	send_reply(RetPath, ?ENUM_CNF, Reply).
+	send_reply(RetPath, Reply).
 
 
 do_loopup_doc(Body, RetPath) ->
-	% parse request
 	<<Doc:16/binary, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
-
-	% execute
-	{Revs, PreRevs} = hotchpotch_broker:lookup_doc(Doc,
-		hotchpotch_broker:get_stores(Stores)),
+	{Revs, PreRevs} = hotchpotch_broker:lookup_doc(Doc, get_stores(Stores)),
 	RevsBin = do_lookup_encode(Revs),
 	PreRevsBin = do_lookup_encode(PreRevs),
-	send_reply(RetPath, ?LOOKUP_DOC_CNF, <<RevsBin/binary, PreRevsBin/binary>>).
+	send_reply(RetPath, <<RevsBin/binary, PreRevsBin/binary>>).
 
 
 do_lookup_encode(Revs) ->
@@ -356,19 +316,15 @@ do_lookup_encode(Revs) ->
 do_loopup_rev(Body, RetPath) ->
 	<<Rev:16/binary, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
-	Found = hotchpotch_broker:lookup_rev(Rev, hotchpotch_broker:get_stores(Stores)),
-	FoundBin = encode_list(Found),
-	send_reply(RetPath, ?LOOKUP_REV_CNF, FoundBin).
+	Found = hotchpotch_broker:lookup_rev(Rev, get_stores(Stores)),
+	send_reply(RetPath, encode_list(Found)).
 
 
 do_stat(Body, RetPath) ->
-	% parse request
 	<<Rev:16/binary, Body1/binary>> = Body,
 	{Stores, <<>>} = parse_uuid_list(Body1),
-
-	% execute
-	Reply = case hotchpotch_broker:stat(Rev, hotchpotch_broker:get_stores(Stores)) of
-		{ok, _Errors, Stat} = Result ->
+	Reply = case hotchpotch_broker:stat(Rev, get_stores(Stores)) of
+		{ok, Stat} ->
 			#rev_stat{
 				flags     = Flags,
 				parts     = Parts,
@@ -385,7 +341,7 @@ do_stat(Body, RetPath) ->
 				end,
 				Parts),
 			<<
-				(encode_broker_result(Result))/binary,
+				(encode_result(ok))/binary,
 				Flags:32,
 				ReplyParts/binary,
 				(encode_list(Parents))/binary,
@@ -397,146 +353,164 @@ do_stat(Body, RetPath) ->
 			>>;
 
 		Error ->
-			encode_broker_result(Error)
+			encode_result(Error)
 	end,
-	send_reply(RetPath, ?STAT_CNF, Reply).
+	send_reply(RetPath, Reply).
 
 
 do_peek(Cookie, RetPath, Body) ->
-	{Rev, Body1} = parse_uuid(Body),
-	{Stores, <<>>} = parse_uuid_list(Body1),
-	case hotchpotch_broker:peek(Rev, hotchpotch_broker:get_stores(Stores)) of
-		{ok, _Errors, Handle} = Result ->
-			Reply = <<(encode_broker_result(Result))/binary, Cookie:32>>,
-			send_reply(RetPath, ?PEEK_CNF, Reply),
-			io_loop(Handle);
-
-		Error ->
-			send_reply(RetPath, ?PEEK_CNF, encode_broker_result(Error))
+	try
+		{Store, Body1} = get_store(Body),
+		{Rev, <<>>} = parse_uuid(Body1),
+		{ok, Handle} = check(hotchpotch_broker:peek(Store, Rev)),
+		Reply = <<(encode_result(ok))/binary, Cookie:32>>,
+		send_reply(RetPath, Reply),
+		io_loop(Handle)
+	catch
+		throw:Error ->
+			send_reply(RetPath, encode_result(Error))
 	end.
 
 
 do_create(Cookie, RetPath, Body) ->
-	{Type, Body1} = parse_string(Body),
-	{Creator, Body2} = parse_string(Body1),
-	{Stores, <<>>} = parse_uuid_list(Body2),
-	case hotchpotch_broker:create(Type, Creator, hotchpotch_broker:get_stores(Stores)) of
-		{ok, _Errors, {Doc, Handle}} = Result ->
-			Reply = <<(encode_broker_result(Result))/binary, Cookie:32, Doc/binary>>,
-			send_reply(RetPath, ?CREATE_CNF, Reply),
-			io_loop(Handle);
-
-		Error ->
-			send_reply(RetPath, ?CREATE_CNF, encode_broker_result(Error))
+	try
+		{Store, Body1} = get_store(Body),
+		{Type, Body2} = parse_string(Body1),
+		{Creator, <<>>} = parse_string(Body2),
+		{ok, Doc, Handle} = check(hotchpotch_broker:create(Store, Type, Creator)),
+		Reply = <<(encode_result(ok))/binary, Cookie:32, Doc/binary>>,
+		send_reply(RetPath, Reply),
+		io_loop(Handle)
+	catch
+		throw:Error ->
+			send_reply(RetPath, encode_result(Error))
 	end.
 
 
 do_fork(Cookie, RetPath, Body) ->
-	{Rev, Body1} = parse_uuid(Body),
-	{Creator, Body2} = parse_string(Body1),
-	{Stores, <<>>} = parse_uuid_list(Body2),
-	case hotchpotch_broker:fork(Rev, Creator, hotchpotch_broker:get_stores(Stores)) of
-		{ok, _Errors, {Doc, Handle}} = Result ->
-			Reply = <<(encode_broker_result(Result))/binary, Cookie:32, Doc/binary>>,
-			send_reply(RetPath, ?FORK_CNF, Reply),
-			io_loop(Handle);
-
-		Error ->
-			send_reply(RetPath, ?FORK_CNF, encode_broker_result(Error))
+	try
+		{Store, Body1} = get_store(Body),
+		{Rev, Body2} = parse_uuid(Body1),
+		{Creator, <<>>} = parse_string(Body2),
+		{ok, Doc, Handle} = check(hotchpotch_broker:fork(Store, Rev, Creator)),
+		Reply = <<(encode_result(ok))/binary, Cookie:32, Doc/binary>>,
+		send_reply(RetPath, Reply),
+		io_loop(Handle)
+	catch
+		throw:Error ->
+			send_reply(RetPath, encode_result(Error))
 	end.
 
 
 do_update(Cookie, RetPath, Body) ->
-	{Doc, Body1} = parse_uuid(Body),
-	{Rev, Body2} = parse_uuid(Body1),
-	{Creator, Body3} = parse_string(Body2),
-	{Stores, <<>>} = parse_uuid_list(Body3),
-	RealCreator = case Creator of
-		<<>> -> keep;
-		_    -> Creator
-	end,
-	case hotchpotch_broker:update(Doc, Rev, RealCreator, hotchpotch_broker:get_stores(Stores)) of
-		{ok, _Errors, Handle} = Result ->
-			Reply = <<(encode_broker_result(Result))/binary, Cookie:32>>,
-			send_reply(RetPath, ?UPDATE_CNF, Reply),
-			io_loop(Handle);
-
-		Error ->
-			send_reply(RetPath, ?UPDATE_CNF, encode_broker_result(Error))
+	try
+		{Store, Body1} = get_store(Body),
+		{Doc, Body2} = parse_uuid(Body1),
+		{Rev, Body3} = parse_uuid(Body2),
+		{Creator, <<>>} = parse_string(Body3),
+		RealCreator = case Creator of
+			<<>> -> keep;
+			_    -> Creator
+		end,
+		{ok, Handle} = check(hotchpotch_broker:update(Store, Doc, Rev, RealCreator)),
+		Reply = <<(encode_result(ok))/binary, Cookie:32>>,
+		send_reply(RetPath, Reply),
+		io_loop(Handle)
+	catch
+		throw:Error ->
+			send_reply(RetPath, encode_result(Error))
 	end.
 
 
 do_resume(Cookie, RetPath, Body) ->
-	{Doc, Body1} = parse_uuid(Body),
-	{Rev, Body2} = parse_uuid(Body1),
-	{Creator, Body3} = parse_string(Body2),
-	{Stores, <<>>} = parse_uuid_list(Body3),
-	RealCreator = case Creator of
-		<<>> -> keep;
-		_    -> Creator
-	end,
-	case hotchpotch_broker:resume(Doc, Rev, RealCreator, hotchpotch_broker:get_stores(Stores)) of
-		{ok, _Errors, Handle} = Result ->
-			Reply = <<(encode_broker_result(Result))/binary, Cookie:32>>,
-			send_reply(RetPath, ?RESUME_CNF, Reply),
-			io_loop(Handle);
-
-		Error ->
-			send_reply(RetPath, ?RESUME_CNF, encode_broker_result(Error))
+	try
+		{Store, Body1} = get_store(Body),
+		{Doc, Body2} = parse_uuid(Body1),
+		{Rev, Body3} = parse_uuid(Body2),
+		{Creator, <<>>} = parse_string(Body3),
+		RealCreator = case Creator of
+			<<>> -> keep;
+			_    -> Creator
+		end,
+		{ok, Handle} = check(hotchpotch_broker:resume(Store, Doc, Rev, RealCreator)),
+		Reply = <<(encode_result(ok))/binary, Cookie:32>>,
+		send_reply(RetPath, Reply),
+		io_loop(Handle)
+	catch
+		throw:Error ->
+			send_reply(RetPath, encode_result(Error))
 	end.
 
 
 do_forget(Body, RetPath) ->
-	{Doc, Body1} = parse_uuid(Body),
-	{Rev, Body2} = parse_uuid(Body1),
-	{Stores, <<>>} = parse_uuid_list(Body2),
-	Reply = hotchpotch_broker:forget(Doc, Rev, hotchpotch_broker:get_stores(Stores)),
-	send_reply(RetPath, ?FORGET_CNF, encode_broker_result(Reply)).
+	Reply = try
+		{Store, Body1} = get_store(Body),
+		{Doc, Body2} = parse_uuid(Body1),
+		{Rev, <<>>} = parse_uuid(Body2),
+		hotchpotch_broker:forget(Store, Doc, Rev)
+	catch
+		throw:Error -> Error
+	end,
+	send_reply(RetPath, encode_result(Reply)).
 
 
 do_delete_doc(Body, RetPath) ->
-	{Doc, Body1} = parse_uuid(Body),
-	{Rev, Body2} = parse_uuid(Body1),
-	{Stores, <<>>} = parse_uuid_list(Body2),
-	Reply = hotchpotch_broker:delete_doc(Doc, Rev, hotchpotch_broker:get_stores(Stores)),
-	send_reply(RetPath, ?DELETE_DOC_CNF, encode_broker_result(Reply)).
+	Reply = try
+		{Store, Body1} = get_store(Body),
+		{Doc, Body2} = parse_uuid(Body1),
+		{Rev, <<>>} = parse_uuid(Body2),
+		hotchpotch_broker:delete_doc(Store, Doc, Rev)
+	catch
+		throw:Error -> Error
+	end,
+	send_reply(RetPath, encode_result(Reply)).
 
 
 do_delete_rev(Body, RetPath) ->
-	{Rev, Body1} = parse_uuid(Body),
-	{Stores, <<>>} = parse_uuid_list(Body1),
-	Reply = hotchpotch_broker:delete_rev(Rev, hotchpotch_broker:get_stores(Stores)),
-	send_reply(RetPath, ?DELETE_REV_CNF, encode_broker_result(Reply)).
-
-
-do_sync(Body, RetPath) ->
-	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
-	{Stores, <<>>} = parse_uuid_list(Body1),
-	Reply = case hotchpotch_broker:sync(Doc, Depth, hotchpotch_broker:get_stores(Stores)) of
-		{ok, _ErrInfo, Rev} = Ok ->
-			<<(encode_broker_result(Ok))/binary, Rev/binary>>;
-		Error ->
-			encode_broker_result(Error)
+	Reply = try
+		{Store, Body1} = get_store(Body),
+		{Rev, <<>>} = parse_uuid(Body1),
+		hotchpotch_broker:delete_rev(Store, Rev)
+	catch
+		throw:Error -> Error
 	end,
-	send_reply(RetPath, ?SYNC_DOC_CNF, Reply).
+	send_reply(RetPath, encode_result(Reply)).
+
+
+do_forward(Body, RetPath) ->
+	Reply = try
+		{Store, Body1} = get_store(Body),
+		<<Doc:16/binary, FromRev:16/binary, ToRev:16/binary, Body2/binary>> = Body1,
+		{SrcStore, <<Depth:64>>} = get_store(Body2),
+		hotchpotch_broker:forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth)
+	catch
+		throw:Error -> Error
+	end,
+	send_reply(RetPath, encode_result(Reply)).
 
 
 do_replicate_doc(Body, RetPath) ->
-	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
-	{SrcStores, Body2} = parse_uuid_list(Body1),
-	{DstStores, <<>>} = parse_uuid_list(Body2),
-	Reply = hotchpotch_broker:replicate_doc(Doc, Depth, hotchpotch_broker:get_stores(SrcStores),
-		hotchpotch_broker:get_stores(DstStores)),
-	send_reply(RetPath, ?REPLICATE_DOC_CNF, encode_broker_result(Reply)).
+	Reply = try
+		{SrcStore, Body1} = get_store(Body),
+		<<Doc:16/binary, Body2/binary>> = Body1,
+		{DstStore, <<Depth:64>>} = get_store(Body2),
+		hotchpotch_broker:replicate_doc(SrcStore, Doc, DstStore, Depth)
+	catch
+		throw:Error -> Error
+	end,
+	send_reply(RetPath, encode_result(Reply)).
 
 
 do_replicate_rev(Body, RetPath) ->
-	<<Doc:16/binary, Depth:64, Body1/binary>> = Body,
-	{SrcStores, Body2} = parse_uuid_list(Body1),
-	{DstStores, <<>>} = parse_uuid_list(Body2),
-	Reply = hotchpotch_broker:replicate_rev(Doc, Depth, hotchpotch_broker:get_stores(SrcStores),
-		hotchpotch_broker:get_stores(DstStores)),
-	send_reply(RetPath, ?REPLICATE_REV_CNF, encode_broker_result(Reply)).
+	Reply = try
+		{SrcStore, Body1} = get_store(Body),
+		<<Rev:16/binary, Body2/binary>> = Body1,
+		{DstStore, <<Depth:64>>} = get_store(Body2),
+		hotchpotch_broker:replicate_rev(SrcStore, Rev, DstStore, Depth)
+	catch
+		throw:Error -> Error
+	end,
+	send_reply(RetPath, encode_result(Reply)).
 
 
 do_mount(Body, RetPath) ->
@@ -550,7 +524,7 @@ do_mount(Body, RetPath) ->
 		{error, _Reason} = Error ->
 			Error
 	end,
-	send_reply(RetPath, ?MOUNT_CNF, encode_direct_result(Reply)).
+	send_reply(RetPath, encode_result(Reply)).
 
 
 do_unmount(Body, RetPath) ->
@@ -564,7 +538,7 @@ do_unmount(Body, RetPath) ->
 		{error, _Reason} = Error ->
 			Error
 	end,
-	send_reply(RetPath, ?UNMOUNT_CNF, encode_direct_result(Reply)).
+	send_reply(RetPath, encode_result(Reply)).
 
 
 do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->
@@ -580,18 +554,18 @@ do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->
 			hotchpotch_work_monitor:deregister_proc(self()),
 			S#state{progreg=false}
 	end,
-	send_reply(RetPath, ?WATCH_PROGRESS_CNF, encode_direct_result(ok)),
+	send_reply(RetPath, encode_result(ok)),
 	S2.
 
 do_sys_info_req(Body, RetPath) ->
 	{Param, <<>>} = parse_string(Body),
 	Reply = case hotchpotch_sys_info:lookup(Param) of
 		{ok, Result} ->
-			<<(encode_direct_result(ok))/binary, (encode_string(Result))/binary>>;
+			<<(encode_result(ok))/binary, (encode_string(Result))/binary>>;
 		{error, _} = Error ->
-			encode_direct_result(Error)
+			encode_result(Error)
 	end,
-	send_reply(RetPath, ?SYS_INFO_CNF, Reply).
+	send_reply(RetPath, Reply).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% IO handler loop
@@ -599,97 +573,103 @@ do_sys_info_req(Body, RetPath) ->
 
 io_loop(Handle) ->
 	receive
-		{?READ_REQ, ReqData, RetPath} ->
-			<<Part:4/binary, Offset:64, Length:32>> = ReqData,
-			Reply = case hotchpotch_broker:read(Handle, Part, Offset, Length) of
-				{ok, _Errors, Data} = Result ->
-					<<(encode_broker_result(Result))/binary, Data/binary>>;
-				Error ->
-					encode_broker_result(Error)
-			end,
-			send_reply(RetPath, ?READ_CNF, Reply),
-			io_loop(Handle);
-
-		{?WRITE_REQ, ReqData, RetPath} ->
-			<<Part:4/binary, Offset:64, Data/binary>> = ReqData,
-			Reply = hotchpotch_broker:write(Handle, Part, Offset, Data),
-			send_reply(RetPath, ?WRITE_CNF, encode_broker_result(Reply)),
-			io_loop(Handle);
-
-		{?TRUNC_REQ, ReqData, RetPath} ->
-			<<Part:4/binary, Offset:64>> = ReqData,
-			Reply = hotchpotch_broker:truncate(Handle, Part, Offset),
-			send_reply(RetPath, ?TRUNC_CNF, encode_broker_result(Reply)),
-			io_loop(Handle);
-
-		{?CLOSE_REQ, <<>>, RetPath} ->
-			Reply = hotchpotch_broker:close(Handle),
-			send_reply(RetPath, ?CLOSE_CNF, encode_broker_result(Reply));
-
-		{?COMMIT_REQ, <<>>, RetPath} ->
-			case hotchpotch_broker:commit(Handle) of
-				{ok, _, Rev} = Result ->
-					send_reply(RetPath, ?COMMIT_CNF,
-						<<(encode_broker_result(Result))/binary, Rev/binary>>);
-
-				{retry, _, _} = Result->
-					send_reply(RetPath, ?COMMIT_CNF, encode_broker_result(Result));
-
-				Error ->
-					send_reply(RetPath, ?COMMIT_CNF, encode_broker_result(Error))
-			end,
-			io_loop(Handle);
-
-		{?SUSPEND_REQ, <<>>, RetPath} ->
-			Reply = case hotchpotch_broker:suspend(Handle) of
-				{ok, _Errors, Rev} = Result ->
-					<<(encode_broker_result(Result))/binary, Rev/binary>>;
-				Error ->
-					encode_broker_result(Error)
-			end,
-			send_reply(RetPath, ?SUSPEND_CNF, Reply),
-			io_loop(Handle);
-
-		{?SET_PARENTS_REQ, Body, RetPath} ->
-			{Parents, <<>>} = parse_uuid_list(Body),
-			Reply = hotchpotch_broker:set_parents(Handle, Parents),
-			send_reply(RetPath, ?SET_PARENTS_CNF, encode_broker_result(Reply)),
-			io_loop(Handle);
-
-		{?GET_PARENTS_REQ, <<>>, RetPath} ->
-			Reply = case hotchpotch_broker:get_parents(Handle) of
-				{ok, _Errors, Parents} = Result ->
-					<<(encode_broker_result(Result))/binary,
-						(encode_list(Parents))/binary>>;
-				Error ->
-					encode_broker_result(Error)
-			end,
-			send_reply(RetPath, ?GET_PARENTS_CNF, Reply),
-			io_loop(Handle);
-
-		{?SET_TYPE_REQ, Body, RetPath} ->
-			{Type, <<>>} = parse_string(Body),
-			Reply = hotchpotch_broker:set_type(Handle, Type),
-			send_reply(RetPath, ?SET_TYPE_CNF, encode_broker_result(Reply)),
-			io_loop(Handle);
-
-		{?GET_TYPE_REQ, <<>>, RetPath} ->
-			Reply = case hotchpotch_broker:get_type(Handle) of
-				{ok, _Errors, Type} = Result ->
-					<<(encode_broker_result(Result))/binary,
-						(encode_string(Type))/binary>>;
-				Error ->
-					encode_broker_result(Error)
-			end,
-			send_reply(RetPath, ?GET_TYPE_CNF, Reply),
-			io_loop(Handle);
+		{Req, Body, RetPath} ->
+			case io_loop_process(Handle, Req, Body) of
+				{reply, Reply} ->
+					send_reply(RetPath, Reply),
+					io_loop(Handle);
+				{stop, Reply} ->
+					send_reply(RetPath, Reply)
+			end;
 
 		closed ->
-			hotchpotch_broker:close(Handle);
+			hotchpotch_broker:close(Handle)
+	end.
 
-		Else ->
-			io:format("io_loop: Invalid request: ~w~n", [Else]),
-			io_loop(Handle)
+
+io_loop_process(Handle, Request, ReqData) ->
+	case Request of
+		?READ_REQ ->
+			<<Part:4/binary, Offset:64, Length:32>> = ReqData,
+			Reply = case hotchpotch_broker:read(Handle, Part, Offset, Length) of
+				{ok, Data} ->
+					<<(encode_result(ok))/binary, Data/binary>>;
+				Error ->
+					encode_result(Error)
+			end,
+			{reply, Reply};
+
+		?WRITE_REQ ->
+			<<Part:4/binary, Offset:64, Data/binary>> = ReqData,
+			Reply = hotchpotch_broker:write(Handle, Part, Offset, Data),
+			{reply, encode_result(Reply)};
+
+		?TRUNC_REQ ->
+			<<Part:4/binary, Offset:64>> = ReqData,
+			Reply = hotchpotch_broker:truncate(Handle, Part, Offset),
+			{reply, encode_result(Reply)};
+
+		?CLOSE_REQ ->
+			Reply = hotchpotch_broker:close(Handle),
+			{stop, encode_result(Reply)};
+
+		?COMMIT_REQ ->
+			<<>> = ReqData,
+			case hotchpotch_broker:commit(Handle) of
+				{ok, Rev} ->
+					{reply, <<(encode_result(ok))/binary, Rev/binary>>};
+				Error ->
+					{reply, encode_result(Error)}
+			end;
+
+		?SUSPEND_REQ ->
+			<<>> = ReqData,
+			case hotchpotch_broker:suspend(Handle) of
+				{ok, Rev} ->
+					{reply, <<(encode_result(ok))/binary, Rev/binary>>};
+				Error ->
+					{reply, encode_result(Error)}
+			end;
+
+		?MERGE_REQ ->
+			Reply = try
+				{Store, ReqData1} = get_store(ReqData),
+				{Rev, <<Depth:64>>} = parse_uuid(ReqData1),
+				hotchpotch_broker:merge(Handle, Store, Rev, Depth)
+			catch
+				throw:Error -> Error
+			end,
+			{reply, encode_result(Reply)};
+
+		?REBASE_REQ ->
+			{Parent, <<>>} = parse_uuid(ReqData),
+			Reply = hotchpotch_broker:rebase(Handle, Parent),
+			{reply, encode_result(Reply)};
+
+		?GET_PARENTS_REQ ->
+			<<>> = ReqData,
+			Reply = case hotchpotch_broker:get_parents(Handle) of
+				{ok, Parents} ->
+					<<(encode_result(ok))/binary, (encode_list(Parents))/binary>>;
+				Error ->
+					encode_result(Error)
+			end,
+			{reply, Reply};
+
+		?SET_TYPE_REQ ->
+			{Type, <<>>} = parse_string(ReqData),
+			Reply = hotchpotch_broker:set_type(Handle, Type),
+			{reply, encode_result(Reply)};
+
+		?GET_TYPE_REQ ->
+			<<>> = ReqData,
+			Reply = case hotchpotch_broker:get_type(Handle) of
+				{ok, Type} ->
+					<<(encode_result(ok))/binary, (encode_string(Type))/binary>>;
+				Error ->
+					encode_result(Error)
+			end,
+			{reply, Reply}
 	end.
 
 
@@ -697,27 +677,37 @@ io_loop(Handle) ->
 %% Local helper functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-encode_broker_result({ok, Errors, _Result}) ->
-	encode_broker_result({ok, Errors});
+get_store(Body) ->
+	{SId, Body1} = parse_uuid(Body),
+	case hotchpotch_volman:store(SId) of
+		{ok, Store} -> {Store, Body1};
+		error       -> throw({error, enxio})
+	end.
 
-encode_broker_result({ok, []}) ->
-	<<0:8>>;
 
-encode_broker_result({ok, Errors}) ->
-	ErrorList = encode_list(
-		fun({Store, Error}) ->
-			<<Store/binary, (encode_error_code(Error))/binary>>
-		end,
-		Errors),
-	<<1:8, ErrorList/binary>>;
+get_stores(StoreList) ->
+	case StoreList of
+		[] ->
+			[Store || {_SId, Store} <- hotchpotch_volman:stores()];
 
-encode_broker_result({error, Reason, Errors}) ->
-	ErrorList = encode_list(
-		fun({Store, Error}) ->
-			<<Store/binary, (encode_error_code(Error))/binary>>
-		end,
-		Errors),
-	<<2:8, (encode_error_code(Reason))/binary, ErrorList/binary>>.
+		_ ->
+			lists:foldr(
+				fun(SId, Acc) ->
+					case hotchpotch_volman:store(SId) of
+						{ok, Store} -> [Store | Acc];
+						error       -> Acc
+					end
+				end,
+				[],
+				StoreList)
+	end.
+
+
+check({error, _} = Error) ->
+	throw(Error);
+
+check(Result) ->
+	Result.
 
 
 start_worker(S, Fun) ->
@@ -729,10 +719,11 @@ start_worker(S, Fun) ->
 		next    = Cookie + 1}}.
 
 
-send_reply(RetPath, Reply, Data) ->
-	Raw = <<(RetPath#retpath.ref):32, Reply:16, Data/binary>>,
+send_reply(#retpath{req=Req, ref=Ref, socket=Socket}, Data) ->
+	Reply = Req bor ?FLAG_CNF,
+	Raw = <<Ref:32, Reply:16, Data/binary>>,
 	%io:format("[~w] Reply: ~w~n", [self(), Raw]),
-	case gen_tcp:send(RetPath#retpath.socket, Raw) of
+	case gen_tcp:send(Socket, Raw) of
 		ok ->
 			ok;
 		{error, Reason} ->

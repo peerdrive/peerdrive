@@ -434,10 +434,10 @@ class SyncEditor(QtGui.QDialog):
 		layout = QtGui.QGridLayout()
 		layout.addWidget(QtGui.QLabel("From \\ To"), 0, 0)
 		for (pos, store) in stores:
-			button = DocButton(store, True)
+			button = DocButton(store, store, True)
 			self.__buttons.append(button)
 			layout.addWidget(button, 0, pos)
-			button = DocButton(store, True)
+			button = DocButton(store, store, True)
 			self.__buttons.append(button)
 			layout.addWidget(button, pos, 0)
 		for (row, store) in stores:
@@ -499,7 +499,7 @@ class StoreWidget(QtGui.QWidget):
 		self.watch = None
 
 		self.mountBtn = QtGui.QPushButton("")
-		self.storeBtn = DocButton(None, True)
+		self.storeBtn = DocButton(withText=True)
 		self.mountBtn.clicked.connect(self.mountUnmount)
 
 		layout = QtGui.QHBoxLayout()
@@ -521,7 +521,7 @@ class StoreWidget(QtGui.QWidget):
 		if enum.isMounted(self.mountId):
 			doc = enum.doc(self.mountId)
 			self.mountBtn.setText("Unmount")
-			self.storeBtn.setDocument(doc)
+			self.storeBtn.setDocument(doc, doc)
 			self.watch = StoreWidget.StoreWatch(doc, self.update)
 			Connector().watch(self.watch)
 			self.mounted = True
@@ -542,13 +542,13 @@ class SyncWidget(QtGui.QFrame):
 	def __init__(self, tag, info, parent=None):
 		super(SyncWidget, self).__init__(parent)
 		self.tag = tag
-		fromUuid = info[0:16]
-		toUuid = info[16:32]
+		fromStore = info[0:16]
+		toStore = info[16:32]
 
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
-		self.fromBtn = DocButton(fromUuid, True)
-		self.toBtn = DocButton(toUuid, True)
+		self.fromBtn = DocButton(fromStore, fromStore, True)
+		self.toBtn = DocButton(toStore, toStore, True)
 		self.progressBar = QtGui.QProgressBar()
 		self.progressBar.setMaximum(255)
 
@@ -577,13 +577,13 @@ class ReplicationWidget(QtGui.QFrame):
 		super(ReplicationWidget, self).__init__(parent)
 		self.tag = tag
 		uuid = info[0:16]
-		stores = info[16:]
+		store = info[16:32]
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
 		if typ == PROGRESS_REP_DOC:
-			self.docBtn = DocButton(uuid, True)
+			self.docBtn = DocButton(store, uuid, True)
 		else:
-			self.docBtn = RevButton(uuid, True)
+			self.docBtn = RevButton(store, uuid, True)
 		self.progressBar = QtGui.QProgressBar()
 		self.progressBar.setMaximum(255)
 
@@ -592,12 +592,9 @@ class ReplicationWidget(QtGui.QFrame):
 		layout.setMargin(0)
 		layout.addWidget(self.docBtn)
 		layout.addWidget(self.progressBar)
-		while stores:
-			store = stores[0:16]
-			button = DocButton(store)
-			self.storeButtons.append(button)
-			layout.addWidget(button)
-			stores = stores[16:]
+		button = DocButton(store, store)
+		self.storeButtons.append(button)
+		layout.addWidget(button)
 		self.setLayout(layout)
 
 		Connector().regProgressHandler(progress=self.progress)
@@ -616,17 +613,17 @@ class ReplicationWidget(QtGui.QFrame):
 
 class SyncRules(object):
 	def __init__(self):
-		sysDoc = Connector().enum().sysStore()
-		sysRev = Connector().lookup_doc(sysDoc).rev(sysDoc)
-		with Connector().peek(sysRev) as r:
-			root = struct.loads(r.readAll('HPSD'))
+		self.sysStore = Connector().enum().sysStore()
+		sysRev = Connector().lookup_doc(self.sysStore).rev(self.sysStore)
+		with Connector().peek(self.sysStore, sysRev) as r:
+			root = struct.loads(self.sysStore, r.readAll('HPSD'))
 			self.syncDoc = root["syncrules"].doc()
-		self.syncRev = Connector().lookup_doc(self.syncDoc).rev(sysDoc)
-		with Connector().peek(self.syncRev) as r:
-			self.rules = struct.loads(r.readAll('HPSD'))
+		self.syncRev = Connector().lookup_doc(self.syncDoc).rev(self.sysStore)
+		with Connector().peek(self.sysStore, self.syncRev) as r:
+			self.rules = struct.loads(self.sysStore, r.readAll('HPSD'))
 
 	def save(self):
-		with Connector().update(self.syncDoc, self.syncRev) as w:
+		with Connector().update(self.sysStore, self.syncDoc, self.syncRev) as w:
 			w.writeAll('HPSD', struct.dumps(self.rules))
 			w.commit()
 			self.rev = w.getRev()

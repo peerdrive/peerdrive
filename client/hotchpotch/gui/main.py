@@ -190,13 +190,15 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			parser.error(str(e))
 		if isinstance(link, struct.DocLink):
 			guid = link.doc()
+			store = link.store()
 			isDoc = True
 		else:
 			guid = link.rev()
+			store = link.store()
 			isDoc = False
 
 		# open the document
-		self.__view.docOpen(guid, isDoc)
+		self.__view.docOpen(store, guid, isDoc)
 		self.__updateStoreButtons()
 		self.__loadSettings()
 
@@ -292,20 +294,33 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		return self.__utiPixmap
 
 	def __updateStoreButtons(self):
+		curStore = self.__view.store()
 		if self.__view.doc():
 			allStores = Connector().lookup_doc(self.__view.doc()).stores()
 		else:
 			allStores = Connector().lookup_rev(self.__view.rev())
 
+		if not allStores:
+			self.close()
+			return
+
 		# update store buttons in status bar
 		for store in set(self.__storeButtons) ^ set(allStores):
 			if store in allStores:
-				button = DocButton(store)
+				button = DocButton(store, store, checkable=True)
+				button.clicked.connect(lambda x,store=store: self.__switchStore(store))
 				self.statusBar().addPermanentWidget(button)
 				self.__storeButtons[store] = button
 			else:
 				self.statusBar().removeWidget(self.__storeButtons[store])
 				del self.__storeButtons[store]
+
+		for (store,button) in self.__storeButtons.items():
+			button.setChecked(store == curStore)
+
+	def __switchStore(self, store):
+		self.__view.switchStore(store)
+		self.__updateStoreButtons()
 
 	def __checkpointFile(self):
 		self.__commentPopup.popup(self.__view.metaDataGetField(DocumentView.HPA_COMMENT, "Enter comment"))
@@ -350,27 +365,28 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 		self.__mergeMenu.clear()
 		for rev in revs:
-			stores = [self.__getStoreName(store) for store in lookup.stores(rev)]
-			names = reduce(lambda x,y: x+", "+y, stores)
-			action = self.__mergeMenu.addAction(names)
-			action.triggered.connect(lambda x,rev=rev: self.__view.merge(rev))
+			for store in lookup.stores(rev):
+				name = self.__getStoreName(store)
+				action = self.__mergeMenu.addAction(name)
+				action.triggered.connect(lambda x,store=store,rev=rev: self.__view.merge(store, rev))
 
 	def __showProperties(self):
 		if self.__view.doc():
-			link = struct.DocLink(self.__view.doc(), False)
+			link = struct.DocLink(self.__view.store(), self.__view.doc(), False)
 		else:
-			link = struct.RevLink(self.__view.rev())
+			link = struct.RevLink(self.__view.store(), self.__view.rev())
 		showProperties(link)
 
 	def __fillDelMenu(self):
+		store = self.__view.store()
 		doc = self.__view.doc()
 		rev = self.__view.rev()
 		self.__delMenu.clear()
 		if isinstance(self.__referrer, struct.DocLink):
 			if doc:
-				link = struct.DocLink(doc, autoUpdate=False)
+				link = struct.DocLink(store, doc, autoUpdate=False)
 			else:
-				link = struct.RevLink(rev)
+				link = struct.RevLink(store, rev)
 			try:
 				container = struct.Container(self.__referrer)
 				title = container.title()
@@ -386,24 +402,16 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		if doc:
 			lookup = Connector().lookup_doc(doc)
 			stores = lookup.stores()
-			delFun = lambda store: Connector().deleteDoc(doc, lookup.rev(store), [store])
+			delFun = lambda store: Connector().deleteDoc(store, doc, lookup.rev(store))
 		else:
 			stores = Connector().lookup_rev(rev)
-			delFun = lambda store: Connector().deleteRev(rev, [store])
+			delFun = lambda store: Connector().deleteRev(store, rev)
 		stores = [(self.__getStoreName(store), store) for store in stores]
 		stores = filter(lambda(name,store):name, stores)
 		for (name, store) in stores:
 			action = self.__delMenu.addAction("Delete item from '%s'" % name)
 			action.triggered.connect(lambda x,s=store: delFun(s))
 			action.setEnabled(doc != store)
-
-		if len(stores) > 1:
-			self.__delMenu.addSeparator()
-			delAllAction = self.__delMenu.addAction("Delete from all stores")
-			if doc:
-				delAllAction.triggered.connect(lambda: Connector().deleteDoc(doc, rev))
-			else:
-				delAllAction.triggered.connect(lambda: Connector().deleteRev(rev))
 
 	def __unlink(self, name, link):
 		try:
@@ -418,11 +426,12 @@ class MainWindow(QtGui.QMainWindow, Watch):
 	def __delete(self):
 		try:
 			if isinstance(self.__referrer, struct.DocLink):
+				store = self.__view.store()
 				doc = self.__view.doc()
 				if doc:
-					link = struct.DocLink(doc, autoUpdate=False)
+					link = struct.DocLink(store, doc, autoUpdate=False)
 				else:
-					link = struct.RevLink(self.__view.rev())
+					link = struct.RevLink(store, self.__view.rev())
 				container = struct.Container(self.__referrer)
 				candidates = [(name, ref) for (name, ref) in container.items()
 					if ref == link]
@@ -441,9 +450,9 @@ class MainWindow(QtGui.QMainWindow, Watch):
 	def __getStoreName(self, store):
 		try:
 			rev = Connector().lookup_doc(store).rev(store)
-			with Connector().peek(rev) as r:
+			with Connector().peek(store, rev) as r:
 				try:
-					metaData = struct.loads(r.readAll('META'))
+					metaData = struct.loads(store, r.readAll('META'))
 					return metaData["org.hotchpotch.annotation"]["title"]
 				except:
 					return "Unnamed store"
@@ -471,12 +480,13 @@ class DragWidget(QtGui.QLabel):
 
 		drag = QtGui.QDrag(self)
 		mimeData = QtCore.QMimeData()
+		store = self.__view.store()
 		doc = self.__view.doc()
 		if doc:
-			link = struct.DocLink(doc)
+			link = struct.DocLink(store, doc)
 		else:
-			link = struct.RevLink(self.__view.rev())
-		link.mimeData(mimeData)
+			link = struct.RevLink(store, self.__view.rev())
+		struct.dumpMimeData(mimeData, [link])
 		f = fuse.findFuseFile(link)
 		if f:
 			mimeData.setUrls([QtCore.QUrl.fromLocalFile(f)])

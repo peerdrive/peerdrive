@@ -196,24 +196,24 @@ stat(Rev, Stores) -- Get information about a revision
 
 === Document manipulation ===
 
-peek(Rev, Stores) -- Open a rev for read only access
+peek(Store, Rev) -- Open a rev for read only access
 	Rev: Rev to open
 	Stores: Optional set of stores where to search the rev. If empty search on
 		all mounted stores.
 
-create(Type, Creator, Stores) -- Create a new document
+create(Store, Type, Creator) -- Create a new document
 	Type: Type UTI of the new document.
 	Creator: Reverse DNS identifier of the calling application
 	Stores: Optional set of stores where to create the document. If empty
 		create on all mounted stores.
 
-fork(Rev, Creator, Stores) -- Create a new document from an existing one
+fork(Store, Rev, Creator) -- Create a new document from an existing one
 	Rev: Starting Rev of the new document (parent and initial content).
 	Creator: Reverse DNS identifier of the calling application
 	Stores: Optional set of stores where to search the Rev. If empty try on all
 		mounted stores where Rev exists.
 
-update(Doc, Rev, Creator, Stores) -- Update a document
+update(Store, Doc, Rev, Creator) -- Update a document
 	Doc: Document to be updated
 	Rev: Old or current revision of the document from which the update will
 		start. At least one store must have this revision or the operation will
@@ -224,7 +224,7 @@ update(Doc, Rev, Creator, Stores) -- Update a document
 		on all mounted stores where Doc exists and is currently pointing to
 		Rev.
 
-resume(Doc, Rev, Creator, Stores) -- Resume updating a document
+resume(Store, Doc, Rev, Creator) -- Resume updating a document
 	Doc: Document with a pending preliminary revision
 	Rev: A pending preliminary revision of the document
 	Creator: Optional new creator code. Keep the previous value if left empty
@@ -248,12 +248,18 @@ trunc(Handle, Part, Offset)
 	Part: FourCC
 	Offset
 
+merge(Handle, Store, Rev, Depth) -- Merge document with another revision
+	Handle: as returned by create/fork/update/resume
+	Store: Store where to merge from
+	Rev: The RId which is merged into the document
+	Depth: Optional. Date of oldest revision which should get replicated.
+
+rebase(Handle, Parent) -- Rebase document to a new parent revision
+	Handle: as returned by create/fork/update/resume
+	Parent: New parent revision.
+
 get_parents(Handle) -- Get current parents
 	Handle: as returned by create/fork/update/resume
-
-set_parents(Handle, Parents) -- Rebase a document to new parents
-	Handle: as returned by create/fork/update/resume
-	Parents: New list of parent revisions. Must not be empty.
 
 get_type(Handle) -- Get current type code UTI
 	Handle: as returned by create/fork/update/resume
@@ -264,14 +270,6 @@ set_type(Handle, Uti) -- Change the type of a document
 
 commit(Handle) -- Commit changes as new revision of the document
 	Handle: as returned by create/fork/update/resume
-	Tristate result:
-		- success
-			- at least one store has commited
-		- retry
-			- no store has comitted
-			- at least one store has rejected due to conflicting revision
-		- fail
-			- all stores have rejected with hard errors
 
 suspend(Handle) -- Suspend handle and enqueue as preliminary revision
 	Handle: as returned by create/fork/update/resume
@@ -281,38 +279,38 @@ close(Handle) -- Discard handle
 
 === Data distribution ===
 
-sync(Doc, Depth, Stores) -- Perform a fast-forward sync
+forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) -- Fast-forward a document
 	Doc: Document which should be unified among the stores
 	Depth: Date of oldest revision which should get replicated
 	Stores: Optional set of stores where the document is synchronized. If empty
 		perform on all stores.
 
-replicate_doc(Doc, SrcStores, DstStores, Depth) -- Replicate a document to other stores
+replicate_doc(SrcStore, Doc, DstStore, Depth) -- Replicate a document to other stores
 	Doc: Document which should be replicated. Must be unambigous throughout
 		all involved stores.
 	SrcStores: Where to replicate from. If empty search all mounted stores.
 	DstStores: Where to replicate to. If empty replicate to all mounted stores.
 	Depth: Date of oldest revision which should get replicated
 
-replicate_rev(Rev, SrcStores, DstStores, Depth) -- Replicate a revision to other stores
+replicate_rev(SrcStore, Rev, DstStore, Depth) -- Replicate a revision to other stores
 	Rev: Revision, must be referenced on the destination stores
 	SrcStores: Where to replicate from. If empty search all mounted stores.
 	DstStores: Where to replicate to. If empty replicate to all mounted stores.
 	Depth: Date of oldest revision which should get replicated
 
-forget(Doc, Rev, Stores) -- Dispose a pending preliminary revision
+forget(Store, Doc, Rev) -- Dispose a pending preliminary revision
 	Doc: Document
 	Rev: Pending preliminary revision of the document
 	Stores: List of stores where the preliminary revision should be disposed
 		from the document. If empty try on all stores.
 
-delete_doc(Doc, Rev, Stores) -- Delete a document
+delete_doc(Store, Doc, Rev) -- Delete a document
 	Doc: Document to be deleted
 	Rev: Current revision of the document
 	Stores: Optional set of stores where to delete the doc. If empty delete on
 		all mounted stores.
 
-delete_rev(Rev, Stores) -- Delete a revision
+delete_rev(Store, Rev) -- Delete a revision
 	Rev: Revision to be deleted
 	Stores: Optional set of stores where to delete the rev. If empty delete on
 		all mounted stores.

@@ -18,8 +18,8 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
--export([cancel/0, event_modified/2, replicate_rev/4, replicate_rev_sync/4,
-         replicate_doc/4, replicate_doc_sync/4]).
+-export([replicate_rev/4, replicate_rev_sync/4, replicate_doc/4,
+         replicate_doc_sync/4]).
 -export([init/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -27,34 +27,19 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link() ->
-	Result = supervisor:start_link({local, hotchpotch_replicator}, ?MODULE, []),
-	%io:format("replicator: start_link ~w~n", [Result]),
-	Result.
+	supervisor:start_link({local, hotchpotch_replicator}, ?MODULE, []).
 
-event_modified(Doc, StoreGuid) ->
-	case hotchpotch_volman:store(StoreGuid) of
-		{ok, StorePid} ->
-			start_child([{modified, Doc, {StoreGuid, StorePid}}]);
+replicate_doc(SrcStore, Doc, DstStore, Depth) ->
+	start_child([{replicate_doc, Doc, true}, SrcStore, DstStore, Depth]).
 
-		error ->
-			ok
-	end.
+replicate_doc_sync(SrcStore, Doc, DstStore, Depth) ->
+	start_child_sync([{replicate_doc, Doc, true}, SrcStore, DstStore, Depth]).
 
-replicate_doc(Doc, Depth, SrcStores, DstStores) ->
-	start_child([{replicate_doc, Doc, Depth, SrcStores, DstStores, true}]).
+replicate_rev(SrcStore, Rev, DstStore, Depth) ->
+	start_child([{replicate_rev, Rev, true}, SrcStore, DstStore, Depth]).
 
-replicate_doc_sync(Doc, Depth, SrcStores, DstStores) ->
-	start_child_sync([{replicate_doc, Doc, Depth, SrcStores, DstStores, true}]).
-
-replicate_rev(Rev, Depth, SrcStores, DstStores) ->
-	start_child([{replicate_rev, Rev, Depth, SrcStores, DstStores, true}]).
-
-replicate_rev_sync(Rev, Depth, SrcStores, DstStores) ->
-	start_child_sync([{replicate_rev, Rev, Depth, SrcStores, DstStores, true}]).
-
-cancel() ->
-	% TODO
-	ok.
+replicate_rev_sync(SrcStore, Rev, DstStore, Depth) ->
+	start_child_sync([{replicate_rev, Rev, true}, SrcStore, DstStore, Depth]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
@@ -80,15 +65,18 @@ start_child(Args) ->
 start_child_sync(Args) ->
 	Ref = make_ref(),
 	case start_child(Args ++ [{self(), Ref}]) of
-		{ok, _WorkerPid} ->
+		{ok, WorkerPid} ->
+			MonRef = monitor(process, WorkerPid),
 			receive
-				{Ref, Reply} -> Reply
-			%after
-			%	% FIXME: this is deemed to FAIL
-			%	60000 -> {error, timeout}
+				{Ref, Reply} ->
+					demonitor(MonRef, [flush]),
+					Reply;
+
+				{'DOWN', MonRef, process, WorkerPid, _Info} ->
+					{error, eio}
 			end;
 
 		{error, _} ->
-			{error, enomem, []}
+			{error, enomem}
 	end.
 

@@ -43,14 +43,14 @@ for store in enum.allStores():
 		state += '-'
 
 	if enum.isMounted(store):
-		doc = enum.doc(store)
+		sid = enum.doc(store)
 		try:
-			rev = Connector().lookup_doc(doc).rev(doc)
-			with Connector().peek(rev) as r:
-				metaData = struct.loads(r.readAll('META'))
+			rev = Connector().lookup_doc(sid, [sid]).rev(sid)
+			with Connector().peek(sid, rev) as r:
+				metaData = struct.loads(sid, r.readAll('META'))
 				realName = metaData["org.hotchpotch.annotation"]["title"]
 		except:
 			realName = "unknwown"
-		print "%s  %s %s  %s [%s]" % (state, store.ljust(8), doc.encode("hex"), realName, mountName)
+		print "%s  %s %s  %s [%s]" % (state, store.ljust(8), sid.encode("hex"), realName, mountName)
 	else:
 		print "%s  %s [%s]" % (state, store.ljust(8), mountName)

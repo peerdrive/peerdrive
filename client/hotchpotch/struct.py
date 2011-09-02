@@ -18,10 +18,11 @@
 
 from __future__ import absolute_import
 
-import struct, json
+import struct, json, copy
 
 from . import connector
 
+LINK_MIME_TYPE = 'application/x-hotchpotch-links'
 
 ###############################################################################
 # HPSD data structures, encoders and decoders
@@ -29,21 +30,26 @@ from . import connector
 
 def Link(spec):
 	if spec.startswith('doc:'):
-		return DocLink(spec[4:].decode("hex"), autoUpdate=False)
+		link = DocLink()
+		link._fromString(spec)
+		return link
 	elif spec.startswith('rev:'):
-		return RevLink(spec[4:].decode("hex"))
+		link = RevLink()
+		link._fromString(spec)
+		return link
 	else:
 		return resolvePath(spec)
 
 class RevLink(object):
 	MIME_TYPE = 'application/x-hotchpotch-revlink'
-	__slots__ = ['__rev']
+	__slots__ = ['__rev', '__store']
 
-	def __init__(self, rev=None):
+	def __init__(self, store=None, rev=None):
+		self.__store = store
 		self.__rev = rev
 
 	def __str__(self):
-		return 'rev:'+self.__rev.encode('hex')
+		return 'rev:'+self.__store.encode('hex')+':'+self.__rev.encode('hex')
 
 	def __eq__(self, link):
 		if isinstance(link, RevLink):
@@ -61,51 +67,51 @@ class RevLink(object):
 		return hash(self.__rev)
 
 	def _fromStruct(self, decoder):
+		self.__store = decoder._getStore()
 		self.__rev = decoder._getStr(16)
 
 	def _toStruct(self):
 		return '\x40' + self.__rev
 
 	def _fromDict(self, dct):
+		self.__store = None
 		self.__rev = dct['rev'].decode('hex')
 
 	def _toDict(self):
 		return { "__rlink__" : True, "rev" : self.__rev.encode('hex') }
 
-	def _fromMime(self, mimeData):
-		self.__rev = str(mimeData.data(RevLink.MIME_TYPE)).decode('hex')
+	def _fromString(self, spec):
+		self.__store = spec[4:36].decode("hex")
+		self.__rev = spec[37:69].decode("hex")
 
-	def mimeData(self, mimeData):
-		mimeData.setData(RevLink.MIME_TYPE, self.__rev.encode('hex'))
-
-	def rev(self):
-		return self.__rev
-
-	def update(self):
-		pass
+	def update(self, newStore=None):
+		if newStore:
+			self.__store = newStore
+		return self
 
 	def doc(self):
 		return None
 
-	def revs(self):
-		return [ self.__rev ]
+	def rev(self):
+		return self.__rev
 
+	def store(self):
+		return self.__store
 
 class DocLink(object):
 	MIME_TYPE = 'application/x-hotchpotch-doclink'
-	__slots__ = ['__doc', '__revs', '__updated']
+	__slots__ = ['__store', '__doc', '__rev', '__updated']
 
-	def __init__(self, doc=None, autoUpdate=True):
+	def __init__(self, store=None, doc=None, autoUpdate=True):
+		self.__store = store
 		self.__doc = doc
-		self.__revs = []
+		self.__rev = None
 		self.__updated = False
 		if doc and autoUpdate:
 			self.update()
-		else:
-			self.__revs = None
 
 	def __str__(self):
-		return 'doc:'+self.__doc.encode('hex')
+		return 'doc:'+self.__store.encode('hex')+':'+self.__doc.encode('hex')
 
 	def __eq__(self, link):
 		if isinstance(link, DocLink):
@@ -123,31 +129,38 @@ class DocLink(object):
 		return hash(self.__doc)
 
 	def _fromStruct(self, decoder):
+		self.__store = decoder._getStore()
 		self.__doc = decoder._getStr(16)
-		self.__revs = []
+		self.__rev = None
 
 	def _toStruct(self):
 		return struct.pack('<B16s', 0x41, self.__doc)
 
 	def _fromDict(self, dct):
+		self.__store = None
 		self.__doc = dct['doc'].decode('hex')
-		self.__revs = []
+		self.__rev = None
 
 	def _toDict(self):
 		return {
 			"__dlink__" : True,
 			"doc" : self.__doc.encode('hex') }
 
-	def _fromMime(self, mimeData):
-		self.__doc = str(mimeData.data(DocLink.MIME_TYPE)).decode('hex')
-		self.update()
+	def _fromString(self, spec):
+		self.__store = spec[4:36].decode("hex")
+		self.__doc = spec[37:69].decode("hex")
+		self.__rev = None
 
-	def mimeData(self, mimeData):
-		mimeData.setData(DocLink.MIME_TYPE, self.__doc.encode('hex'))
-
-	def update(self):
-		self.__revs = connector.Connector().lookup_doc(self.__doc).revs()
+	def update(self, newStore=None):
+		if newStore:
+			self.__store = newStore
+		l = connector.Connector().lookup_doc(self.__doc, [self.__store])
+		if self.__store in l.stores():
+			self.__rev = l.rev(self.__store)
+		else:
+			self.__rev = None
 		self.__updated = True
+		return self
 
 	def doc(self):
 		return self.__doc
@@ -155,25 +168,24 @@ class DocLink(object):
 	def rev(self):
 		if not self.__updated:
 			self.update()
-		if len(self.__revs) == 1:
-			return self.__revs[0]
-		else:
-			return None
+		return self.__rev
 
-	def revs(self):
-		if not self.__updated:
-			self.update()
-		return self.__revs
+	def store(self):
+		return self.__store
 
 
 class Decoder(object):
-	def __init__(self):
+	def __init__(self, store):
+		self.__store = store
 		pass
 
 	def decode(self, s):
 		self._s = s
 		self._i = 0
 		return self._decodeDoc()
+
+	def _getStore(self):
+		return self.__store
 
 	def _getInt(self, code):
 		length = struct.calcsize('<'+code)
@@ -341,8 +353,8 @@ def __encode_link(obj):
 		raise TypeError(repr(obj) + " is not serializable")
 
 
-def loads(s):
-	dec = Decoder()
+def loads(store, s):
+	dec = Decoder(store)
 	return dec.decode(s)
 
 
@@ -360,16 +372,19 @@ def dumpJSON(o):
 
 
 def loadMimeData(mimeData):
-	if mimeData.hasFormat(DocLink.MIME_TYPE):
-		link = DocLink()
-		link._fromMime(mimeData)
-		return link
-	elif mimeData.hasFormat(RevLink.MIME_TYPE):
-		link = RevLink()
-		link._fromMime(mimeData)
-		return link
-	else:
-		return None
+	links = []
+	if mimeData.hasFormat(LINK_MIME_TYPE):
+		data = str(mimeData.data(LINK_MIME_TYPE))
+		for spec in data.splitlines():
+			link = Link(spec)
+			if link:
+				links.append(link)
+	return links
+
+def dumpMimeData(mimeData, links):
+	if len(links) >= 1:
+		data = reduce(lambda x,y: x+'\n'+y, [str(link) for link in links])
+		mimeData.setData(LINK_MIME_TYPE, data)
 
 
 # returns (result, conflicts)
@@ -484,7 +499,7 @@ def Container(link):
 	rev = link.rev()
 	if not rev:
 		return None
-	uti = connector.Connector().stat(rev).type()
+	uti = connector.Connector().stat(rev, [link.store()]).type()
 	if uti in Dict.UTIs:
 		return Dict(link)
 	elif uti in Set.UTIs:
@@ -497,27 +512,32 @@ class Dict(object):
 	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
 
 	def __init__(self, link = None):
-		self.__conn = connector.Connector()
 		if link:
 			self.__rev = link.rev()
 			self.__doc = link.doc()
+			self.__store = link.store()
 			self.__load()
 		else:
 			self.__content = { }
 			self.__rev = None
 			self.__doc = None
+			self.__store = None
 
 	def __load(self):
-		uti = self.__conn.stat(self.__rev).type()
+		uti = connector.Connector().stat(self.__rev, [self.__store]).type()
 		if uti not in Dict.UTIs:
 			raise IOError("Not a dict: "+uti)
-		with self.__conn.peek(self.__rev) as r:
-			self.__meta    = loads(r.readAll('META'))
-			self.__content = loads(r.readAll('HPSD'))
+		with connector.Connector().peek(self.__store, self.__rev) as r:
+			self.__meta    = loads(self.__store, r.readAll('META'))
+			self.__content = loads(self.__store, r.readAll('HPSD'))
 
-	def create(self, name, stores):
+	def create(self, store, name):
 		if self.__rev or self.__doc:
 			raise IOError("Not new")
+
+		self.__store = store
+		for link in self.__content:
+			link.update(self.__store)
 
 		if not name:
 			name = "New dict"
@@ -530,7 +550,7 @@ class Dict(object):
 				"sticky" : True
 			}
 		}
-		w = connector.Connector().create("org.hotchpotch.dict", "", stores)
+		w = connector.Connector().create(store, "org.hotchpotch.dict", "")
 		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(self.__content))
@@ -544,8 +564,8 @@ class Dict(object):
 
 	def save(self):
 		self.__meta["org.hotchpotch.annotation"]["comment"] = "<<Changed by import>>"
-		if self.__rev and self.__doc:
-			with connector.Connector().update(self.__doc, self.__rev) as w:
+		if self.__rev and self.__doc and self.__store:
+			with connector.Connector().update(self.__store, self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
 				w.writeAll('HPSD', dumps(self.__content))
 				self.__rev = w.commit()
@@ -568,6 +588,8 @@ class Dict(object):
 
 	def __setitem__(self, name, link):
 		key = name.split(':')[0]
+		if self.__store:
+			link.update(self.__store)
 		self.__content[key] = link
 
 	def __delitem__(self, name):
@@ -591,40 +613,49 @@ class Dict(object):
 		else:
 			raise KeyError(name)
 
+	def getDoc(self):
+		return self.__doc
+
+	def getRev(self):
+		return self.__rev
+
 
 class Set(object):
 	UTIs = ["org.hotchpotch.set"]
 
 	def __init__(self, link = None):
 		self.__didCache = False
-		self.__conn = connector.Connector()
 		if link:
 			self.__rev = link.rev()
 			self.__doc = link.doc()
+			self.__store = link.store()
 			self.__load()
 		else:
 			self.__content = []
 			self.__rev = None
 			self.__doc = None
+			self.__store = None
 
 	def __load(self):
-		uti = self.__conn.stat(self.__rev).type()
+		uti = connector.Connector().stat(self.__rev, [self.__store]).type()
 		if uti not in Set.UTIs:
 			raise IOError("Not a dict: "+uti)
-		with self.__conn.peek(self.__rev) as r:
-			self.__meta = loads(r.readAll('META'))
-			content = loads(r.readAll('HPSD'))
+		with connector.Connector().peek(self.__store, self.__rev) as r:
+			self.__meta = loads(self.__store, r.readAll('META'))
+			content = loads(self.__store, r.readAll('HPSD'))
 		self.__content = [ (None, l) for l in content ]
 
 	def __doCache(self):
 		if not self.__didCache:
-			self.__content = [ (readTitle(l), l) for (t, l) in self.__content ]
+			self.__content = [ (readTitle(l), l) for (t, l) in
+				self.__content ]
 			self.__didCache = True
 
-	def create(self, name, stores):
+	def create(self, store, name):
 		if self.__rev or self.__doc:
 			raise IOError("Not new")
 
+		self.__store = store
 		if not name:
 			name = "New set"
 		self.__meta = {
@@ -636,10 +667,8 @@ class Set(object):
 				"sticky" : True
 			}
 		}
-		content = [ link for (descr, link) in self.__content ]
-		for link in content:
-			link.update()
-		w = connector.Connector().create("org.hotchpotch.set", "", stores)
+		content = [ link.update(self.__store) for (descr, link) in self.__content ]
+		w = connector.Connector().create(store, "org.hotchpotch.set", "")
 		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(content))
@@ -652,12 +681,10 @@ class Set(object):
 			raise
 
 	def save(self):
-		if self.__rev and self.__doc:
+		if self.__rev and self.__doc and self.__store:
 			self.__meta["org.hotchpotch.annotation"]["comment"] = "<<Changed by import>>"
 			content = [ link for (descr, link) in self.__content ]
-			for link in content:
-				link.update()
-			with connector.Connector().update(self.__doc, self.__rev) as w:
+			with connector.Connector().update(self.__store, self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
 				w.writeAll('HPSD', dumps(content))
 				self.__rev = w.commit()
@@ -692,6 +719,8 @@ class Set(object):
 		return self.__content[i][1]
 
 	def __setitem__(self, name, link):
+		if self.__store:
+			link.update(self.__store)
 		self.__content.append( (readTitle(link), link) )
 
 	def __delitem__(self, name):
@@ -720,13 +749,19 @@ class Set(object):
 		self.__doCache()
 		self.__content.remove((name, link))
 
+	def getDoc(self):
+		return self.__doc
+
+	def getRev(self):
+		return self.__rev
+
 # tiny helper function
 def readTitle(link):
 	rev = link.rev()
 	if rev:
 		try:
-			with connector.Connector().peek(rev) as r:
-				meta = loads(r.readAll('META'))
+			with connector.Connector().peek(link.store(), rev) as r:
+				meta = loads(link.store(), r.readAll('META'))
 			if "org.hotchpotch.annotation" in meta:
 				annotation = meta["org.hotchpotch.annotation"]
 				if "title" in annotation:
@@ -764,7 +799,7 @@ def walkPath(path, create=False):
 		raise IOError("Store not found")
 
 	# walk the path
-	curContainer = Dict(DocLink(storeDoc, False))
+	curContainer = Dict(DocLink(storeDoc, storeDoc, False))
 	for (step, nextStep) in steps:
 		next = curContainer.get(step)
 		if next:
@@ -772,12 +807,12 @@ def walkPath(path, create=False):
 		elif create:
 			name = step.split(':')[-1]
 			if ':' in nextStep:
-				handle = Dict().create(name, [storeDoc])
+				handle = Dict().create(storeDoc, name)
 			else:
-				handle = Set().create(name, [storeDoc])
+				handle = Set().create(storeDoc, name)
 
 			try:
-				next = DocLink(handle.getDoc())
+				next = DocLink(storeDoc, handle.getDoc())
 				curContainer[step] = next
 				curContainer.save()
 			finally:
@@ -800,5 +835,5 @@ def resolvePath(path):
 		enum = connector.Connector().enum()
 		if path not in enum.allStores():
 			raise IOError("Path not found")
-		return DocLink(enum.doc(path), False)
+		return DocLink(enum.doc(path), enum.doc(path), False)
 

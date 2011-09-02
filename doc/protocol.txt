@@ -39,44 +39,46 @@ Opcode ::=
 	SET_TYPE_CNF        0x00E1
 	GET_PARENTS_REQ     0x00F0
 	GET_PARENTS_CNF     0x00F1
-	SET_PARENTS_REQ     0x0100
-	SET_PARENTS_CNF     0x0101
+	MERGE_REQ           0x0100
+	MERGE_CNF           0x0101
+	REBASE_REQ          0x0110
+	REBASE_CNF          0x0111
 
-	COMMIT_REQ          0x0110
-	COMMIT_CNF          0x0111
-	SUSPEND_REQ         0x0120
-	SUSPEND_CNF         0x0121
-	CLOSE_REQ           0x0130
-	CLOSE_CNF           0x0131
+	COMMIT_REQ          0x0120
+	COMMIT_CNF          0x0121
+	SUSPEND_REQ         0x0130
+	SUSPEND_CNF         0x0131
+	CLOSE_REQ           0x0140
+	CLOSE_CNF           0x0141
 
-	WATCH_ADD_REQ       0x0140
-	WATCH_ADD_CNF       0x0141
-	WATCH_REM_REQ       0x0150
-	WATCH_REM_CNF       0x0151
-	WATCH_PROGRESS_REQ  0x0160
-	WATCH_PROGRESS_CNF  0x0161
+	WATCH_ADD_REQ       0x0150
+	WATCH_ADD_CNF       0x0151
+	WATCH_REM_REQ       0x0160
+	WATCH_REM_CNF       0x0161
+	WATCH_PROGRESS_REQ  0x0170
+	WATCH_PROGRESS_CNF  0x0171
 
-	FORGET_REQ          0x0170
-	FORGET_CNF          0x0171
-	DELETE_DOC_REQ      0x0180
-	DELETE_DOC_CNF      0x0181
-	DELETE_REV_REQ      0x0190
-	DELETE_REV_CNF      0x0191
+	FORGET_REQ          0x0180
+	FORGET_CNF          0x0181
+	DELETE_DOC_REQ      0x0190
+	DELETE_DOC_CNF      0x0191
+	DELETE_REV_REQ      0x01A0
+	DELETE_REV_CNF      0x01A1
 
-	SYNC_DOC_REQ        0x01A0
-	SYNC_DOC_CNF        0x01A1
-	REPLICATE_DOC_REQ   0x01B0
-	REPLICATE_DOC_CNF   0x01B1
-	REPLICATE_REV_REQ   0x01C0
-	REPLICATE_REV_CNF   0x01C1
+	FORWARD_DOC_REQ     0x01B0
+	FORWARD_DOC_CNF     0x01B1
+	REPLICATE_DOC_REQ   0x01C0
+	REPLICATE_DOC_CNF   0x01C1
+	REPLICATE_REV_REQ   0x01D0
+	REPLICATE_REV_CNF   0x01D1
 
-	MOUNT_REQ           0x01D0
-	MOUNT_CNF           0x01D1
-	UNMOUNT_REQ         0x01E0
-	UNMOUNT_CNF         0x01E1
+	MOUNT_REQ           0x01E0
+	MOUNT_CNF           0x01E1
+	UNMOUNT_REQ         0x01F0
+	UNMOUNT_CNF         0x01F1
 
-	SYS_INFO_REQ        0x01F0
-	SYS_INFO_CNF        0x01F1
+	SYS_INFO_REQ        0x0200
+	SYS_INFO_CNF        0x0201
 
 	WATCH_IND           0x0002
 	PROGRESS_START_IND  0x0012
@@ -85,7 +87,7 @@ Opcode ::=
 
 Body ::=
 	INIT_REQ            Version::Version
-	INIT_CNF            Result::DirectCnf, Version::Version, MaxPacketSize::UINT32
+	INIT_CNF            Result::ErrorCode, Version::Version, MaxPacketSize::UINT32
 
 	ENUM_REQ
 	ENUM_CNF            Stores::List(Guid::UUID, Flags::StoreFlags, Id::String, Name::String)
@@ -94,40 +96,42 @@ Body ::=
 	LOOKUP_REV_REQ      Rev::UUID, Stores::List(Store::UUID)
 	LOOKUP_REV_CNF      Stores::List(Store::UUID)
 	STAT_REQ            Rev::UUID, Stores::List(Store::UUID)
-	STAT_CNF            Result::BrokerCnf, (Flags::RevFlags, Parts::List(FourCC::UINT32, Size:UINT64, Hash::UINT128), Parents::List(Parent::UUID), Mtime:Time, TypeCode::String, CreatorCode::String, DocLinks::List32(Doc::UUID), RevLinks::List32(Rev::UUID))?
+	STAT_CNF            Result::ErrorCode, (Flags::RevFlags, Parts::List(FourCC::UINT32, Size:UINT64, Hash::UINT128), Parents::List(Parent::UUID), Mtime:Time, TypeCode::String, CreatorCode::String, DocLinks::List32(Doc::UUID), RevLinks::List32(Rev::UUID))?
 
-	PEEK_REQ            Rev::UUID, Stores::List(Store::UUID)
-	PEEK_CNF            Result::BrokerCnf, (Handle::UINT32)?
-	CREATE_REQ          TypeCode::String, CreatorCode::String, Stores::List(Store::UUID)
-	CREATE_CNF          Result::BrokerCnf, (Handle::UINT32, Doc::UUID)?
-	FORK_REQ            Rev::UUID, CreatorCode::String, Stores::List(Store::UUID)
-	FORK_CNF            Result::BrokerCnf, (Handle::UINT32, Doc::UUID)?
-	UPDATE_REQ          Doc::UUID, Rev::UUID, CreatorCode::String, Stores::List(Store::UUID)
-	UPDATE_CNF          Result::BrokerCnf, (Handle::UINT32)?
-	RESUME_REQ          Doc::UUID, Rev::UUID, CreatorCode::String, Stores::List(Store::UUID)
-	RESUME_CNF          Result::BrokerCnf, (Handle::UINT32)?
+	PEEK_REQ            Store::UUID, Rev::UUID
+	PEEK_CNF            Result::ErrorCode, (Handle::UINT32)?
+	CREATE_REQ          Store::UUID, TypeCode::String, CreatorCode::String
+	CREATE_CNF          Result::ErrorCode, (Handle::UINT32, Doc::UUID)?
+	FORK_REQ            Store::UUID, Rev::UUID, CreatorCode::String
+	FORK_CNF            Result::ErrorCode, (Handle::UINT32, Doc::UUID)?
+	UPDATE_REQ          Store::UUID, Doc::UUID, Rev::UUID, CreatorCode::String
+	UPDATE_CNF          Result::ErrorCode, (Handle::UINT32)?
+	RESUME_REQ          Store::UUID, Doc::UUID, Rev::UUID, CreatorCode::String
+	RESUME_CNF          Result::ErrorCode, (Handle::UINT32)?
 
 	READ_REQ            Handle::UINT32, Part::UINT32, Offset::UINT64, Length::UINT32
-	READ_CNF            Result::BrokerCnf, Data...
+	READ_CNF            Result::ErrorCode, Data...
 	TRUNC_REQ           Handle::UINT32, Part::UINT32, Offset::UINT64
-	TRUNC_CNF           Result::BrokerCnf
+	TRUNC_CNF           Result::ErrorCode
 	WRITE_REQ           Handle::UINT32, Part::UINT32, Offset::UINT64, Data...
-	WRITE_CNF           Result::BrokerCnf
+	WRITE_CNF           Result::ErrorCode
 	GET_TYPE_REQ        Handle::UINT32
-	GET_TYPE_CNF        Result::BrokerCnf, (TypeCode::String)?
+	GET_TYPE_CNF        Result::ErrorCode, (TypeCode::String)?
 	SET_TYPE_REQ        Handle::UINT32, TypeCode::String
-	SET_TYPE_CNF        Result::BrokerCnf
+	SET_TYPE_CNF        Result::ErrorCode
 	GET_PARENTS_REQ     Handle::UINT32
-	GET_PARENTS_CNF     Result::BrokerCnf, (Parents::List(Parent::UUID))?
-	SET_PARENTS_REQ     Handle::UINT32, Parents::List(Parent::UUID)
-	SET_PARENTS_CNF     Result::BrokerCnf
+	GET_PARENTS_CNF     Result::ErrorCode, (Parents::List(Parent::UUID))?
+	MERGE_REQ           Handle::UINT32, Store::UUID, Rev::UUID, Depth::UINT64
+	MERGE_CNF           Result::ErrorCode
+	REBASE_REQ          Handle::UINT32, Rev::UUID
+	REBASE_CNF          Result::ErrorCode
 
 	COMMIT_REQ          Handle::UINT32
-	COMMIT_CNF          Result::BrokerCnf, (Rev::UUID)?
+	COMMIT_CNF          Result::ErrorCode, (Rev::UUID)?
 	SUSPEND_REQ         Handle::UINT32
-	SUSPEND_CNF         Result::BrokerCnf, (Rev::UUID)?
+	SUSPEND_CNF         Result::ErrorCode, (Rev::UUID)?
 	CLOSE_REQ           Handle::UINT32
-	CLOSE_CNF           Result::BrokerCnf
+	CLOSE_CNF           Result::ErrorCode
 
 	WATCH_ADD_REQ       Type::WatchType, Element::UUID
 	WATCH_ADD_CNF       Result::DirectCnf
@@ -136,19 +140,19 @@ Body ::=
 	WATCH_PROGRESS_REQ  Enable::Bool
 	WATCH_PROGRESS_CNF  Result::DirectCnf
 
-	FORGET_REQ          Doc::UUID, Rev::UUID, Stores::List(Store::UUID)
-	FORGET_CNF          Result::BrokerCnf
-	DELETE_DOC_REQ      Doc::UUID, Rev::UUID, Stores::List(Store::UUID)
-	DELETE_DOC_CNF      Result::BrokerCnf
-	DELETE_REV_REQ      Rev::UUID, Stores::List(Store::UUID)
-	DELETE_REV_CNF      Result::BrokerCnf
+	FORGET_REQ          Store::UUID, Doc::UUID, Rev::UUID
+	FORGET_CNF          Result::ErrorCode
+	DELETE_DOC_REQ      Store::UUID, Doc::UUID, Rev::UUID
+	DELETE_DOC_CNF      Result::ErrorCode
+	DELETE_REV_REQ      Store::UUID, Rev::UUID
+	DELETE_REV_CNF      Result::ErrorCode
 
-	SYNC_DOC_REQ        Doc::UUID, Depth::Time, Stores::List(Store::UUID)
-	SYNC_DOC_CNF        Result::BrokerCnf, (Rev:UUID)?
-	REPLICATE_DOC_REQ   Doc::UUID, Depth::Time, SrcStores::List(Store::UUID), DstStores::List(Store::UUID)
-	REPLICATE_DOC_CNF   Result::BrokerCnf
-	REPLICATE_REV_REQ   Rev::UUID, Depth::Time, SrcStores::List(Store::UUID), DstStores::List(Store::UUID)
-	REPLICATE_REV_CNF   Result::BrokerCnf
+	FORWARD_DOC_REQ     Store::UUID, Doc::UUID, FromRev::UUID, ToRev::UUID, SrcStore::UUID, Depth::Time
+	FORWARD_DOC_CNF     Result::ErrorCode
+	REPLICATE_DOC_REQ   SrcStore::UUID, Doc::UUID, DstStore::UUID, Depth::Time
+	REPLICATE_DOC_CNF   Result::ErrorCode
+	REPLICATE_REV_REQ   SrcStore::UUID, Rev::UUID, DstStore::UUID, Depth::Time
+	REPLICATE_REV_CNF   Result::ErrorCode
 
 	MOUNT_REQ           Id::String
 	MOUNT_CNF           Result::DirectCnf
@@ -416,20 +420,6 @@ ErrorCode ::= UINT32
 	393	= nxdomain
 
 	0xffffffff	= Unknown error
-
-BrokerResult ::= UINT8
-	0	= ok      (operation succeeded everywhere)
-	1	= partial (operation succeeded, but not on all stores)
-	2	= fail    (operation failed)
-
-DirectCnf ::= Result::ErrorCode
-
-BrokerCnf ::= Result::BrokerResult, ErrInfo::ExtendedInfo
-
-ExtendedInfo ::=
-	Result=0:
-	Result=1: ErrInfo::List(Store::UUID, Error::ErrorCode)
-	Result=2: Error::ErrorCode, ErrInfo::List(Store::UUID, Error::ErrorCode)
 
 WatchType ::= UINT8
 	0	= Doc

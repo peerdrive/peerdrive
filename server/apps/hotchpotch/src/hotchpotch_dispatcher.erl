@@ -35,10 +35,6 @@ init(Parent) ->
 
 loop() ->
 	receive
-		{trigger_mod_doc, StoreGuid, Uuid} ->
-			hotchpotch_replicator:event_modified(Uuid, StoreGuid),
-			loop();
-
 		{trigger_add_store, Store} ->
 			added_store(Store),
 			loop();
@@ -135,7 +131,7 @@ find_sys_store([{_Id, _Descr, Guid, Tags} | Remaining]) ->
 
 read_doc(StorePid, Doc) ->
 	case hotchpotch_store:lookup(StorePid, Doc) of
-		{ok, Rev, _} -> hotchpotch_util:read_rev_struct(Rev, <<"HPSD">>);
+		{ok, Rev, _} -> hotchpotch_util:read_rev_struct(StorePid, Rev, <<"HPSD">>);
 		error        -> {error, enoent}
 	end.
 

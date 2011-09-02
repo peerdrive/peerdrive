@@ -29,23 +29,26 @@ from .utils import showDocument
 
 class DocButton(QtGui.QToolButton, Watch):
 
-	def __init__(self, doc=None, withText=False):
+	def __init__(self, store=None, doc=None, withText=False, checkable=False):
 		QtGui.QToolButton.__init__(self)
 		self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
 		self.__watching = None
 		self.__withText = withText
+		self.__checkable = checkable
 		self.__docName = ""
 		self.setAutoRaise(True)
-		self.clicked.connect(self.__clicked)
+		if checkable:
+			self.setCheckable(True)
+		else:
+			self.clicked.connect(self.__clicked)
 		self.customContextMenuRequested.connect(self.__showContextMenu)
-		if withText:
-			self.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-		self.setDocument(doc)
+		self.setDocument(store, doc)
 
 	def cleanup(self):
-		self.setDocument(None)
+		self.setDocument(None, None)
 
-	def setDocument(self, doc):
+	def setDocument(self, store, doc):
+		self.__store = store
 		self.__doc = doc
 		if self.__watching:
 			Connector().unwatch(self)
@@ -58,22 +61,22 @@ class DocButton(QtGui.QToolButton, Watch):
 
 	def triggered(self, cause):
 		if cause == Watch.EVENT_DISAPPEARED:
-			self.setDocument(None)
+			self.setDocument(self.__store, None)
 
 		if self.__doc:
 			self.setEnabled(True)
 			try:
-				rev = Connector().lookup_doc(self.__doc).revs()[0]
+				rev = Connector().lookup_doc(self.__doc, [self.__store]).rev(self.__store)
 				docIcon = None
-				with Connector().peek(rev) as r:
+				with Connector().peek(self.__store, rev) as r:
 					try:
-						metaData = struct.loads(r.readAll('META'))
+						metaData = struct.loads(self.__store, r.readAll('META'))
 						docName = metaData["org.hotchpotch.annotation"]["title"]
 						# TODO: individual store icon...
 					except:
 						docName = "Unnamed"
 				if not docIcon:
-					uti = Connector().stat(rev).type()
+					uti = Connector().stat(rev, [self.__store]).type()
 					docIcon = QtGui.QIcon(Registry().getIcon(uti))
 			except IOError:
 				docName = ''
@@ -88,25 +91,34 @@ class DocButton(QtGui.QToolButton, Watch):
 			docName = docName[:20] + '...'
 		self.setIcon(docIcon)
 		self.__docName = docName
-		if self.__withText:
-			self.setText(docName)
+		self.__updateText()
+
+	def setChecked(self, checked):
+		QtGui.QToolButton.setChecked(self, checked)
+		self.__updateText()
+
+	def __updateText(self):
+		self.setText(self.__docName)
+		if self.__withText or (self.__checkable and self.isChecked()):
+			self.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+			self.setToolTip('')
 		else:
-			self.setToolTip(docName)
+			self.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+			self.setToolTip(self.__docName)
 
 	def __clicked(self):
 		if self.__doc:
-			showDocument(struct.DocLink(self.__doc, False))
+			showDocument(struct.DocLink(self.__store, self.__doc, False))
 
 	def __showContextMenu(self, pos):
+		type = None
 		executables = []
-		for rev in Connector().lookup_doc(self.__doc).revs():
-			try:
-				type = Connector().stat(rev).type()
-				executables = Registry().getExecutables(type)
-				if executables:
-					break
-			except IOError:
-				pass
+		rev = Connector().lookup_doc(self.__doc, [self.__store]).rev(self.__store)
+		try:
+			type = Connector().stat(rev, [self.__store]).type()
+			executables = Registry().getExecutables(type)
+		except IOError:
+			pass
 
 		menu = QtGui.QMenu()
 		action = menu.addAction("Open")
@@ -117,12 +129,12 @@ class DocButton(QtGui.QToolButton, Watch):
 			for e in executables:
 				action = openMenu.addAction(e)
 				action.triggered.connect(
-					lambda x,d=self.__doc,e=e: showDocument(struct.DocLink(d, False), executable=e))
+					lambda x,s=self.__store,d=self.__doc,e=e: showDocument(struct.DocLink(s, d, False), executable=e))
 
 		if Registry().conformes(type, "org.hotchpotch.container"):
 			menu.addSeparator()
 			m = menu.addMenu(self.__docName)
-			l = struct.DocLink(self.__doc, False)
+			l = struct.DocLink(self.__store, self.__doc, False)
 			m.aboutToShow.connect(lambda m=m, l=l: self.__fillMenu(m, l))
 
 		menu.exec_(self.mapToGlobal(pos))
@@ -131,14 +143,11 @@ class DocButton(QtGui.QToolButton, Watch):
 		menu.clear()
 		c = struct.Container(menuLink)
 		for (title, link) in c.items():
-			link.update()
-			type = None
-			for rev in link.revs():
-				try:
-					type = Connector().stat(rev).type()
-					break
-				except IOError:
-					pass
+			link.update(self.__store)
+			try:
+				type = Connector().stat(link.rev()).type()
+			except IOError:
+				type = None
 
 			if not type:
 				continue
@@ -156,8 +165,9 @@ class DocButton(QtGui.QToolButton, Watch):
 
 
 class RevButton(QtGui.QToolButton):
-	def __init__(self, rev, withText=False):
+	def __init__(self, store, rev, withText=False):
 		super(RevButton, self).__init__()
+		self.__store = store
 		self.__rev = rev
 		self.font().setItalic(True)
 
@@ -166,9 +176,9 @@ class RevButton(QtGui.QToolButton):
 		mtime = None
 		try:
 			title = "Unnamed"
-			with Connector().peek(rev) as r:
+			with Connector().peek(store, rev) as r:
 				try:
-					metaData = struct.loads(r.readAll('META'))
+					metaData = struct.loads(store, r.readAll('META'))
 					if "org.hotchpotch.annotation" in metaData:
 						metaData = metaData["org.hotchpotch.annotation"]
 						if "title" in metaData:
@@ -217,7 +227,7 @@ class RevButton(QtGui.QToolButton):
 		pass
 
 	def __clicked(self):
-		showDocument(struct.RevLink(self.__rev))
+		showDocument(struct.RevLink(self.__store, self.__rev))
 
 
 class DocumentView(QtGui.QStackedWidget, Watch):
@@ -269,6 +279,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__open = False
 		self.__doc = None
 		self.__rev = None
+		self.__store = None
 		self.__mutable = False
 		self.__state = DocumentView.STATE_NO_DOC
 		self.__saveNeeded = False
@@ -280,7 +291,8 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__saveTimer.setSingleShot(True)
 		self.__saveTimer.setInterval(10000)
 
-		self.__noDocWidget = QtGui.QLabel("No doc")
+		self.__noDocWidget = QtGui.QLabel("The document is no longer accessible")
+		self.__noDocWidget.setAlignment(QtCore.Qt.AlignCenter)
 		self.addWidget(self.__noDocWidget)
 		self.__chooseSaveAsWidget = QtGui.QLabel("TODO: Choose new location")
 		self.addWidget(self.__chooseSaveAsWidget)
@@ -293,8 +305,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__editWidget = widget
 		self.addWidget(self.__editWidget)
 
-	def docOpen(self, guid, isDoc):
+	def docOpen(self, store, guid, isDoc):
 		self.docClose()
+		self.__store = store
 		self.__mutable = isDoc
 		if isDoc:
 			print "doc:%s" % guid.encode("hex")
@@ -332,19 +345,33 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def docRevert(self):
 		if not (self.__open and self.__mutable):
 			return
+		store = self.__store
 		doc = self.__doc
 		rev = self.__rev
 		pre = self.__preliminary
 		self.docClose(False)
 		if pre:
-			Connector().forget(doc, rev)
-		self.docOpen(doc, True)
+			Connector().forget(store, doc, rev)
+		self.docOpen(store, doc, True)
+
+	def switchStore(self, store):
+		if self.__doc:
+			doc = self.__doc
+			self.docClose()
+			self.docOpen(store, doc, True)
+		else:
+			rev = self.__rev
+			self.docClose()
+			self.docOpen(store, rev, False)
 
 	def doc(self):
 		return self.__doc
 
 	def rev(self):
 		return self.__rev
+
+	def store(self):
+		return self.__store
 
 	def save(self):
 		self.__saveFile("<<Periodic checkpoint>>")
@@ -355,36 +382,36 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.metaDataSetField(DocumentView.HPA_COMMENT, comment)
 		self.__saveFile(comment)
 		if self.__preliminary:
-			with Connector().resume(self.__doc, self.__rev) as writer:
+			with Connector().resume(self.__store, self.__doc, self.__rev) as writer:
 				writer.commit()
 			self.__rev = writer.getRev()
 			self.__setPreliminary(False)
 			self.__emitNewRev()
-			self.__sync()
 
-	def merge(self, rev):
+	def merge(self, store, rev):
 		self.checkpoint("<<Save before merge>>")
 
-		lookup = Connector().lookup_doc(self.__doc)
-		stores = set(lookup.stores(self.__rev))
-		stores |= set(lookup.stores(rev))
-		revs = [self.__rev, rev]
-
 		# determine common ancestor
-		(fastForward, base) = self.__calculateMergeBase(revs, stores)
+		(fastForward, base) = self.__calculateMergeBase(store, rev)
 		#print "ff:%s, base:%s" % (fastForward, base.encode("hex"))
 		if base:
 			# fast-forward merge?
 			if fastForward:
-				self.__rev = Connector().sync(self.__doc, stores=stores)
-				self.__loadFile()
+				if base == self.__rev:
+					QtGui.QMessageBox.warning(self, 'Merge revision outdated',
+						'The selected revision is outdated')
+				else:
+					Connector().forwardDoc(self.__store, self.__doc, self.__rev,
+						rev, store)
+					self.__rev = rev
+					self.__loadFile()
 				return
 
 			# can the application help?
-			if self.__mergeAuto(base, revs, stores):
+			if self.__mergeAuto(store, rev, base):
 				return
 
-		if self.__mergeOurs(revs, list(stores)):
+		if self.__mergeOurs(store, rev):
 			return
 
 	def docSave(self, writer):
@@ -401,11 +428,11 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	# return conflict True/False
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-		baseMeta = struct.loads(baseReader.readAll('META'))
+		baseMeta = struct.loads(self.__store, baseReader.readAll('META'))
 		if 'META' in changedParts:
 			mergeMeta = []
 			for mr in mergeReaders:
-				mergeMeta.append(struct.loads(mr.readAll('META')))
+				mergeMeta.append(struct.loads(self.__store, mr.readAll('META')))
 			(newMeta, conflict) = struct.merge(baseMeta, mergeMeta)
 		else:
 			newMeta = baseMeta
@@ -514,7 +541,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__updateRev()
 
 	def __updateRev(self):
-		avail = len(Connector().lookup_rev(self.__rev)) > 0
+		avail = len(Connector().lookup_rev(self.__rev, [self.__store])) > 0
 		if (self.__state == DocumentView.STATE_NO_DOC) and avail:
 			self.__setState(DocumentView.STATE_EDITING)
 			self.__emitNewRev()
@@ -523,7 +550,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	def __updateDoc(self):
 		if self.__state == DocumentView.STATE_NO_DOC:
-			l = Connector().lookup_doc(self.__doc)
+			l = Connector().lookup_doc(self.__doc, [self.__store])
 			revs = l.revs()
 			preRevs = filter(self.__filterPreRev, l.preRevs())
 			if (len(revs) == 1) and (preRevs == []):
@@ -531,34 +558,37 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 				self.__setPreliminary(False)
 				self.__setState(DocumentView.STATE_EDITING)
 				self.__emitNewRev()
-			elif (len(revs) > 1) or (len(preRevs) > 0):
+			elif len(revs) == 1:
 				self.__setState(DocumentView.STATE_CHOOSE_START)
 		elif self.__state == DocumentView.STATE_EDITING:
 			# are we gone?
 			stores = Connector().lookup_rev(self.__rev)
 			info = Connector().lookup_doc(self.__doc)
-			if len(set(stores) & set(info.stores())) > 0:
+			if self.__store in (set(stores) & set(info.stores())):
 				# still there, make a preliminary commit if necessary
 				self.__saveFile('<<Internal checkpoint>>')
 
 				# ok, whats up?
-				currentRevs = set(info.revs())
 				if self.__preliminary:
 					validRevs = set(Connector().stat(self.__rev).parents())
 				else:
 					validRevs = set([self.__rev])
 
 				# check if we're still up-to-date
-				if currentRevs.isdisjoint(validRevs):
+				if info.rev(self.__store) in validRevs:
+					currentRevs = set(info.revs())
+					self.__setMergeNeeded(bool(currentRevs - validRevs))
+				else:
 					if self.__preliminary:
 						self.__setState(DocumentView.STATE_CHOOSE_REBASE)
 					else:
 						self.__setState(DocumentView.STATE_CHOOSE_FF)
-				else:
-					self.__setMergeNeeded(bool(currentRevs - validRevs))
 			else:
 				# we've disappeared
-				self.__setState(DocumentView.STATE_CHOOSE_ALTERNATE)
+				if self.__mutable and self.__saveNeeded:
+					self.__setState(DocumentView.STATE_CHOOSE_ALTERNATE)
+				else:
+					self.__setState(DocumentView.STATE_NO_DOC)
 		elif self.__state == DocumentView.STATE_CHOOSE_START:
 			self.__updateDocStartRev()
 		elif self.__state == DocumentView.STATE_CHOOSE_FF:
@@ -596,7 +626,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__update()
 
 	def __updateDocStartRev(self):
-		l = Connector().lookup_doc(self.__doc)
+		l = Connector().lookup_doc(self.__doc, [self.__store])
 		revs = l.revs()
 		preRevs = filter(self.__filterPreRev, l.preRevs())
 		if (len(revs) == 1) and (preRevs == []):
@@ -612,7 +642,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		found = []
 		target = self.__rev
 		try:
-			lookup = Connector().lookup_doc(self.__doc)
+			lookup = Connector().lookup_doc(self.__doc, [self.__store])
 			depth = Connector().stat(target).mtime() - datetime.timedelta(days=1)
 		except IOError:
 			# seems we're gone
@@ -655,7 +685,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def __updateDocRebase(self):
 		# get current revs on all stores where the preliminary versions exists
 		heads = set()
-		lookup = Connector().lookup_doc(self.__doc)
+		lookup = Connector().lookup_doc(self.__doc, [self.__store])
 		for store in lookup.stores(self.__rev):
 			heads.add(lookup.rev(store))
 
@@ -663,7 +693,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__chooseOverwriteWidget.updateChoices(lookup, heads)
 
 	def __updateDocSaveAs(self):
-		info = Connector().lookup_doc(self.__doc)
+		info = Connector().lookup_doc(self.__doc, [self.__store])
 		if ((not self.__preliminary and (self.__rev in info.revs())) or
 			(self.__preliminary and (self.__rev in info.preRevs()))):
 			# document appeared again
@@ -677,12 +707,12 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	def __rebase(self, rev, overwrite):
 		if overwrite:
-			with Connector().resume(self.__doc, self.__rev) as writer:
-				writer.setParents([rev]) # FIXME: will wreck a merge prerev
+			with Connector().resume(self.__store, self.__doc, self.__rev) as writer:
+				writer.rebase(rev)
 				writer.suspend()
 			self.__rev = writer.getRev()
 		else:
-			Connector().forget(self.__doc, self.__rev)
+			Connector().forget(self.__store, self.__doc, self.__rev)
 			self.__rev = rev
 			self.__setPreliminary(False)
 		self.__setState(DocumentView.STATE_EDITING)
@@ -691,9 +721,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def __loadFile(self):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 		try:
-			with Connector().peek(self.__rev) as r:
+			with Connector().peek(self.__store, self.__rev) as r:
 				try:
-					self.__metaData = struct.loads(r.readAll('META'))
+					self.__metaData = struct.loads(self.__store, r.readAll('META'))
 				except IOError:
 					self.__metaData = { }
 				self.__metaDataChanged = False
@@ -705,11 +735,11 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def __saveFile(self, comment = ""):
 		if self.__mutable and self.__saveNeeded:
 			if self.__preliminary:
-				with Connector().resume(self.__doc, self.__rev) as writer:
+				with Connector().resume(self.__store, self.__doc, self.__rev) as writer:
 					self.__saveFileInternal(comment, writer)
 					writer.suspend()
 			else:
-				with Connector().update(self.__doc, self.__rev, self.__creator) as writer:
+				with Connector().update(self.__store, self.__doc, self.__rev, self.__creator) as writer:
 					self.__saveFileInternal(comment, writer)
 					writer.suspend()
 			self.__metaDataChanged = False
@@ -728,24 +758,6 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		finally:
 			QtGui.QApplication.restoreOverrideCursor()
 
-	def __sync(self):
-		lookup = Connector().lookup_doc(self.__doc)
-		stat = Connector().stat(self.__rev)
-
-		# get all revs which are heads of __doc and are parents of __rev
-		parents = set(stat.parents())
-		heads = set(lookup.revs())
-		revs = (parents & heads) | set([self.__rev])
-
-		# get all the stores of these revs
-		stores = set()
-		for rev in revs:
-			stores |= set(lookup.stores(rev))
-
-		# sync if more than one store is involved
-		if len(stores) > 1:
-			Connector().sync(self.__doc, stores=stores)
-
 	def __filterPreRev(self, rev):
 		try:
 			return Connector().stat(rev).creator() == self.__creator
@@ -755,16 +767,16 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def __getStoreName(self, store):
 		try:
 			rev = Connector().lookup_doc(store).rev(store)
-			with Connector().peek(rev) as r:
+			with Connector().peek(store, rev) as r:
 				try:
-					metaData = struct.loads(r.readAll('META'))
+					metaData = struct.loads(store, r.readAll('META'))
 					return metaData["org.hotchpotch.annotation"]["title"]
 				except:
 					return "Unnamed store"
 		except:
 			return None
 
-	def __mergeOurs(self, revs, stores):
+	def __mergeOurs(self, mergeStore, mergeRev):
 		# last resort: "ours"-merge
 		options = []
 		for rev in revs:
@@ -785,8 +797,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			False)
 		if ok:
 			base = revs[options.index(choice)]
-			with Connector().update(self.__doc, base, self.__creator, stores) as w:
-				w.setParents(revs)
+			with Connector().update(self.__store, self.__doc, base, self.__creator) as w:
+				for rev in revs:
+					w.merge(revs)
 				w.suspend()
 			self.__rev = w.getRev()
 			self.__setPreliminary(True)
@@ -796,7 +809,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		else:
 			return False
 
-	def __mergeAuto(self, baseRev, mergeRevs, stores):
+	def __mergeAuto(self, mergeStore, mergeRev, baseRev):
+		stores = [self.__store, mergeStore]
+
 		# see what has changed...
 		s = Connector().stat(baseRev, stores)
 		types = set([s.type()])
@@ -805,7 +820,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		changedParts = set()
 		for part in origParts:
 			origHashes[part] = s.hash(part)
-		for rev in mergeRevs:
+		for rev in [self.__rev, mergeRev]:
 			s = Connector().stat(rev, stores)
 			types.add(s.type())
 			mergeParts = set(s.parts())
@@ -817,7 +832,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 					changedParts.add(part)
 
 		# vote
-		(uti, handledParts) = self.docMergeCheck(len(mergeRevs), types, changedParts)
+		(uti, handledParts) = self.docMergeCheck(2, types, changedParts)
 		if not uti:
 			return False # couldn't agree on resulting uti
 		if not changedParts.issubset(handledParts):
@@ -828,13 +843,13 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		conflicts = False
 		try:
 			# open all contributing revisions
-			for rev in mergeRevs:
-				mergeReaders.append(Connector().peek(rev, stores))
+			mergeReaders.append(Connector().peek(self.__store, self.__rev))
+			mergeReaders.append(Connector().peek(mergeStore, mergeRev))
 
-			with Connector().peek(baseRev, stores) as baseReader:
-				with Connector().update(self.__doc, self.__rev, self.__creator, stores) as writer:
+			with Connector().peek(Connector().lookup_rev(baseRev)[0], baseRev) as baseReader:
+				with Connector().update(self.__store, self.__doc, self.__rev, self.__creator) as writer:
 					writer.setType(uti)
-					writer.setParents(mergeRevs)
+					writer.merge(mergeStore, mergeRev)
 					conflicts = self.docMergePerform(writer, baseReader, mergeReaders, changedParts)
 					writer.suspend()
 				self.__rev = writer.getRev()
@@ -853,7 +868,9 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	# FIXME: This whole method is severely broken. It traverses the _whole_
 	# history and selects the merge base based on the mtime. It has also no
 	# provisions for criss-cross merges...
-	def __calculateMergeBase(self, baseVersions, stores):
+	def __calculateMergeBase(self, store, mergeRev):
+		stores = [self.__store, store]
+		baseVersions = [self.__rev, mergeRev]
 		#print "Start: ", [rev.encode('hex') for rev in baseVersions]
 		heads = [[rev] for rev in baseVersions] # list of heads for each rev
 		paths = [set([rev]) for rev in baseVersions] # visited revs for each rev
@@ -945,11 +962,10 @@ class _ChooseWidget(QtGui.QWidget):
 		widget = QtGui.QWidget()
 		layout = QtGui.QHBoxLayout()
 
-		layout.addWidget(RevButton(rev, True))
-
 		stores = lookup.stores(rev)
+		layout.addWidget(RevButton(stores[0], rev, True))
 		for doc in stores:
-			layout.addWidget(DocButton(doc, True))
+			layout.addWidget(DocButton(doc, doc, True))
 
 		layout.addStretch()
 		if preliminary:
@@ -1002,11 +1018,10 @@ class _OverwriteWidget(QtGui.QWidget):
 		widget = QtGui.QWidget()
 		layout = QtGui.QHBoxLayout()
 
-		layout.addWidget(RevButton(rev, True))
-
 		stores = lookup.stores(rev)
+		layout.addWidget(RevButton(stores[0], rev, True))
 		for doc in stores:
-			layout.addWidget(DocButton(doc, True))
+			layout.addWidget(DocButton(doc, doc, True))
 
 		layout.addStretch()
 		button = QtGui.QPushButton("Open")

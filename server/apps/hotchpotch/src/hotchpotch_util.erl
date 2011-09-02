@@ -16,7 +16,7 @@
 
 -module(hotchpotch_util).
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
--export([read_rev/2, read_rev_struct/2, hash_file/1]).
+-export([read_rev/3, read_rev_struct/3, hash_file/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Hex conversions
@@ -76,16 +76,16 @@ gen_tmp_name(RootPath) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % returns {ok, Data} | {error, Reason}
-read_rev(Rev, Part) ->
-	case hotchpotch_broker:peek(Rev, hotchpotch_broker:get_stores([])) of
-		{ok, _Errors, Reader} ->
+read_rev(Store, Rev, Part) ->
+	case hotchpotch_broker:peek(Store, Rev) of
+		{ok, Reader} ->
 			try
 				read_rev_loop(Reader, Part, 0, <<>>)
 			after
 				hotchpotch_broker:close(Reader)
 			end;
 
-		{error, Reason, _Errors} ->
+		{error, Reason} ->
 			{error, Reason}
 	end.
 
@@ -93,17 +93,17 @@ read_rev(Rev, Part) ->
 read_rev_loop(Reader, Part, Offset, Acc) ->
 	Length = 16#10000,
 	case hotchpotch_broker:read(Reader, Part, Offset, Length) of
-		{ok, _Error, <<>>} ->
+		{ok, <<>>} ->
 			{ok, Acc};
-		{ok, _Errors, Data} ->
+		{ok, Data} ->
 			read_rev_loop(Reader, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
-		{error, Reason, _Errors} ->
+		{error, Reason} ->
 			{error, Reason}
 	end.
 
 
-read_rev_struct(Rev, Part) ->
-	case read_rev(Rev, Part) of
+read_rev_struct(Store, Rev, Part) ->
+	case read_rev(Store, Rev, Part) of
 		{ok, Data} ->
 			case catch hotchpotch_struct:decode(Data) of
 				{'EXIT', _Reason} ->

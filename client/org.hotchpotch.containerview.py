@@ -97,10 +97,11 @@ class CollectionWindow(main.MainWindow):
 		self.__cleanAct.setEnabled(mutable)
 
 	def __itemOpen(self, link, executable):
+		store = self.viewWidget().store()
 		if self.viewWidget().doc():
-			ref = struct.DocLink(self.viewWidget().doc(), autoUpdate=False)
+			ref = struct.DocLink(store, self.viewWidget().doc(), autoUpdate=False)
 		elif self.viewWidget().rev():
-			ref = struct.RevLink(self.viewWidget().rev())
+			ref = struct.RevLink(store, self.viewWidget().rev())
 		else:
 			ref = None
 		utils.showDocument(link, executable=executable, referrer=ref)

@@ -15,400 +15,139 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(hotchpotch_broker_io).
--behaviour(gen_server).
 
--export([start/1]).
--export([read/4, write/4, truncate/3, get_parents/1, set_parents/2, get_type/1,
-	set_type/2, commit/1, suspend/1, close/1]).
-
--export([init/1, init/2, handle_call/3, handle_cast/2, code_change/3,
-	handle_info/2, terminate/2]).
-
--record(state, {handles, user, doc, stores}).
+-export([peek/2, create/3, fork/3, update/4, resume/4]).
+-export([read/4, write/4, truncate/3, get_parents/1, merge/4, rebase/2,
+	get_type/1, set_type/2, commit/1, suspend/1, close/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public broker operations...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start(Operation) ->
-	proc_lib:start_link(?MODULE, init, [self(), Operation]).
-
-read(Broker, Part, Offset, Length) ->
-	gen_server:call(Broker, {read, Part, Offset, Length}, infinity).
-
-write(Broker, Part, Offset, Data) ->
-	gen_server:call(Broker, {write, Part, Offset, Data}, infinity).
-
-truncate(Broker, Part, Offset) ->
-	gen_server:call(Broker, {truncate, Part, Offset}, infinity).
-
-get_parents(Broker) ->
-	gen_server:call(Broker, get_parents, infinity).
-
-set_parents(Broker, Parents) ->
-	gen_server:call(Broker, {set_parents, Parents}, infinity).
-
-get_type(Broker) ->
-	gen_server:call(Broker, get_type, infinity).
-
-set_type(Broker, Type) ->
-	gen_server:call(Broker, {set_type, Type}, infinity).
-
-commit(Broker) ->
-	gen_server:call(Broker, commit, infinity).
-
-suspend(Broker) ->
-	gen_server:call(Broker, suspend, infinity).
-
-close(Broker) ->
-	gen_server:call(Broker, close, infinity).
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% gen_server callbacks...
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-init(Parent, Operation) ->
-	case init_operation(Operation) of
-		{ok, ErrInfo, State} ->
-			proc_lib:init_ack(Parent, {ok, ErrInfo, self()}),
-			process_flag(trap_exit, true),
-			link(Parent),
-			gen_server:enter_loop(?MODULE, [], State#state{user=Parent});
-
-		{error, _Reason, _ErrInfo} = Error ->
-			proc_lib:init_ack(Parent, Error),
+peek(Store, Rev) ->
+	case hotchpotch_store:peek(Store, Rev) of
+		{ok, Handle} ->
+			{ok, {Store, Handle}};
+		Error ->
 			Error
 	end.
 
-
-init_operation({peek, Rev, Stores}) ->
-	do_peek(Rev, Stores);
-
-init_operation({create, Doc, Type, Creator, Stores}) ->
-	do_create(Doc, Type, Creator, Stores);
-
-init_operation({fork, Doc, StartRev, Creator, Stores}) ->
-	do_fork(Doc, StartRev, Creator, Stores);
-
-init_operation({update, Doc, StartRev, Creator, Stores}) ->
-	do_update(Doc, StartRev, Creator, Stores);
-
-init_operation({resume, Doc, PreRev, Creator, Stores}) ->
-	do_resume(Doc, PreRev, Creator, Stores).
-
-
-handle_call({read, Part, Offset, Length}, _From, S) ->
-	make_reply(distribute_read(
-		fun(Handle) -> hotchpotch_store:read(Handle, Part, Offset, Length) end,
-		S));
-
-handle_call({write, Part, Offset, Data}, _From, S) ->
-	make_reply(distribute_write(
-		fun(Handle) -> hotchpotch_store:write(Handle, Part, Offset, Data) end,
-		S));
-
-handle_call({truncate, Part, Offset}, _From, S) ->
-	make_reply(distribute_write(
-		fun(Handle) -> hotchpotch_store:truncate(Handle, Part, Offset) end,
-		S));
-
-handle_call(get_parents, _From, S) ->
-	make_reply(distribute_read(
-		fun(Handle) -> hotchpotch_store:get_parents(Handle) end,
-		S));
-
-handle_call({set_parents, Parents}, _From, S) ->
-	make_reply(distribute_write(
-		fun(Handle) -> hotchpotch_store:set_parents(Handle, Parents) end,
-		S));
-
-handle_call(get_type, _From, S) ->
-	make_reply(distribute_read(
-		fun(Handle) -> hotchpotch_store:get_type(Handle) end,
-		S));
-
-handle_call({set_type, Type}, _From, S) ->
-	make_reply(distribute_write(
-		fun(Handle) -> hotchpotch_store:set_type(Handle, Type) end,
-		S));
-
-handle_call(commit, _From, S) ->
-	do_commit(fun hotchpotch_store:commit/2, S);
-
-handle_call(suspend, _From, S) ->
-	do_commit(fun hotchpotch_store:suspend/2, S);
-
-handle_call(close, _From, S) ->
-	do_close(S#state.handles),
-	{stop, normal, {ok, []}, S}.
-
-
-handle_info({'EXIT', From, Reason}, #state{user=User} = S) ->
-	case From of
-		User ->
-			% upstream process died
-			do_close(S#state.handles),
-			{stop, normal, S};
-
-		_Handle ->
-			% one of the handles died, abnormally?
-			case Reason of
-				% don't care
-				normal   -> {noreply, S};
-				shutdown -> {noreply, S};
-
-				Abnormal ->
-					% well, this one was unexpected...
-					error_logger:warning_msg("broker_io: handle died: ~p~n",
-						[Abnormal]),
-					Handles = lists:filter(
-						fun({_, N}) -> is_process_alive(N) end,
-						S#state.handles),
-					{noreply, S#state{handles=Handles}}
-			end
+create(Store, Type, Creator) ->
+	case hotchpotch_store:create(Store, Type, Creator) of
+		{ok, Doc, Handle} ->
+			{ok, Doc, {Store, Handle}};
+		Error ->
+			Error
 	end.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Stubs...
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+fork(Store, Rev, Creator) ->
+	case hotchpotch_store:fork(Store, Rev, Creator) of
+		{ok, Doc, Handle} ->
+			{ok, Doc, {Store, Handle}};
+		Error ->
+			Error
+	end.
 
+update(Store, Doc, Rev, Creator) ->
+	case hotchpotch_store:update(Store, Doc, Rev, Creator) of
+		{ok, Handle} ->
+			{ok, {Store, Handle}};
+		Error ->
+			Error
+	end.
 
-init(_) -> {stop, enotsup}.
-handle_cast(_, State)    -> {stop, enotsup, State}.
-code_change(_, State, _) -> {ok, State}.
-terminate(_, _)          -> ok.
+resume(Store, Doc, PreRev, Creator) ->
+	case hotchpotch_store:resume(Store, Doc, PreRev, Creator) of
+		{ok, Handle} ->
+			{ok, {Store, Handle}};
+		Error ->
+			Error
+	end.
+
+read({_, Handle}, Part, Offset, Length) ->
+	hotchpotch_store:read(Handle, Part, Offset, Length).
+
+write({_, Handle}, Part, Offset, Data) ->
+	hotchpotch_store:write(Handle, Part, Offset, Data).
+
+truncate({_, Handle}, Part, Offset) ->
+	hotchpotch_store:truncate(Handle, Part, Offset).
+
+get_parents({_, Handle}) ->
+	hotchpotch_store:get_parents(Handle).
+
+merge({DstStore, Handle}, SrcStore, Rev, Depth) ->
+	do_merge(Handle, DstStore, SrcStore, Rev, Depth).
+
+rebase({_, Handle}, Rev) ->
+	do_rebase(Handle, Rev).
+
+get_type({_, Handle}) ->
+	hotchpotch_store:get_type(Handle).
+
+set_type({_, Handle}, Type) ->
+	hotchpotch_store:set_type(Handle, Type).
+
+commit({_, Handle}) ->
+	do_commit(Handle, fun hotchpotch_store:commit/1).
+
+suspend({_, Handle}) ->
+	do_commit(Handle, fun hotchpotch_store:suspend/1).
+
+close({_, Handle}) ->
+	hotchpotch_store:close(Handle).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_peek(Rev, Stores) ->
-	do_peek_loop(Rev, Stores, []).
+do_merge(Handle, DstStore, SrcStore, Rev, Depth) ->
+	case hotchpotch_store:contains(SrcStore, Rev) of
+		true ->
+			case hotchpotch_store:get_parents(Handle) of
+				{ok, Parents} ->
+					% TODO: check if the new Rev supersedes any present parent
+					NewParents = lists:usort([Rev | Parents]),
+					case hotchpotch_store:set_parents(Handle, NewParents) of
+						ok ->
+							% FIXME: _sync?
+							hotchpotch_replicator:replicate_rev(SrcStore, Rev,
+								DstStore, Depth),
+							ok;
+						{error, _} = Error ->
+							Error
+					end;
 
+				{error, _} = Error ->
+					Error
+			end;
 
-do_peek_loop(_Rev, [], Errors) ->
-	hotchpotch_broker:consolidate_error(Errors);
-
-do_peek_loop(Rev, [{Guid, Pid} | Stores], Errors) ->
-	case hotchpotch_store:peek(Pid, Rev) of
-		{ok, Handle} ->
-			State = #state{ handles=[{Guid, Handle}] },
-			hotchpotch_broker:consolidate_success(Errors, State);
-		{error, Reason} ->
-			do_peek_loop(Rev, Stores, [{Guid, Reason} | Errors])
+		false ->
+			{error, enoent}
 	end.
 
 
-do_create(Doc, Type, Creator, Stores) ->
-	start_handles(
-		fun(Pid) -> hotchpotch_store:create(Pid, Doc, Type, Creator) end,
-		Doc,
-		Stores).
+do_rebase(Handle, Rev) ->
+	% TODO: only remove superseded revisions
+	hotchpotch_store:set_parents(Handle, [Rev]).
 
 
-do_fork(Doc, StartRev, Creator, Stores) ->
-	start_handles(
-		fun(Pid) -> hotchpotch_store:fork(Pid, Doc, StartRev, Creator) end,
-		Doc,
-		Stores).
+do_commit(Handle, Fun) ->
+	case do_commit_prepare(Handle) of
+		ok    -> Fun(Handle);
+		Error -> Error
+	end.
 
 
-do_update(Doc, StartRev, Creator, Stores) ->
-	start_handles(
-		fun(Pid) -> hotchpotch_store:update(Pid, Doc, StartRev, Creator) end,
-		Doc,
-		Stores).
-
-
-do_resume(Doc, PreRev, Creator, Stores) ->
-	start_handles(
-		fun(Pid) -> hotchpotch_store:resume(Pid, Doc, PreRev, Creator) end,
-		Doc,
-		Stores).
-
-
-do_commit(Fun, S) ->
-	Reply = case do_commit_prepare(S) of
-		{ok, ErrInfo, S2} ->
-			merge_errors(do_commit_store(Fun, S2), ErrInfo);
-
-		Error ->
-			Error
-	end,
-	make_reply(Reply).
-
-
-do_commit_prepare(S) ->
-	case distribute_read(fun read_rev_refs/1, S) of
-		{ok, ErrInfo, {DocRefs, RevRefs}, S2} ->
-			merge_errors(
-				distribute_write(
-					fun(H) -> hotchpotch_store:set_links(H, DocRefs, RevRefs) end,
-					S2),
-				ErrInfo);
-
+do_commit_prepare(Handle) ->
+	case read_rev_refs(Handle) of
+		{ok, DocRefs, RevRefs} ->
+			hotchpotch_store:set_links(Handle, DocRefs, RevRefs);
 		Error ->
 			Error
 	end.
 
-
-do_commit_store(Fun, S) ->
-	Mtime = hotchpotch_util:get_time(),
-	{Revs, RWHandles, ROHandles, Errors} = lists:foldl(
-		fun({Store, StoreHandle}=Handle, {AccRevs, AccRW, AccRO, AccErrors}) ->
-			case Fun(StoreHandle, Mtime) of
-				{ok, Rev} ->
-					{[Rev|AccRevs], AccRW, [Handle|AccRO], AccErrors};
-				{error, Reason} ->
-					{AccRevs, [Handle|AccRW], AccRO, [{Store, Reason}|AccErrors]}
-			end
-		end,
-		{[], [], [], []},
-		S#state.handles),
-	case lists:usort(Revs) of
-		[Rev] ->
-			% as expected
-			do_close(RWHandles),
-			{ok, Errors, Rev, S#state{handles=ROHandles}};
-
-		[] when ROHandles =:= [] ->
-			% no writer commited...
-			{error, Errors, S#state{handles=RWHandles}};
-
-		RevList ->
-			% internal error: handles did not came to the same revision! WTF?
-			error_logger:error_report([
-				{module, ?MODULE},
-				{error, 'revision discrepancy'},
-				{doc, hotchpotch_util:bin_to_hexstr(S#state.doc)},
-				{revs, lists:map(fun hotchpotch_util:bin_to_hexstr/1, RevList)},
-				{committers, lists:map(fun({G,_}) -> hotchpotch_util:bin_to_hexstr(G) end, ROHandles)}
-			]),
-			do_close(ROHandles),
-			do_close(RWHandles),
-			{
-				error,
-				lists:map(fun({Store, _}) -> {Store, einternal} end, ROHandles),
-				S#state{handles=[]}
-			}
-	end.
-
-
-do_close(Handles) ->
-	lists:foreach(fun({_Guid, Handle}) -> hotchpotch_store:close(Handle) end, Handles).
-
-
-start_handles(Fun, Doc, Stores) ->
-	case start_handles_loop(Fun, Stores, [], []) of
-		{ok, ErrInfo, Handles} ->
-			{
-				ok,
-				ErrInfo,
-				#state{
-					doc     = Doc,
-					handles = Handles,
-					stores  = Stores
-				}
-			};
-		Error ->
-			Error
-	end.
-
-
-start_handles_loop(_Fun, [], Handles, Errors) ->
-	case Handles of
-		[] -> hotchpotch_broker:consolidate_error(Errors);
-		_  -> hotchpotch_broker:consolidate_success(Errors, Handles)
-	end;
-
-start_handles_loop(Fun, [{Guid, Pid} | Stores], Handles, Errors) ->
-	case Fun(Pid) of
-		{ok, Handle} ->
-			start_handles_loop(Fun, Stores, [{Guid, Handle} | Handles], Errors);
-		{error, Reason} ->
-			start_handles_loop(Fun, Stores, Handles, [{Guid, Reason} | Errors])
-	end.
-
-
-distribute_read(Fun, S) ->
-	case S#state.handles of
-		[] ->
-			{error, enoent, []};
-
-		[{Guid, Handle} | _] ->
-			% TODO: ask more than just the first store if it fails...
-			case Fun(Handle) of
-				{ok, Result}    -> {ok, [], Result, S};
-				{error, Reason} -> {error, [{Guid, Reason}], S}
-			end
-	end.
-
-
-distribute_write(Fun, S) ->
-	% TODO: parallelize this loop
-	{Success, Fail} = lists:foldr(
-		fun({Store, Handle}, {AccSuccess, AccFail}) ->
-			case Fun(Handle) of
-				ok ->
-					{[{Store, Handle} | AccSuccess], AccFail};
-
-				{error, Reason} ->
-					{AccSuccess, [{Store, Reason, Handle} | AccFail]}
-			end
-		end,
-		{[], []},
-		S#state.handles),
-
-	% let's see what we got...
-	case Success of
-		[] ->
-			% nobody did anything -> no state change -> keep going
-			ErrInfo = lists:map(
-				fun({Store, Reason, _}) -> {Store, Reason} end,
-				Fail),
-			{error, ErrInfo, S};
-
-		_ ->
-			% at least someone did what he was told
-			ErrInfo = lists:map(
-				fun({Store, Reason, Handle}) ->
-					hotchpotch_store:close(Handle),
-					{Store, Reason}
-				end,
-				Fail),
-			{ok, ErrInfo, S#state{handles=Success}}
-	end.
-
-
-make_reply(Result) ->
-	case Result of
-		{ok, ErrInfo, State} ->
-			{reply, hotchpotch_broker:consolidate_success(ErrInfo), State};
-
-		{ok, ErrInfo, Reply, State} ->
-			{reply, hotchpotch_broker:consolidate_success(ErrInfo, Reply), State};
-
-		{error, ErrInfo, State} ->
-			{reply, hotchpotch_broker:consolidate_error(ErrInfo), State}
-	end.
-
-
-merge_errors(Result, AddErrors) ->
-	case Result of
-		{ok, ErrInfo, State} ->
-			{ok, AddErrors++ErrInfo, State};
-
-		{ok, ErrInfo, Reply, State} ->
-			{ok, AddErrors++ErrInfo, Reply, State};
-
-		{error, ErrInfo, State} ->
-			{error, AddErrors++ErrInfo, State}
-	end.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Reference reading
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 read_rev_refs(Handle) ->
 	try
@@ -420,7 +159,7 @@ read_rev_refs(Handle) ->
 			end,
 			{sets:new(), sets:new()},
 			[<<"HPSD">>, <<"META">>]),
-		{ok, {sets:to_list(DocSet), sets:to_list(RevSet)}}
+		{ok, sets:to_list(DocSet), sets:to_list(RevSet)}
 	catch
 		throw:Term -> Term
 	end.

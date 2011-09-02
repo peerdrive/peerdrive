@@ -28,12 +28,12 @@ new(BaseRevs, Stores) ->
 	Destination = lists:foldr(
 		fun(Rev, Acc) ->
 			case hotchpotch_broker:stat(Rev, Stores) of
-				{ok, _, Stat} ->
+				{ok, Stat} ->
 					Rev = digraph:add_vertex(G, Rev, #node{stat=Stat, paths=[Rev]}),
 					digraph:add_edge(G, {heads, Rev}, heads, Rev, []),
 					[Rev | Acc];
 
-				{error, _, _} ->
+				{error, _} ->
 					Acc
 			end
 		end,
@@ -127,12 +127,12 @@ update_node(#graph{g=G} = Graph, Rev, Node, Paths) ->
 
 add_node(#graph{g=G, stores=Stores}, Rev, Child, Paths) ->
 	case hotchpotch_broker:stat(Rev, Stores) of
-		{ok, _, Stat} ->
+		{ok, Stat} ->
 			Rev = digraph:add_vertex(G, Rev, #node{stat=Stat, paths=Paths}),
 			digraph:add_edge(G, {heads, Rev}, heads, Rev, []),
 			digraph:add_edge(G, {Child, Rev}, Child, Rev, []);
 
-		{error, _, _} ->
+		{error, _} ->
 			ok
 	end.
 
@@ -166,6 +166,41 @@ ff_path(#graph{g=G}, Head, Rev) ->
 	end.
 
 
-merge_bases(_Graph) ->
-	throw(enosys).
+merge_bases(#graph{g=G, dest=Dest}) ->
+	Paths = [ {[Rev], sets:new()} || Rev <- Dest ],
+	get_merge_base_loop(Paths, G).
+
+
+get_merge_base_loop(Paths, G) ->
+	{Heads, PathSets} = lists:unzip(Paths),
+	% did we already find a common rev?
+	Common = sets:intersection(PathSets),
+	case sets:size(Common) of
+		0 ->
+			% traverse deeper into the history
+			case lists:all(fun(H) -> H == [] end, Heads) of
+				true ->
+					% no heads anymore -> cannot traverse further
+					error;
+
+				false ->
+					NewPaths = [ traverse(OldHeads, OldPath, G) ||
+						{OldHeads, OldPath} <- Paths ],
+					get_merge_base_loop(NewPaths, G)
+			end;
+
+		% seems so :)
+		_ ->
+			{ok, sets:to_list(Common)}
+	end.
+
+
+traverse(Heads, Path, G) ->
+	lists:foldl(
+		fun(Head, {AccHeads, AccPath}) ->
+			Parents = digraph:out_neighbours(G, Head),
+			{Parents ++ AccHeads, sets:add_element(Head, AccPath)}
+		end,
+		{[], Path},
+		Heads).
 

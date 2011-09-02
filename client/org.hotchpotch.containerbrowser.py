@@ -19,11 +19,11 @@
 
 from PyQt4 import QtCore, QtGui#, QtOpenGL
 from datetime import datetime
-import itertools, optparse
+import itertools, optparse, copy
 
 from hotchpotch import Connector, Registry, struct, connector
 from hotchpotch.gui import utils
-from hotchpotch.gui.widgets import DocumentView
+from hotchpotch.gui.widgets import DocumentView, DocButton
 
 from views.container import CollectionWidget, CollectionModel
 from views.text import TextEdit
@@ -175,13 +175,14 @@ class WarpProxy(QtGui.QGraphicsProxyWidget):
 
 class WarpItem(connector.Watch):
 
-	def __init__(self, view, cls, size, scene, rev):
+	def __init__(self, view, cls, size, scene, store, rev):
 		connector.Watch.__init__(self, connector.Watch.TYPE_REV, rev)
 		self.__view = view
 		self.__class = cls
 		self.__geometry = QtCore.QRectF(-size.width()/2.0, -size.height()/2.0,
 			float(size.width()), float(size.height()))
 		self.__scene = scene
+		self.__store = store
 		self.__rev = rev
 		self.__widget = None
 		self.__available = False
@@ -268,7 +269,7 @@ class WarpItem(connector.Watch):
 		widget = self.__class()
 		if self.__state:
 			widget._loadSettings(self.__state)
-		widget.docOpen(self.__rev, False)
+		widget.docOpen(self.__store, self.__rev, False)
 		#widget.itemOpen.connect(self.__itemOpen)
 		proxy = WarpProxy(self, level)
 		proxy.setWidget(widget)
@@ -319,8 +320,9 @@ class WarpView(QtGui.QGraphicsView):
 
 	openItem = QtCore.pyqtSignal(struct.RevLink, object)
 
-	def __init__(self, cls, rev, state):
+	def __init__(self, cls, store, rev, state):
 		self.__class = cls
+		self.__store = store
 		self.__scene = QtGui.QGraphicsScene()
 		super(WarpView, self).__init__(self.__scene)
 
@@ -349,7 +351,7 @@ class WarpView(QtGui.QGraphicsView):
 		self.__scene.addWidget(self.__goPresent)
 		self.__scene.addWidget(self.__openBtn)
 
-		item = WarpItem(self, self.__class, self.size(), self.__scene, rev)
+		item = WarpItem(self, self.__class, self.size(), self.__scene, store, rev)
 		item.fadeFull(0)
 		item.setState(state)
 		self.__distance = 1
@@ -422,7 +424,8 @@ class WarpView(QtGui.QGraphicsView):
 
 		for rev in todo:
 			if rev not in self.__allItems:
-				self.__allItems[rev] = WarpItem(self, self.__class, self.size()*self.__distance, self.__scene, rev)
+				self.__allItems[rev] = WarpItem(self, self.__class,
+					self.size()*self.__distance, self.__scene, self.__store, rev)
 				trigger = True
 
 		if trigger:
@@ -476,7 +479,7 @@ class WarpView(QtGui.QGraphicsView):
 
 	def __open(self):
 		self.__state = self.__curItem.getState()
-		link = struct.RevLink(self.__curItem.rev())
+		link = struct.RevLink(self.__store, self.__curItem.rev())
 		state = self.__state
 		self.__initTimeLine.setDirection(QtCore.QTimeLine.Backward)
 		self.__initTimeLine.finished.connect(
@@ -494,9 +497,9 @@ class ViewHandler(object):
 	def enter(self, link, state):
 		self._view._loadSettings(state)
 		if isinstance(link, struct.DocLink):
-			self._view.docOpen(link.doc(), True)
+			self._view.docOpen(link.store(), link.doc(), True)
 		else:
-			self._view.docOpen(link.rev(), False)
+			self._view.docOpen(link.store(), link.rev(), False)
 
 	def leave(self, state={}):
 		self._view.checkpoint("<<Changed by browser>>")
@@ -605,6 +608,8 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.setWindowIcon(QtGui.QIcon("icons/system-file-manager.png"))
 
 		self.__viewHandler = None
+		self.__store = None
+		self.__storeButtons = { }
 
 		self.__history = History()
 		self.__history.leaveItem.connect(self.__leaveItem)
@@ -657,10 +662,15 @@ class BrowserWindow(QtGui.QMainWindow):
 		# parse command line
 		try:
 			link = struct.Link(args[0])
+			link.update()
 		except IOError as e:
 			parser.error(str(e))
 
+		if not link.doc() and not link.rev():
+			parser.error("document not found")
+
 		# open the document
+		self.__store = link.store()
 		if not self.itemOpen(link):
 			parser.error("cannot browse item")
 
@@ -676,7 +686,9 @@ class BrowserWindow(QtGui.QMainWindow):
 
 	def itemOpen(self, link, executable=None, browseHint=True, state={}):
 		if browseHint:
-			self.__history.push(link, state)
+			myLink = copy.deepcopy(link)
+			myLink.update(self.__store)
+			self.__history.push(myLink, state)
 			return True
 		else:
 			utils.showDocument(link, executable=executable,
@@ -690,22 +702,26 @@ class BrowserWindow(QtGui.QMainWindow):
 
 	def __enterItem(self, item):
 		link = item.link()
+		self.__store = link.store()
 		self.__setViewHandler(link)
 		self.__viewHandler.enter(link, item.state())
 		self.__backAct.setEnabled(self.__history.canGoBack())
 		self.__forwardAct.setEnabled(self.__history.canGoForward())
+		self.__updateStoreButtons()
 
 	def __setViewHandler(self, link):
 		link.update()
-		executables = []
-		for rev in link.revs():
-			try:
-				type = Connector().stat(rev).type()
-				executables = Registry().getExecutables(type)
-				if executables:
-					break
-			except IOError:
-				pass
+		try:
+			type = Connector().stat(link.rev()).type()
+			executables = Registry().getExecutables(type)
+		except IOError:
+			executables = []
+
+		if not executables:
+			# Probably a bad idea to leave the current view widget, but what
+			# else can we do?
+			return
+
 		for executable in executables:
 			if executable in BrowserWindow.TYPES:
 				break
@@ -716,6 +732,8 @@ class BrowserWindow(QtGui.QMainWindow):
 			self.__viewHandler.delete()
 		self.__viewHandler = handler(self)
 		self.setCentralWidget(self.__viewHandler.getView())
+		self.__viewHandler.getView().distributionChanged.connect(
+			self.__updateStoreButtons)
 
 	def __showBackMenu(self):
 		self.__backMenu.clear()
@@ -736,7 +754,8 @@ class BrowserWindow(QtGui.QMainWindow):
 			self.centralWidget().setParent(None)
 			state = {}
 			self.__viewHandler.leave(state)
-			warp = WarpView(self.__viewHandler.getClass(), self.__viewHandler.rev(), state)
+			warp = WarpView(self.__viewHandler.getClass(), self.__store,
+				self.__viewHandler.rev(), state)
 			warp.openItem.connect(self.__warpOpen)
 			self.setCentralWidget(warp)
 		else:
@@ -746,6 +765,33 @@ class BrowserWindow(QtGui.QMainWindow):
 	def __warpOpen(self, link, state):
 		if self.itemOpen(link, state=state):
 			self.__warpAct.setChecked(False)
+
+	def __updateStoreButtons(self):
+		view = self.__viewHandler.getView()
+		curStore = view.store()
+		if view.doc():
+			allStores = Connector().lookup_doc(view.doc()).stores()
+		else:
+			allStores = Connector().lookup_rev(view.rev())
+
+		# update store buttons in status bar
+		for store in set(self.__storeButtons) ^ set(allStores):
+			if store in allStores:
+				button = DocButton(store, store, checkable=True)
+				button.clicked.connect(lambda x,store=store: self.__switchStore(store))
+				self.statusBar().addPermanentWidget(button)
+				self.__storeButtons[store] = button
+			else:
+				self.statusBar().removeWidget(self.__storeButtons[store])
+				del self.__storeButtons[store]
+
+		for (store,button) in self.__storeButtons.items():
+			button.setChecked(store == curStore)
+
+	def __switchStore(self, store):
+		self.__store = store
+		self.__viewHandler.getView().switchStore(store)
+		self.__updateStoreButtons()
 
 
 if __name__ == '__main__':

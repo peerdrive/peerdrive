@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os.path
+import os.path, copy
 from PyQt4 import QtCore, QtGui
 from datetime import datetime
 
@@ -186,7 +186,7 @@ def _columnFactory(key):
 class CollectionEntry(Watch):
 	def __init__(self, link, model, columns):
 		self.__model = model
-		self.__link  = link
+		self.__link  = copy.deepcopy(link).update(self.__model.getStore())
 		self.__valid = False
 		self.__icon  = None
 		self.__uti   = None
@@ -261,21 +261,18 @@ class CollectionEntry(Watch):
 		# determine revision
 		needMerge = False
 		if isinstance(self.__link, struct.DocLink):
-			self.__link.update()
-			revisions = self.__link.revs()
+			revisions = Connector().lookup_doc(self.__link.doc()).revs()
 			if len(revisions) == 0:
 				return
 			elif len(revisions) > 1:
 				needMerge = True
-			# TODO: maybe sort by date
-			rev = revisions[0]
-		else:
-			rev = self.__link.rev()
-		self.__rev = rev
+			self.__link.update()
+
+		self.__rev = self.__link.rev()
 
 		# stat
 		try:
-			s = Connector().stat(rev)
+			s = Connector().stat(self.__rev)
 		except IOError:
 			return
 		self.__uti = s.type()
@@ -303,9 +300,9 @@ class CollectionEntry(Watch):
 
 		try:
 			stat = Connector().stat(self.__rev)
-			with Connector().peek(self.__rev) as r:
+			with Connector().peek(self.__model.getStore(), self.__rev) as r:
 				try:
-					metaData = struct.loads(r.readAll('META'))
+					metaData = struct.loads(self.__model.getStore(), r.readAll('META'))
 				except:
 					metaData = { }
 
@@ -347,6 +344,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__changedContent = False
 		self.__autoClean = False
 		self.__mutable = False
+		self.__store = None
 		self.setColumns(["public.item:org.hotchpotch.annotation/title"])
 
 		self._dropMenu = QtGui.QMenu()
@@ -360,8 +358,9 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__changedContent = False
 		self.__autoClean = autoClean
 		self.__typeCodes = set()
+		self.__store = handle.getStore()
 		self._listing = []
-		data = struct.loads(handle.readAll('HPSD'))
+		data = struct.loads(handle.getStore(), handle.readAll('HPSD'))
 		listing = self.decode(data)
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
@@ -397,6 +396,9 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def isDoc(self):
 		return self.__mutable
+
+	def getStore(self):
+		return self.__store
 
 	def getItemLink(self, index):
 		item = self.getItem(index)
@@ -542,34 +544,26 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def mimeTypes(self):
 		types = QtCore.QStringList()
-		types << struct.DocLink.MIME_TYPE
-		types << struct.RevLink.MIME_TYPE
-		types << 'application/x-hotchpotch-linklist'
+		types << struct.LINK_MIME_TYPE
 		types << "text/uri-list"
 		return types
 
 	def mimeData(self, indexes):
-		nativeData = []
+		links = [self.getItemLink(index) for index in indexes
+			if index.isValid() and (index.column() == 0)]
+		if not links:
+			return None
+
+		mimeData = QtCore.QMimeData()
+		struct.dumpMimeData(mimeData, links)
 		fuseData = []
-		for index in indexes:
-			if index.isValid() and (index.column() == 0):
-				link = self.getItemLink(index)
-				if isinstance(link, struct.DocLink):
-					nativeData.append('doc:' + link.doc().encode('hex'))
-					f = fuse.findFuseFile(link)
-					if f:
-						fuseData.append(f)
-				elif isinstance(link, struct.RevLink):
-					nativeData.append('rev:' + link.rev().encode('hex'))
-		if nativeData == []:
-			mimeData = None
-		else:
-			mimeData = QtCore.QMimeData()
-			mimeData.setData('application/x-hotchpotch-linklist',
-				reduce(lambda x,y: x+","+y, nativeData))
-			if fuseData:
-				fuseData = [QtCore.QUrl.fromLocalFile(f) for f in fuseData]
-				mimeData.setUrls(fuseData)
+		for link in links:
+			if isinstance(link, struct.DocLink):
+				f = fuse.findFuseFile(link)
+				if f:
+					fuseData.append(f)
+		if fuseData:
+			mimeData.setUrls([QtCore.QUrl.fromLocalFile(f) for f in fuseData])
 		return mimeData
 
 	def dropMimeData(self, data, action, row, column, parent):
@@ -578,16 +572,14 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		if action == QtCore.Qt.IgnoreAction:
 			return True
 
-		if data.hasFormat('application/x-hotchpotch-linklist'):
-			return self.__dropLinkList(data)
+		if data.hasFormat(struct.LINK_MIME_TYPE):
+			return self.__dropLinks(struct.loadMimeData(data))
 		if data.hasFormat('text/uri-list'):
 			return self.__dropFile(data, parent)
-		else:
-			return self.__dropLink(data)
+
+		return False
 
 	def __dropFile(self, data, onto):
-		# FIXME: find a better way than calling back to the parent
-		stores = Connector().lookup_rev(self.__parent.rev())
 		urlList = data.urls()
 		if onto.isValid():
 			if len(urlList) != 1:
@@ -616,7 +608,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 					link = self.getItemLink(onto)
 					path = str(urlList[0].toLocalFile().toUtf8())
 					try:
-						return importer.overwriteFile(stores, link, path)
+						return importer.overwriteFile(link, path)
 					except IOError:
 						pass
 					except OSError:
@@ -627,10 +619,10 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		for url in urlList:
 			try:
 				path = str(url.toLocalFile().toUtf8())
-				handle = importer.importFile(stores, path)
+				handle = importer.importFile(self.__store, path)
 				if handle:
 					try:
-						self.insertLink(struct.DocLink(handle.getDoc()))
+						self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
 						self.__parent.save()
 					finally:
 						handle.close()
@@ -638,40 +630,34 @@ class CollectionModel(QtCore.QAbstractTableModel):
 				pass
 		return True
 
-	def __dropLink(self, data):
-		# parse link
-		link = struct.loadMimeData(data)
-		if not link:
+	def __dropLinks(self, links):
+		if not links:
 			return False
 
-		# what to do?
-		if isinstance(link, struct.DocLink):
-			self._docLinkAct.setEnabled(True)
-			self._revLinkAct.setEnabled(len(link.revs()) == 1)
-		else:
-			self._docLinkAct.setEnabled(False)
+		for link in links:
+			link.update()
+
+		self._docLinkAct.setEnabled(
+			any([isinstance(link, struct.DocLink) for l in links]))
+		self._revLinkAct.setEnabled(
+			any([bool(link.rev()) for link in links]))
 		action = self._dropMenu.exec_(QtGui.QCursor.pos())
 		if action is self._docLinkAct:
 			pass
 		elif action is self._revLinkAct:
-			if isinstance(link, struct.DocLink):
-				link = struct.RevLink(link.revs()[0])
+			links = [struct.RevLink(link.store(), link.rev()) for link in links
+				if link.rev() is not None]
 		else:
 			return False
 
-		return self.insertLink(link)
-
-	def __dropLinkList(self, mimeData):
-		linkList = str(mimeData.data('application/x-hotchpotch-linklist'))
-		for link in linkList.split(','):
-			(cls, val) = link.split(':')
-			if cls == 'doc':
-				link = struct.DocLink(val.decode("hex"), False)
-			elif cls == 'rev':
-				link = struct.RevLink(val.decode("hex"))
-			else:
-				continue
+		for link in links:
 			self.insertLink(link)
+			self.__parent.save()
+			if isinstance(link, struct.DocLink):
+				Connector().replicateDoc(link.store(), link.doc(), self.__store)
+			else:
+				Connector().replicateRev(link.store(), link.rev(), self.__store)
+
 		return True
 
 	def insertLink(self, link):
@@ -906,10 +892,10 @@ class CollectionWidget(widgets.DocumentView):
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
 		conflicts = super(CollectionWidget, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
 		if 'HPSD' in changedParts:
-			baseHpsd = struct.loads(baseReader.readAll('HPSD'))
+			baseHpsd = struct.loads(self.store(), baseReader.readAll('HPSD'))
 			mergeHpsd = []
 			for r in mergeReaders:
-				mergeHpsd.append(struct.loads(r.readAll('HPSD')))
+				mergeHpsd.append(struct.loads(self.store(), r.readAll('HPSD')))
 			(newHpsd, newConflict) = struct.merge(baseHpsd, mergeHpsd)
 			conflicts = conflicts or newConflict
 			writer.writeAll('HPSD', struct.dumps(newHpsd))
@@ -980,15 +966,11 @@ class CollectionWidget(widgets.DocumentView):
 	def __doubleClicked(self, index):
 		link = self.model().getItemLink(self.modelMapIndex(index))
 		if link:
-			executables = []
-			revs = link.revs()
-			for rev in revs:
-				try:
-					uti = Connector().stat(rev).type()
-					executables = Registry().getExecutables(uti)
-					break
-				except IOError:
-					pass
+			try:
+				uti = Connector().stat(link.rev()).type()
+				executables = Registry().getExecutables(uti)
+			except IOError:
+				executables = []
 			self.itemOpen.emit(link, None,
 				"org.hotchpotch.containerbrowser.py" in executables)
 
@@ -1065,6 +1047,11 @@ class CollectionWidget(widgets.DocumentView):
 				curVolumes = set(c.lookup_rev(link.rev()))
 		except IOError:
 			return
+
+		if not curVolumes:
+			return
+
+		srcVol = list(curVolumes)[0]
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
 			try:
@@ -1077,52 +1064,49 @@ class CollectionWidget(widgets.DocumentView):
 						name = "Unknown store"
 					action = menu.addAction("Replicate item to '%s'" % name)
 					action.triggered.connect(
-						lambda x,l=link,s=store: self.__doReplicate(l, s))
+						lambda x,l=link,s=store: self.__doReplicate(srcVol, l, s))
 			except:
 				pass
 
-	def __doReplicate(self, link, store):
+	def __doReplicate(self, srcStore, link, dstStore):
 		if isinstance(link, struct.DocLink):
-			Connector().replicateDoc(link.doc(), dstStores=[store])
+			Connector().replicateDoc(srcStore, link.doc(), dstStore)
 		else:
-			Connector().replicateRev(link.rev(), dstStores=[store])
+			Connector().replicateRev(srcStore, link.rev(), dstStore)
 
 	def __addCreateActions(self, menu):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
-		sysStore = struct.Container(struct.DocLink(Connector().enum().sysStore()))
-		templatesDict = struct.Container(sysStore.get("templates:"))
+		sysStore = Connector().enum().sysStore()
+		sysDict = struct.Container(struct.DocLink(sysStore, sysStore))
+		templatesDict = struct.Container(sysDict.get("templates:").update(sysStore))
 		items = templatesDict.items()
 		items.sort(key=lambda item: item[0])
 		for (name, link) in items:
 			rev = link.rev()
 			icon = QtGui.QIcon(Registry().getIcon(Connector().stat(rev).type()))
 			action = newMenu.addAction(icon, name)
-			action.triggered.connect(lambda x,r=rev: self.__doCreate(r))
+			action.triggered.connect(lambda x,r=rev: self.__doCreate(sysStore, r))
 
-	def __doCreate(self, sourceRev):
-		info = Connector().stat(sourceRev)
-		destStores = Connector().lookup_rev(self.rev())
-		with Connector().create(info.type(), info.creator(), destStores) as w:
-			with Connector().peek(sourceRev) as r:
+	def __doCreate(self, srcStore, srcRev):
+		info = Connector().stat(srcRev, [srcStore])
+		dstStore = self.store()
+		with Connector().create(dstStore, info.type(), info.creator()) as w:
+			with Connector().peek(srcStore, srcRev) as r:
 				for part in info.parts():
 					w.write(part, r.readAll(part))
 			w.commit()
 			destDoc = w.getDoc()
 			# add link
-			self.model().insertLink(struct.DocLink(destDoc))
+			self.model().insertLink(struct.DocLink(dstStore, destDoc))
 			# save immediately
 			self.save()
 
 	def __addOpenActions(self, menu, link, isDoc):
-		executables = []
-		revs = link.revs()
-		for rev in revs:
-			try:
-				uti = Connector().stat(rev).type()
-				executables = Registry().getExecutables(uti)
-				break
-			except IOError:
-				pass
+		try:
+			uti = Connector().stat(link.rev()).type()
+			executables = Registry().getExecutables(uti)
+		except IOError:
+			executables = []
 
 		prefix = "Open"
 		browseHint = False
@@ -1135,44 +1119,22 @@ class CollectionWidget(widgets.DocumentView):
 				prefix = "Browse"
 				break
 
-		if isDoc:
-			if browseHint:
-				action = menu.addAction("&Browse")
-				action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None, True))
-				if browsePreferred:
-					menu.setDefaultAction(action)
-				action = menu.addAction("&Open")
-				action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None, False))
-				if not browsePreferred:
-					menu.setDefaultAction(action)
-			else:
-				action = menu.addAction("&Open")
-				action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None, False))
+		if browseHint:
+			action = menu.addAction("&Browse")
+			action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None, True))
+			if browsePreferred:
 				menu.setDefaultAction(action)
-			if len(executables) > 1:
-				openWith = menu.addMenu("Open with")
-				for e in executables:
-					action = openWith.addAction(e)
-					action.triggered.connect(lambda x,l=link,e=e: self.itemOpen.emit(l, e, False))
-			if isinstance(link, struct.DocLink):
-				links = [struct.RevLink(rev) for rev in link.revs()]
-				if len(links) == 1:
-					action = menu.addAction("Open revision (read only)")
-					action.triggered.connect(lambda x,l=links[0]: self.itemOpen.emit(l, None, False))
-				elif len(links) > 1:
-					revMenu = menu.addMenu("Open revision (read only)")
-					for link in links:
-						date = str(Connector().stat(link.rev()).mtime())
-						action = revMenu.addAction(date)
-						action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None, False))
+			action = menu.addAction("&Open")
+			action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None, False))
+			if not browsePreferred:
+				menu.setDefaultAction(action)
 		else:
-			links = [struct.RevLink(rev) for rev in link.revs()]
-			if len(links) == 1:
-				action = menu.addAction(prefix)
-				action.triggered.connect(lambda x,l=link,h=browseHint: self.itemOpen.emit(l, None, h))
-			elif len(links) > 1:
-				for link in links:
-					date = prefix + " " + str(Connector().stat(link.rev()).mtime())
-					action = menu.addAction(date)
-					action.triggered.connect(lambda x,l=link,h=browseHint: self.itemOpen.emit(l, None, h))
+			action = menu.addAction("&Open")
+			action.triggered.connect(lambda x,l=link: self.itemOpen.emit(l, None, False))
+			menu.setDefaultAction(action)
+		if len(executables) > 1:
+			openWith = menu.addMenu("Open with")
+			for e in executables:
+				action = openWith.addAction(e)
+				action.triggered.connect(lambda x,l=link,e=e: self.itemOpen.emit(l, e, False))
 

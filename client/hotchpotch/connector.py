@@ -230,38 +230,40 @@ class _Connector(QtCore.QObject):
 	SET_TYPE_CNF        = 0x00E1
 	GET_PARENTS_REQ     = 0x00F0
 	GET_PARENTS_CNF     = 0x00F1
-	SET_PARENTS_REQ     = 0x0100
-	SET_PARENTS_CNF     = 0x0101
-	COMMIT_REQ          = 0x0110
-	COMMIT_CNF          = 0x0111
-	SUSPEND_REQ         = 0x0120
-	SUSPEND_CNF         = 0x0121
-	CLOSE_REQ           = 0x0130
-	CLOSE_CNF           = 0x0131
-	WATCH_ADD_REQ       = 0x0140
-	WATCH_ADD_CNF       = 0x0141
-	WATCH_REM_REQ       = 0x0150
-	WATCH_REM_CNF       = 0x0151
-	WATCH_PROGRESS_REQ  = 0x0160
-	WATCH_PROGRESS_CNF  = 0x0161
-	FORGET_REQ          = 0x0170
-	FORGET_CNF          = 0x0171
-	DELETE_DOC_REQ      = 0x0180
-	DELETE_DOC_CNF      = 0x0181
-	DELETE_REV_REQ      = 0x0190
-	DELETE_REV_CNF      = 0x0191
-	SYNC_DOC_REQ        = 0x01A0
-	SYNC_DOC_CNF        = 0x01A1
-	REPLICATE_DOC_REQ   = 0x01B0
-	REPLICATE_DOC_CNF   = 0x01B1
-	REPLICATE_REV_REQ   = 0x01C0
-	REPLICATE_REV_CNF   = 0x01C1
-	MOUNT_REQ           = 0x01D0
-	MOUNT_CNF           = 0x01D1
-	UNMOUNT_REQ         = 0x01E0
-	UNMOUNT_CNF         = 0x01E1
-	SYS_INFO_REQ        = 0x01F0
-	SYS_INFO_CNF        = 0x01F1
+	MERGE_REQ           = 0x0100
+	MERGE_CNF           = 0x0101
+	REBASE_REQ          = 0x0110
+	REBASE_CNF          = 0x0111
+	COMMIT_REQ          = 0x0120
+	COMMIT_CNF          = 0x0121
+	SUSPEND_REQ         = 0x0130
+	SUSPEND_CNF         = 0x0131
+	CLOSE_REQ           = 0x0140
+	CLOSE_CNF           = 0x0141
+	WATCH_ADD_REQ       = 0x0150
+	WATCH_ADD_CNF       = 0x0151
+	WATCH_REM_REQ       = 0x0160
+	WATCH_REM_CNF       = 0x0161
+	WATCH_PROGRESS_REQ  = 0x0170
+	WATCH_PROGRESS_CNF  = 0x0171
+	FORGET_REQ          = 0x0180
+	FORGET_CNF          = 0x0181
+	DELETE_DOC_REQ      = 0x0190
+	DELETE_DOC_CNF      = 0x0191
+	DELETE_REV_REQ      = 0x01A0
+	DELETE_REV_CNF      = 0x01A1
+	FORWARD_DOC_REQ     = 0x01B0
+	FORWARD_DOC_CNF     = 0x01B1
+	REPLICATE_DOC_REQ   = 0x01C0
+	REPLICATE_DOC_CNF   = 0x01C1
+	REPLICATE_REV_REQ   = 0x01D0
+	REPLICATE_REV_CNF   = 0x01D1
+	MOUNT_REQ           = 0x01E0
+	MOUNT_CNF           = 0x01E1
+	UNMOUNT_REQ         = 0x01F0
+	UNMOUNT_CNF         = 0x01F1
+	SYS_INFO_REQ        = 0x0200
+	SYS_INFO_CNF        = 0x0201
 	WATCH_IND           = 0x0002
 	PROGRESS_START_IND  = 0x0012
 	PROGRESS_IND        = 0x0022
@@ -292,7 +294,7 @@ class _Connector(QtCore.QObject):
 			reply = self._rpc(_Connector.INIT_REQ, _Connector.INIT_CNF,
 				struct.pack('>L', 0))
 			(version, self.maxPacketSize) = struct.unpack_from('>LL',
-				self._parseDirectResult(reply), 0)
+				self._parseResult(reply), 0)
 			if version != 0:
 				raise IOError("Unsupported protocol version!")
 		except:
@@ -326,46 +328,51 @@ class _Connector(QtCore.QObject):
 		_checkUuid(rev)
 		request = rev + _encodeUuidList(stores)
 		reply = self._rpc(_Connector.STAT_REQ, _Connector.STAT_CNF, request)
-		stat = self._parseBrokerResult(reply)
+		stat = self._parseResult(reply)
 		return Stat(stat)
 
-	def peek(self, rev, stores=[]):
+	def peek(self, store, rev):
+		_checkUuid(store)
 		_checkUuid(rev)
-		request = rev + _encodeUuidList(stores)
+		request = store + rev
 		reply = self._rpc(_Connector.PEEK_REQ, _Connector.PEEK_CNF, request)
-		handle = self._parseBrokerResult(reply)
-		return Handle(self, handle, None, rev)
+		handle = self._parseResult(reply)
+		return Handle(self, store, handle, None, rev)
 
-	def create(self, typ, creator, stores=[]):
-		request = _encodeString(typ) + _encodeString(creator) + _encodeUuidList(stores)
+	def create(self, store, typ, creator):
+		_checkUuid(store)
+		request = store + _encodeString(typ) + _encodeString(creator)
 		reply = self._rpc(_Connector.CREATE_REQ, _Connector.CREATE_CNF, request)
-		reply = self._parseBrokerResult(reply)
+		reply = self._parseResult(reply)
 		(handle, doc) = struct.unpack('>4s16s', reply)
-		return Handle(self, handle, doc, None)
+		return Handle(self, store, handle, doc, None)
 
-	def fork(self, rev, creator, stores=[]):
+	def fork(self, store, rev, creator):
+		_checkUuid(store)
 		_checkUuid(rev)
-		request = rev + _encodeString(creator) + _encodeUuidList(stores)
+		request = store + rev + _encodeString(creator)
 		reply = self._rpc(_Connector.FORK_REQ, _Connector.FORK_CNF, request)
-		reply = self._parseBrokerResult(reply)
+		reply = self._parseResult(reply)
 		(handle, doc) = struct.unpack('>4s16s', reply)
-		return Handle(self, handle, doc, rev)
+		return Handle(self, store, handle, doc, rev)
 
-	def update(self, doc, rev, creator='', stores=[]):
+	def update(self, store, doc, rev, creator=''):
+		_checkUuid(store)
 		_checkUuid(doc)
 		_checkUuid(rev)
-		request = doc + rev + _encodeString(creator) + _encodeUuidList(stores)
+		request = store + doc + rev + _encodeString(creator)
 		reply = self._rpc(_Connector.UPDATE_REQ, _Connector.UPDATE_CNF, request)
-		handle = self._parseBrokerResult(reply)
-		return Handle(self, handle, doc, rev)
+		handle = self._parseResult(reply)
+		return Handle(self, store, handle, doc, rev)
 
-	def resume(self, doc, rev, creator='', stores=[]):
+	def resume(self, store, doc, rev, creator=''):
+		_checkUuid(store)
 		_checkUuid(doc)
 		_checkUuid(rev)
-		request = doc + rev + _encodeString(creator) + _encodeUuidList(stores)
+		request = store + doc + rev + _encodeString(creator)
 		reply = self._rpc(_Connector.RESUME_REQ, _Connector.RESUME_CNF, request)
-		handle = self._parseBrokerResult(reply)
-		return Handle(self, handle, doc, rev)
+		handle = self._parseResult(reply)
+		return Handle(self, store, handle, doc, rev)
 
 	def watch(self, w):
 		if w._incWatchRef() == 1:
@@ -373,7 +380,7 @@ class _Connector(QtCore.QObject):
 			if ref not in self.watchHandlers:
 				reply = self._rpc(_Connector.WATCH_ADD_REQ,
 					_Connector.WATCH_ADD_CNF, struct.pack('>B16s', typ, h))
-				self._parseDirectResult(reply)
+				self._parseResult(reply)
 				self.watchHandlers[ref] = []
 			tb = None #traceback.extract_stack()
 			self.watchHandlers[ref].append(weakref.ref(w,
@@ -399,79 +406,89 @@ class _Connector(QtCore.QObject):
 			if newHandlers == []:
 				reply = self._rpc(_Connector.WATCH_REM_REQ,
 					_Connector.WATCH_REM_CNF, struct.pack('>B16s', typ, h))
-				self._parseDirectResult(reply)
+				self._parseResult(reply)
 				del self.watchHandlers[ref]
 			else:
 				self.watchHandlers[ref] = newHandlers
 
-	def forget(self, doc, rev, stores=[]):
+	def forget(self, store, doc, rev):
+		_checkUuid(store)
 		_checkUuid(doc)
 		_checkUuid(rev)
-		request = doc + rev + _encodeUuidList(stores)
+		request = store + doc + rev
 		reply = self._rpc(_Connector.FORGET_REQ, _Connector.FORGET_CNF,
 			request)
-		self._parseBrokerResult(reply)
+		self._parseResult(reply)
 		return True
 
-	def deleteDoc(self, doc, rev, stores=[]):
+	def deleteDoc(self, store, doc, rev):
+		_checkUuid(store)
 		_checkUuid(doc)
 		_checkUuid(rev)
-		request = doc + rev + _encodeUuidList(stores)
+		request = store + doc + rev
 		reply = self._rpc(_Connector.DELETE_DOC_REQ,
 			_Connector.DELETE_DOC_CNF, request)
-		self._parseBrokerResult(reply)
+		self._parseResult(reply)
 		return True
 
-	def deleteRev(self, rev, stores=[]):
+	def deleteRev(self, store, rev):
+		_checkUuid(store)
 		_checkUuid(rev)
-		request = rev + _encodeUuidList(stores)
+		request = store + rev
 		reply = self._rpc(_Connector.DELETE_REV_REQ,
 			_Connector.DELETE_REV_CNF, request)
-		self._parseBrokerResult(reply)
+		self._parseResult(reply)
 		return True
 
-	def sync(self, doc, depth=0, stores=[]):
+	def forwardDoc(self, store, doc, fromRev, toRev, srcStore, depth=0):
+		_checkUuid(store)
 		_checkUuid(doc)
-		request = struct.pack('>16sQ', doc, depth) + _encodeUuidList(stores)
-		reply = self._rpc(_Connector.SYNC_DOC_REQ, _Connector.SYNC_DOC_CNF,
+		_checkUuid(fromRev)
+		_checkUuid(toRev)
+		_checkUuid(srcStore)
+		request = store + doc + fromRev + toRev + srcStore + struct.pack('>Q',
+			depth)
+		reply = self._rpc(_Connector.FORWARD_DOC_REQ, _Connector.FORWARD_DOC_CNF,
 			request)
-		rev = self._parseBrokerResult(reply)
+		rev = self._parseResult(reply)
 		return rev
 
-	def replicateDoc(self, doc, depth=0, srcStores=[], dstStores=[]):
+	def replicateDoc(self, srcStore, doc, dstStore, depth=0):
+		_checkUuid(srcStore)
 		_checkUuid(doc)
-		request = struct.pack('>16sQ', doc, depth) + \
-			_encodeUuidList(srcStores) + _encodeUuidList(dstStores)
+		_checkUuid(dstStore)
+		request = srcStore + doc + dstStore + struct.pack('>Q', depth)
 		reply = self._rpc(_Connector.REPLICATE_DOC_REQ,
 			_Connector.REPLICATE_DOC_CNF, request)
-		self._parseBrokerResult(reply)
+		self._parseResult(reply)
 		return True
 
-	def replicateRev(self, rev, depth=0, srcStores=[], dstStores=[]):
+	def replicateRev(self, srcStore, rev, dstStore, depth=0):
+		_checkUuid(srcStore)
 		_checkUuid(rev)
-		request = struct.pack('>16sQ', rev, depth) + \
-			_encodeUuidList(srcStores) + _encodeUuidList(dstStores)
+		_checkUuid(dstStore)
+		request = srcStore + rev + dstStore + struct.pack('>Q', depth)
 		reply = self._rpc(_Connector.REPLICATE_REV_REQ,
 			_Connector.REPLICATE_REV_CNF, request)
-		self._parseBrokerResult(reply)
+		self._parseResult(reply)
 		return True
 
 	def mount(self, store):
 		reply = self._rpc(_Connector.MOUNT_REQ, _Connector.MOUNT_CNF,
 			_encodeString(store))
-		self._parseDirectResult(reply)
+		self._parseResult(reply)
 		return True
 
 	def unmount(self, store):
 		reply = self._rpc(_Connector.UNMOUNT_REQ, _Connector.UNMOUNT_CNF,
 			_encodeString(store))
-		self._parseDirectResult(reply)
+		self._parseResult(reply)
 		return True
 
 	def sysInfo(self, param):
 		reply = self._rpc(_Connector.SYS_INFO_REQ, _Connector.SYS_INFO_CNF,
 			_encodeString(param))
-		res = self._parseDirectResult(reply)
+		res = self._parseResult(reply)
 		(valueLen,) = struct.unpack_from('>H', res, 2)
 		return res[2:2+valueLen]
 
@@ -496,7 +513,7 @@ class _Connector(QtCore.QObject):
 		if len(self.progressHandlers) == 0:
 			reply = self._rpc(_Connector.WATCH_PROGRESS_REQ,
 				_Connector.WATCH_PROGRESS_CNF, '\x01')
-			self._parseDirectResult(reply)
+			self._parseResult(reply)
 		self.progressHandlers.append((event, handler))
 
 	def unregProgressHandler(self, start=None, progress=None, stop=None):
@@ -512,7 +529,7 @@ class _Connector(QtCore.QObject):
 		if len(self.progressHandlers) == 0:
 			reply = self._rpc(_Connector.WATCH_PROGRESS_REQ,
 				_Connector.WATCH_PROGRESS_CNF, '\x00')
-			self._parseDirectResult(reply)
+			self._parseResult(reply)
 
 	# protected functions
 
@@ -528,31 +545,7 @@ class _Connector(QtCore.QObject):
 		raw_ind = struct.pack('>LL', ref, req_op) + body
 		self.__send(raw_ind)
 
-	def _parseBrokerResult(self, reply):
-		(result,) = struct.unpack_from('>B', reply, 0)
-		if result == 0:
-			# all went good
-			return reply[1:]
-		else:
-			pos = 1
-			if result != 1:
-				(error,) = struct.unpack_from('>L', reply, pos)
-				pos += 4
-			(count,) = struct.unpack_from('>B', reply, pos)
-			errors = []
-			pos += 1
-			for i in range(count):
-				(store, error) = struct.unpack_from('>16sL', reply, pos)
-				pos += 20
-				errors.append({'store': store, 'error': error})
-			if result == 1:
-				# partial success
-				return reply[pos:]
-			else:
-				# boom
-				_raiseError(error)
-
-	def _parseDirectResult(self, reply):
+	def _parseResult(self, reply):
 		(error,) = struct.unpack_from('>L', reply, 0)
 		_raiseError(error)
 		return reply[4:]
@@ -895,9 +888,10 @@ class Stat(object):
 
 
 class Handle(object):
-	def __init__(self, connector, handle, doc, rev):
+	def __init__(self, connector, store, handle, doc, rev):
 		self.__pos = { }
 		self.connector = connector
+		self.__store = store
 		self.handle = handle
 		self.doc = doc
 		self.rev = rev
@@ -950,7 +944,7 @@ class Handle(object):
 			request = struct.pack('>4s4sQL', self.handle, part, pos, chunk)
 			reply = self.connector._rpc(_Connector.READ_REQ,
 				_Connector.READ_CNF, request)
-			data = self.connector._parseBrokerResult(reply)
+			data = self.connector._parseResult(reply)
 			size = len(data)
 			result = result + data
 			pos = pos + size
@@ -987,7 +981,7 @@ class Handle(object):
 			request = struct.pack('>4s4sQ', self.handle, part, pos+i) + reqData
 			reply = self.connector._rpc(_Connector.WRITE_REQ,
 				_Connector.WRITE_CNF, request)
-			self.connector._parseBrokerResult(reply)
+			self.connector._parseResult(reply)
 			i += reqSize
 			self._setPos(part, pos+i)
 
@@ -1003,14 +997,14 @@ class Handle(object):
 		request = struct.pack('>4s4sQ', self.handle, part, self._getPos(part))
 		reply = self.connector._rpc(_Connector.TRUNC_REQ,
 			_Connector.TRUNC_CNF, request)
-		self.connector._parseBrokerResult(reply)
+		self.connector._parseResult(reply)
 
 	def commit(self):
 		if not self.active:
 			raise IOError('Handle expired')
 		reply = self.connector._rpc(_Connector.COMMIT_REQ,
 			_Connector.COMMIT_CNF, self.handle)
-		rev = self.connector._parseBrokerResult(reply)
+		rev = self.connector._parseResult(reply)
 		self.rev = rev
 
 	def suspend(self):
@@ -1018,7 +1012,7 @@ class Handle(object):
 			raise IOError('Handle expired')
 		reply = self.connector._rpc(_Connector.SUSPEND_REQ,
 			_Connector.SUSPEND_CNF, self.handle)
-		rev = self.connector._parseBrokerResult(reply)
+		rev = self.connector._parseResult(reply)
 		self.rev = rev
 
 	def close(self):
@@ -1026,7 +1020,7 @@ class Handle(object):
 			self.active = False
 			reply = self.connector._rpc(_Connector.CLOSE_REQ,
 				_Connector.CLOSE_CNF, self.handle)
-			self.connector._parseBrokerResult(reply)
+			self.connector._parseResult(reply)
 		else:
 			raise IOError('Handle expired')
 
@@ -1035,7 +1029,7 @@ class Handle(object):
 			raise IOError('Handle expired')
 		reply = self.connector._rpc(_Connector.GET_TYPE_REQ,
 			_Connector.GET_TYPE_CNF, self.handle)
-		result = self.connector._parseBrokerResult(reply)
+		result = self.connector._parseResult(reply)
 		(length,) = struct.unpack_from('>H', result, 0)
 		return result[2:2+length]
 
@@ -1045,33 +1039,47 @@ class Handle(object):
 		request = self.handle + _encodeString(uti)
 		reply = self.connector._rpc(_Connector.SET_TYPE_REQ,
 			_Connector.SET_TYPE_CNF, request)
-		self.connector._parseBrokerResult(reply)
+		self.connector._parseResult(reply)
 
 	def getParents(self):
 		if not self.active:
 			raise IOError('Handle expired')
 		reply = self.connector._rpc(_Connector.GET_PARENTS_REQ,
 			_Connector.GET_PARENTS_CNF, self.handle)
-		result = self.connector._parseBrokerResult(reply)
+		result = self.connector._parseResult(reply)
 		parents = []
 		(count,) = struct.unpack_from('>B', result, 0)
 		for i in range(count):
 			parents.append(result[i*16+1:i*16+17])
 		return parents
 
-	def setParents(self, parents):
+	def merge(self, store, rev, depth=0):
+		_checkUuid(store)
+		_checkUuid(rev)
 		if not self.active:
 			raise IOError('Handle expired')
-		request = self.handle + _encodeUuidList(parents)
-		reply = self.connector._rpc(_Connector.SET_PARENTS_REQ,
-			_Connector.SET_PARENTS_CNF, request)
-		self.connector._parseBrokerResult(reply)
+		request = self.handle + store + rev + struct.pack('>Q', depth)
+		reply = self.connector._rpc(_Connector.MERGE_REQ, _Connector.MERGE_CNF,
+			request)
+		self.connector._parseResult(reply)
+
+	def rebase(self, parent):
+		_checkUuid(parent)
+		if not self.active:
+			raise IOError('Handle expired')
+		request = self.handle + parent
+		reply = self.connector._rpc(_Connector.REBASE_REQ,
+			_Connector.REBASE_CNF, request)
+		self.connector._parseResult(reply)
 
 	def getDoc(self):
 		return self.doc
 
 	def getRev(self):
 		return self.rev
+
+	def getStore(self):
+		return self.__store
 
 _connection = None
 

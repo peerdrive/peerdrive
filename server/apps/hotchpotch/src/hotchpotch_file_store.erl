@@ -22,8 +22,8 @@
 
 % Functions used by helper processes (io/forwarder/importer)
 -export([commit/4, doc_unlock/2, forward_commit/3, part_get/2, part_lock/2,
-	part_put/3, part_unlock/2, put_rev_commit/3, rev_unlock/2, suspend/4,
-	tmp_name/1]).
+	part_put/3, part_unlock/2, put_doc_commit/3, put_rev_commit/3,
+	rev_unlock/2, suspend/4, tmp_name/1, rev_lock/2]).
 
 -include("store.hrl").
 -include_lib("kernel/include/file.hrl").
@@ -92,6 +92,9 @@ tmp_name(Store) ->
 doc_unlock(Store, DId) ->
 	gen_server:cast(Store, {unlock, {doc, DId}}).
 
+rev_lock(Store, RId) ->
+	gen_server:call(Store, {lock, {rev, RId}}, infinity).
+
 rev_unlock(Store, RId) ->
 	gen_server:cast(Store, {unlock, {rev, RId}}).
 
@@ -115,6 +118,9 @@ suspend(Store, Doc, PreRev, Revision) ->
 
 forward_commit(Store, Doc, RevPath) ->
 	gen_server:call(Store, {forward_commit, Doc, RevPath}, infinity).
+
+put_doc_commit(Store, DId, RId) ->
+	gen_server:call(Store, {put_doc_commit, DId, RId}, infinity).
 
 put_rev_commit(Store, RId, Rev) ->
 	gen_server:call(Store, {put_rev_commit, RId, Rev}, infinity).
@@ -150,14 +156,14 @@ handle_call({peek, RId}, From, S) ->
 	{Reply, S2} = do_peek(RId, User, S),
 	{reply, Reply, S2};
 
-handle_call({create, DId, Type, Creator}, From, S) ->
+handle_call({create, Type, Creator}, From, S) ->
 	{User, _} = From,
-	{Reply, S2} = do_create(DId, Type, Creator, User, S),
+	{Reply, S2} = do_create(Type, Creator, User, S),
 	{reply, Reply, S2};
 
-handle_call({fork, DId, StartRId, Creator}, From, S) ->
+handle_call({fork, StartRId, Creator}, From, S) ->
 	{User, _} = From,
-	{Reply, S2} = do_fork(DId, StartRId, Creator, User, S),
+	{Reply, S2} = do_fork(StartRId, Creator, User, S),
 	{reply, Reply, S2};
 
 handle_call({update, DId, StartRId, Creator}, From, S) ->
@@ -182,8 +188,8 @@ handle_call({delete_doc, DId, RId}, _From, S) ->
 	{Reply, S2} = do_delete_doc(DId, RId, S),
 	{reply, Reply, S2};
 
-handle_call({put_doc, DId, RId}, _From, S) ->
-	{Reply, S2} = do_put_doc(DId, RId, S),
+handle_call({put_doc, DId, RId}, {User, _}, S) ->
+	{Reply, S2} = do_put_doc(DId, RId, User, S),
 	{reply, Reply, S2};
 
 handle_call({forward_doc, DId, RevPath}, {User, _}, S) ->
@@ -232,6 +238,11 @@ handle_call({suspend, DId, PreRId, Rev}, _From, S) ->
 % internal: ok | {error, Reason}
 handle_call({forward_commit, DId, RevPath}, _From, S) ->
 	{Reply, S2} = do_forward_doc_commit(DId, RevPath, S),
+	{reply, Reply, S2};
+
+% internal: ok | {error, Reason}
+handle_call({put_doc_commit, DId, RId}, _From, S) ->
+	{Reply, S2} = do_put_doc_commit(DId, RId, S),
 	{reply, Reply, S2};
 
 % internal: ok | {error, Reason}
@@ -344,27 +355,43 @@ do_peek(RId, User, #state{rev_tbl=RevTbl} = S) ->
 				fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
 				S,
 				Rev#revision.parts),
+			S3 = lists:foldl(
+				fun(ParentRId, AccS) -> do_lock({rev, ParentRId}, AccS) end,
+				S2,
+				Rev#revision.parents),
 			{ok, _} = Reply = hotchpotch_file_store_io:start_link(Rev, User),
-			{Reply, S2};
+			{Reply, S3};
 
 		[] ->
 			{{error, enoent}, S}
 	end.
 
 
-do_create(DId, Type, Creator, User, S) ->
+do_create(Type, Creator, User, S) ->
+	DId = crypto:rand_bytes(16),
 	Rev = #revision{type=Type, creator=Creator},
-	start_writer(DId, undefined, Rev, User, S).
+	case start_writer(DId, undefined, Rev, User, S) of
+		{{ok, Handle}, S2} ->
+			{{ok, DId, Handle}, S2};
+		Error ->
+			Error
+	end.
 
 
-do_fork(DId, StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
+do_fork(StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
+	DId = crypto:rand_bytes(16),
 	case ets:lookup(RevTbl, StartRId) of
 		[{_, Rev}] ->
 			NewRev = Rev#revision{
 				parents = [StartRId],
 				creator = Creator
 			},
-			start_writer(DId, undefined, NewRev, User, S);
+			case start_writer(DId, undefined, NewRev, User, S) of
+				{{ok, Handle}, S2} ->
+					{{ok, DId, Handle}, S2};
+				Error ->
+					Error
+			end;
 
 		[] ->
 			{{error, enoent}, S}
@@ -476,7 +503,26 @@ do_delete_doc(DId, RId, #state{doc_tbl=DocTbl, sid=SId} = S) ->
 	end.
 
 
-do_put_doc(DId, RId, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
+do_put_doc(DId, RId, User, #state{doc_tbl=DocTbl} = S) ->
+	case ets:lookup(DocTbl, DId) of
+		% document does not exist (yet)...
+		[] ->
+			S2 = do_lock({rev, RId}, S),
+			{ok, Handle} = hotchpotch_file_store_put:start_link(DId,
+				RId, User),
+			{{ok, Handle}, S2};
+
+		% already pointing to requested rev
+		[{_, RId, _, _}] ->
+			{ok, S};
+
+		% completely other rev
+		[_] ->
+			{{error, econflict}, S}
+	end.
+
+
+do_put_doc_commit(DId, RId, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 	case ets:lookup(DocTbl, DId) of
 		% document does not exist (yet)...
 		[] ->
@@ -591,6 +637,16 @@ do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
 					{{ok, Missing, Handle}, S2}
 			end;
 
+		[_] ->
+			{{error, econflict}, S};
+		[] ->
+			{{error, enoent}, S}
+	end;
+
+do_forward_doc(DId, [RId], _User, S) ->
+	case ets:lookup(S#state.doc_tbl, DId) of
+		[{_, RId, _, _}] ->
+			{ok, S};
 		[_] ->
 			{{error, econflict}, S};
 		[] ->
@@ -815,10 +871,14 @@ start_writer(DId, PreRId, Rev, User, S) ->
 		fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
 		S,
 		Rev#revision.parts),
-	S3 = do_lock({doc, DId}, S2),
+	S3 = lists:foldl(
+		fun(RId, AccS) -> do_lock({rev, RId}, AccS) end,
+		S2,
+		Rev#revision.parents),
+	S4 = do_lock({doc, DId}, S3),
 	{ok, _} = Reply =
 		hotchpotch_file_store_io:start_link(DId, PreRId, Rev, User),
-	{Reply, S3}.
+	{Reply, S4}.
 
 
 part_size(PId, #state{part_tbl=PartTbl}) ->

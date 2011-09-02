@@ -32,7 +32,7 @@ def showDocument(link, executable=None, referrer=None):
 		args.append(str(referrer))
 	if not executable:
 		link.update()
-		rev = link.revs()[0]
+		rev = link.rev()
 		uti = Connector().stat(rev).type()
 		executable = Registry().getExecutables(uti)[0]
 	if executable:

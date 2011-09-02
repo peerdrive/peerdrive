@@ -19,7 +19,7 @@
 -export([parse_uuid/1, parse_string/1, parse_list/2, parse_list_32/2,
 	parse_uuid_list/1, parse_store/1, parse_direct_result/1]).
 -export([encode_list/1, encode_list/2, encode_list_32/1, encode_list_32/2,
-	encode_string/1, encode_direct_result/1, encode_error_code/1]).
+	encode_string/1, encode_result/1, encode_error_code/1]).
 -export([err2int/1, int2err/1]).
 
 
@@ -114,13 +114,16 @@ encode_string(String) when is_list(String) ->
 	<<(size(Bin)):16, Bin/binary>>.
 
 
-encode_direct_result(ok) ->
+encode_result(ok) ->
 	<<0:32>>;
 
-encode_direct_result({ok, _}) ->
+encode_result({ok, _}) ->
 	<<0:32>>;
 
-encode_direct_result({error, Reason}) ->
+encode_result({ok, _, _}) ->
+	<<0:32>>;
+
+encode_result({error, Reason}) ->
 	encode_error_code(Reason).
 
 

@@ -44,103 +44,156 @@ def setMetaData(metaData, field, value):
 
 
 class PropertiesDialog(QtGui.QDialog):
-	def __init__(self, uuid, isDoc, parent=None):
+	def __init__(self, link, parent=None):
 		super(PropertiesDialog, self).__init__(parent)
 
 		mainLayout = QtGui.QVBoxLayout()
-		mainLayout.setSizeConstraint(QtGui.QLayout.SetFixedSize)
+		#mainLayout.setSizeConstraint(QtGui.QLayout.SetFixedSize)
 
-		if isDoc:
-			self.doc = uuid
-			info = Connector().lookup_doc(uuid)
-			mainLayout.addWidget(DocumentTab(info.stores(), "document"))
-			self.revs = info.revs()
+		self.__doc = link.doc()
+		self.__rev = link.rev()
+		if self.__doc:
+			isDoc = True
+			banner = "document"
+			stores = Connector().lookup_doc(self.__doc).stores()
 		else:
-			self.doc = None
-			mainLayout.addWidget(DocumentTab(Connector().lookup_rev(uuid), "revision"))
-			self.revs = [uuid]
+			isDoc = False
+			banner = "revision"
+			stores = Connector().lookup_rev(self.__rev)
 
-		if len(self.revs) == 0:
+		if len(stores) == 0:
 			QtGui.QMessageBox.warning(self, 'Missing document', 'The requested document was not found on any store.')
 			sys.exit(1)
 
-		tabWidget = QtGui.QTabWidget()
-		self.annoTab = AnnotationTab(self.revs, isDoc and (len(self.revs) == 1))
-		QtCore.QObject.connect(self.annoTab, QtCore.SIGNAL("changed()"), self.__changed)
-		tabWidget.addTab(self.annoTab, "Annotation")
-		tabWidget.addTab(HistoryTab(self.revs), "History")
-		if isDoc:
-			tabWidget.addTab(RevisionTab(self.revs), "Revisions")
-		else:
-			tabWidget.addTab(RevisionTab(self.revs), "Revision")
-		mainLayout.addWidget(tabWidget)
+		self.__docTab = DocumentTab(link.store(), stores, banner)
+		self.__docTab.switchStore.connect(self.__switchStore)
+		self.__revTab = RevisionTab()
+		self.__annoTab = AnnotationTab(isDoc)
+		self.__annoTab.changed.connect(self.__changed)
+		self.__hisTab = HistoryTab()
 
-		if isDoc and (len(self.revs) == 1):
-			self.buttonBox = QtGui.QDialogButtonBox(
+		tabWidget = QtGui.QTabWidget()
+		tabWidget.addTab(self.__annoTab, "Annotation")
+		tabWidget.addTab(self.__hisTab, "History")
+
+		if isDoc:
+			self.__buttonBox = QtGui.QDialogButtonBox(
 				QtGui.QDialogButtonBox.Save |
 				QtGui.QDialogButtonBox.Close)
-			self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
-			self.buttonBox.accepted.connect(self.__save)
-			self.buttonBox.rejected.connect(self.reject)
+			self.__buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
+			self.__buttonBox.accepted.connect(self.__save)
+			self.__buttonBox.rejected.connect(self.reject)
 		else:
-			self.buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok)
-			self.buttonBox.accepted.connect(self.accept)
-		mainLayout.addWidget(self.buttonBox)
+			self.__buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok)
+			self.__buttonBox.accepted.connect(self.accept)
+
+		mainLayout.addWidget(self.__docTab)
+		mainLayout.addWidget(self.__revTab)
+		mainLayout.addWidget(tabWidget)
+		mainLayout.addWidget(self.__buttonBox)
 		self.setLayout(mainLayout)
-		self.setWindowTitle("Properties of %s" % (self.annoTab.getTitle()))
+
+		self.__switchStore(self.__docTab.activeStore())
+
+		self.setWindowTitle("Properties of %s" % (self.__annoTab.getTitle()))
 
 	def __changed(self):
-		self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(True)
+		self.__buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(True)
+
+	def __switchStore(self, store):
+		if self.__doc:
+			self.__rev = Connector().lookup_doc(self.__doc, [store]).rev(store)
+
+		self.__store = store
+		self.__revTab.load(store, self.__rev)
+		self.__annoTab.load(store, self.__rev)
+		self.__hisTab.load(store, self.__rev)
 
 	def __save(self):
-		rev = self.revs[0]
-		self.buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
-		with Connector().peek(rev) as r:
-			metaData = struct.loads(r.readAll('META'))
-		setMetaData(metaData, ["org.hotchpotch.annotation", "title"], str(self.annoTab.titleEdit.text()))
-		setMetaData(metaData, ["org.hotchpotch.annotation", "description"], str(self.annoTab.descEdit.text()))
-		if self.annoTab.tagsEdit.hasAcceptableInput():
-			tagString = self.annoTab.tagsEdit.text()
-			tagSet = set([ tag.strip() for tag in str(tagString).split(',')])
-			tagList = list(tagSet)
+		self.__buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
+		with Connector().peek(self.__store, self.__rev) as r:
+			metaData = struct.loads(self.__store, r.readAll('META'))
+
+		setMetaData(metaData, ["org.hotchpotch.annotation", "title"],
+			self.__annoTab.getTitle())
+		setMetaData(metaData, ["org.hotchpotch.annotation", "description"],
+			self.__annoTab.getDescription())
+		tagString = self.__annoTab.getTags()
+		if tagString is not None:
+			tagList = [ tag.strip() for tag in tagString.split(',')]
+			tagList = [ tag for tag in tagList if tag != '' ]
+			tagList = list(set(tagList))
 			setMetaData(metaData, ["org.hotchpotch.annotation", "tags"], tagList)
-		with Connector().update(self.doc, rev) as writer:
+
+		with Connector().update(self.__store, self.__doc, self.__rev) as writer:
 			writer.writeAll('META', struct.dumps(metaData))
 			writer.commit()
-			self.revs[0] = writer.getRev()
+			self.__rev = writer.getRev()
+
+		self.__switchStore(self.__store)
 
 
 class DocumentTab(QtGui.QWidget):
-	def __init__(self, stores, descr, parent=None):
+
+	switchStore = QtCore.pyqtSignal(object)
+
+	def __init__(self, store, stores, descr, parent=None):
 		super(DocumentTab, self).__init__(parent)
+
+		if store in stores:
+			self.__store = store
+		else:
+			self.__store = stores[0]
+		self.__buttons = { }
 
 		mainLayout = QtGui.QVBoxLayout()
 		mainLayout.addWidget(QtGui.QLabel("The "+descr+" exists on the following stores:"))
 		subLayout = QtGui.QHBoxLayout()
 		for store in stores:
-			subLayout.addWidget(DocButton(store, True))
+			button = DocButton(store, store, True, True)
+			button.setCheckable(True)
+			button.setChecked(store == self.__store)
+			button.clicked.connect(lambda x,store=store: self.__switchStore(store))
+			subLayout.addWidget(button)
+			self.__buttons[store] = button
 		subLayout.addStretch()
 		mainLayout.addLayout(subLayout)
 		self.setLayout(mainLayout)
 
+	def activeStore(self):
+		return self.__store
+
+	def __switchStore(self, store):
+		if store != self.__store:
+			self.__buttons[self.__store].setChecked(False)
+			self.__store = store
+			self.__buttons[self.__store].setChecked(True)
+			self.switchStore.emit(store)
+
 
 class RevisionTab(QtGui.QWidget):
-	def __init__(self, revs, parent=None):
+	def __init__(self, parent=None):
 		super(RevisionTab, self).__init__(parent)
 
+		self.__typeLabel = QtGui.QLabel()
+		self.__mtimeLabel = QtGui.QLabel()
+		self.__sizeLabel = QtGui.QLabel()
+
 		layout = QtGui.QGridLayout()
-		layout.addWidget(QtGui.QLabel("Type:"), 1, 0)
-		layout.addWidget(QtGui.QLabel("Modification time:"), 2, 0)
-		layout.addWidget(QtGui.QLabel("Size:"), 3, 0)
-		layout.addWidget(QtGui.QLabel("Stores:"), 4, 0)
+		layout.addWidget(QtGui.QLabel("Type:"), 0, 0)
+		layout.addWidget(QtGui.QLabel("Modification time:"), 1, 0)
+		layout.addWidget(QtGui.QLabel("Size:"), 2, 0)
+		layout.addWidget(self.__typeLabel, 0, 1)
+		layout.addWidget(self.__mtimeLabel, 1, 1)
+		layout.addWidget(self.__sizeLabel, 2, 1)
 
-		col = 1
-		for rev in revs:
-			stat = Connector().stat(rev)
+		self.setLayout(layout)
 
-			layout.addWidget(RevButton(rev, True), 0, col)
-			layout.addWidget(QtGui.QLabel(Registry().getDisplayString(stat.type())), 1, col)
-			layout.addWidget(QtGui.QLabel(str(stat.mtime())), 2, col)
+	def load(self, store, rev):
+		try:
+			stat = Connector().stat(rev, [store])
+			self.__typeLabel.setText(Registry().getDisplayString(stat.type()))
+			self.__mtimeLabel.setText(str(stat.mtime()))
 			size = 0
 			for part in stat.parts():
 				size += stat.size(part)
@@ -150,38 +203,48 @@ class RevisionTab(QtGui.QWidget):
 				else:
 					size = size >> 10
 			sizeText = "%d %s (%d parts)" % (size, unit, len(stat.parts()))
-			layout.addWidget(QtGui.QLabel(sizeText), 3, col)
-
-			storeLayout = QtGui.QVBoxLayout()
-			for store in Connector().lookup_rev(rev):
-				storeLayout.addWidget(DocButton(store, True))
-			layout.addLayout(storeLayout, 4, col)
-
-			col += 1
-
-		self.setLayout(layout)
+			self.__sizeLabel.setText(sizeText)
+		except IOError:
+			self.__typeLabel.setText("n/a")
+			self.__mtimeLabel.setText("n/a")
+			self.__sizeLabel.setText("n/a")
 
 
 class HistoryTab(QtGui.QWidget):
-	def __init__(self, revs, parent=None):
+	def __init__(self, parent=None):
 		super(HistoryTab, self).__init__(parent)
 
+		self.__historyListBox = QtGui.QListWidget()
+		self.__historyListBox.setSizePolicy(
+			QtGui.QSizePolicy.Ignored,
+			QtGui.QSizePolicy.Ignored )
+		QtCore.QObject.connect(
+			self.__historyListBox,
+			QtCore.SIGNAL("itemDoubleClicked(QListWidgetItem *)"),
+			self.__open)
+
+		layout = QtGui.QVBoxLayout()
+		layout.addWidget(self.__historyListBox)
+		self.setLayout(layout)
+
+	def load(self, store, rev):
 		# TODO: implement something nice gitk like...
+		self.__store = store
 		self.__historyList = []
 		self.__historyRevs = []
-		heads = revs[:]
+		heads = [rev]
 		while len(heads) > 0:
 			newHeads = []
 			for rev in heads:
 				try:
 					if rev not in self.__historyRevs:
-						stat = Connector().stat(rev)
+						stat = Connector().stat(rev, [store])
 						mtime = str(stat.mtime())
 						comment = ""
 						if 'META' in stat.parts():
 							try:
-								with Connector().peek(rev) as r:
-									metaData = struct.loads(r.readAll('META'))
+								with Connector().peek(store, rev) as r:
+									metaData = struct.loads(store, r.readAll('META'))
 									comment = extractMetaData(
 										metaData,
 										["org.hotchpotch.annotation", "comment"],
@@ -195,113 +258,93 @@ class HistoryTab(QtGui.QWidget):
 					pass
 			heads = newHeads
 
-		self.__historyListBox = QtGui.QListWidget()
-		self.__historyListBox.setSizePolicy(
-			QtGui.QSizePolicy.Ignored,
-			QtGui.QSizePolicy.Ignored )
+		self.__historyListBox.clear()
 		self.__historyListBox.insertItems(0, self.__historyList)
-		QtCore.QObject.connect(
-			self.__historyListBox,
-			QtCore.SIGNAL("itemDoubleClicked(QListWidgetItem *)"),
-			self.__open)
-
-		layout = QtGui.QVBoxLayout()
-		layout.addWidget(self.__historyListBox)
-		self.setLayout(layout)
 
 	def __open(self, item):
 		row = self.__historyListBox.row(item)
 		rev = self.__historyRevs[row]
-		showDocument(struct.RevLink(rev))
+		showDocument(struct.RevLink(self.__store, rev))
 
 
 class AnnotationTab(QtGui.QWidget):
-	def __init__(self, revs, edit, parent=None):
+
+	changed = QtCore.pyqtSignal()
+
+	def __init__(self, edit, parent=None):
 		super(AnnotationTab, self).__init__(parent)
 
-		titles = set()
-		self.__title = ""
-		descriptions = set()
-		description = ""
-		tagSets = set()
-		tags = []
-		for rev in revs:
-			try:
-				with Connector().peek(rev) as r:
-					metaData = struct.loads(r.readAll('META'))
-					self.__title = extractMetaData(
-						metaData,
-						["org.hotchpotch.annotation", "title"],
-						"")
-					titles.add(self.__title)
-					description = extractMetaData(
-						metaData,
-						["org.hotchpotch.annotation", "description"],
-						"")
-					descriptions.add(description)
-					tags = extractMetaData(
-						metaData,
-						["org.hotchpotch.annotation", "tags"],
-						[])
-					tagSets.add(frozenset(tags))
-			except IOError:
-				pass
-
-		layout = QtGui.QGridLayout()
-
-		layout.addWidget(QtGui.QLabel("Title:"), 0, 0)
-		if len(titles) > 1:
-			layout.addWidget(QtGui.QLabel("<ambiguous>"), 0, 1)
-		else:
-			if edit:
-				self.titleEdit = QtGui.QLineEdit()
-				self.titleEdit.setText(self.__title)
-				QtCore.QObject.connect(self.titleEdit, QtCore.SIGNAL("textEdited(const QString&)"), self.__changed)
-				layout.addWidget(self.titleEdit, 0, 1)
-			else:
-				layout.addWidget(QtGui.QLabel(self.__title), 0, 1)
-
-		layout.addWidget(QtGui.QLabel("Description:"), 1, 0)
-		if len(descriptions) > 1:
-			layout.addWidget(QtGui.QLabel("<ambiguous>"), 1, 1)
-		else:
-			if edit:
-				self.descEdit = QtGui.QLineEdit()
-				self.descEdit.setText(description)
-				QtCore.QObject.connect(self.descEdit, QtCore.SIGNAL("textEdited(const QString&)"), self.__changed)
-				layout.addWidget(self.descEdit, 1, 1)
-			else:
-				descLabel = QtGui.QLabel(description)
-				descLabel.setWordWrap(True)
-				descLabel.setScaledContents(True)
-				layout.addWidget(descLabel, 1, 1)
-
-		layout.addWidget(QtGui.QLabel("Tags:"), 2, 0)
-		if len(tagSets) > 1:
-			layout.addWidget(QtGui.QLabel("<ambiguous>"), 2, 1)
-		else:
-			tags.sort()
-			tagList = ""
-			for tag in tags:
-				tagList += ", " + tag
-			if edit:
-				self.tagsEdit = QtGui.QLineEdit()
-				self.tagsEdit.setText(tagList[2:])
-				self.tagsEdit.setValidator(QtGui.QRegExpValidator(
+		if edit:
+				self.__titleEdit = QtGui.QLineEdit()
+				self.__titleEdit.textEdited.connect(self.__changed)
+				self.__descEdit = QtGui.QLineEdit()
+				self.__descEdit.textEdited.connect(self.__changed)
+				self.__tagsEdit = QtGui.QLineEdit()
+				self.__tagsEdit.setValidator(QtGui.QRegExpValidator(
 					QtCore.QRegExp("(\\s*\\w+\\s*(,\\s*\\w+\\s*)*)?"),
 					self))
-				QtCore.QObject.connect(self.tagsEdit, QtCore.SIGNAL("textEdited(const QString&)"), self.__changed)
-				layout.addWidget(self.tagsEdit, 2, 1)
-			else:
-				layout.addWidget(QtGui.QLabel(tagList[2:]), 2, 1)
+				self.__tagsEdit.textEdited.connect(self.__changed)
+		else:
+				self.__titleEdit = QtGui.QLabel()
+				self.__descEdit = QtGui.QLabel(description)
+				self.__descEdit.setWordWrap(True)
+				self.__descEdit.setScaledContents(True)
+				self.__tagsEdit = QtGui.QLabel()
 
+		layout = QtGui.QGridLayout()
+		layout.addWidget(QtGui.QLabel("Title:"), 0, 0)
+		layout.addWidget(self.__titleEdit, 0, 1)
+		layout.addWidget(QtGui.QLabel("Description:"), 1, 0)
+		layout.addWidget(self.__descEdit, 1, 1)
+		layout.addWidget(QtGui.QLabel("Tags:"), 2, 0)
+		layout.addWidget(self.__tagsEdit, 2, 1)
 		self.setLayout(layout)
 
+	def load(self, store, rev):
+		title = ""
+		description = ""
+		tags = []
+
+		try:
+			with Connector().peek(store, rev) as r:
+				metaData = struct.loads(store, r.readAll('META'))
+				title = extractMetaData(
+					metaData,
+					["org.hotchpotch.annotation", "title"],
+					"")
+				description = extractMetaData(
+					metaData,
+					["org.hotchpotch.annotation", "description"],
+					"")
+				tags = extractMetaData(
+					metaData,
+					["org.hotchpotch.annotation", "tags"],
+					[])
+		except IOError:
+			pass
+
+		tags.sort()
+		self.__titleEdit.setText(title)
+		self.__descEdit.setText(description)
+		if tags:
+			self.__tagsEdit.setText(reduce(lambda x, y: x+", "+y, tags))
+		else:
+			self.__tagsEdit.setText("")
+
 	def getTitle(self):
-		return self.__title
+		return str(self.__titleEdit.text())
+
+	def getDescription(self):
+		return str(self.__descEdit.text())
+
+	def getTags(self):
+		if self.__tagsEdit.hasAcceptableInput():
+			return str(self.__tagsEdit.text())
+		else:
+			return None
 
 	def __changed(self):
-		self.emit(QtCore.SIGNAL("changed()"))
+		self.changed.emit()
 
 
 if __name__ == '__main__':
@@ -310,15 +353,14 @@ if __name__ == '__main__':
 
 	app = QtGui.QApplication(sys.argv)
 
-	if (len(sys.argv) == 2) and sys.argv[1].startswith('doc:'):
-		uuid = sys.argv[1][4:].decode('hex')
-		dialog = PropertiesDialog(uuid, True)
-	elif (len(sys.argv) == 2) and sys.argv[1].startswith('rev:'):
-		uuid = sys.argv[1][4:].decode('hex')
-		dialog = PropertiesDialog(uuid, False)
-	else:
+	link = None
+	if len(sys.argv) == 2:
+		link = struct.Link(sys.argv[1])
+
+	if not link:
 		print "Usage: properties.py [doc:|rev:]UUID"
 		sys.exit(1)
 
+	dialog = PropertiesDialog(link)
 	sys.exit(dialog.exec_())
 

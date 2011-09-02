@@ -17,12 +17,12 @@
 -module(hotchpotch_store).
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2]).
--export([put_doc/3, forward_doc_start/3, forward_doc_commit/1,
+-export([put_doc/3, put_doc_commit/1, put_doc_abort/1, forward_doc_start/3, forward_doc_commit/1,
 	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
--export([close/1, commit/2, create/4, fork/4, get_parents/1, get_type/1,
+-export([close/1, commit/1, create/3, fork/3, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
-	write/4, suspend/2, get_links/1, set_links/3]).
+	write/4, suspend/1, get_links/1, set_links/3]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/2, sync_set_anchor/3, sync_finish/2]).
 -export([hash_revision/1]).
@@ -60,22 +60,23 @@ contains(Store, Rev) ->
 
 %% @doc Stat a revision.
 %%
-%% Returns information about a revision if it is found on the store, or `error'
-%% if no such revision exists. The returned information is a #stat{} record
-%% containing the following fields:
+%% Returns information about a revision if it is found on the store, or
+%% `{error, enonent}' if no such revision exists. The returned information is a
+%% #rev_stat{} record containing the following fields:
 %%
 %%   flags = integer()
-%%   parts = [{FourCC::binary(), Size::interger(), Hash::guid()}]
-%%   parents = [guid()]
+%%   parts = [{FourCC::binary(), Size::interger(), PId::guid()}]
+%%   parents = [RId::guid()]
 %%   mtime = integer()
 %%   type = binary()
 %%   creator = binary()
+%%   doc_links = [DId::guid()]
+%%   rev_links = [RId::guid()]
 %%
-%% @spec stat(Store, Rev) -> {ok, Stat} | {error, Reason}
+%% @spec stat(Store, Rev) -> {ok, Stat} | {error, enoent}
 %%       Store = pid()
 %%       Rev = guid()
 %%       Stat = #rev_stat{}
-%%       Reason = ecode()
 stat(Store, Rev) ->
 	call_store(Store, {stat, Rev}).
 
@@ -93,35 +94,36 @@ peek(Store, Rev) ->
 
 %% @doc Create a new, empty document.
 %%
-%% Returns a handle for the following read/write functions to fill it. The
-%% handle can only be commited or aborted but not suspended because the new
-%% document will not show up in the store until a sucsessful commit.
+%% Returns the new DId and a handle for the following read/write functions to
+%% fill it. The handle can only be commited or aborted but not suspended
+%% because the new document will not show up in the store until a sucsessful
+%% commit.
 %%
-%% @spec create(Store, Doc, Type, Creator) -> {ok, Handle} | {error, Reason}
+%% @spec create(Store, Type, Creator) -> {ok, Doc, Handle} | {error, Reason}
 %%         Store = pid()
 %%         Handle = pid()
 %%         Doc = guid()
 %%         Type, Creator = binary()
 %%         Reason = ecode()
-create(Store, Doc, Type, Creator) ->
-	call_store(Store, {create, Doc, Type, Creator}).
+create(Store, Type, Creator) ->
+	call_store(Store, {create, Type, Creator}).
 
 %% @doc Derive a new document from an existing revision
 %%
-%% Returns a handle for the following read/write functions to update the new
-%% document. The new revision will start with the content of the StartRev
-%% revision. The handle can only be commited or aborted but not suspended
-%% because the new document will not show up in the store until a sucsessful
-%% commit.
+%% Returns the new DId and a handle for the following read/write functions to
+%% update the new document. The new revision will start with the content of the
+%% StartRev revision. The handle can only be commited or aborted but not
+%% suspended because the new document will not show up in the store until a
+%% sucsessful commit.
 %%
-%% @spec fork(Store, Doc, StartRev, Creator) -> {ok, Handle} | {error, Reason}
+%% @spec fork(Store, StartRev, Creator) -> {ok, Doc, Handle} | {error, Reason}
 %%         Store = pid()
 %%         Handle = pid()
 %%         StartRev, Doc = guid()
 %%         Creator = binary()
 %%         Reason = ecode()
-fork(Store, Doc, StartRev, Creator) ->
-	call_store(Store, {fork, Doc, StartRev, Creator}).
+fork(Store, StartRev, Creator) ->
+	call_store(Store, {fork, StartRev, Creator}).
 
 %% @doc Update an existing document
 %%
@@ -232,13 +234,12 @@ set_links(Handle, DocLinks, RevLinks) ->
 %% The handle will be read only after the call if the commit succeeds. In case
 %% the commit fails, e.g. due to a conflict the handle will still be writable.
 %%
-%% @spec commit(Handle, Mtime) -> {ok, Rev} | {error, Reason}
+%% @spec commit(Handle) -> {ok, Rev} | {error, Reason}
 %%       Handle = pid()
-%%       Mtime = integer()
 %%       Rev = guid()
 %%       Reason = ecode()
-commit(Handle, Mtime) ->
-	call_store(Handle, {commit, Mtime}).
+commit(Handle) ->
+	call_store(Handle, commit).
 
 %% @doc Suspend a handle
 %%
@@ -255,13 +256,12 @@ commit(Handle, Mtime) ->
 %% The handle will be read only after the call if the operation succeeds. In
 %% case the operation fails the handle will still be writable.
 %%
-%% @spec suspend(Handle, Mtime) -> {ok, Rev} | {error, Reason}
+%% @spec suspend(Handle) -> {ok, Rev} | {error, Reason}
 %%       Handle = pid()
-%%       Mtime = integer()
 %%       Rev = guid()
 %%       Reason = ecode()
-suspend(Handle, Mtime) ->
-	call_store(Handle, {suspend, Mtime}).
+suspend(Handle) ->
+	call_store(Handle, suspend).
 
 %% @doc Close a handle
 %%
@@ -312,12 +312,21 @@ delete_rev(Store, Rev) ->
 %% If the Doc does not exist yet then it is created and points to Rev. If the
 %% Doc exits it must point to Rev, otherwise the call will fail.
 %%
-%% @spec put_doc(Store, Doc, Rev) -> ok | {error, Reason}
+%% @spec put_doc(Store, Doc, Rev) -> {ok, Handle} | {error, Reason}
 %%       Store = pid()
 %%       Doc = Rev = guid()
+%%       Handle = pid()
 %%       Reason = ecode()
 put_doc(Store, Doc, Rev) ->
 	call_store(Store, {put_doc, Doc, Rev}).
+
+
+put_doc_commit(Handle) ->
+	call_store(Handle, commit).
+
+
+put_doc_abort(Handle) ->
+	call_store(Handle, abort).
 
 
 %% @doc Fast-forward a document

@@ -15,329 +15,234 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(hotchpotch_replicator_worker).
--behaviour(gen_server).
 
 -include("store.hrl").
 
--export([start_link/1, start_link/2]).
+-export([start_link/4, start_link/5]).
 -export([cancel/1]).
--export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
+-export([init/6]).
 
--record(state, {backlog, from, result, monitor, count, done}).
+-record(state, {backlog, srcstore, dststore, depth, monitor, count, done}).
 
 -define(SYNC_STICKY, [<<"org.hotchpotch.sync">>, <<"sticky">>]).
--define(SYNC_HISTORY, [<<"org.hotchpotch.sync">>, <<"history">>]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Request) ->
-    Result = gen_server:start_link(?MODULE, {Request, none}, []),
-	%io:format("replicator_worker: start_link/1 ~w~n", [Result]),
-	Result.
+start_link(Request, SrcStore, DstStore, Depth) ->
+	proc_lib:start_link(?MODULE, init, [self(), Request, none, SrcStore,
+		DstStore, Depth]).
 
-start_link(Request, From) ->
-    Result = gen_server:start_link(?MODULE, {Request, From}, []),
-	%io:format("replicator_worker: start_link/2 ~w~n", [Result]),
-	Result.
+start_link(Request, SrcStore, DstStore, Depth, From) ->
+	proc_lib:start_link(?MODULE, init, [self(), Request, From, SrcStore,
+		DstStore, Depth]).
 
 cancel(Worker) ->
-	gen_server:cast(Worker, cancel).
+	Worker ! cancel.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Request, From}) ->
+init(Parent, Request, From, SrcStore, DstStore, Depth) ->
 	Info = case Request of
-		{modified, Doc, {StoreGuid, _StorePid}} ->
-			{rep_doc, Doc, [StoreGuid]};
+		{replicate_doc, Doc, _First} ->
+			{rep_doc, Doc, hotchpotch_store:guid(DstStore)};
 
-		{replicate_doc, Doc, _Depth, _SrcStores, DstStores, _Important} ->
-			{rep_doc, Doc, lists:map(fun({Uuid, _Pid}) -> Uuid end, DstStores)};
-
-		{replicate_rev, Rev, _Depth, _SrcStores, DstStores, _Important} ->
-			{rep_rev, Rev, lists:map(fun({Uuid, _Pid}) -> Uuid end, DstStores)}
+		{replicate_rev, Rev, _First} ->
+			{rep_rev, Rev, hotchpotch_store:guid(DstStore)}
 	end,
 	{ok, Monitor} = hotchpotch_hysteresis:start(Info),
 	hotchpotch_hysteresis:started(Monitor),
-	{
-		ok,
-		#state{
-			backlog = queue:in(Request, queue:new()),
-			from    = From,
-			result  = {undecided, orddict:new()},
-			monitor = Monitor,
-			count   = 1,
-			done    = 0
-		},
-		0
-	}.
-
-handle_cast(cancel, State) ->
-	{stop, normal, State}.
-
-handle_info(timeout, State) ->
-	NewState = run_queue(State),
-	#state{count=Count, done=Done, monitor=Monitor} = NewState,
-	hotchpotch_hysteresis:progress(Monitor, Done * 255 div Count),
-	case queue:is_empty(NewState#state.backlog) of
-		true  -> {stop, normal, NewState};
-		false -> {noreply, NewState, 0}
-	end.
-
-terminate(_Reason, #state{from=From, result=RawResult, monitor=Monitor}) ->
+	proc_lib:init_ack(Parent, {ok, self()}),
+	S = #state{
+		backlog  = queue:in(Request, queue:new()),
+		srcstore = SrcStore,
+		dststore = DstStore,
+		depth    = Depth,
+		monitor  = Monitor,
+		count    = 1,
+		done     = 0
+	},
+	Result = loop(S),
 	hotchpotch_hysteresis:done(Monitor),
 	hotchpotch_hysteresis:stop(Monitor),
 	case From of
-		{Pid, Ref} ->
-			Result = case RawResult of
-				{ok, ErrInfo} ->
-					{ok, orddict:to_list(ErrInfo)};
-				{undecided, ErrInfo} ->
-					hotchpotch_broker:consolidate_error(orddict:to_list(ErrInfo));
-				{Reason, ErrInfo} ->
-					{error, Reason, orddict:to_list(ErrInfo)}
-			end,
-			Pid ! {Ref, Result};
+		{Pid, Ref} -> Pid ! {Ref, Result};
 		_Else      -> ok
-	end.
+	end,
+	normal.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Doc: Document to replicate
-% Stores: Destination stores
-% Depth: Date of oldest revision which gets replicated
-push_doc(Backlog, Doc, Depth, SrcStores, DstStores) ->
-	queue:in({replicate_doc, Doc, Depth, SrcStores, DstStores, false}, Backlog).
+push_doc(Doc, #state{backlog=Backlog} = S) ->
+	NewBacklog = queue:in({replicate_doc, Doc, false}, Backlog),
+	S#state{backlog=NewBacklog}.
 
 
-push_rev(Backlog, Rev, Depth, SrcStores, DstStores) ->
-	queue:in({replicate_rev, Rev, Depth, SrcStores, DstStores, false}, Backlog).
+push_rev(Rev, #state{backlog=Backlog} = S) ->
+	NewBacklog = queue:in({replicate_rev, Rev, false}, Backlog),
+	S#state{backlog=NewBacklog}.
 
 
-push_error(Backlog, _Result, false) ->
-	Backlog;
+loop(State) ->
+	case run_queue(State) of
+		{ok, NewState} ->
+			#state{count=Count, done=Done, monitor=Monitor} = NewState,
+			hotchpotch_hysteresis:progress(Monitor, Done * 255 div Count),
+			loop(NewState);
 
-push_error(Backlog, Result, true) ->
-	queue:in({fail, Result}, Backlog).
+		{stop, _NewState} ->
+			ok;
 
-
-push_error(Backlog, _Store, _Result, false) ->
-	Backlog;
-
-push_error(Backlog, Store, Result, true) ->
-	queue:in({fail, Store, Result}, Backlog).
-
-
-push_success(Backlog, false) ->
-	Backlog;
-
-push_success(Backlog, true) ->
-	queue:in(success, Backlog).
+		{{error, _} = Error, _NewState} ->
+			Error
+	end.
 
 
-run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = State) ->
+run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = S) ->
 	case queue:out(Backlog) of
 		{{value, Item}, Remaining} ->
 			PrevSize = queue:len(Remaining),
-			NewState = case Item of
-				{modified, Doc, Store} ->
-					State#state{backlog=do_modified(Remaining, Doc, Store)};
-
-				{replicate_doc, Doc, Depth, SrcStores, DstStores, Important} ->
-					State#state{
-						backlog = do_replicate_doc(Remaining, Doc, Depth,
-							SrcStores, DstStores, Important)
-					};
-
-				{replicate_rev, Rev, Depth, SrcStores, DstStores, Important} ->
-					State#state{
-						backlog = do_replicate_rev(Remaining, Rev, Depth,
-							SrcStores, DstStores, Important, false)
-					};
-
-				success ->
-					{_Vote, ErrInfo} = State#state.result,
-					State#state{backlog=Remaining, result={ok, ErrInfo}};
-
-				{fail, Reason} ->
-					{_Vote, ErrInfo} = State#state.result,
-					State#state{backlog=Remaining, result={Reason, ErrInfo}};
-
-				{fail, Store, Reason} ->
-					{Vote, ErrInfo} = State#state.result,
-					State#state{
-						backlog = Remaining,
-						result  = {Vote, orddict:store(Store, Reason, ErrInfo)}
-					}
+			S2 = S#state{backlog=Remaining},
+			{Result, S3} = case Item of
+				{replicate_doc, Doc, First} ->
+					replicate_doc(Doc, First, S2);
+				{replicate_rev, Rev, First} ->
+					replicate_rev(queue:in(Rev, queue:new()), First, S2)
 			end,
-			NextSize = queue:len(NewState#state.backlog),
-			NewState#state{count=OldCount+NextSize-PrevSize, done=Done+1};
+			NextSize = queue:len(S3#state.backlog),
+			{Result, S3#state{count=OldCount+NextSize-PrevSize, done=Done+1}};
 
 		{empty, _Backlog} ->
-			State
+			{stop, S}
 	end.
 
 
-do_modified(Backlog, Doc, Store) ->
-	{_Guid, Pid} = Store,
-	case hotchpotch_store:lookup(Pid, Doc) of
+replicate_doc(Doc, First, S) ->
+	#state{
+		srcstore = SrcStore,
+		dststore = DstStore
+	} = S,
+	case hotchpotch_store:lookup(SrcStore, Doc) of
 		{ok, Rev, _PreRevs} ->
-			SrcStores = hotchpotch_volman:stores(),
-			sticky_handling(Backlog, Rev, SrcStores, [Store], true);
+			case hotchpotch_store:put_doc(DstStore, Doc, Rev) of
+				ok ->
+					{ok, S};
 
-		error ->
-			Backlog
-	end.
-
-
-do_replicate_doc(Backlog, _Doc, _Depth, _SrcStores, [], _Important) ->
-	Backlog;
-
-do_replicate_doc(Backlog, Doc, Depth, SrcStores, DstStores, Important) ->
-	case lookup(Doc, SrcStores) of
-		[Rev] ->
-			% replicate doc to all stores, queue errors when failed
-			{NewBacklog, RepStores} = lists:foldl(
-				fun({DestGuid, DestPid}=Store, {AccBacklog, AccRepStores}) ->
-					case hotchpotch_store:put_doc(DestPid, Doc, Rev) of
-						ok ->
-							{AccBacklog, [Store|AccRepStores]};
-						{error, Reason} ->
-							{
-								push_error(AccBacklog, DestGuid, Reason, Important),
-								AccRepStores
-							}
-					end
-				end,
-				{Backlog, []},
-				DstStores),
-			% replicate corresponding rev
-			do_replicate_rev(NewBacklog, Rev, Depth, SrcStores, RepStores,
-				Important, true);
-
-		[] -> push_error(Backlog, enoent, Important);
-		_  -> push_error(Backlog, econflict, Important)
-	end.
-
-
-do_replicate_rev(Backlog, _Rev, _Depth, _SrcStores, [], _Important, _Latest) ->
-	Backlog;
-
-do_replicate_rev(Backlog, Rev, Depth, SrcStores, DstStores, Important, Latest) ->
-	case stat(Rev, SrcStores) of
-		{ok, #rev_stat{parents=Parents, mtime=Mtime}} ->
-			if
-				(Mtime >= Depth) or Latest ->
-					{NewBacklog1, RepStores} = lists:foldl(
-						fun({DstGuid, DstPid}=Store, {AccBack, AccRep}) ->
-							case hotchpotch_replicator_copy:put_rev(SrcStores, DstPid, Rev) of
+				{ok, Handle} ->
+					% replicate corresponding rev
+					case replicate_rev(queue:in(Rev, queue:new()), First, S) of
+						{ok, _} = Ok ->
+							case hotchpotch_store:put_doc_commit(Handle) of
 								ok ->
-									{
-										push_success(AccBack, Important),
-										[Store|AccRep]
-									};
-								{error, Reason} ->
-									{
-										push_error(AccBack, DstGuid, Reason, Important),
-										AccRep
-									}
-							end
-						end,
-						{Backlog, []},
-						DstStores),
-					NewBacklog2 = lists:foldl(
-						fun(Parent, BackAcc) ->
-							push_rev(BackAcc, Parent, Depth, SrcStores, RepStores)
-						end,
-						NewBacklog1,
-						Parents),
-					sticky_handling(NewBacklog2, Rev, SrcStores, RepStores, Latest);
-
-				true ->
-					Backlog
-			end;
-
-		{error, ErrInfo} ->
-			lists:foldl(
-				fun({Guid, Error}, AccBack) ->
-					push_error(AccBack, Guid, Error, Important)
-				end,
-				Backlog,
-				ErrInfo)
-	end.
-
-
-sticky_handling(Backlog, _Rev, _SrcStores, _DstStores, false) ->
-	Backlog;
-
-sticky_handling(Backlog, Rev, SrcStores, DstStores, true) ->
-	case hotchpotch_util:read_rev_struct(Rev, <<"META">>) of
-		{ok, MetaData} ->
-			case meta_read_bool(MetaData, ?SYNC_STICKY) of
-				true ->
-					Depth = hotchpotch_util:get_time() -
-						meta_read_int(MetaData, ?SYNC_HISTORY) * 1000000,
-					NewBacklog = lists:foldl(
-						fun(Reference, BackAcc) ->
-							push_doc(BackAcc, Reference, Depth, SrcStores, DstStores)
-						end,
-						Backlog,
-						read_doc_references(Rev, SrcStores)),
-					lists:foldl(
-						fun(Reference, BackAcc) ->
-							push_rev(BackAcc, Reference, Depth, SrcStores, DstStores)
-						end,
-						NewBacklog,
-						read_rev_references(Rev, SrcStores));
-
-				false ->
-					Backlog
-			end;
-
-		{error, _Reason} ->
-			Backlog
-	end.
-
-
-lookup(Doc, Stores) ->
-	RevSet = lists:foldl(
-		fun({_StoreGuid, StorePid}, AccRev) ->
-			case hotchpotch_store:lookup(StorePid, Doc) of
-				{ok, Rev, _PreRevs} -> sets:add_element(Rev, AccRev);
-				error               -> AccRev
-			end
-		end,
-		sets:new(),
-		Stores),
-	sets:to_list(RevSet).
-
-
-stat(Rev, SearchStores) ->
-	{Stat, ErrInfo} = lists:foldl(
-		fun({Guid, Pid}, {SoFar, ErrInfo} = Acc) ->
-			case SoFar of
-				undef ->
-					case hotchpotch_store:stat(Pid, Rev) of
-						{ok, Stat} ->
-							{Stat, ErrInfo};
-						{error, Reason} ->
-							{undef, [{Guid, Reason} | ErrInfo]}
+									Ok;
+								{error, econflict} when not First ->
+									% Not treated as an error but deliberately
+									% drop new state
+									{ok, S};
+								Error ->
+									% Drop new state
+									{Error, S}
+							end;
+						Error ->
+							hotchpotch_store:put_doc_abort(Handle),
+							Error
 					end;
 
-				_ ->
-					Acc
+				{error, econflict} when not First ->
+					{ok, S};
+				{error, _Reason} = Error ->
+					{Error, S}
+			end;
+
+		error when First ->
+			{{error, enoent}, S};
+
+		error ->
+			{ok, S}
+	end.
+
+
+replicate_rev(Revs, First, S) ->
+	receive
+		cancel -> {stop, S}
+	after
+		0 ->
+			case queue:out(Revs) of
+				{{value, Rev}, RemainRevs} ->
+					case hotchpotch_store:contains(S#state.dststore, Rev) of
+						false ->
+							case do_replicate_rev(Rev, RemainRevs, First, S) of
+								{ok, NewRevs, S2} ->
+									replicate_rev(NewRevs, false, S2);
+								Else ->
+									Else
+							end;
+						true ->
+							replicate_rev(RemainRevs, false, S)
+					end;
+
+				{empty, _} ->
+					{ok, S}
 			end
-		end,
-		{undef, []},
-		SearchStores),
-	case Stat of
-		undef -> {error, ErrInfo};
-		_     -> {ok, Stat}
+	end.
+
+
+do_replicate_rev(Rev, Backlog, First, S) ->
+	#state{
+		srcstore = SrcStore,
+		dststore = DstStore,
+		depth    = Depth
+	} = S,
+	case hotchpotch_store:stat(SrcStore, Rev) of
+		{ok, #rev_stat{parents=Parents, mtime=Mtime} = Stat}
+		when (Mtime >= Depth) or First ->
+			case put_rev(SrcStore, DstStore, Rev) of
+				ok ->
+					NewBacklog = lists:foldl(
+						fun(Parent, BackAcc) -> queue:in(Parent, BackAcc) end,
+						Backlog,
+						Parents),
+					S2 = case is_sticky(SrcStore, Rev) of
+						true ->
+							lists:foldl(
+								fun(Ref, Acc) -> push_doc(Ref, Acc) end,
+								lists:foldl(
+									fun(Ref, Acc) -> push_rev(Ref, Acc) end,
+									S,
+									Stat#rev_stat.rev_links),
+								Stat#rev_stat.doc_links);
+						false ->
+							S
+					end,
+					{ok, NewBacklog, S2};
+
+				{error, _} = Error ->
+					{Error, S}
+			end;
+
+		{ok, _} ->
+			{ok, Backlog, S};
+
+		{error, _} = Error when First ->
+			{Error, S};
+
+		{error, _} ->
+			{ok, Backlog, S}
+	end.
+
+
+is_sticky(SrcStore, Rev) ->
+	case hotchpotch_util:read_rev_struct(SrcStore, Rev, <<"META">>) of
+		{ok, MetaData} ->
+			meta_read_bool(MetaData, ?SYNC_STICKY);
+		{error, _Reason} ->
+			false
 	end.
 
 
@@ -354,45 +259,89 @@ meta_read_bool(_Meta, _Path) ->
 	false.
 
 
-meta_read_int(Meta, []) when is_integer(Meta) ->
-	Meta;
-meta_read_int(_Meta, []) ->
-	0;
-meta_read_int(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
-	case dict:find(Step, Meta) of
-		{ok, Value} -> meta_read_int(Value, Path);
-		error       -> 0
-	end;
-meta_read_int(_Meta, _Path) ->
-	0.
+% returns ok | {error, Reason}
+put_rev(SourceStore, DestStore, Rev) ->
+	case hotchpotch_store:stat(SourceStore, Rev) of
+		{ok, Stat} ->
+			Revision = #revision{
+				flags = Stat#rev_stat.flags,
+				parts = lists:sort(
+					lists:map(
+						fun({FCC, _Size, Hash}) -> {FCC, Hash} end,
+						Stat#rev_stat.parts)),
+				parents   = lists:sort(Stat#rev_stat.parents),
+				mtime     = Stat#rev_stat.mtime,
+				type      = Stat#rev_stat.type,
+				creator   = Stat#rev_stat.creator,
+				doc_links = Stat#rev_stat.doc_links,
+				rev_links = Stat#rev_stat.rev_links
+			},
+			case hotchpotch_store:put_rev_start(DestStore, Rev, Revision) of
+				ok ->
+					ok;
 
+				{ok, MissingParts, Importer} ->
+					copy_parts(Rev, SourceStore, Importer, MissingParts);
 
-% extract all document links
-read_doc_references(Rev, SearchStores) ->
-	case stat(Rev, SearchStores) of
-		{ok, #rev_stat{doc_links=DocLinks}} ->
-			DocLinks;
+				{error, Reason} ->
+					{error, Reason}
+			end;
 
-		{error, _} ->
-			[]
+		Error ->
+			Error
 	end.
 
 
-% extract all revision links
-read_rev_references(Rev, SearchStores) ->
-	case stat(Rev, SearchStores) of
-		{ok, #rev_stat{rev_links=RevLinks}} ->
-			RevLinks;
+copy_parts(Rev, SourceStore, Importer, Parts) ->
+	case hotchpotch_store:peek(SourceStore, Rev) of
+		{ok, Reader} ->
+			case copy_parts_loop(Parts, Reader, Importer) of
+				ok ->
+					hotchpotch_store:close(Reader),
+					hotchpotch_store:put_rev_commit(Importer);
 
-		{error, _} ->
-			[]
+				{error, Reason} ->
+					hotchpotch_store:close(Reader),
+					hotchpotch_store:put_rev_abort(Importer),
+					{error, Reason}
+			end;
+
+		{error, Reason} ->
+			hotchpotch_store:put_rev_abort(Importer),
+			{error, Reason}
 	end.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Stubs...
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+copy_parts_loop([], _Reader, _Importer) ->
+	ok;
+copy_parts_loop([Part|Remaining], Reader, Importer) ->
+	case copy(Part, Reader, Importer) of
+		ok   -> copy_parts_loop(Remaining, Reader, Importer);
+		Else -> Else
+	end.
 
-handle_call(_Request, _From, S)     -> {noreply, S}.
-code_change(_OldVsn, State, _Extra) -> {ok, State}.
+copy(Part, Reader, Importer) ->
+	copy_loop(Part, Reader, Importer, 0).
 
+copy_loop(Part, Reader, Importer, Pos) ->
+	case hotchpotch_store:read(Reader, Part, Pos, 16#100000) of
+		{ok, Data} ->
+			case hotchpotch_store:put_rev_part(Importer, Part, Data) of
+				ok ->
+					if
+						size(Data) == 16#100000 ->
+							copy_loop(Part, Reader, Importer, Pos+16#100000);
+						true ->
+							ok
+					end;
+
+				{error, Reason} ->
+					{error, Reason}
+			end;
+
+		eof ->
+			ok;
+
+		{error, Reason} ->
+			{error, Reason}
+	end.
 

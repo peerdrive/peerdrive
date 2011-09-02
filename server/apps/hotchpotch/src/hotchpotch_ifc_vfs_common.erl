@@ -599,8 +599,12 @@ stores_lookup(stores, Name, Cache) ->
 			BinId = atom_to_binary(Id, utf8),
 			if
 				BinId == Name ->
-					{ok, {doc, Guid, Guid}};
-
+					case hotchpotch_volman:store(Guid) of
+						{ok, Pid} ->
+							{ok, {doc, Pid, Guid}};
+						error ->
+							error
+					end;
 				true ->
 					error
 			end
@@ -651,7 +655,7 @@ stores_readdir(stores, Cache) ->
 %% Store wrapper: adds a '.docs' directory to each store
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-storewrap_lookup({doc, Store, Store} = Oid, Name, Cache, Lookup) ->
+storewrap_lookup({doc, Store, _SId} = Oid, Name, Cache, Lookup) ->
 	case Name of
 		<<".docs">> ->
 			{entry, {docsdir, Store}, Cache};
@@ -785,8 +789,8 @@ docdir_read_entry(Store, Doc, {CacheRev, CacheEntry}=Cache) ->
 	end.
 
 
-read_file_name(_Store, _Doc, Rev) ->
-	Meta = case hotchpotch_util:read_rev_struct(Rev, <<"META">>) of
+read_file_name(Store, _Doc, Rev) ->
+	Meta = case hotchpotch_util:read_rev_struct(Store, Rev, <<"META">>) of
 		{ok, Value1} when is_record(Value1, dict, 9) ->
 			Value1;
 		{ok, _} ->
@@ -1009,7 +1013,7 @@ dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
 			{ok, CacheEntries, Cache};
 
 		{ok, Rev} ->
-			case hotchpotch_util:read_rev_struct(Rev, <<"HPSD">>) of
+			case hotchpotch_util:read_rev_struct(Store, Rev, <<"HPSD">>) of
 				{ok, Entries} when is_record(Entries, dict, 9) ->
 					{ok, Entries, {Rev, Entries}};
 				{ok, _} ->
@@ -1274,7 +1278,7 @@ set_link({doc, Store, ParentDoc}, {doc, Store, ChildDoc}, Name, Cache) ->
 	{Title, _DocId} = set_split_name(Name),
 	ChildRev = case hotchpotch_ifc_vfs_broker:lookup(Store, ChildDoc) of
 		{ok, Rev} ->
-			case set_read_title(Rev) of
+			case set_read_title(Store, Rev) of
 				Title -> Rev;
 				_     -> throw({error, eacces})
 			end;
@@ -1423,7 +1427,7 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries}) ->
 			{ok, NewCacheEntries, {CacheRev, NewCacheEntries}};
 
 		{ok, Rev} ->
-			case hotchpotch_util:read_rev_struct(Rev, <<"HPSD">>) of
+			case hotchpotch_util:read_rev_struct(Store, Rev, <<"HPSD">>) of
 				{ok, List} when is_list(List) ->
 					Entries = set_read_entries_list(Store, List),
 					{ok, Entries, {Rev, Entries}};
@@ -1454,7 +1458,7 @@ set_find_update(#se{oid={doc, Store, Doc}, rev=CacheRev}=Entry, Acc) ->
 		{ok, CacheRev} ->
 			Acc;
 		{ok, NewRev} ->
-			[Entry#se{rev=NewRev, title=set_read_title(NewRev)} | Acc];
+			[Entry#se{rev=NewRev, title=set_read_title(Store, NewRev)} | Acc];
 		error ->
 			[Entry#se{rev=undefined, title= <<"">>} | Acc]
 	end.
@@ -1483,7 +1487,7 @@ set_read_entries_filter(Store, {dlink, Doc}) ->
 	Suffix = hotchpotch_util:bin_to_hexstr(Doc),
 	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, Rev} ->
-			Title = set_read_title(Rev),
+			Title = set_read_title(Store, Rev),
 			{ok, #se{oid=Oid, rev=Rev, title=Title, suffix=Suffix}};
 
 		error ->
@@ -1494,8 +1498,8 @@ set_read_entries_filter(_, _) ->
 	skip.
 
 
-set_read_title(Rev) ->
-	case hotchpotch_util:read_rev_struct(Rev, <<"META">>) of
+set_read_title(Store, Rev) ->
+	case hotchpotch_util:read_rev_struct(Store, Rev, <<"META">>) of
 		{ok, Meta} ->
 			case meta_read_entry(Meta, [<<"org.hotchpotch.annotation">>, <<"title">>]) of
 				{ok, Title} when is_binary(Title) ->
@@ -1867,20 +1871,20 @@ create_empty_file(Store, Name) ->
 				<<"Created by FUSE interface">>,
 				dict:new())),
 		dict:new()),
-	case hotchpotch_broker:create(<<"public.text">>, ?VFS_CC, hotchpotch_broker:get_stores([Store])) of
-		{ok, _CreateErrInfo, {Doc, Handle}} ->
+	case hotchpotch_broker:create(Store, <<"public.text">>, ?VFS_CC) of
+		{ok, Doc, Handle} ->
 			hotchpotch_broker:write(Handle, <<"META">>, 0, hotchpotch_struct:encode(MetaData)),
 			hotchpotch_broker:write(Handle, <<"FILE">>, 0, <<>>),
 			case hotchpotch_broker:commit(Handle) of
-				{ok, _CommitErrInfo, Rev} ->
+				{ok, Rev} ->
 					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};
-				{error, Reason, _CommitErrInfo} ->
+				{error, Reason} ->
 					hotchpotch_broker:close(Handle),
 					{error, Reason}
 			end;
 
-		{error, Reason, _CreateErrInfo} ->
+		{error, Reason} ->
 			{error, Reason}
 	end.
 
@@ -1914,22 +1918,22 @@ create_empty_directory(Store, Name) ->
 			TypeCode = <<"org.hotchpotch.set">>,
 			Hpsd = []
 	end,
-	case hotchpotch_broker:create(TypeCode, ?VFS_CC, hotchpotch_broker:get_stores([Store])) of
-		{ok, _CreateErrInfo, {Doc, Handle}} ->
+	case hotchpotch_broker:create(Store, TypeCode, ?VFS_CC) of
+		{ok, Doc, Handle} ->
 			hotchpotch_broker:write(Handle, <<"META">>, 0,
 				hotchpotch_struct:encode(MetaData2)),
 			hotchpotch_broker:write(Handle, <<"HPSD">>, 0,
 				hotchpotch_struct:encode(Hpsd)),
 			case hotchpotch_broker:commit(Handle) of
-				{ok, _CommitErrInfo, Rev} ->
+				{ok, Rev} ->
 					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};
-				{error, Reason, _CommitErrInfo} ->
+				{error, Reason} ->
 					hotchpotch_broker:close(Handle),
 					{error, Reason}
 			end;
 
-		{error, Reason, _CreateErrInfo} ->
+		{error, Reason} ->
 			{error, Reason}
 	end.
 
