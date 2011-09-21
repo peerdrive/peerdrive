@@ -9,7 +9,6 @@ identified by the hash of its content called RId.
 At the basic level each revision consists of the following:
 
 	- a set of flags
-		- the version of the revision data model (currently only version 0)
 		- sticky flag
 		- possibly other flags in the future
 	- one or more "parts", each identified by a FourCC and containing a blob
@@ -34,7 +33,7 @@ one of the parts.
 To compute the hash of a revision a common binary representation is needed.
 All values are encoded as little endian...
 
-uint32           .. Flags (0..7: Version, 8: Sticky, 9..31: Reserved [0])
+uint32           .. Flags (0: Sticky, 1..31: Reserved [0])
 uint32           .. PartsCount
 	char[4]      .. FourCC
 	uint128      .. SHA1 hash of part content (initial 16 bytes)

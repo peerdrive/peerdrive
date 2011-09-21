@@ -22,7 +22,7 @@
 	put_rev_commit/1]).
 -export([close/1, commit/1, create/3, fork/3, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
-	write/4, suspend/1, get_links/1, set_links/3]).
+	write/4, suspend/1, get_links/1, set_links/3, get_flags/1, set_flags/2]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/2, sync_set_anchor/3, sync_finish/2]).
 -export([hash_revision/1]).
@@ -194,6 +194,14 @@ write(Handle, Part, Offset, Data) ->
 %%       Reason = ecode()
 truncate(Handle, Part, Offset) ->
 	call_store(Handle, {truncate, Part, Offset}).
+
+% {ok, integer()} | {error, Reason}
+get_flags(Handle) ->
+	call_store(Handle, get_flags).
+
+% ok | {error, Reason}
+set_flags(Handle, Flags) ->
+	call_store(Handle, {set_flags, Flags}).
 
 % {ok, binary()} | {error, Reason}
 get_type(Handle) ->

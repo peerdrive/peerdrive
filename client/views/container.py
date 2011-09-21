@@ -626,8 +626,9 @@ class CollectionModel(QtCore.QAbstractTableModel):
 						self.__parent.save()
 					finally:
 						handle.close()
-			except IOError:
-				pass
+			except IOError as error:
+				QtGui.QMessageBox.critical(self.__parent, "Import error",
+					"Error importing '"+path+"': "+str(error))
 		return True
 
 	def __dropLinks(self, links):
@@ -1094,6 +1095,7 @@ class CollectionWidget(widgets.DocumentView):
 			with Connector().peek(srcStore, srcRev) as r:
 				for part in info.parts():
 					w.write(part, r.readAll(part))
+				w.setFlags(r.getFlags())
 			w.commit()
 			destDoc = w.getDoc()
 			# add link

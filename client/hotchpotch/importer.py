@@ -112,7 +112,7 @@ def importFile(store, path, name=""):
 
 			container = struct.Set()
 			for (entry, handle) in handles:
-				container[entry] = struct.DocLink(handle.getDoc())
+				container[entry] = struct.DocLink(store, handle.getDoc())
 
 			return container.create(store, name)
 		finally:
@@ -162,12 +162,13 @@ def overwriteFile(link, path):
 
 
 # returns a commited writer or None
-def importObject(store, uti, spec):
+def importObject(store, uti, spec, flags):
 	try:
 		writer = Connector().create(store, uti, "")
 		try:
 			for (fourcc, data) in spec:
 				writer.writeAll(fourcc, data)
+			writer.setFlags(flags)
 			writer.commit()
 			return writer
 		except:
@@ -177,7 +178,7 @@ def importObject(store, uti, spec):
 	return None
 
 
-def overwriteObject(link, uti, spec):
+def overwriteObject(link, uti, spec, flags):
 	link.update()
 	store = link.store()
 	doc = link.doc()
@@ -189,12 +190,13 @@ def overwriteObject(link, uti, spec):
 		for (fourcc, data) in spec:
 			writer.writeAll(fourcc, data)
 		writer.setType(uti)
+		writer.setFlags(flags)
 		writer.commit()
 
 	return True
 
 
-def importObjectByPath(path, uti, spec, overwrite=False):
+def importObjectByPath(path, uti, spec, overwrite=False, flags=[]):
 	try:
 		# resolve the path
 		(store, container, name) = struct.walkPath(path, True)
@@ -202,12 +204,12 @@ def importObjectByPath(path, uti, spec, overwrite=False):
 			if not overwrite:
 				return False
 			try:
-				return overwriteObject(container[name], uti, spec)
+				return overwriteObject(container[name], uti, spec, flags)
 			except IOError:
 				pass
 
 		# create the object and add to dict
-		handle = importObject(store, uti, spec)
+		handle = importObject(store, uti, spec, flags)
 		if not handle:
 			return False
 		try:

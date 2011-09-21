@@ -17,10 +17,11 @@
 -module(hotchpotch_broker).
 
 -export([
-	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_parents/1,
-	get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2, replicate_rev/4,
-	replicate_doc/4, resume/4, set_type/2, stat/2, suspend/1, forward_doc/6,
-	update/4, close/1, commit/1, write/4, truncate/3, rebase/2, merge/4]).
+	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_flags/1,
+	get_parents/1, get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2,
+	replicate_rev/4, replicate_doc/4, resume/4, set_flags/2, set_type/2,
+	stat/2, suspend/1, forward_doc/6, update/4, close/1, commit/1, write/4,
+	truncate/3, rebase/2, merge/4]).
 
 -include("store.hrl").
 
@@ -247,6 +248,12 @@ write(Handle, Part, Offset, Data) ->
 truncate(Handle, Part, Offset) ->
 	hotchpotch_broker_io:truncate(Handle, Part, Offset).
 
+
+get_flags(Handle) ->
+	hotchpotch_broker_io:get_flags(Handle).
+
+set_flags(Handle, Flags) ->
+	hotchpotch_broker_io:set_flags(Handle, Flags).
 
 get_type(Handle) ->
 	hotchpotch_broker_io:get_type(Handle).

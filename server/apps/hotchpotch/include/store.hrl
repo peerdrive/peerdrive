@@ -14,9 +14,11 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+-define(REV_FLAG_STICKY, 1).
+
 -record(revision,
 	{
-		flags = 0,      % integer(): reserved (0)
+		flags = 0,      % integer()
 		parts = [],     % [{FourCC::binary(), Hash::guid()}]
 		parents = [],   % [Rev::guid()]: Parent revisions
 		mtime = 0,      % interger(): Microseconds since epoch (unix date, UTC)

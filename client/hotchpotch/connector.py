@@ -224,6 +224,10 @@ class _Connector(QtCore.QObject):
 	TRUNC_CNF           = 0x00B1
 	WRITE_REQ           = 0x00C0
 	WRITE_CNF           = 0x00C1
+	GET_FLAGS_REQ       = 0x0210
+	GET_FLAGS_CNF       = 0x0211
+	SET_FLAGS_REQ       = 0x0220
+	SET_FLAGS_CNF       = 0x0221
 	GET_TYPE_REQ        = 0x00D0
 	GET_TYPE_CNF        = 0x00D1
 	SET_TYPE_REQ        = 0x00E0
@@ -809,6 +813,8 @@ class Stat(object):
 	__slots__ = ['__flags', '__parts', '__parents', '__mtime', '__type',
 		'__creator', '__docLinks', '__revLinks']
 
+	FLAG_STICKY = 0
+
 	def __init__(self, packet):
 		# Packet format:
 		#   Flags:32
@@ -858,6 +864,20 @@ class Stat(object):
 		for i in xrange(count):
 			self.__revLinks.append(packet[pos:pos+16])
 			pos += 16
+
+	def flags(self):
+		# lazy flags decomposition
+		if not isinstance(self.__flags, set):
+			flags = self.__flags
+			flagSet = set()
+			i = 0
+			while flags:
+				if flags & 1:
+					flagSet.add(i)
+				flags = flags >> 1
+				i += 1
+			self.__flags = flagSet
+		return self.__flags
 
 	def size(self, part):
 		return self.__parts[part][0]
@@ -1023,6 +1043,31 @@ class Handle(object):
 			self.connector._parseResult(reply)
 		else:
 			raise IOError('Handle expired')
+
+	def getFlags(self):
+		if not self.active:
+			raise IOError('Handle expired')
+		reply = self.connector._rpc(_Connector.GET_FLAGS_REQ,
+			_Connector.GET_FLAGS_CNF, self.handle)
+		result = self.connector._parseResult(reply)
+		(flags,) = struct.unpack_from('>L', result, 0)
+		flagSet = set()
+		i = 0
+		while flags:
+			if flags & 1:
+				flagSet.add(i)
+			flags = flags >> 1
+			i += 1
+		return flagSet
+
+	def setFlags(self, flags):
+		if not self.active:
+			raise IOError('Handle expired')
+		flags = reduce(lambda x,y: x|y, [ 1 << f for f in flags ], 0)
+		request = self.handle + struct.pack('>L', flags)
+		reply = self.connector._rpc(_Connector.SET_FLAGS_REQ,
+			_Connector.SET_FLAGS_CNF, request)
+		self.connector._parseResult(reply)
 
 	def getType(self):
 		if not self.active:

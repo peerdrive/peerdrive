@@ -66,6 +66,9 @@ handle_call({read, Part, Offset, Length}, _From, S) ->
 handle_call(close, _From, S) ->
 	{stop, normal, ok, S};
 
+handle_call(get_flags, _From, S) ->
+	{reply, {ok, (S#state.rev)#revision.flags}, S};
+
 handle_call(get_type, _From, S) ->
 	{reply, {ok, (S#state.rev)#revision.type}, S};
 
@@ -99,6 +102,11 @@ handle_call(commit, _From, S) ->
 handle_call(suspend, _From, S) ->
 	{Reply, S2} = do_commit(fun hotchpotch_file_store:suspend/4, S),
 	{reply, Reply, S2};
+
+handle_call({set_flags, Flags}, _From, S) ->
+	Rev = S#state.rev,
+	NewRev = Rev#revision{flags=Flags},
+	{reply, ok, S#state{rev=NewRev}};
 
 handle_call({set_type, Type}, _From, S) ->
 	Rev = S#state.rev,

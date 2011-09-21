@@ -74,13 +74,10 @@ importObjectByPath(
 			"org.hotchpotch.annotation" : {
 				"title" : "New, empty dictionary",
 				"comment" : "Created from template"
-			},
-			"org.hotchpotch.sync" : {
-				"sticky"  : True,
-				"history" : 31*24*60*60 # 1 month
 			}
 		}))
-	])
+	],
+	flags=[hotchpotch.connector.Stat.FLAG_STICKY])
 importObjectByPath(
 	"sys/templates:Document templates/Collection:",
 	"org.hotchpotch.set",
@@ -90,11 +87,8 @@ importObjectByPath(
 			"org.hotchpotch.annotation" : {
 				"title" : "New, empty collection",
 				"comment" : "Created from template"
-			},
-			"org.hotchpotch.sync" : {
-				"sticky"  : True,
-				"history" : 31*24*60*60 # 1 month
 			}
 		}))
-	])
+	],
+	flags=[hotchpotch.connector.Stat.FLAG_STICKY])
 

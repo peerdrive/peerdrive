@@ -545,15 +545,13 @@ class Dict(object):
 			"org.hotchpotch.annotation" : {
 				"title" : name,
 				"comment" : "<<Created by import>>"
-			},
-			"org.hotchpotch.sync" : {
-				"sticky" : True
 			}
 		}
 		w = connector.Connector().create(store, "org.hotchpotch.dict", "")
 		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(self.__content))
+			w.setFlags([connector.Stat.FLAG_STICKY])
 			w.commit()
 			self.__rev = w.getRev()
 			self.__doc = w.getDoc()
@@ -662,9 +660,6 @@ class Set(object):
 			"org.hotchpotch.annotation" : {
 				"title" : name,
 				"comment" : "<<Created by import>>"
-			},
-			"org.hotchpotch.sync" : {
-				"sticky" : True
 			}
 		}
 		content = [ link.update(self.__store) for (descr, link) in self.__content ]
@@ -672,6 +667,7 @@ class Set(object):
 		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('HPSD', dumps(content))
+			w.setFlags([connector.Stat.FLAG_STICKY])
 			w.commit()
 			self.__rev = w.getRev()
 			self.__doc = w.getDoc()

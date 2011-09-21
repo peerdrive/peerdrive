@@ -44,6 +44,10 @@
 -define(READ_REQ,           16#00A0).
 -define(TRUNC_REQ,          16#00B0).
 -define(WRITE_REQ,          16#00C0).
+-define(GET_FLAGS_REQ,      16#0210).
+-define(GET_FLAGS_CNF,      16#0211).
+-define(SET_FLAGS_REQ,      16#0220).
+-define(SET_FLAGS_CNF,      16#0221).
 -define(GET_TYPE_REQ,       16#00D0).
 -define(SET_TYPE_REQ,       16#00E0).
 -define(GET_PARENTS_REQ,    16#00F0).
@@ -666,6 +670,21 @@ io_loop_process(Handle, Request, ReqData) ->
 			Reply = case hotchpotch_broker:get_type(Handle) of
 				{ok, Type} ->
 					<<(encode_result(ok))/binary, (encode_string(Type))/binary>>;
+				Error ->
+					encode_result(Error)
+			end,
+			{reply, Reply};
+
+		?SET_FLAGS_REQ ->
+			<<Flags:32>> = ReqData,
+			Reply = hotchpotch_broker:set_flags(Handle, Flags),
+			{reply, encode_result(Reply)};
+
+		?GET_FLAGS_REQ ->
+			<<>> = ReqData,
+			Reply = case hotchpotch_broker:get_flags(Handle) of
+				{ok, Flags} ->
+					<<(encode_result(ok))/binary, Flags:32>>;
 				Error ->
 					encode_result(Error)
 			end,

@@ -157,6 +157,68 @@ class TestReadWrite(CommonParts):
 		self.assertTrue(s.mtime() > now - datetime.timedelta(seconds=3))
 
 
+class TestFlags(CommonParts):
+
+	def test_create(self):
+		w = self.create(self.store1)
+		w.commit()
+		self.assertEqual(w.getFlags(), set())
+		rev = w.getRev()
+
+		s = Connector().stat(rev)
+		self.assertEqual(s.flags(), set())
+
+	def test_update_change(self):
+		w = self.create(self.store1)
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
+
+		with Connector().update(self.store1, doc, rev) as w:
+			w.setFlags([0, 3, 8])
+			w.commit()
+			rev = w.getRev()
+
+		s = Connector().stat(rev)
+		self.assertEqual(s.flags(), set([0, 3, 8]))
+
+	def test_update_keep(self):
+		w = self.create(self.store1)
+		w.setFlags([3, 6, 12])
+		w.commit()
+		doc = w.getDoc()
+		rev = w.getRev()
+
+		s = Connector().stat(rev)
+		self.assertEqual(s.flags(), set([3, 6, 12]))
+
+		with Connector().update(self.store1, doc, rev) as w:
+			w.writeAll('FILE', "asdfafd")
+			w.commit()
+			self.assertEqual(w.getFlags(), set([3, 6, 12]))
+			rev = w.getRev()
+
+		s = Connector().stat(rev)
+		self.assertEqual(s.flags(), set([3, 6, 12]))
+
+	def test_fork(self):
+		w = self.create(self.store1)
+		w.setFlags([1, 2, 3])
+		w.commit()
+		rev1 = w.getRev()
+
+		w = self.fork(self.store1, rev1)
+		w.writeAll('FILE', "asdfafd")
+		self.assertEqual(w.getFlags(), set([1, 2, 3]))
+		w.commit()
+		rev2 = w.getRev()
+
+		s = Connector().stat(rev1)
+		self.assertEqual(s.flags(), set([1, 2, 3]))
+		s = Connector().stat(rev2)
+		self.assertEqual(s.flags(), set([1, 2, 3]))
+
+
 class TestCreatorCode(CommonParts):
 
 	def test_create(self):
@@ -584,6 +646,7 @@ class TestReplicator(CommonParts):
 	def test_sticky(self):
 		# create the document which should get replicated
 		w = self.create(self.store1)
+		w.writeAll('FILE', "foobar")
 		w.commit()
 		doc = w.getDoc()
 		rev = w.getRev()

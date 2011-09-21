@@ -33,6 +33,10 @@ Opcode ::=
 	TRUNC_CNF           0x00B1
 	WRITE_REQ           0x00C0
 	WRITE_CNF           0x00C1
+	GET_FLAGS_REQ       0x0210
+	GET_FLAGS_CNF       0x0211
+	SET_FLAGS_REQ       0x0220
+	SET_FLAGS_CNF       0x0221
 	GET_TYPE_REQ        0x00D0
 	GET_TYPE_CNF        0x00D1
 	SET_TYPE_REQ        0x00E0
@@ -115,6 +119,10 @@ Body ::=
 	TRUNC_CNF           Result::ErrorCode
 	WRITE_REQ           Handle::UINT32, Part::UINT32, Offset::UINT64, Data...
 	WRITE_CNF           Result::ErrorCode
+	GET_FLAGS_REQ       Handle::UINT32
+	GET_FLAGS_CNF       Result::ErrorCode, (Flags::UINT32)?
+	SET_FLAGS_REQ       Handle::UINT32, Flags::UINT32
+	SET_FLAGS_CNF       Result::ErrorCode
 	GET_TYPE_REQ        Handle::UINT32
 	GET_TYPE_CNF        Result::ErrorCode, (TypeCode::String)?
 	SET_TYPE_REQ        Handle::UINT32, TypeCode::String

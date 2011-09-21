@@ -235,8 +235,6 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	HPA_TAGS         = ["org.hotchpotch.annotation", "tags"]
 	HPA_COMMENT      = ["org.hotchpotch.annotation", "comment"]
 	HPA_DESCRIPTION  = ["org.hotchpotch.annotation", "description"]
-	SYNC_STICKY      = ["org.hotchpotch.sync", "sticky"]
-	SYNC_HISTROY     = ["org.hotchpotch.sync", "history"]
 
 	STATE_NO_DOC = 1
 	STATE_EDITING = 2
@@ -470,6 +468,19 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			else:
 				return default
 		return item
+
+	def metaDataSetFlag(self, flag, value):
+		oldFlags = self.__flags
+		if value:
+			self.__flags.add(flag)
+		else:
+			self.__flags.discard(flag)
+
+		if self.__flags != oldFlags:
+			self._emitSaveNeeded()
+
+	def metaDataGetFlag(self, flag):
+		return flag in self.__flags
 
 	# === re-implemented inherited methods
 
@@ -724,8 +735,10 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			with Connector().peek(self.__store, self.__rev) as r:
 				try:
 					self.__metaData = struct.loads(self.__store, r.readAll('META'))
+					self.__flags = r.getFlags()
 				except IOError:
 					self.__metaData = { }
+					self.__flags = set()
 				self.__metaDataChanged = False
 				self.docRead(self.__mutable, r)
 				self.__setSaveNeeded(False)
@@ -754,6 +767,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.metaDataSetField(DocumentView.HPA_COMMENT, comment)
 			if self.__metaDataChanged:
 				writer.writeAll('META', struct.dumps(self.__metaData))
+				writer.setFlags(self.__flags)
 			self.docSave(writer)
 		finally:
 			QtGui.QApplication.restoreOverrideCursor()

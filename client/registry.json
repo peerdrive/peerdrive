@@ -28,16 +28,6 @@
 				"key"     : ["org.hotchpotch.annotation", "origin"],
 				"type"    : "string",
 				"display" : "Document origin"
-			},
-			{
-				"key"     : ["org.hotchpotch.sync", "sticky"],
-				"type"    : "bool",
-				"display" : "Sticky"
-			},
-			{
-				"key"     : ["org.hotchpotch.sync", "history"],
-				"type"    : "bool",
-				"display" : "Replicate history"
 			}
 		]
 	},

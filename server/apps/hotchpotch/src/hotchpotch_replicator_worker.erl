@@ -24,8 +24,6 @@
 
 -record(state, {backlog, srcstore, dststore, depth, monitor, count, done}).
 
--define(SYNC_STICKY, [<<"org.hotchpotch.sync">>, <<"sticky">>]).
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -208,7 +206,7 @@ do_replicate_rev(Rev, Backlog, First, S) ->
 						fun(Parent, BackAcc) -> queue:in(Parent, BackAcc) end,
 						Backlog,
 						Parents),
-					S2 = case is_sticky(SrcStore, Rev) of
+					S2 = case is_sticky(Stat) of
 						true ->
 							lists:foldl(
 								fun(Ref, Acc) -> push_doc(Ref, Acc) end,
@@ -237,26 +235,8 @@ do_replicate_rev(Rev, Backlog, First, S) ->
 	end.
 
 
-is_sticky(SrcStore, Rev) ->
-	case hotchpotch_util:read_rev_struct(SrcStore, Rev, <<"META">>) of
-		{ok, MetaData} ->
-			meta_read_bool(MetaData, ?SYNC_STICKY);
-		{error, _Reason} ->
-			false
-	end.
-
-
-meta_read_bool(Meta, []) when is_boolean(Meta) ->
-	Meta;
-meta_read_bool(_Meta, []) ->
-	false;
-meta_read_bool(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
-	case dict:find(Step, Meta) of
-		{ok, Value} -> meta_read_bool(Value, Path);
-		error       -> false
-	end;
-meta_read_bool(_Meta, _Path) ->
-	false.
+is_sticky(#rev_stat{flags=Flags}) ->
+	(Flags band ?REV_FLAG_STICKY) =/= 0.
 
 
 % returns ok | {error, Reason}

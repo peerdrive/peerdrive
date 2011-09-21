@@ -21,7 +21,7 @@ from __future__ import absolute_import
 from PyQt4 import QtCore, QtGui
 import sys, os, subprocess, pickle, datetime, optparse
 
-from ..connector import Watch, Connector
+from ..connector import Watch, Connector, Stat
 from ..registry import Registry
 from .. import struct, fuse
 from .widgets import DocumentView, DocButton
@@ -73,17 +73,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			self.__stickyAct.setStatusTip("Automatically replicate referenced documents")
 			self.__stickyAct.setCheckable(True)
 			self.__stickyAct.setEnabled(False)
-			QtCore.QObject.connect(self.__stickyAct, QtCore.SIGNAL("triggered(bool)"), self.__toggleSticky)
-
-			self.__historySpin = QtGui.QSpinBox(self)
-			self.__historySpin.setMaximum(365)
-			self.__historySpin.setSuffix(" days")
-			self.__historySpin.setStatusTip("Maximum depth (in days) of the replicated documents histories")
-			QtCore.QObject.connect(self.__historySpin, QtCore.SIGNAL("valueChanged(int)"), self.__toggleHistroy)
-
-			self.__historyAct = QtGui.QWidgetAction(self)
-			self.__historyAct.setDefaultWidget(self.__historySpin)
-			self.__historyAct.setEnabled(False)
+			self.__stickyAct.triggered.connect(self.__toggleSticky)
 
 		self.__nameEdit = QtGui.QLineEdit()
 		self.__tagsEdit = QtGui.QLineEdit()
@@ -139,7 +129,6 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		if isEditor:
 			self.repMenu = self.fileMenu.addMenu("Replication")
 			self.repMenu.addAction(self.__stickyAct)
-			self.repMenu.addAction(self.__historyAct)
 		self.fileMenu.addAction(self.__propertiesAct)
 		self.fileMenu.addSeparator();
 		self.fileMenu.addAction(self.__exitAct)
@@ -259,7 +248,6 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__descEdit.setReadOnly(not mutable)
 		if self.__isEditor:
 			self.__stickyAct.setEnabled(mutable)
-			self.__historyAct.setEnabled(mutable and self.__stickyAct.isChecked())
 
 	def __extractMetaData(self):
 		# window icon
@@ -280,9 +268,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.setWindowTitle(name)
 		if self.__isEditor:
 			self.__stickyAct.setEnabled(self.__mutable)
-			self.__stickyAct.setChecked(self.__view.metaDataGetField(DocumentView.SYNC_STICKY, False))
-			self.__historyAct.setEnabled(self.__mutable and self.__stickyAct.isChecked())
-			self.__historySpin.setValue(self.__view.metaDataGetField(DocumentView.SYNC_HISTROY, 0) / (24*60*60))
+			self.__stickyAct.setChecked(self.__view.metaDataGetFlag(Stat.FLAG_STICKY))
 
 	def __getUtiPixmap(self):
 		if self.__utiPixmap is None:
@@ -349,11 +335,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			self.__view.metaDataSetField(DocumentView.HPA_DESCRIPTION, new)
 
 	def __toggleSticky(self, checked):
-		self.__view.metaDataSetField(DocumentView.SYNC_STICKY, checked)
-		self.__historyAct.setEnabled(checked)
-
-	def __toggleHistroy(self, value):
-		self.__view.metaDataSetField(DocumentView.SYNC_HISTROY, value*24*60*60)
+		self.__view.metaDataSetFlag(Stat.FLAG_STICKY, checked)
 
 	def __mergeShow(self):
 		lookup = Connector().lookup_doc(self.__view.doc())

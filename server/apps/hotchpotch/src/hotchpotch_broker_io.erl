@@ -18,7 +18,8 @@
 
 -export([peek/2, create/3, fork/3, update/4, resume/4]).
 -export([read/4, write/4, truncate/3, get_parents/1, merge/4, rebase/2,
-	get_type/1, set_type/2, commit/1, suspend/1, close/1]).
+	get_type/1, set_type/2, commit/1, suspend/1, close/1, get_flags/1,
+	set_flags/2]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public broker operations...
@@ -81,6 +82,12 @@ merge({DstStore, Handle}, SrcStore, Rev, Depth) ->
 
 rebase({_, Handle}, Rev) ->
 	do_rebase(Handle, Rev).
+
+get_flags({_, Handle}) ->
+	hotchpotch_store:get_flags(Handle).
+
+set_flags({_, Handle}, Flags) ->
+	hotchpotch_store:set_flags(Handle, Flags).
 
 get_type({_, Handle}) ->
 	hotchpotch_store:get_type(Handle).

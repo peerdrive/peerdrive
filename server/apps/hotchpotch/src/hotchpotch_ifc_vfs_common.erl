@@ -1890,7 +1890,7 @@ create_empty_file(Store, Name) ->
 
 
 create_empty_directory(Store, Name) ->
-	MetaData1 = dict:store(
+	MetaData = dict:store(
 		<<"org.hotchpotch.annotation">>,
 		dict:store(
 			<<"title">>,
@@ -1900,16 +1900,6 @@ create_empty_directory(Store, Name) ->
 				<<"Created by FUSE interface">>,
 				dict:new())),
 		dict:new()),
-	MetaData2 = dict:store(
-		<<"org.hotchpotch.sync">>,
-		dict:store(
-			<<"sticky">>,
-			true,
-			dict:store(
-				<<"history">>,
-				31*24*60*60, % one month
-				dict:new())),
-		MetaData1),
 	case get(dir_type) of
 		dict ->
 			TypeCode = <<"org.hotchpotch.dict">>,
@@ -1921,9 +1911,10 @@ create_empty_directory(Store, Name) ->
 	case hotchpotch_broker:create(Store, TypeCode, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			hotchpotch_broker:write(Handle, <<"META">>, 0,
-				hotchpotch_struct:encode(MetaData2)),
+				hotchpotch_struct:encode(MetaData)),
 			hotchpotch_broker:write(Handle, <<"HPSD">>, 0,
 				hotchpotch_struct:encode(Hpsd)),
+			hotchpotch_broker:set_flags(Handle, ?REV_FLAG_STICKY),
 			case hotchpotch_broker:commit(Handle) of
 				{ok, Rev} ->
 					% leave handle open, the caller has to close it
