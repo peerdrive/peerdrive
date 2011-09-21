@@ -288,7 +288,7 @@ class WarpItem(connector.Watch):
 	def __update(self):
 		if self.__seen:
 			self.__unwatch()
-			self.__available = len(Connector().lookup_rev(self.__rev)) > 0
+			self.__available = len(Connector().lookupRev(self.__rev)) > 0
 		else:
 			self.__available = False
 			try:
@@ -770,9 +770,9 @@ class BrowserWindow(QtGui.QMainWindow):
 		view = self.__viewHandler.getView()
 		curStore = view.store()
 		if view.doc():
-			allStores = Connector().lookup_doc(view.doc()).stores()
+			allStores = Connector().lookupDoc(view.doc()).stores()
 		else:
-			allStores = Connector().lookup_rev(view.rev())
+			allStores = Connector().lookupRev(view.rev())
 
 		# update store buttons in status bar
 		for store in set(self.__storeButtons) ^ set(allStores):

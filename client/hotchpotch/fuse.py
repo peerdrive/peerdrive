@@ -39,11 +39,11 @@ def findFuseFile(link):
 		return None
 	if isinstance(link, struct.DocLink):
 		uuid = link.doc()
-		stores = Connector().lookup_doc(uuid).stores()
+		stores = Connector().lookupDoc(uuid).stores()
 		dir = ".docs"
 	else:
 		uuid = link.rev()
-		stores = Connector().lookup_rev(uuid)
+		stores = Connector().lookupRev(uuid)
 		dir = ".revs"
 	enum = Connector().enum()
 	for store in stores:

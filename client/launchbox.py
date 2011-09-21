@@ -152,7 +152,7 @@ class DocSyncer(QtCore.QObject, Syncer, Watch):
 		self.__timer.start()
 
 	def __update(self):
-		revs = Connector().lookup_doc(self.__doc).revs()
+		revs = Connector().lookupDoc(self.__doc).revs()
 		if self._rev in revs:
 			return
 		# FIXME: prompt if more than one version
@@ -614,11 +614,11 @@ class ReplicationWidget(QtGui.QFrame):
 class SyncRules(object):
 	def __init__(self):
 		self.sysStore = Connector().enum().sysStore()
-		sysRev = Connector().lookup_doc(self.sysStore).rev(self.sysStore)
+		sysRev = Connector().lookupDoc(self.sysStore).rev(self.sysStore)
 		with Connector().peek(self.sysStore, sysRev) as r:
 			root = struct.loads(self.sysStore, r.readAll('HPSD'))
 			self.syncDoc = root["syncrules"].doc()
-		self.syncRev = Connector().lookup_doc(self.syncDoc).rev(self.sysStore)
+		self.syncRev = Connector().lookupDoc(self.syncDoc).rev(self.sysStore)
 		with Connector().peek(self.sysStore, self.syncRev) as r:
 			self.rules = struct.loads(self.sysStore, r.readAll('HPSD'))
 

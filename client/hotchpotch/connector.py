@@ -309,13 +309,13 @@ class _Connector(QtCore.QObject):
 		reply = self._rpc(_Connector.ENUM_REQ, _Connector.ENUM_CNF)
 		return Enum(reply)
 
-	def lookup_doc(self, doc, stores=[]):
+	def lookupDoc(self, doc, stores=[]):
 		_checkUuid(doc)
 		request = doc + _encodeUuidList(stores)
 		reply = self._rpc(_Connector.LOOKUP_DOC_REQ, _Connector.LOOKUP_DOC_CNF, request)
 		return Lookup(reply)
 
-	def lookup_rev(self, rev, stores=[]):
+	def lookupRev(self, rev, stores=[]):
 		_checkUuid(rev)
 		request = rev + _encodeUuidList(stores)
 		reply = self._rpc(_Connector.LOOKUP_REV_REQ, _Connector.LOOKUP_REV_CNF, request)

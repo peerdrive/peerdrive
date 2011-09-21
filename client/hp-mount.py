@@ -24,7 +24,7 @@ if len(sys.argv) == 2:
 	if Connector().mount(sys.argv[1]):
 		sid = Connector().enum().doc(sys.argv[1])
 		try:
-			rev = Connector().lookup_doc(sid, [sid]).rev(sid)
+			rev = Connector().lookupDoc(sid, [sid]).rev(sid)
 			with Connector().peek(sid, rev) as r:
 				metaData = struct.loads(sid, r.readAll('META'))
 				name = metaData["org.hotchpotch.annotation"]["title"]

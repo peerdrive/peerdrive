@@ -261,7 +261,7 @@ class CollectionEntry(Watch):
 		# determine revision
 		needMerge = False
 		if isinstance(self.__link, struct.DocLink):
-			revisions = Connector().lookup_doc(self.__link.doc()).revs()
+			revisions = Connector().lookupDoc(self.__link.doc()).revs()
 			if len(revisions) == 0:
 				return
 			elif len(revisions) > 1:
@@ -1035,17 +1035,17 @@ class CollectionWidget(widgets.DocumentView):
 	def __addReplicateActions(self, menu, link):
 		c = Connector()
 		try:
-			allVolumes = set(c.lookup_rev(self.rev()))
+			allVolumes = set(c.lookupRev(self.rev()))
 			if isinstance(link, struct.DocLink):
-				lookup = c.lookup_doc(link.doc())
+				lookup = c.lookupDoc(link.doc())
 				curVolumes = set(lookup.stores())
 				try:
 					for rev in lookup.revs():
-						curVolumes = curVolumes & set(c.lookup_rev(rev, curVolumes))
+						curVolumes = curVolumes & set(c.lookupRev(rev, curVolumes))
 				except IOError:
 					curVolumes = set()
 			else:
-				curVolumes = set(c.lookup_rev(link.rev()))
+				curVolumes = set(c.lookupRev(link.rev()))
 		except IOError:
 			return
 
@@ -1056,7 +1056,7 @@ class CollectionWidget(widgets.DocumentView):
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
 			try:
-				rev = c.lookup_doc(store).rev(store)
+				rev = c.lookupDoc(store).rev(store)
 				with c.peek(rev) as r:
 					metaData = struct.loads(r.readAll('META'))
 					try:

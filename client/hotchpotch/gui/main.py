@@ -282,9 +282,9 @@ class MainWindow(QtGui.QMainWindow, Watch):
 	def __updateStoreButtons(self):
 		curStore = self.__view.store()
 		if self.__view.doc():
-			allStores = Connector().lookup_doc(self.__view.doc()).stores()
+			allStores = Connector().lookupDoc(self.__view.doc()).stores()
 		else:
-			allStores = Connector().lookup_rev(self.__view.rev())
+			allStores = Connector().lookupRev(self.__view.rev())
 
 		if not allStores:
 			self.close()
@@ -338,7 +338,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__view.metaDataSetFlag(Stat.FLAG_STICKY, checked)
 
 	def __mergeShow(self):
-		lookup = Connector().lookup_doc(self.__view.doc())
+		lookup = Connector().lookupDoc(self.__view.doc())
 		revs = set(lookup.revs())
 		if self.__view.rev() in lookup.preRevs():
 			revs -= set(Connector().stat(self.__view.rev()).parents())
@@ -382,11 +382,11 @@ class MainWindow(QtGui.QMainWindow, Watch):
 				pass
 			self.__delMenu.addSeparator()
 		if doc:
-			lookup = Connector().lookup_doc(doc)
+			lookup = Connector().lookupDoc(doc)
 			stores = lookup.stores()
 			delFun = lambda store: Connector().deleteDoc(store, doc, lookup.rev(store))
 		else:
-			stores = Connector().lookup_rev(rev)
+			stores = Connector().lookupRev(rev)
 			delFun = lambda store: Connector().deleteRev(store, rev)
 		stores = [(self.__getStoreName(store), store) for store in stores]
 		stores = filter(lambda(name,store):name, stores)
@@ -431,7 +431,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 	def __getStoreName(self, store):
 		try:
-			rev = Connector().lookup_doc(store).rev(store)
+			rev = Connector().lookupDoc(store).rev(store)
 			with Connector().peek(store, rev) as r:
 				try:
 					metaData = struct.loads(store, r.readAll('META'))

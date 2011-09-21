@@ -66,7 +66,7 @@ class DocButton(QtGui.QToolButton, Watch):
 		if self.__doc:
 			self.setEnabled(True)
 			try:
-				rev = Connector().lookup_doc(self.__doc, [self.__store]).rev(self.__store)
+				rev = Connector().lookupDoc(self.__doc, [self.__store]).rev(self.__store)
 				docIcon = None
 				with Connector().peek(self.__store, rev) as r:
 					try:
@@ -113,7 +113,7 @@ class DocButton(QtGui.QToolButton, Watch):
 	def __showContextMenu(self, pos):
 		type = None
 		executables = []
-		rev = Connector().lookup_doc(self.__doc, [self.__store]).rev(self.__store)
+		rev = Connector().lookupDoc(self.__doc, [self.__store]).rev(self.__store)
 		try:
 			type = Connector().stat(rev, [self.__store]).type()
 			executables = Registry().getExecutables(type)
@@ -552,7 +552,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__updateRev()
 
 	def __updateRev(self):
-		avail = len(Connector().lookup_rev(self.__rev, [self.__store])) > 0
+		avail = len(Connector().lookupRev(self.__rev, [self.__store])) > 0
 		if (self.__state == DocumentView.STATE_NO_DOC) and avail:
 			self.__setState(DocumentView.STATE_EDITING)
 			self.__emitNewRev()
@@ -561,7 +561,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	def __updateDoc(self):
 		if self.__state == DocumentView.STATE_NO_DOC:
-			l = Connector().lookup_doc(self.__doc, [self.__store])
+			l = Connector().lookupDoc(self.__doc, [self.__store])
 			revs = l.revs()
 			preRevs = filter(self.__filterPreRev, l.preRevs())
 			if (len(revs) == 1) and (preRevs == []):
@@ -573,8 +573,8 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 				self.__setState(DocumentView.STATE_CHOOSE_START)
 		elif self.__state == DocumentView.STATE_EDITING:
 			# are we gone?
-			stores = Connector().lookup_rev(self.__rev)
-			info = Connector().lookup_doc(self.__doc)
+			stores = Connector().lookupRev(self.__rev)
+			info = Connector().lookupDoc(self.__doc)
 			if self.__store in (set(stores) & set(info.stores())):
 				# still there, make a preliminary commit if necessary
 				self.__saveFile('<<Internal checkpoint>>')
@@ -637,7 +637,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__update()
 
 	def __updateDocStartRev(self):
-		l = Connector().lookup_doc(self.__doc, [self.__store])
+		l = Connector().lookupDoc(self.__doc, [self.__store])
 		revs = l.revs()
 		preRevs = filter(self.__filterPreRev, l.preRevs())
 		if (len(revs) == 1) and (preRevs == []):
@@ -653,7 +653,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		found = []
 		target = self.__rev
 		try:
-			lookup = Connector().lookup_doc(self.__doc, [self.__store])
+			lookup = Connector().lookupDoc(self.__doc, [self.__store])
 			depth = Connector().stat(target).mtime() - datetime.timedelta(days=1)
 		except IOError:
 			# seems we're gone
@@ -696,7 +696,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def __updateDocRebase(self):
 		# get current revs on all stores where the preliminary versions exists
 		heads = set()
-		lookup = Connector().lookup_doc(self.__doc, [self.__store])
+		lookup = Connector().lookupDoc(self.__doc, [self.__store])
 		for store in lookup.stores(self.__rev):
 			heads.add(lookup.rev(store))
 
@@ -704,7 +704,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__chooseOverwriteWidget.updateChoices(lookup, heads)
 
 	def __updateDocSaveAs(self):
-		info = Connector().lookup_doc(self.__doc, [self.__store])
+		info = Connector().lookupDoc(self.__doc, [self.__store])
 		if ((not self.__preliminary and (self.__rev in info.revs())) or
 			(self.__preliminary and (self.__rev in info.preRevs()))):
 			# document appeared again
@@ -780,7 +780,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	def __getStoreName(self, store):
 		try:
-			rev = Connector().lookup_doc(store).rev(store)
+			rev = Connector().lookupDoc(store).rev(store)
 			with Connector().peek(store, rev) as r:
 				try:
 					metaData = struct.loads(store, r.readAll('META'))
@@ -795,7 +795,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		options = []
 		for rev in revs:
 			revDate = Connector().stat(rev, stores).mtime()
-			revStores = Connector().lookup_rev(rev, stores)
+			revStores = Connector().lookupRev(rev, stores)
 			storeNames = reduce(
 				lambda x,y: x+", "+y,
 				[self.__getStoreName(s) for s in revStores])
@@ -860,7 +860,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			mergeReaders.append(Connector().peek(self.__store, self.__rev))
 			mergeReaders.append(Connector().peek(mergeStore, mergeRev))
 
-			with Connector().peek(Connector().lookup_rev(baseRev)[0], baseRev) as baseReader:
+			with Connector().peek(Connector().lookupRev(baseRev)[0], baseRev) as baseReader:
 				with Connector().update(self.__store, self.__doc, self.__rev, self.__creator) as writer:
 					writer.setType(uti)
 					writer.merge(mergeStore, mergeRev)

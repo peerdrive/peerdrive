@@ -77,7 +77,7 @@ class CommonParts(unittest.TestCase):
 			Connector().replicateDoc(leadStore, doc, store)
 
 		# verify the common document on all stores
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev])
 		for store in stores:
 			self.assertTrue(store in l.stores())
@@ -374,7 +374,7 @@ class TestFastForward(CommonParts):
 	def test_nop(self):
 		(doc, rev) = self.createCommon([self.store1, self.store2])
 		Connector().forwardDoc(self.store1, doc, rev, rev, self.store2)
-		self.assertEqual(Connector().lookup_doc(doc).revs(), [rev])
+		self.assertEqual(Connector().lookupDoc(doc).revs(), [rev])
 
 	def test_forward(self):
 		(doc, rev1) = self.createCommon([self.store1, self.store2])
@@ -383,7 +383,7 @@ class TestFastForward(CommonParts):
 			w.commit()
 			rev2 = w.getRev()
 		Connector().forwardDoc(self.store2, doc, rev1, rev2, self.store1)
-		self.assertEqual(Connector().lookup_doc(doc).revs(), [rev2])
+		self.assertEqual(Connector().lookupDoc(doc).revs(), [rev2])
 
 	def test_not_updatable(self):
 		(doc, rev1) = self.createCommon([self.store1, self.store2])
@@ -393,8 +393,8 @@ class TestFastForward(CommonParts):
 			rev2 = w.getRev()
 		self.assertRaises(IOError, Connector().forwardDoc, self.store1,
 			doc, rev1, rev2, self.store2)
-		self.assertEqual(Connector().lookup_doc(doc).rev(self.store1), rev2)
-		self.assertEqual(Connector().lookup_doc(doc).rev(self.store2), rev1)
+		self.assertEqual(Connector().lookupDoc(doc).rev(self.store1), rev2)
+		self.assertEqual(Connector().lookupDoc(doc).rev(self.store2), rev1)
 
 
 class TestPreRevs(CommonParts):
@@ -416,7 +416,7 @@ class TestPreRevs(CommonParts):
 	def test_suspend(self):
 		(doc, rev1, rev2) = self.createSuspendDoc()
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev2])
 		self.assertRevContent(self.store1, rev1, {'FILE' : 'ok'})
@@ -435,7 +435,7 @@ class TestPreRevs(CommonParts):
 			w.suspend()
 			rev_s2 = w.getRev()
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev2])
 		self.assertEqual(len(l.preRevs()), 2)
 		self.assertTrue(rev_s1 in l.preRevs())
@@ -455,7 +455,7 @@ class TestPreRevs(CommonParts):
 		(doc, rev1, rev2) = self.createSuspendDoc()
 		self.assertRaises(IOError, Connector().resume, self.store1, doc, rev1)
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev2])
 		self.assertRevContent(self.store1, rev1, {'FILE' : 'ok'})
@@ -467,13 +467,13 @@ class TestPreRevs(CommonParts):
 		with Connector().resume(self.store1, doc, rev2) as w:
 			w.writeAll('FILE', 'Hail to the king, baby!')
 
-			l = Connector().lookup_doc(doc)
+			l = Connector().lookupDoc(doc)
 			self.assertEqual(l.revs(), [rev1])
 			self.assertEqual(l.preRevs(), [rev2])
 
 			w.close()
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev2])
 		self.assertRevContent(self.store1, rev1, {'FILE' : 'ok'})
@@ -487,7 +487,7 @@ class TestPreRevs(CommonParts):
 			w.commit()
 			rev3 = w.getRev()
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev3])
 		self.assertEqual(len(l.preRevs()), 0)
 
@@ -503,7 +503,7 @@ class TestPreRevs(CommonParts):
 			w.suspend()
 			rev3 = w.getRev()
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev3])
 
@@ -521,7 +521,7 @@ class TestPreRevs(CommonParts):
 			w.suspend()
 			rev3 = w.getRev()
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev1])
 		self.assertEqual(l.preRevs(), [rev3])
 
@@ -547,7 +547,7 @@ class TestPreRevs(CommonParts):
 		self.assertRaises(IOError, Connector().forget, self.store1, doc, rev1)
 		Connector().forget(self.store1, doc, rev_s1)
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev2])
 		self.assertEqual(l.preRevs(), [rev_s2])
 
@@ -573,7 +573,7 @@ class TestGarbageCollector(CommonParts):
 		# perform a GC cycle
 		self.gc(self.store1)
 
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [])
 		self.assertEqual(l.preRevs(), [])
 		self.assertRaises(IOError, Connector().stat, rev)
@@ -587,7 +587,7 @@ class TestGarbageCollector(CommonParts):
 			# perform a GC cycle
 			self.gc(self.store1)
 
-			l = Connector().lookup_doc(doc)
+			l = Connector().lookupDoc(doc)
 			self.assertEqual(l.revs(), [rev])
 			self.assertEqual(l.preRevs(), [])
 
@@ -609,7 +609,7 @@ class TestGarbageCollector(CommonParts):
 			# perform a GC cycle
 			self.gc(self.store1)
 
-			l = Connector().lookup_doc(doc2)
+			l = Connector().lookupDoc(doc2)
 			self.assertEqual(l.revs(), [rev2])
 			self.assertEqual(l.preRevs(), [])
 			Connector().stat(rev2)
@@ -631,14 +631,14 @@ class TestGarbageCollector(CommonParts):
 			# w2 is closed now, w1 still open, should prevent gc
 			self.gc(self.store1)
 
-			l = Connector().lookup_doc(doc1)
+			l = Connector().lookupDoc(doc1)
 			self.assertEqual(l.revs(), [rev1])
 			self.assertEqual(l.preRevs(), [])
-			self.assertEqual(Connector().lookup_rev(rev1), [self.store1])
-			l = Connector().lookup_doc(doc2)
+			self.assertEqual(Connector().lookupRev(rev1), [self.store1])
+			l = Connector().lookupDoc(doc2)
 			self.assertEqual(l.revs(), [rev2])
 			self.assertEqual(l.preRevs(), [])
-			self.assertEqual(Connector().lookup_rev(rev2), [self.store1])
+			self.assertEqual(Connector().lookupRev(rev2), [self.store1])
 
 
 class TestReplicator(CommonParts):
@@ -673,13 +673,13 @@ class TestReplicator(CommonParts):
 		self.assertTrue(watch2.waitForWatch())
 
 		# check doc (with rev) to exist on all stores
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(l.revs(), [rev])
 		self.assertEqual(len(l.stores(rev)), 2)
 		self.assertTrue(self.store1 in l.stores(rev))
 		self.assertTrue(self.store2 in l.stores(rev))
 
-		l = Connector().lookup_rev(rev)
+		l = Connector().lookupRev(rev)
 		self.assertEqual(len(l), 2)
 		self.assertTrue(self.store1 in l)
 		self.assertTrue(self.store2 in l)
@@ -736,11 +736,11 @@ class TestSynchronization(CommonParts):
 			rev3 = w.getRev()
 
 		# verify the merge condition
-		l = Connector().lookup_rev(rev1)
+		l = Connector().lookupRev(rev1)
 		self.assertTrue(self.store1 in l)
 		self.assertTrue(self.store2 in l)
-		self.assertEqual(Connector().lookup_rev(rev2), [self.store1])
-		self.assertEqual(Connector().lookup_rev(rev3), [self.store2])
+		self.assertEqual(Connector().lookupRev(rev2), [self.store1])
+		self.assertEqual(Connector().lookupRev(rev3), [self.store2])
 		self.assertEqual(Connector().stat(rev2).parents(), [rev1])
 		self.assertEqual(Connector().stat(rev3).parents(), [rev1])
 
@@ -755,7 +755,7 @@ class TestSynchronization(CommonParts):
 		while True:
 			watch.reset()
 			self.assertTrue(watch.waitForWatch())
-			l = Connector().lookup_doc(doc)
+			l = Connector().lookupDoc(doc)
 			if len(l.revs()) == 1:
 				break
 
@@ -792,7 +792,7 @@ class TestSynchronization(CommonParts):
 		self.assertFalse(watch.waitForWatch(1))
 
 		# check that doc is not synced
-		l = Connector().lookup_doc(doc)
+		l = Connector().lookupDoc(doc)
 		self.assertEqual(len(l.revs()), 2)
 		self.assertEqual(l.rev(self.store1), rev1)
 		self.assertEqual(l.rev(self.store2), rev2)
@@ -847,10 +847,10 @@ class TestSynchronization(CommonParts):
 		self.assertTrue(rev2 in s.parents())
 
 		# all revs on all stores?
-		l = Connector().lookup_rev(rev1)
+		l = Connector().lookupRev(rev1)
 		self.assertTrue(self.store1 in l)
 		self.assertTrue(self.store2 in l)
-		l = Connector().lookup_rev(rev2)
+		l = Connector().lookupRev(rev2)
 		self.assertTrue(self.store1 in l)
 		self.assertTrue(self.store2 in l)
 

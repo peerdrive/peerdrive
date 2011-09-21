@@ -154,7 +154,7 @@ class DocLink(object):
 	def update(self, newStore=None):
 		if newStore:
 			self.__store = newStore
-		l = connector.Connector().lookup_doc(self.__doc, [self.__store])
+		l = connector.Connector().lookupDoc(self.__doc, [self.__store])
 		if self.__store in l.stores():
 			self.__rev = l.rev(self.__store)
 		else:

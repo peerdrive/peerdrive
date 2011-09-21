@@ -55,11 +55,11 @@ class PropertiesDialog(QtGui.QDialog):
 		if self.__doc:
 			isDoc = True
 			banner = "document"
-			stores = Connector().lookup_doc(self.__doc).stores()
+			stores = Connector().lookupDoc(self.__doc).stores()
 		else:
 			isDoc = False
 			banner = "revision"
-			stores = Connector().lookup_rev(self.__rev)
+			stores = Connector().lookupRev(self.__rev)
 
 		if len(stores) == 0:
 			QtGui.QMessageBox.warning(self, 'Missing document', 'The requested document was not found on any store.')
@@ -102,7 +102,7 @@ class PropertiesDialog(QtGui.QDialog):
 
 	def __switchStore(self, store):
 		if self.__doc:
-			self.__rev = Connector().lookup_doc(self.__doc, [store]).rev(store)
+			self.__rev = Connector().lookupDoc(self.__doc, [store]).rev(store)
 
 		self.__store = store
 		self.__revTab.load(store, self.__rev)

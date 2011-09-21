@@ -45,7 +45,7 @@ for store in enum.allStores():
 	if enum.isMounted(store):
 		sid = enum.doc(store)
 		try:
-			rev = Connector().lookup_doc(sid, [sid]).rev(sid)
+			rev = Connector().lookupDoc(sid, [sid]).rev(sid)
 			with Connector().peek(sid, rev) as r:
 				metaData = struct.loads(sid, r.readAll('META'))
 				realName = metaData["org.hotchpotch.annotation"]["title"]
