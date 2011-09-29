@@ -27,6 +27,7 @@ Requirements
 
 * Python 2.6
     * PyQt >=4.6.x
+    * protobuf
     * magic (optional)
 * Erlang >= R14A
     * rebar (http://github.com/basho/rebar)

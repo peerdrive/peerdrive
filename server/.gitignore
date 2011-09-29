@@ -1,6 +1,8 @@
-/rel/hotchpotch/
-/stores/
-/snapshots/
-/vfs/
+/apps/hotchpotch/include/hotchpotch_client_pb.hrl
+/deps/
 /hotchpotch.config
 /rebar.config
+/rel/hotchpotch/
+/snapshots/
+/stores/
+/vfs/

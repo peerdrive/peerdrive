@@ -49,8 +49,8 @@ for store in enum.allStores():
 			with Connector().peek(sid, rev) as r:
 				metaData = struct.loads(sid, r.readAll('META'))
 				realName = metaData["org.hotchpotch.annotation"]["title"]
-		except:
-			realName = "unknwown"
+		except IOError as err:
+			realName = "unknwown (" + str(err) + ")"
 		print "%s  %s %s  %s [%s]" % (state, store.ljust(8), sid.encode("hex"), realName, mountName)
 	else:
 		print "%s  %s [%s]" % (state, store.ljust(8), mountName)

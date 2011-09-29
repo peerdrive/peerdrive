@@ -2,3 +2,11 @@
 {erl_opts, [debug_info, warn_obsolete_guard, warnings_as_errors]}.
 
 {sub_dirs, ["apps/hotchpotch", "rel"]}.
+
+{deps, [
+	{
+		protobuffs,
+		"0.6.*",
+		{git, "git://github.com/freke/erlang_protobuffs.git", {branch, "master"}}
+	}
+]}.

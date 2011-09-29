@@ -98,7 +98,6 @@ lookup_rev(Rev, Stores) ->
 %%       Rev = guid()
 %%       SearchStores = [pid()]
 %%       Stat = #rev_stat{}
-%%       ErrInfo = [{Store::guid(), Reason::ecode()}]
 %%       Reason = ecode()
 stat(Rev, SearchStores) ->
 	try
@@ -158,7 +157,7 @@ create(Store, Type, Creator) ->
 %% will not show up in the store until a successful commit.
 %%
 %% @spec fork(Store, StartRev, Creator) -> Result
-%%       Result = {ok, Doc, Handle} | {error, ErrInfo}
+%%       Result = {ok, Doc, Handle} | {error, Reason}
 %%       Store = pid()
 %%       StartRev, Doc = guid()
 %%       Creator = binary()
@@ -178,7 +177,7 @@ fork(Store, StartRev, Creator) ->
 %% @spec update(Store, Doc, StartRev, Creator) -> Result
 %%       Result = {ok, Handle} | {error, Reason}
 %%       Doc, StartRev = guid()
-%%       Creator = keep | binary()
+%%       Creator = undefined | binary()
 %%       Store = pid()
 %%       Handle = handle()
 %%       Reason = ecode()
@@ -196,7 +195,7 @@ update(Store, Doc, StartRev, Creator) ->
 %% @spec resume(Store, Doc, PreRev, Creator) -> Result
 %%       Result = {ok, Handle} | {error, Reason}
 %%       Doc, PreRev = guid()
-%%       Creator = keep | binary()
+%%       Creator = undefined | binary()
 %%       Store = pid()
 %%       Handle = handle()
 %%       Reason = ecode()
@@ -392,7 +391,7 @@ delete_rev(Store, Rev) ->
 %% are searched on SrcStore and replicated to the documents store.
 %%
 %% @spec forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) -> Result
-%%       Result = {ok, ErrInfo, Rev} | {error, Reason, ErrInfo}
+%%       Result = ok | {error, Reason}
 %%       Doc, Rev = guid()
 %%       Depth = interger()
 %%       Stores = [guid()]
@@ -436,7 +435,7 @@ replicate_doc(SrcStore, Doc, DstStore, Depth) ->
 %%       Rev = guid()
 %%       Depth = integer()
 %%       SrcStore, DstStore = guid()
-%%       Result = {ok, ErrInfo} | {error, Reason}
+%%       Result = ok | {error, Reason}
 replicate_rev(SrcStore, Rev, DstStore, Depth) ->
 	hotchpotch_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Depth).
 

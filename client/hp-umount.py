@@ -21,7 +21,11 @@ import sys
 from hotchpotch import Connector
 
 if len(sys.argv) == 2:
-	Connector().unmount(sys.argv[1])
+	try:
+		Connector().unmount(sys.argv[1])
+	except IOError as error:
+		print "Unmount failed: " + str(error)
+		sys.exit(2)
 else:
 	print "Usage: hp-umount.py <id>"
 	sys.exit(1)

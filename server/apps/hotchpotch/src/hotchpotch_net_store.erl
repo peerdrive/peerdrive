@@ -139,16 +139,16 @@ handle_call({fork, Doc, StartRev, Creator}, From, S) ->
 
 handle_call({update, Doc, StartRev, Creator}, From, S) ->
 	BinCreator = case Creator of
-		keep -> <<>>;
-		_    -> Creator
+		undefined -> <<>>;
+		_ -> Creator
 	end,
 	Body = <<Doc/binary, StartRev/binary, (encode_string(BinCreator))/binary>>,
 	req_start_io(?UPDATE_REQ, Body, From, S);
 
 handle_call({resume, Doc, PreRev, Creator}, From, S) ->
 	BinCreator = case Creator of
-		keep -> <<>>;
-		_    -> Creator
+		undefined -> <<>>;
+		_ -> Creator
 	end,
 	Body = <<Doc/binary, PreRev/binary, (encode_string(BinCreator))/binary>>,
 	req_start_io(?RESUME_REQ, Body, From, S);

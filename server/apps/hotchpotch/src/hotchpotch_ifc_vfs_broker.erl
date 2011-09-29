@@ -187,7 +187,7 @@ do_open_doc(Store, Doc, true, S) ->
 				{ok, Rev, IsPre, false, S2} ->
 					StoreReply = if
 						IsPre ->
-							hotchpotch_broker:resume(Store, Doc, Rev, keep);
+							hotchpotch_broker:resume(Store, Doc, Rev, undefined);
 						true ->
 							hotchpotch_broker:update(Store, Doc, Rev, ?VFS_CC)
 					end,
@@ -272,7 +272,7 @@ do_close({rw, Store, Doc}=FuseHandle, S) ->
 							{{ok, Rev}, S3};
 
 						keep ->
-							case hotchpotch_broker:resume(Store, Doc, Rev, keep) of
+							case hotchpotch_broker:resume(Store, Doc, Rev, undefined) of
 								{ok, NewHandle} ->
 									S4 = reopen_handle(FuseHandle, Rev, NewHandle, S3),
 									{{ok, Rev}, mark_open(Store, Doc, S4)};
@@ -543,7 +543,7 @@ commit_prerevs(Expired) ->
 
 
 commit_prerev(Store, Doc, Rev) ->
-	case hotchpotch_broker:resume(Store, Doc, Rev, keep) of
+	case hotchpotch_broker:resume(Store, Doc, Rev, undefined) of
 		{ok, Handle} ->
 			try
 				commit_prerev_loop(Store, Doc, Handle)

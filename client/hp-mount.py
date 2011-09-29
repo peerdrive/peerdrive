@@ -21,19 +21,21 @@ import sys
 from hotchpotch import Connector, struct
 
 if len(sys.argv) == 2:
-	if Connector().mount(sys.argv[1]):
-		sid = Connector().enum().doc(sys.argv[1])
-		try:
-			rev = Connector().lookupDoc(sid, [sid]).rev(sid)
-			with Connector().peek(sid, rev) as r:
-				metaData = struct.loads(sid, r.readAll('META'))
-				name = metaData["org.hotchpotch.annotation"]["title"]
-		except:
-			name = "Unnamed store"
-		print "Mounted '%s'" % name
-	else:
-		print "Mount failed"
+	try:
+		Connector().mount(sys.argv[1])
+	except IOError as error:
+		print "Mount failed: " + str(error)
 		sys.exit(2)
+
+	sid = Connector().enum().doc(sys.argv[1])
+	try:
+		rev = Connector().lookupDoc(sid, [sid]).rev(sid)
+		with Connector().peek(sid, rev) as r:
+			metaData = struct.loads(sid, r.readAll('META'))
+			name = metaData["org.hotchpotch.annotation"]["title"]
+	except IOError:
+		name = "Unnamed store"
+	print "Mounted '%s'" % name
 else:
 	print "Usage: hp-mount.py <id>"
 	sys.exit(1)

@@ -259,7 +259,7 @@ latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
 	if
 		FromStat#rev_stat.mtime >= ToStat#rev_stat.mtime ->
 			% worker will pick up again the new merge rev
-			Handle = throws(hotchpotch_broker:update(From, Doc, FromRev, keep)),
+			Handle = throws(hotchpotch_broker:update(From, Doc, FromRev, undefined)),
 			try
 				throws(hotchpotch_broker:merge(Handle, To, ToRev, 0)),
 				throws(hotchpotch_broker:commit(Handle))

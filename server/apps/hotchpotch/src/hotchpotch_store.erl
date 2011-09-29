@@ -135,7 +135,7 @@ fork(Store, StartRev, Creator) ->
 %%        Store = pid()
 %%        Handle = pid()
 %%        Doc, StartRev = guid()
-%%        Creator = keep | binary()
+%%        Creator = undefined | binary()
 %%        Reason = ecode()
 update(Store, Doc, StartRev, Creator) ->
 	call_store(Store, {update, Doc, StartRev, Creator}).
@@ -151,7 +151,7 @@ update(Store, Doc, StartRev, Creator) ->
 %%        Store = pid()
 %%        Handle = pid()
 %%        Doc, PreRev = guid()
-%%        Creator = keep | binary()
+%%        Creator = undefined | binary()
 %%        Reason = ecode()
 resume(Store, Doc, PreRev, Creator) ->
 	call_store(Store, {resume, Doc, PreRev, Creator}).
@@ -279,7 +279,7 @@ suspend(Handle) ->
 %% @spec close(Handle) -> ok
 %%       Handle = pid()
 close(Handle) ->
-	call_store(Handle, close).
+	call_store(Handle, close, ok).
 
 %% @doc Remove a pending preliminary revision from a document.
 %%

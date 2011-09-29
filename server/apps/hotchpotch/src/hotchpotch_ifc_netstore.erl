@@ -355,7 +355,7 @@ do_update(NetHandle, RetPath, Body, Store) ->
 	{Rev, Body2} = parse_uuid(Body1),
 	{Creator, <<>>} = parse_string(Body2),
 	RealCreator = case Creator of
-		<<>> -> keep;
+		<<>> -> undefined;
 		_    -> Creator
 	end,
 	case hotchpotch_store:update(Store, Doc, Rev, RealCreator) of
@@ -374,7 +374,7 @@ do_resume(NetHandle, RetPath, Body, Store) ->
 	{Rev, Body2} = parse_uuid(Body1),
 	{Creator, <<>>} = parse_string(Body2),
 	RealCreator = case Creator of
-		<<>> -> keep;
+		<<>> -> undefined;
 		_    -> Creator
 	end,
 	case hotchpotch_store:resume(Store, Doc, Rev, RealCreator) of

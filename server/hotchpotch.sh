@@ -2,8 +2,14 @@
 
 set -e
 
-ERL="erl -pa $PWD/apps/hotchpotch/ebin"
+cd `dirname "$0"`
+ERL="erl -pa apps/hotchpotch/ebin"
 STORES="stores/user/ stores/sys/"
+
+# add fetched dependencies
+for i in deps/*; do
+	ERL="$ERL -pa $i/ebin"
+done
 
 # some special options
 if [ $# -gt 0 ]; then

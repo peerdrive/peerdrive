@@ -405,8 +405,8 @@ do_update(DId, StartRId, Creator, User, S) ->
 			case ets:lookup(RevTbl, StartRId) of
 				[{_, Rev}] ->
 					NewCreator = case Creator of
-						keep -> Rev#revision.creator;
-						_    -> Creator
+						undefined -> Rev#revision.creator;
+						_ -> Creator
 					end,
 					NewRev = Rev#revision{
 						parents = [StartRId],
@@ -432,8 +432,8 @@ do_resume(DId, PreRId, Creator, User, S) ->
 					case ets:lookup(RevTbl, PreRId) of
 						[{_, Rev}] ->
 							NewCreator = case Creator of
-								keep -> Rev#revision.creator;
-								_    -> Creator
+								undefined -> Rev#revision.creator;
+								_ -> Creator
 							end,
 							NewRev = Rev#revision{creator = NewCreator},
 							start_writer(DId, PreRId, NewRev, User, S);
