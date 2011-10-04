@@ -14,13 +14,13 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(hotchpotch_net_store_importer).
+-module(hotchpotch_net_store_put).
 -behaviour(gen_server).
 
--export([start_link/4]).
+-export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, handle, mps}).
+-record(state, {store, handle}).
 
 -include("store.hrl").
 -include("netstore.hrl").
@@ -30,8 +30,8 @@
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Store, Handle, MaxPacketSize, User) ->
-	State = #state{store=Store, handle=Handle, mps=MaxPacketSize},
+start_link(Store, Handle, User) ->
+	State = #state{store=Store, handle=Handle},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -43,10 +43,6 @@ init({State, User}) ->
 	link(User),
 	{ok, State}.
 
-
-handle_call({put_part, Part, Data}, _From, S) ->
-	Reply = do_put_part(Part, Data, S),
-	{reply, Reply, S};
 
 handle_call(commit, _From, S) ->
 	Reply = do_commit(S),
@@ -80,31 +76,16 @@ terminate(_, _)          -> ok.
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_put_part(Part, Data, #state{handle=Handle, mps=MaxPS} = S) when size(Data) =< MaxPS ->
-	Req = hotchpotch_netstore_pb:encode_putrevpartreq(
-		#putrevpartreq{handle=Handle, part=Part, data=Data}),
-	relay_request(?PUT_REV_PART_MSG, Req, S);
-
-do_put_part(Part, Data, #state{mps=MaxPS} = S) ->
-	<<Chunk1:MaxPS/binary, Chunk2/binary>> = Data,
-	case do_put_part(Part, Chunk1, S) of
-		ok ->
-			do_put_part(Part, Chunk2, S);
-		Error ->
-			Error
-	end.
-
-
 do_commit(#state{handle=Handle} = S) ->
-	Req = hotchpotch_netstore_pb:encode_putrevcommitreq(
-		#putrevcommitreq{handle=Handle}),
-	relay_request(?PUT_REV_COMMIT_MSG, Req, S).
+	Req = hotchpotch_netstore_pb:encode_putdoccommitreq(
+		#putdoccommitreq{handle=Handle}),
+	relay_request(?PUT_DOC_COMMIT_MSG, Req, S).
 
 
 do_abort(#state{handle=Handle} = S) ->
-	Req = hotchpotch_netstore_pb:encode_putrevabortreq(
-		#putrevabortreq{handle=Handle}),
-	relay_request(?PUT_REV_ABORT_MSG, Req, S).
+	Req = hotchpotch_netstore_pb:encode_putdocabortreq(
+		#putdocabortreq{handle=Handle}),
+	relay_request(?PUT_DOC_ABORT_MSG, Req, S).
 
 
 relay_request(Request, Body, #state{store=Store}) ->

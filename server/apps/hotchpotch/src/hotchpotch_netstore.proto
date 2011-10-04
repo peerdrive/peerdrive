@@ -1,0 +1,476 @@
+
+message ErrorCnf {
+	enum ErrorCode {
+		econflict = 0;
+		e2big = 1;
+		eacces = 2;
+		eaddrinuse = 3;
+		eaddrnotavail = 4;
+		eadv = 5;
+		eafnosupport = 6;
+		eagain = 7;
+		ealign = 8;
+		ealready = 9;
+		ebade = 10;
+		ebadf = 11;
+		ebadfd = 12;
+		ebadmsg = 13;
+		ebadr = 14;
+		ebadrpc = 15;
+		ebadrqc = 16;
+		ebadslt = 17;
+		ebfont = 18;
+		ebusy = 19;
+		echild = 20;
+		echrng = 21;
+		ecomm = 22;
+		econnaborted = 23;
+		econnrefused = 24;
+		econnreset = 25;
+		edeadlk = 26;
+		edeadlock = 27;
+		edestaddrreq = 28;
+		edirty = 29;
+		edom = 30;
+		edotdot = 31;
+		edquot = 32;
+		eduppkg = 33;
+		eexist = 34;
+		efault = 35;
+		efbig = 36;
+		ehostdown = 37;
+		ehostunreach = 38;
+		eidrm = 39;
+		einit = 40;
+		einprogress = 41;
+		eintr = 42;
+		einval = 43;
+		eio = 44;
+		eisconn = 45;
+		eisdir = 46;
+		eisnam = 47;
+		elbin = 48;
+		el2hlt = 49;
+		el2nsync = 50;
+		el3hlt = 51;
+		el3rst = 52;
+		elibacc = 53;
+		elibbad = 54;
+		elibexec = 55;
+		elibmax = 56;
+		elibscn = 57;
+		elnrng = 58;
+		eloop = 59;
+		emfile = 60;
+		emlink = 61;
+		emsgsize = 62;
+		emultihop = 63;
+		enametoolong = 64;
+		enavail = 65;
+		enet = 66;
+		enetdown = 67;
+		enetreset = 68;
+		enetunreach = 69;
+		enfile = 70;
+		enoano = 71;
+		enobufs = 72;
+		enocsi = 73;
+		enodata = 74;
+		enodev = 75;
+		enoent = 76;
+		enoexec = 77;
+		enolck = 78;
+		enolink = 79;
+		enomem = 80;
+		enomsg = 81;
+		enonet = 82;
+		enopkg = 83;
+		enoprotoopt = 84;
+		enospc = 85;
+		enosr = 86;
+		enosym = 87;
+		enosys = 88;
+		enotblk = 89;
+		enotconn = 90;
+		enotdir = 91;
+		enotempty = 92;
+		enotnam = 93;
+		enotsock = 94;
+		enotsup = 95;
+		enotty = 96;
+		enotuniq = 97;
+		enxio = 98;
+		eopnotsupp = 99;
+		eperm = 100;
+		epfnosupport = 101;
+		epipe = 102;
+		eproclim = 103;
+		eprocunavail = 104;
+		eprogmismatch = 105;
+		eprogunavail = 106;
+		eproto = 107;
+		eprotonosupport = 108;
+		eprototype = 109;
+		erange = 110;
+		erefused = 111;
+		eremchg = 112;
+		eremdev = 113;
+		eremote = 114;
+		eremoteio = 115;
+		eremoterelease = 116;
+		erofs = 117;
+		erpcmismatch = 118;
+		erremote = 119;
+		eshutdown = 120;
+		esocktnosupport = 121;
+		espipe = 122;
+		esrch = 123;
+		esrmnt = 124;
+		estale = 125;
+		esuccess = 126;
+		etime = 127;
+		etimedout = 128;
+		etoomanyrefs = 129;
+		etxtbsy = 130;
+		euclean = 131;
+		eunatch = 132;
+		eusers = 133;
+		eversion = 134;
+		ewouldblock = 135;
+		exdev = 136;
+		exfull = 137;
+		nxdomain = 138;
+	}
+
+	required ErrorCode error = 1;
+}
+
+message InitReq {
+	required uint32 major = 1;
+	required uint32 minor = 2;
+	required string store = 3;
+}
+
+message InitCnf {
+	required uint32 major = 1;
+	required uint32 minor = 2;
+	optional uint32 max_packet_size = 3 [default = 4096];
+	required bytes sid = 4;
+}
+
+message StatfsCnf {
+	required uint32 bsize = 1;
+	required uint64 blocks = 2;
+	required uint64 bfree = 3;
+	required uint64 bavail = 4;
+}
+
+message LookupReq {
+	required bytes doc = 1;
+}
+
+message LookupCnf {
+	required bytes rev = 1;
+	repeated bytes pre_revs = 2;
+}
+
+message ContainsReq {
+	required bytes rev = 1;
+}
+
+message ContainsCnf {
+	required bool found = 1;
+}
+
+message StatReq {
+	required bytes rev = 1;
+}
+
+message StatCnf {
+	message Part {
+		required bytes fourcc = 1;
+		required uint64 size = 2;
+		required bytes pid = 3;
+	}
+
+	required uint32 flags = 1;
+	repeated Part parts = 2;
+	repeated bytes parents = 3;
+	required uint64 mtime = 4;
+	required string type_code = 5;
+	required string creator_code = 6;
+	repeated bytes doc_links = 7;
+	repeated bytes rev_links = 8;
+}
+
+message PeekReq {
+	required bytes rev = 1;
+}
+
+message PeekCnf {
+	required uint32 handle = 1;
+}
+
+message CreateReq {
+	required string type_code = 1;
+	required string creator_code = 2;
+}
+
+message CreateCnf {
+	required uint32 handle = 1;
+	required bytes doc = 2;
+}
+
+message ForkReq {
+	required bytes rev = 1;
+	required string creator_code = 2;
+}
+
+message ForkCnf {
+	required uint32 handle = 1;
+	required bytes doc = 2;
+}
+
+message UpdateReq {
+	required bytes doc = 1;
+	required bytes rev = 2;
+	optional string creator_code = 3;
+}
+
+message UpdateCnf {
+	required uint32 handle = 1;
+}
+
+message ResumeReq {
+	required bytes doc = 1;
+	required bytes rev = 2;
+	optional string creator_code = 3;
+}
+
+message ResumeCnf {
+	required uint32 handle = 1;
+}
+
+message ReadReq {
+	required uint32 handle = 1;
+	required bytes part = 2;
+	required uint64 offset = 3;
+	required uint32 length = 4;
+}
+
+message ReadCnf {
+	required bytes data = 1;
+}
+
+message TruncReq {
+	required uint32 handle = 1;
+	required bytes part = 2;
+	required uint64 offset = 3;
+}
+
+message WriteReq {
+	required uint32 handle = 1;
+	required bytes part = 2;
+	required uint64 offset = 3;
+	required bytes data = 4;
+}
+
+message GetFlagsReq {
+	required uint32 handle = 1;
+}
+
+message GetFlagsCnf {
+	required uint32 flags = 1;
+}
+
+message SetFlagsReq {
+	required uint32 handle = 1;
+	required uint32 flags = 2;
+
+}
+
+message GetTypeReq {
+	required uint32 handle = 1;
+}
+
+message GetTypeCnf {
+	required string type_code = 1;
+}
+
+message SetTypeReq {
+	required uint32 handle = 1;
+	required string type_code = 2;
+}
+
+message GetParentsReq {
+	required uint32 handle = 1;
+}
+
+message GetParentsCnf {
+	repeated bytes parents = 1;
+}
+
+message SetParentsReq {
+	required uint32 handle = 1;
+	repeated bytes parents = 2;
+}
+
+message GetLinksReq {
+	required uint32 handle = 1;
+}
+
+message GetLinksCnf {
+	repeated bytes doc_links = 1;
+	repeated bytes rev_links = 2;
+}
+
+message SetLinksReq {
+	required uint32 handle = 1;
+	repeated bytes doc_links = 2;
+	repeated bytes rev_links = 3;
+}
+
+message CommitReq {
+	required uint32 handle = 1;
+}
+
+message CommitCnf {
+	required bytes rev = 1;
+}
+
+message SuspendReq {
+	required uint32 handle = 1;
+}
+
+message SuspendCnf {
+	required bytes rev = 1;
+}
+
+message CloseReq {
+	required uint32 handle = 1;
+}
+
+message ForgetReq {
+	required bytes doc = 1;
+	required bytes rev = 2;
+}
+
+message DeleteDocReq {
+	required bytes doc = 1;
+	required bytes rev = 2;
+}
+
+message DeleteRevReq {
+	required bytes rev = 1;
+}
+
+message PutDocStartReq {
+	required bytes doc = 1;
+	required bytes rev = 2;
+}
+
+message PutDocStartCnf {
+	required uint32 handle = 1;
+}
+
+message PutDocCommitReq {
+	required uint32 handle = 1;
+}
+
+message PutDocAbortReq {
+	required uint32 handle = 1;
+}
+
+message ForwardDocStartReq {
+	required bytes doc = 1;
+	repeated bytes rev_path = 2;
+}
+
+message ForwardDocStartCnf {
+	optional uint32 handle = 1;
+	repeated bytes missing_revs = 2;
+}
+
+message ForwardDocCommitReq {
+	required uint32 handle = 1;
+}
+
+message ForwardDocAbortReq {
+	required uint32 handle = 1;
+}
+
+message PutRevStartReq {
+	message Revision {
+		message Part {
+			required bytes fourcc = 1;
+			required bytes pid = 2;
+		}
+
+		required uint32 flags = 1;
+		repeated Part parts = 2;
+		repeated bytes parents = 3;
+		required uint64 mtime = 4;
+		required string type_code = 5;
+		required string creator_code = 6;
+		repeated bytes doc_links = 7;
+		repeated bytes rev_links = 8;
+	}
+
+	required bytes rid = 1;
+	required Revision revision = 2;
+}
+
+message PutRevStartCnf {
+	optional uint32 handle = 1;
+	repeated bytes missing_parts = 2;
+}
+
+message PutRevPartReq {
+	required uint32 handle = 1;
+	required bytes part = 2;
+	required bytes data = 3;
+}
+
+message PutRevCommitReq {
+	required uint32 handle = 1;
+}
+
+message PutRevAbortReq {
+	required uint32 handle = 1;
+}
+
+message SyncGetChangesReq {
+	required bytes peer_sid = 1;
+}
+
+message SyncGetChangesCnf {
+	message Item {
+		required bytes doc = 1;
+		required uint64 seq_num = 2;
+	}
+
+	repeated Item backlog = 1;
+}
+
+message SyncSetAnchorReq {
+	required bytes peer_sid = 1;
+	required uint64 seq_num = 2;
+}
+
+message SyncFinishReq {
+	required bytes peer_sid = 1;
+}
+
+message TriggerInd {
+	enum Event {
+		trigger_add_rev = 0;
+		trigger_rm_rev = 1;
+		trigger_add_doc = 2;
+		trigger_rm_doc = 3;
+		trigger_mod_doc = 4;
+	}
+
+	required Event event = 1;
+	required bytes element = 2;
+}
+

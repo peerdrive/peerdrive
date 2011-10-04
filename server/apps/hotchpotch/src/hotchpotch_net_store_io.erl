@@ -26,6 +26,7 @@
 
 -include("store.hrl").
 -include("netstore.hrl").
+-include("hotchpotch_netstore_pb.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -64,14 +65,17 @@ handle_call(get_parents, _From, S) ->
 handle_call(get_links, _From, S) ->
 	{reply, do_get_links(S), S};
 
+handle_call(get_flags, _From, S) ->
+	{reply, do_get_flags(S), S};
+
 handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, do_truncate(Part, Offset, S), S};
 
-handle_call({commit, Mtime}, _From, S) ->
-	{reply, do_commit(Mtime, S), S};
+handle_call(commit, _From, S) ->
+	{reply, do_commit(S), S};
 
-handle_call({suspend, Mtime}, _From, S) ->
-	{reply, do_suspend(Mtime, S), S};
+handle_call(suspend, _From, S) ->
+	{reply, do_suspend(S), S};
 
 handle_call({set_type, Type}, _From, S) ->
 	{reply, do_set_type(Type, S), S};
@@ -80,7 +84,10 @@ handle_call({set_links, DocLinks, RevLinks}, _From, S) ->
 	{reply, do_set_links(DocLinks, RevLinks, S), S};
 
 handle_call({set_parents, Parents}, _From, S) ->
-	{reply, do_set_parents(Parents, S), S}.
+	{reply, do_set_parents(Parents, S), S};
+
+handle_call({set_flags, Flags}, _From, S) ->
+	{reply, do_set_flags(Flags, S), S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
@@ -107,8 +114,15 @@ code_change(_, State, _) -> {ok, State}.
 
 do_read(Part, Offset, Length, #state{mps=MaxPS} = S) when Length =< MaxPS ->
 	#state{handle=Handle, store=Store} = S,
-	ReqBody = <<Handle:32, Part/binary, Offset:64, Length:32>>,
-	hotchpotch_net_store:io_request(Store, ?READ_REQ, ReqBody);
+	Req = hotchpotch_netstore_pb:encode_readreq(#readreq{
+		handle=Handle, part=Part, offset=Offset, length=Length}),
+	case hotchpotch_net_store:io_request(Store, ?READ_MSG, Req) of
+		{ok, Cnf} ->
+			#readcnf{data=Data} = hotchpotch_netstore_pb:decode_readcnf(Cnf),
+			{ok, Data};
+		{error, _} = Error ->
+			Error
+	end;
 
 do_read(Part, Offset, Length, S) ->
 	do_read_loop(Part, Offset, Length, S, <<>>).
@@ -139,8 +153,9 @@ do_read_loop(Part, Offset, Length, #state{mps=MaxPS} = S, Acc) ->
 
 do_write(Part, Offset, Data, #state{mps=MaxPS} = S) when size(Data) =< MaxPS ->
 	#state{handle=Handle, store=Store} = S,
-	ReqBody = <<Handle:32, Part/binary, Offset:64, Data/binary>>,
-	case hotchpotch_net_store:io_request(Store, ?WRITE_REQ, ReqBody) of
+	Req = hotchpotch_netstore_pb:encode_writereq(#writereq{
+		handle=Handle, part=Part, offset=Offset, data=Data}),
+	case hotchpotch_net_store:io_request(Store, ?WRITE_MSG, Req) of
 		{ok, <<>>} -> ok;
 		Error      -> Error
 	end;
@@ -155,37 +170,48 @@ do_write(Part, Offset, Data, #state{mps=MaxPS} = S) ->
 	end.
 
 
-do_close(S) ->
-	relay_request_noresult(?CLOSE_REQ, <<>>, S).
+do_close(#state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_closereq(#closereq{handle=Handle}),
+	simple_request(?CLOSE_MSG, Req, S).
 
 
-do_get_type(S) ->
-	case relay_request(?GET_TYPE_REQ, <<>>, S) of
-		{ok, Body} ->
-			{Type, <<>>} = parse_string(Body),
-			{ok, Type};
-
-		Error ->
-			Error
-	end.
-
-
-do_get_parents(S) ->
-	case relay_request(?GET_PARENTS_REQ, <<>>, S) of
-		{ok, Body} ->
-			{Parents, <<>>} = parse_uuid_list(Body),
-			{ok, Parents};
+do_get_type(#state{handle=Handle, store=Store}) ->
+	Req = hotchpotch_netstore_pb:encode_gettypereq(#gettypereq{handle=Handle}),
+	case hotchpotch_net_store:io_request(Store, ?GET_TYPE_MSG, Req) of
+		{ok, Cnf} ->
+			#gettypecnf{type_code=Type} =
+				hotchpotch_netstore_pb:decode_gettypecnf(Cnf),
+			{ok, unicode:characters_to_binary(Type)};
 
 		Error ->
 			Error
 	end.
 
 
-do_get_links(S) ->
-	case relay_request(?GET_LINKS_REQ, <<>>, S) of
-		{ok, Body} ->
-			{DocLinks, Body1} = parse_list_32(fun(B) -> parse_uuid(B) end, Body),
-			{RevLinks, <<>>} = parse_list_32(fun(B) -> parse_uuid(B) end, Body1),
+do_get_parents(#state{handle=Handle, store=Store}) ->
+	Req = hotchpotch_netstore_pb:encode_getparentsreq(#getparentsreq{handle=Handle}),
+	case hotchpotch_net_store:io_request(Store, ?GET_PARENTS_MSG, Req) of
+		{ok, Cnf} ->
+			try
+				#getparentscnf{parents=Parents} =
+					hotchpotch_netstore_pb:decode_getparentscnf(Cnf),
+				?ASSERT_GUID_LIST(Parents),
+				{ok, Parents}
+			catch
+				throw:Error -> Error
+			end;
+
+		Error ->
+			Error
+	end.
+
+
+do_get_links(#state{handle=Handle, store=Store}) ->
+	Req = hotchpotch_netstore_pb:encode_getlinksreq(#getlinksreq{handle=Handle}),
+	case hotchpotch_net_store:io_request(Store, ?GET_LINKS_MSG, Req) of
+		{ok, Cnf} ->
+			#getlinkscnf{doc_links=DocLinks, rev_links=RevLinks} =
+				hotchpotch_netstore_pb:decode_getlinkscnf(Cnf),
 			{ok, {DocLinks, RevLinks}};
 
 		Error ->
@@ -193,14 +219,30 @@ do_get_links(S) ->
 	end.
 
 
-do_truncate(Part, Offset, S) ->
-	relay_request_noresult(?TRUNC_REQ, <<Part/binary, Offset:64>>, S).
+do_get_flags(#state{handle=Handle, store=Store}) ->
+	Req = hotchpotch_netstore_pb:encode_getflagsreq(#getflagsreq{handle=Handle}),
+	case hotchpotch_net_store:io_request(Store, ?GET_FLAGS_MSG, Req) of
+		{ok, Cnf} ->
+			#getflagscnf{flags=Flags} =
+				hotchpotch_netstore_pb:decode_getflagscnf(Cnf),
+			{ok, Flags};
+
+		Error ->
+			Error
+	end.
 
 
-do_commit(Mtime, S) ->
-	case relay_request(?COMMIT_REQ, <<Mtime:64>>, S) of
-		{ok, Body} ->
-			{Rev, <<>>} = parse_uuid(Body),
+do_truncate(Part, Offset, #state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_truncreq(#truncreq{handle=Handle,
+		part=Part, offset=Offset}),
+	simple_request(?TRUNC_MSG, Req, S).
+
+
+do_commit(#state{store=Store, handle=Handle}) ->
+	Req = hotchpotch_netstore_pb:encode_commitreq(#commitreq{handle=Handle}),
+	case hotchpotch_net_store:io_request(Store, ?COMMIT_MSG, Req) of
+		{ok, Cnf} ->
+			#commitcnf{rev=Rev} = hotchpotch_netstore_pb:decode_commitcnf(Cnf),
 			{ok, Rev};
 
 		Error ->
@@ -208,10 +250,11 @@ do_commit(Mtime, S) ->
 	end.
 
 
-do_suspend(Mtime, S) ->
-	case relay_request(?SUSPEND_REQ, <<Mtime:64>>, S) of
-		{ok, Body} ->
-			{Rev, <<>>} = parse_uuid(Body),
+do_suspend(#state{store=Store, handle=Handle}) ->
+	Req = hotchpotch_netstore_pb:encode_suspendreq(#suspendreq{handle=Handle}),
+	case hotchpotch_net_store:io_request(Store, ?SUSPEND_MSG, Req) of
+		{ok, Cnf} ->
+			#suspendcnf{rev=Rev} = hotchpotch_netstore_pb:decode_suspendcnf(Cnf),
 			{ok, Rev};
 
 		Error ->
@@ -219,28 +262,32 @@ do_suspend(Mtime, S) ->
 	end.
 
 
-do_set_type(Type, S) ->
-	relay_request_noresult(?SET_TYPE_REQ, encode_string(Type), S).
+do_set_type(Type, #state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_settypereq(#settypereq{handle=Handle,
+		type_code=Type}),
+	simple_request(?SET_TYPE_MSG, Req, S).
 
 
-do_set_links(DocLinks, RevLinks, S) ->
-	Body = <<
-		(encode_list_32(DocLinks))/binary,
-		(encode_list_32(RevLinks))/binary
-	>>,
-	relay_request_noresult(?SET_LINKS_REQ, Body, S).
+do_set_links(DocLinks, RevLinks, #state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_setlinksreq(#setlinksreq{handle=Handle,
+		doc_links=DocLinks, rev_links=RevLinks}),
+	simple_request(?SET_LINKS_MSG, Req, S).
 
 
-do_set_parents(Parents, S) ->
-	relay_request_noresult(?SET_PARENTS_REQ, encode_list(Parents), S).
+do_set_parents(Parents, #state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_setparentsreq(#setparentsreq{
+		handle=Handle, parents=Parents}),
+	simple_request(?SET_PARENTS_MSG, Req, S).
 
 
-relay_request(Request, Body, #state{handle=Handle, store=Store}) ->
-	hotchpotch_net_store:io_request(Store, Request, <<Handle:32, Body/binary>>).
+do_set_flags(Flags, #state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_setflagsreq(#setflagsreq{handle=Handle,
+		flags=Flags}),
+	simple_request(?SET_FLAGS_MSG, Req, S).
 
 
-relay_request_noresult(Request, Body, S) ->
-	case relay_request(Request, Body, S) of
+simple_request(Request, Body, #state{store=Store}) ->
+	case hotchpotch_net_store:io_request(Store, Request, Body) of
 		{ok, <<>>} -> ok;
 		Error      -> Error
 	end.

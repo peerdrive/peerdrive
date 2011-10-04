@@ -24,6 +24,7 @@
 
 -include("store.hrl").
 -include("netstore.hrl").
+-include("hotchpotch_netstore_pb.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -44,11 +45,11 @@ init({State, User}) ->
 
 
 handle_call(commit, _From, S) ->
-	Reply = relay_request(?FF_DOC_COMMIT_REQ, S),
+	Reply = do_commit(S),
 	{stop, normal, Reply, S};
 
 handle_call(abort, _From, S) ->
-	relay_request(?FF_DOC_ABORT_REQ, S),
+	do_abort(S),
 	{stop, normal, ok, S}.
 
 
@@ -57,7 +58,7 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 		Store ->
 			{stop, {orphaned, Reason}, S};
 		_User ->
-			relay_request(?FF_DOC_ABORT_REQ, S),
+			do_abort(S),
 			{stop, normal, S}
 	end.
 
@@ -75,8 +76,20 @@ terminate(_, _)          -> ok.
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-relay_request(Request, #state{handle=Handle, store=Store}) ->
-	case hotchpotch_net_store:io_request(Store, Request, <<Handle:32>>) of
+do_commit(#state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_forwarddoccommitreq(
+		#forwarddoccommitreq{handle=Handle}),
+	relay_request(?FF_DOC_COMMIT_MSG, Req, S).
+
+
+do_abort(#state{handle=Handle} = S) ->
+	Req = hotchpotch_netstore_pb:encode_forwarddocabortreq(
+		#forwarddocabortreq{handle=Handle}),
+	relay_request(?FF_DOC_ABORT_MSG, Req, S).
+
+
+relay_request(Request, Body, #state{store=Store}) ->
+	case hotchpotch_net_store:io_request(Store, Request, Body) of
 		{ok, <<>>} -> ok;
 		Error      -> Error
 	end.

@@ -1,4 +1,5 @@
 /apps/hotchpotch/include/hotchpotch_client_pb.hrl
+/apps/hotchpotch/include/hotchpotch_netstore_pb.hrl
 /deps/
 /hotchpotch.config
 /rebar.config

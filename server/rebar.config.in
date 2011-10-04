@@ -7,6 +7,6 @@
 	{
 		protobuffs,
 		"0.6.*",
-		{git, "git://github.com/freke/erlang_protobuffs.git", {branch, "master"}}
+		{git, "git://github.com/jkloetzke/erlang_protobuffs.git", {branch, "fix-repeated-default"}}
 	}
 ]}.

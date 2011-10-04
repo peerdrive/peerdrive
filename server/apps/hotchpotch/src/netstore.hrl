@@ -14,82 +14,58 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--define(INIT_REQ,             16#0000).
--define(INIT_CNF,             16#0001).
--define(STATFS_REQ,           16#0010).
--define(STATFS_CNF,           16#0011).
--define(LOOKUP_REQ,           16#0020).
--define(LOOKUP_CNF,           16#0021).
--define(CONTAINS_REQ,         16#0030).
--define(CONTAINS_CNF,         16#0031).
--define(STAT_REQ,             16#0040).
--define(STAT_CNF,             16#0041).
--define(PEEK_REQ,             16#0050).
--define(PEEK_CNF,             16#0051).
--define(CREATE_REQ,           16#0060).
--define(CREATE_CNF,           16#0061).
--define(FORK_REQ,             16#0070).
--define(FORK_CNF,             16#0071).
--define(UPDATE_REQ,           16#0080).
--define(UPDATE_CNF,           16#0081).
--define(RESUME_REQ,           16#0090).
--define(RESUME_CNF,           16#0091).
--define(READ_REQ,             16#00A0).
--define(READ_CNF,             16#00A1).
--define(TRUNC_REQ,            16#00B0).
--define(TRUNC_CNF,            16#00B1).
--define(WRITE_REQ,            16#00C0).
--define(WRITE_CNF,            16#00C1).
--define(GET_TYPE_REQ,         16#00D0).
--define(GET_TYPE_CNF,         16#00D1).
--define(SET_TYPE_REQ,         16#00E0).
--define(SET_TYPE_CNF,         16#00E1).
--define(GET_PARENTS_REQ,      16#00F0).
--define(GET_PARENTS_CNF,      16#00F1).
--define(SET_PARENTS_REQ,      16#0100).
--define(SET_PARENTS_CNF,      16#0101).
--define(GET_LINKS_REQ,        16#0110).
--define(GET_LINKS_CNF,        16#0111).
--define(SET_LINKS_REQ,        16#0120).
--define(SET_LINKS_CNF,        16#0121).
--define(COMMIT_REQ,           16#0130).
--define(COMMIT_CNF,           16#0131).
--define(SUSPEND_REQ,          16#0140).
--define(SUSPEND_CNF,          16#0141).
--define(CLOSE_REQ,            16#0150).
--define(CLOSE_CNF,            16#0151).
--define(FORGET_REQ,           16#0160).
--define(FORGET_CNF,           16#0161).
--define(DELETE_DOC_REQ,       16#0170).
--define(DELETE_DOC_CNF,       16#0171).
--define(DELETE_REV_REQ,       16#0180).
--define(DELETE_REV_CNF,       16#0181).
--define(FF_DOC_START_REQ,     16#0190).
--define(FF_DOC_START_CNF,     16#0191).
--define(FF_DOC_COMMIT_REQ,    16#01A0).
--define(FF_DOC_COMMIT_CNF,    16#01A1).
--define(FF_DOC_ABORT_REQ,     16#01B0).
--define(FF_DOC_ABORT_CNF,     16#01B1).
--define(PUT_DOC_REQ,          16#01C0).
--define(PUT_DOC_CNF,          16#01C1).
--define(PUT_REV_START_REQ,    16#01D0).
--define(PUT_REV_START_CNF,    16#01D1).
--define(PUT_REV_PART_REQ,     16#01E0).
--define(PUT_REV_PART_CNF,     16#01E1).
--define(PUT_REV_ABORT_REQ,    16#01F0).
--define(PUT_REV_ABORT_CNF,    16#01F1).
--define(PUT_REV_COMMIT_REQ,   16#0200).
--define(PUT_REV_COMMIT_CNF,   16#0201).
--define(SYNC_GET_CHANGES_REQ, 16#0210).
--define(SYNC_GET_CHANGES_CNF, 16#0211).
--define(SYNC_SET_ANCHOR_REQ,  16#0220).
--define(SYNC_SET_ANCHOR_CNF,  16#0221).
--define(SYNC_FINISH_REQ,      16#0230).
--define(SYNC_FINISH_CNF,      16#0231).
+-define(FLAG_REQ, 0).
+-define(FLAG_CNF, 1).
+-define(FLAG_IND, 2).
+-define(FLAG_RSP, 3).
 
--define(ADD_REV_IND,          16#0002).
--define(REM_REV_IND,          16#0012).
--define(ADD_DOC_IND,          16#0022).
--define(REM_DOC_IND,          16#0032).
--define(MOD_DOC_IND,          16#0042).
+-define(ERROR_MSG,            16#000).
+-define(INIT_MSG,             16#001).
+-define(STATFS_MSG,           16#002).
+-define(LOOKUP_MSG,           16#003).
+-define(CONTAINS_MSG,         16#004).
+-define(STAT_MSG,             16#005).
+-define(PEEK_MSG,             16#006).
+-define(CREATE_MSG,           16#007).
+-define(FORK_MSG,             16#008).
+-define(UPDATE_MSG,           16#009).
+-define(RESUME_MSG,           16#00a).
+-define(READ_MSG,             16#00b).
+-define(TRUNC_MSG,            16#00c).
+-define(WRITE_MSG,            16#00d).
+-define(GET_FLAGS_MSG,        16#00e).
+-define(SET_FLAGS_MSG,        16#00f).
+-define(GET_TYPE_MSG,         16#010).
+-define(SET_TYPE_MSG,         16#011).
+-define(GET_PARENTS_MSG,      16#012).
+-define(SET_PARENTS_MSG,      16#013).
+-define(GET_LINKS_MSG,        16#014).
+-define(SET_LINKS_MSG,        16#015).
+-define(COMMIT_MSG,           16#016).
+-define(SUSPEND_MSG,          16#017).
+-define(CLOSE_MSG,            16#018).
+-define(FORGET_MSG,           16#019).
+-define(DELETE_DOC_MSG,       16#01a).
+-define(DELETE_REV_MSG,       16#01b).
+-define(PUT_DOC_START_MSG,    16#01c).
+-define(PUT_DOC_COMMIT_MSG,   16#01d).
+-define(PUT_DOC_ABORT_MSG,    16#01e).
+-define(FF_DOC_START_MSG,     16#01f).
+-define(FF_DOC_COMMIT_MSG,    16#020).
+-define(FF_DOC_ABORT_MSG,     16#021).
+-define(PUT_REV_START_MSG,    16#022).
+-define(PUT_REV_PART_MSG,     16#023).
+-define(PUT_REV_ABORT_MSG,    16#024).
+-define(PUT_REV_COMMIT_MSG,   16#025).
+-define(SYNC_GET_CHANGES_MSG, 16#026).
+-define(SYNC_SET_ANCHOR_MSG,  16#027).
+-define(SYNC_FINISH_MSG,      16#028).
+-define(TRIGGER_MSG,          16#029).
+
+
+-define(ASSERT_GUID(G), ((is_binary(G) and (size(G) == 16)) orelse
+                         begin throw({error, einval}), false end)).
+-define(ASSERT_GUID_LIST(L), lists:all(fun(G) -> ?ASSERT_GUID(G) end, L)).
+-define(ASSERT_PART(G), ((is_binary(G) and (size(G) == 4)) orelse
+                         begin throw({error, einval}), false end)).
 

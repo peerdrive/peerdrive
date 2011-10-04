@@ -599,7 +599,7 @@ io_loop_process(Handle, Request, ReqData) ->
 
 		?SUSPEND_MSG ->
 			{ok, Rev} = check(hotchpotch_broker:suspend(Handle)),
-			hotchpotch_client_pb:encode_commitcnf(#commitcnf{rev=Rev});
+			hotchpotch_client_pb:encode_suspendcnf(#suspendcnf{rev=Rev});
 
 		?MERGE_MSG ->
 			#mergereq{store=Store, rev=Rev, depth=Depth} =
@@ -657,7 +657,7 @@ get_store(SId) ->
 
 get_stores(StoreList) ->
 	case StoreList of
-		undefined ->
+		[] ->
 			[Store || {_SId, Store} <- hotchpotch_volman:stores()];
 
 		_ ->
