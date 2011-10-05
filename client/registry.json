@@ -44,16 +44,19 @@
 	},
 
 	"public.text" : {
+		"display" : "Generic text",
 		"conforming" : ["public.content", "public.data"],
 		"icon" : "uti/document.png",
 		"exec" : ["org.hotchpotch.textedit.py"]
 	},
 	"public.plain-text" : {
+		"display" : "Plain text",
 		"conforming" : ["public.text"],
 		"extensions" : [".txt", ".asc", ".text", ".pot", ".brf"],
 		"mimetypes"  : ["text/plain"]
 	},
 	"public.html" : {
+		"display" : "HTML document",
 		"conforming" : ["public.text"],
 		"extensions" : [".html", ".htm"],
 		"mimetypes"  : ["text/html"],
@@ -154,10 +157,12 @@
 	},
 
 	"org.hotchpotch.registry" : {
-		"conforming" : ["public.content", "public.data"]
+		"conforming" : ["public.content", "public.data"],
+		"display" : "Hotchpotch registry"
 	},
 
 	"public.message" : {
+		"display" : "Generic message",
 		"conforming" : ["public.content"],
 		"icon" : "uti/message.png",
 		"meta" : [
