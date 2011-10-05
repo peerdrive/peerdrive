@@ -17,43 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt4 import QtCore, QtNetwork
-import sys, optparse
-
-from hotchpotch import struct
-
-PIPE_NAME = "org.hotchpotch.oslauncher"
-
-class RequestManager(QtCore.QObject):
-
-	finished = QtCore.pyqtSignal()
-
-	def __init__(self, parent=None):
-		super(RequestManager, self).__init__(parent)
-		self.__quitRequested = False
-
-	def request(self, request):
-		self.__request = request
-		self.__socket = QtNetwork.QLocalSocket(self)
-		self.__socket.connected.connect(self.__clientConnect)
-		self.__socket.error.connect(self.__clientError)
-		self.__socket.connectToServer(PIPE_NAME)
-		return not self.__quitRequested
-
-	def __finished(self):
-		self.__quitRequested = True
-		self.finished.emit()
-
-	def __clientConnect(self):
-		self.__socket.write(self.__request + '\n')
-		self.__socket.disconnected.connect(self.__finished)
-		self.__socket.disconnectFromServer()
-
-	def __clientError(self, error):
-		#if error == QtNetwork.QLocalSocket.ServerNotFoundError:
-		print "Cannot launch:", self.__socket.errorString()
-		self.__finished()
-
+import sys, optparse, subprocess, os.path, stat, tempfile
+from hotchpotch import Connector, Registry, struct, fuse
 
 usage = ("usage: %prog [options] <Document>\n\n"
 	"Document:\n"
@@ -71,11 +36,46 @@ try:
 except IOError as e:
 	parser.error(str(e))
 
-app = QtCore.QCoreApplication(sys.argv)
-mgr = RequestManager(app)
-mgr.finished.connect(app.quit)
-if mgr.request(str(link)):
-	sys.exit(app.exec_())
-else:
-	sys.exit(1)
+# mounted through user space file system?
+path = fuse.findFuseFile(link)
+if not path:
+	s = Connector().stat(link.rev())
+	hash = s.hash('FILE')
 
+	name = hash.encode('hex')
+	ext = ""
+	with Connector().peek(link.store(), link.rev()) as r:
+		meta = struct.loads(link.store(), r.readAll('META'))
+
+	# first look into annotation meta data
+	if "org.hotchpotch.annotation" in meta:
+		annotation = meta["org.hotchpotch.annotation"]
+		# read title
+		if "title" in annotation:
+			(name, ext) = os.path.splitext(annotation["title"])
+		# try to get extension from Registry if title has none
+		if not ext:
+			extensions = Registry().search(s.type(), "extensions")
+			if extensions:
+				ext = extensions[0]
+
+	# try to get extension from origin if we don't have one already
+	if not ext and ("origin" in annotation):
+		ext = os.path.splitext(annotation["origin"])[1]
+
+	# copy out file (if necessary)
+	path = os.path.join(tempfile.gettempdir(), hash.encode('hex'), name+ext)
+	if not os.path.isdir(os.path.dirname(path)):
+		os.makedirs(os.path.dirname(path))
+	if not os.path.isfile(path):
+		with open(path, "wb") as file:
+			with Connector().peek(link.store(), link.rev()) as reader:
+				file.write(reader.readAll('FILE'))
+		os.chmod(path, stat.S_IREAD)
+
+
+# start external program
+if sys.platform == "win32":
+	subprocess.Popen(["start", path], shell=True)
+else:
+	subprocess.Popen(["xdg-open", path])
