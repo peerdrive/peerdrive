@@ -125,13 +125,20 @@ handle_info({watch, Cause, Type, Uuid}, S) ->
 		hotchpotch_client_pb:encode_watchind(Ind)),
 	{ok, S};
 
-handle_info({'EXIT', _From, normal}, S) ->
-	{ok, S};
-
 handle_info({'EXIT', From, Reason}, S) ->
-	error_logger:error_report(["Client servlet neighbour crashed", {from, From},
-		{reason, Reason}]),
-	{stop, S}.
+	case Reason of
+		normal ->
+			{ok, S};
+		shutdown ->
+			{ok, S};
+		_ ->
+			error_logger:error_report([{module, ?MODULE},
+				{error, 'neighbour crashed'}, {from, From}, {reason, Reason}]),
+			{stop, S}
+	end;
+
+handle_info({gen_event_EXIT, _Handler, _Reason}, S) ->
+	{ok, S}.
 
 
 handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->

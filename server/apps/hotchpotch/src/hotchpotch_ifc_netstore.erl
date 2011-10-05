@@ -67,9 +67,16 @@ handle_info({trigger_add_store, _StoreGuid}, S) ->
 	{ok, S};
 
 handle_info({'EXIT', From, Reason}, S) ->
-	error_logger:error_report(["Netstore servlet neighbour crashed", {from, From},
-		{reason, Reason}]),
-	{stop, S};
+	case Reason of
+		normal ->
+			{ok, S};
+		shutdown ->
+			{ok, S};
+		_ ->
+			error_logger:error_report([{module, ?MODULE},
+				{error, 'neighbour crashed'}, {from, From}, {reason, Reason}]),
+			{stop, S}
+	end;
 
 handle_info({gen_event_EXIT, _Handler, _Reason}, S) ->
 	{ok, S}.
