@@ -818,7 +818,7 @@ doc_make_node({doc, Store, Doc} = Oid) ->
 				{ok, #rev_stat{type=Type}} ->
 					case Type of
 						<<"org.hotchpotch.store">> ->
-							doc_make_node_dict(Oid);
+							doc_make_node_set(Oid);
 						<<"org.hotchpotch.dict">> ->
 							doc_make_node_dict(Oid);
 						<<"org.hotchpotch.set">> ->

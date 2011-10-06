@@ -706,7 +706,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 
 class DictModel(CollectionModel):
-	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
+	UTIs = ["org.hotchpotch.dict"]
 
 	def __init__(self, parent = None):
 		super(DictModel, self).__init__(parent)
@@ -760,7 +760,7 @@ class DictModel(CollectionModel):
 
 
 class SetModel(CollectionModel):
-	UTIs = ["org.hotchpotch.set"]
+	UTIs = ["org.hotchpotch.set", "org.hotchpotch.store"]
 
 	def __init__(self, parent = None):
 		super(SetModel, self).__init__(parent)
@@ -1079,7 +1079,7 @@ class CollectionWidget(widgets.DocumentView):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
 		sysStore = Connector().enum().sysStore()
 		sysDict = struct.Container(struct.DocLink(sysStore, sysStore))
-		templatesDict = struct.Container(sysDict.get("templates:").update(sysStore))
+		templatesDict = struct.Container(sysDict.get("templates").update(sysStore))
 		items = templatesDict.items()
 		items.sort(key=lambda item: item[0])
 		for (name, link) in items:

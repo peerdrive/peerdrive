@@ -32,7 +32,7 @@ importObjectByPath(
 		("HPSD", hotchpotch.struct.dumps(registry)),
 		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
-				"title"   : "UTI registry",
+				"title"   : "registry",
 				"comment" : "Import by boot.py"
 			}
 		}))
@@ -42,19 +42,20 @@ importObjectByPath(
 # set default sync rules
 importObjectByPath(
 	"sys/syncrules",
-	"public.data",
+	"org.hotchpotch.syncrules",
 	[
 		("HPSD", hotchpotch.struct.dumps([])),
 		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
-				"title" : "Synchronization rules"
+				"title" : "syncrules",
+				"description" : "Static synchronization rules between stores"
 			}
 		}))
 	])
 
 # import templates to store
 importObjectByPath(
-	"sys/templates:Document templates/Plain text:",
+	"sys/templates/Plain text:",
 	"public.plain-text",
 	[
 		("FILE", "Empty document"),
@@ -66,29 +67,31 @@ importObjectByPath(
 		}))
 	])
 importObjectByPath(
-	"sys/templates:Document templates/Dictionary:",
-	"org.hotchpotch.dict",
-	[
-		("HPSD", hotchpotch.struct.dumps( {} )),
-		("META", hotchpotch.struct.dumps({
-			"org.hotchpotch.annotation" : {
-				"title" : "New, empty dictionary",
-				"comment" : "Created from template"
-			}
-		}))
-	],
-	flags=[hotchpotch.connector.Stat.FLAG_STICKY])
-importObjectByPath(
-	"sys/templates:Document templates/Collection:",
+	"sys/templates/Folder:",
 	"org.hotchpotch.set",
 	[
 		("HPSD", hotchpotch.struct.dumps( [] )),
 		("META", hotchpotch.struct.dumps({
 			"org.hotchpotch.annotation" : {
-				"title" : "New, empty collection",
+				"title" : "New folder",
+				"description" : "A unsorted collection of documents",
 				"comment" : "Created from template"
 			}
 		}))
 	],
 	flags=[hotchpotch.connector.Stat.FLAG_STICKY])
+#importObjectByPath(
+#	"sys/templates/Directory:",
+#	"org.hotchpotch.dict",
+#	[
+#		("HPSD", hotchpotch.struct.dumps( {} )),
+#		("META", hotchpotch.struct.dumps({
+#			"org.hotchpotch.annotation" : {
+#				"title" : "New directory",
+#				"description" : "A list of documents indexed by distinct names",
+#				"comment" : "Created from template"
+#			}
+#		}))
+#	],
+#	flags=[hotchpotch.connector.Stat.FLAG_STICKY])
 

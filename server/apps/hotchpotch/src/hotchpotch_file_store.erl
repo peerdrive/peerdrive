@@ -960,7 +960,7 @@ check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
 		true ->
 			S;
 		false ->
-			RootContent = dict:new(),
+			RootContent = [],
 			ContentPId = crd_write_part(RootContent, S),
 			Annotation1 = dict:new(),
 			Annotation2 = dict:store(<<"title">>, list_to_binary(Name), Annotation1),

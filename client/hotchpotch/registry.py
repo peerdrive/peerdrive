@@ -26,20 +26,18 @@ class _Registry(connector.Watch):
 	def __init__(self):
 		self.connection = connector.Connector()
 
-		self.__sysDoc = self.connection.enum().sysStore()
-		sysRev = self.connection.lookupDoc(self.__sysDoc).rev(self.__sysDoc)
-		with self.connection.peek(self.__sysDoc, sysRev) as r:
-			root = struct.loads(self.__sysDoc, r.readAll('HPSD'))
-			self.__regDoc = root["registry"].doc()
+		sysDoc = self.connection.enum().sysStore()
+		root = struct.Container(struct.DocLink(sysDoc, sysDoc))
+		self.__regLink = root["registry"]
 
-		connector.Watch.__init__(self, connector.Watch.TYPE_DOC, self.__regDoc)
+		connector.Watch.__init__(self, connector.Watch.TYPE_DOC, self.__regLink.doc())
 		self.connection.watch(self)
 		self.loadRegistry()
 
 	def loadRegistry(self):
-		regRev = self.connection.lookupDoc(self.__regDoc).rev(self.__sysDoc)
-		with self.connection.peek(self.__sysDoc, regRev) as r:
-			self.registry = struct.loads(self.__sysDoc, r.readAll('HPSD'))
+		self.__regLink.update()
+		with self.connection.peek(self.__regLink.store(), self.__regLink.rev()) as r:
+			self.registry = struct.loads(self.__regLink.store(), r.readAll('HPSD'))
 
 	def triggered(self, event):
 		if event == connector.Watch.EVENT_MODIFIED:

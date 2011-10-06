@@ -142,16 +142,16 @@
 	},
 	"org.hotchpotch.set" : {
 		"conforming" : ["org.hotchpotch.container"],
-		"display" : "Set (collection)",
-		"icon" : "uti/collection.png"
+		"display" : "Folder",
+		"icon" : "uti/folder.png"
 	},
 	"org.hotchpotch.dict" : {
 		"conforming" : ["org.hotchpotch.container"],
-		"display" : "Dictionary (collection)",
-		"icon" : "uti/folder.png"
+		"display" : "Directory",
+		"icon" : "uti/directory.png"
 	},
 	"org.hotchpotch.store" : {
-		"conforming" : ["org.hotchpotch.dict"],
+		"conforming" : ["org.hotchpotch.set"],
 		"display" : "Hotchpotch store",
 		"icon" : "uti/store.png"
 	},
@@ -159,6 +159,11 @@
 	"org.hotchpotch.registry" : {
 		"conforming" : ["public.content", "public.data"],
 		"display" : "Hotchpotch registry"
+	},
+
+	"org.hotchpotch.syncrules" : {
+		"conforming" : ["public.content", "public.data"],
+		"display" : "Hotchpotch sync rules"
 	},
 
 	"public.message" : {

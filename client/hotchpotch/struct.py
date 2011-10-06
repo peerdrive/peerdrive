@@ -509,7 +509,7 @@ def Container(link):
 
 
 class Dict(object):
-	UTIs = ["org.hotchpotch.dict", "org.hotchpotch.store"]
+	UTIs = ["org.hotchpotch.dict"]
 
 	def __init__(self, link = None):
 		if link:
@@ -619,7 +619,7 @@ class Dict(object):
 
 
 class Set(object):
-	UTIs = ["org.hotchpotch.set"]
+	UTIs = ["org.hotchpotch.set", "org.hotchpotch.store"]
 
 	def __init__(self, link = None):
 		self.__didCache = False
@@ -702,6 +702,7 @@ class Set(object):
 			else:
 				i += 1
 		if fail:
+			print self.__content
 			raise IndexError(title)
 		else:
 			return None
@@ -795,7 +796,7 @@ def walkPath(path, create=False):
 		raise IOError("Store not found")
 
 	# walk the path
-	curContainer = Dict(DocLink(storeDoc, storeDoc, False))
+	curContainer = Container(DocLink(storeDoc, storeDoc, False))
 	for (step, nextStep) in steps:
 		next = curContainer.get(step)
 		if next:
