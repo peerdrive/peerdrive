@@ -1133,7 +1133,7 @@ doc_make_node_set(Oid) ->
 			mkdir   = fun set_mkdir/3,
 			rename  = fun set_rename/4
 		},
-		cache = {undefined, undefined}
+		cache = {undefined, undefined, {0, 0, 0}}
 	}}.
 
 
@@ -1420,17 +1420,22 @@ set_readdir_filter(_) ->
 %% Entry list format: [{Oid, Rev, DispTitle, RealTitle, Suffix}]
 %% Cache format: {Rev, Entries}
 %%
-set_read_entries(Store, Doc, {CacheRev, CacheEntries}) ->
+set_read_entries(Store, Doc, {CacheRev, CacheEntries, CacheTime}=OldCache) ->
 	case hotchpotch_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, CacheRev} ->
-			NewCacheEntries = set_update_entries(CacheEntries),
-			{ok, NewCacheEntries, {CacheRev, NewCacheEntries}};
+			case set_need_update(CacheTime) of
+				true ->
+					NewCacheEntries = set_update_entries(CacheEntries),
+					{ok, NewCacheEntries, {CacheRev, NewCacheEntries, now()}};
+				false ->
+					{ok, CacheEntries, OldCache}
+			end;
 
 		{ok, Rev} ->
 			case hotchpotch_util:read_rev_struct(Store, Rev, <<"HPSD">>) of
 				{ok, List} when is_list(List) ->
 					Entries = set_read_entries_list(Store, List),
-					{ok, Entries, {Rev, Entries}};
+					{ok, Entries, {Rev, Entries, now()}};
 
 				{ok, _} ->
 					error;
@@ -1441,6 +1446,12 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries}) ->
 		error ->
 			error
 	end.
+
+
+set_need_update({CacheMS, CacheS, CacheUS}) ->
+	{NowMS, NowS, NowUS} = now(),
+	Delta = (NowMS-CacheMS)*1000000 + (NowS-CacheS) + (NowUS-CacheUS)/1000000,
+	Delta > 1.
 
 
 set_update_entries(Cache) ->
@@ -1577,15 +1588,15 @@ set_update(Store, Doc, Cache, Fun) ->
 	end.
 
 
-set_update_cache(_Store, _Handle, Rev, {Rev, Entries}) ->
+set_update_cache(_Store, _Handle, Rev, {Rev, Entries, _LastUpdate}) ->
 	NewEntries = set_update_entries(Entries),
-	{ok, NewEntries, {Rev, NewEntries}};
+	{ok, NewEntries, {Rev, NewEntries, now()}};
 
 set_update_cache(Store, Handle, Rev, _Cache) ->
 	case catch read_struct(Handle, <<"HPSD">>) of
 		List when is_list(List) ->
 			Entries = set_read_entries_list(Store, List),
-			{ok, Entries, {Rev, Entries}};
+			{ok, Entries, {Rev, Entries, now()}};
 		{error, _} = Error ->
 			Error;
 		_ ->
@@ -1599,7 +1610,7 @@ set_write_entries(Handle, Entries, Cache) ->
 		ok ->
 			case hotchpotch_ifc_vfs_broker:close(Handle) of
 				{ok, Rev} ->
-					{ok, {Rev, set_sanitize_entries(Entries, 0)}};
+					{ok, {Rev, set_sanitize_entries(Entries, 0), now()}};
 				{error, Reason} ->
 					{error, Reason, Cache}
 			end;
