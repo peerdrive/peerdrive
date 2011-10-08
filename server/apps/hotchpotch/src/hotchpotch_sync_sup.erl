@@ -18,7 +18,7 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
--export([sync/3]).
+-export([start_sync/3, stop_sync/2]).
 -export([init/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -26,25 +26,49 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link() ->
-	supervisor:start_link({local, hotchpotch_sync_sup}, ?MODULE, []).
+	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-sync(Mode, Store, Peer) ->
-	supervisor:start_child(hotchpotch_sync_sup, [Mode, Store, Peer]).
+
+start_sync(Mode, Store, Peer) ->
+	Id = <<Store/binary, Peer/binary>>,
+	ChildSpec = {
+		Id,
+		{hotchpotch_sync_worker, start_link, [Mode, Store, Peer]},
+		transient,
+		10000,
+		worker,
+		[hotchpotch_sync_worker]
+	},
+	case supervisor:start_child(?MODULE, ChildSpec) of
+		{ok, _Child} ->
+			ok;
+		{error, already_present} ->
+			ok = supervisor:delete_child(?MODULE, Id),
+			case supervisor:start_child(?MODULE, ChildSpec) of
+				{ok, _Child} ->
+					ok;
+				{error, _} = Error->
+					Error
+			end;
+		{error, {already_started, _}} ->
+			{error, ebusy};
+		{error, _} = Error->
+			Error
+	end.
+
+
+stop_sync(Store, Peer) ->
+	case supervisor:terminate_child(?MODULE, <<Store/binary, Peer/binary>>) of
+		ok ->
+			ok;
+		{error, not_found} ->
+			{error, einval}
+	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([]) ->
-	{ok, {
-		{simple_one_for_one, 1, 10},
-		[{
-			hotchpotch_synchronizer,
-			{hotchpotch_sync_worker, start_link, []},
-			transient,
-			10000,
-			worker,
-			[]
-		}]
-	}}.
+	{ok, { {one_for_one, 1, 10}, [] }}.
 

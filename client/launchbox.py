@@ -294,10 +294,7 @@ class ReplicationWidget(QtGui.QFrame):
 class SyncRules(object):
 	def __init__(self):
 		self.sysStore = Connector().enum().sysStore()
-		sysRev = Connector().lookupDoc(self.sysStore).rev(self.sysStore)
-		with Connector().peek(self.sysStore, sysRev) as r:
-			root = struct.loads(self.sysStore, r.readAll('HPSD'))
-			self.syncDoc = root["syncrules"].doc()
+		self.syncDoc = struct.Container(struct.DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
 		self.syncRev = Connector().lookupDoc(self.syncDoc).rev(self.sysStore)
 		with Connector().peek(self.sysStore, self.syncRev) as r:
 			self.rules = struct.loads(self.sysStore, r.readAll('HPSD'))

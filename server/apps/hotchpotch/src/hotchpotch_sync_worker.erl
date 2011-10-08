@@ -21,7 +21,8 @@
 -export([start_link/3]).
 -export([init/4]).
 
--record(state, {syncfun, from, to, fromsid, tosid, monitor, numdone, numremain}).
+-record(state, {syncfun, from, to, fromsid, tosid, monitor, numdone,
+	numremain, parent}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
@@ -49,6 +50,7 @@ init(Parent, Mode, FromSId, ToSId) ->
 					{ok, Monitor} = hotchpotch_hysteresis:start({sync, FromSId, ToSId}),
 					hotchpotch_vol_monitor:register_proc(Id),
 					proc_lib:init_ack(Parent, {ok, self()}),
+					process_flag(trap_exit, true),
 					State = #state{
 						syncfun   = SyncFun,
 						from      = FromPid,
@@ -57,16 +59,21 @@ init(Parent, Mode, FromSId, ToSId) ->
 						tosid     = ToSId,
 						monitor   = Monitor,
 						numdone   = 0,
-						numremain = 0
+						numremain = 0,
+						parent    = Parent
 					},
-					try
+					error_logger:info_report([{sync, start}, {from, FromSId},
+						{to, ToSId}]),
+					Reason = try
 						loop(State, [])
 					catch
-						throw:Term -> error_logger:warning_msg(
-							"sync_worker: exit: ~p~n", [Term])
+						throw:Term -> Term
 					end,
+					error_logger:info_report([{sync, stop}, {from, FromSId},
+						{to, ToSId}, {reason, Reason}]),
 					hotchpotch_hysteresis:stop(Monitor),
-					hotchpotch_vol_monitor:deregister_proc(Id);
+					hotchpotch_vol_monitor:deregister_proc(Id),
+					Reason;
 
 				error ->
 					proc_lib:init_ack(Parent, {error, enxio})
@@ -74,8 +81,7 @@ init(Parent, Mode, FromSId, ToSId) ->
 
 		error ->
 			proc_lib:init_ack(Parent, {error, enxio})
-	end,
-	normal.
+	end.
 
 
 loop(State, OldBacklog) ->
@@ -124,15 +130,19 @@ loop_check_msg(State, Backlog, Timeout) ->
 	#state{
 		from    = FromStore,
 		fromsid = FromSId,
-		tosid   = ToSId
+		tosid   = ToSId,
+		parent  = Parent
 	} = State,
 	receive
 		{trigger_mod_doc, FromSId, _Doc} ->
 			loop_check_msg(State, Backlog, 0);
 		{trigger_rem_store, FromSId} ->
-			ok;
+			normal;
 		{trigger_rem_store, ToSId} ->
-			hotchpotch_store:sync_finish(FromStore, ToSId);
+			hotchpotch_store:sync_finish(FromStore, ToSId),
+			normal;
+		{'EXIT', Parent, Reason} ->
+			Reason;
 
 		% deliberately ignore all other messages
 		_ -> loop_check_msg(State, Backlog, Timeout)
