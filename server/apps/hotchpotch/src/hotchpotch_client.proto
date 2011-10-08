@@ -167,11 +167,11 @@ message EnumCnf {
 
 		required bool is_mounted = 4;
 		required bool is_removable = 5;
-		required bool is_system_store = 6;
-		required bool is_network_store = 7;
+		required bool is_network_store = 6;
 	}
 
-	repeated Store stores = 1;
+	required Store sys_store = 1;
+	repeated Store stores = 2;
 }
 
 message LookupDocReq {

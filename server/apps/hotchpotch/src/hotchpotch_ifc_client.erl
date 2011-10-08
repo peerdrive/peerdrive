@@ -253,16 +253,16 @@ do_init(Body, RetPath) ->
 
 do_enum(RetPath) ->
 	Stores = [
-		#enumcnf_store{
+		{proplists:get_bool(system, Properties), #enumcnf_store{
 			guid = Store,
 			id = atom_to_binary(Id, utf8),
 			name = Descr,
 			is_mounted = proplists:get_bool(mounted, Properties),
 			is_removable = proplists:get_bool(removable, Properties),
-			is_system_store = proplists:get_bool(system, Properties),
 			is_network_store = proplists:get_bool(net, Properties)
-		} || {Id, Descr, Store, Properties} <- hotchpotch_volman:enum() ],
-	Reply = #enumcnf{stores=Stores},
+		}} || {Id, Descr, Store, Properties} <- hotchpotch_volman:enum() ],
+	{value, {true, SysStore}, AllStores} = lists:keytake(true, 1, Stores),
+	Reply = #enumcnf{sys_store=SysStore, stores=[S || {false,S} <- AllStores]},
 	send_reply(RetPath, hotchpotch_client_pb:encode_enumcnf(Reply)).
 
 

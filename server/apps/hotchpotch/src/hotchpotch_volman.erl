@@ -21,12 +21,12 @@
 -export([reg_store/2, enum/0, stores/0, store/1, mount/1, unmount/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
-% specs:  [{Id, Disposition, Module, Args}]
+% specs:  [{Id, Descr, Disposition, Module, Args}]
 %           Id = atom()
+%           Descr = string()
 %           Disposition = [system | removable | net]
 %           Module = atom()
-%           Path = string()
-%           Name = string()
+%           Args = [term()]
 % stores: [{Pid, Id, Guid}]
 %           Pid = pid()
 %           Id = atom()
@@ -243,12 +243,14 @@ start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs]) ->
 
 
 have_system_store(Specs) ->
-	lists:any(
-		fun({_Id, _Descr, Disposition, _Module, _Args}) ->
-			proplists:is_defined(system, Disposition) andalso
-			not proplists:is_defined(removable, Disposition)
+	lists:foldl(
+		fun({_Id, _Descr, Disposition, _Module, _Args}, Acc) ->
+			Found = proplists:is_defined(system, Disposition) andalso
+			not proplists:is_defined(removable, Disposition),
+			if Found -> Acc+1; true -> Acc end
 		end,
-		Specs).
+		0,
+		Specs) == 1.
 
 
 check_store_spec({Id, Descr, Disposition, Module, _Args}) when

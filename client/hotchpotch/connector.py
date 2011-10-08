@@ -634,21 +634,21 @@ class Watch(object):
 class Enum(object):
 
 	class Store(object):
-		def __init__(self, store):
+		def __init__(self, store, isSystem):
 			self.doc = store.guid
 			self.name = store.name
 			self.isMounted = store.is_mounted
 			self.isRemovable = store.is_removable
-			self.isSystem = store.is_system_store
+			self.isSystem = isSystem
 			self.isNet = store.is_network_store
 
 	def __init__(self, reply):
 		self.__stores = { }
-		self.__sysStore = None
+		sys = Enum.Store(reply.sys_store, True)
+		self.__stores[reply.sys_store.id] = Enum.Store(reply.sys_store, True)
+		self.__sysStore = reply.sys_store.guid
 		for s in reply.stores:
-			self.__stores[s.id] = Enum.Store(s)
-			if s.is_system_store:
-				self.__sysStore = s.guid
+			self.__stores[s.id] = Enum.Store(s, False)
 
 	def sysStore(self):
 		return self.__sysStore
