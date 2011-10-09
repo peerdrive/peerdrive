@@ -73,7 +73,7 @@ init(Parent, Mode, FromSId, ToSId) ->
 						{to, ToSId}, {reason, Reason}]),
 					hotchpotch_hysteresis:stop(Monitor),
 					hotchpotch_vol_monitor:deregister_proc(Id),
-					Reason;
+					exit(Reason);
 
 				error ->
 					proc_lib:init_ack(Parent, {error, enxio})
@@ -142,6 +142,10 @@ loop_check_msg(State, Backlog, Timeout) ->
 			hotchpotch_store:sync_finish(FromStore, ToSId),
 			normal;
 		{'EXIT', Parent, Reason} ->
+			Reason;
+		{'EXIT', _, normal} ->
+			loop_check_msg(State, Backlog, Timeout);
+		{'EXIT', _, Reason} ->
 			Reason;
 
 		% deliberately ignore all other messages
