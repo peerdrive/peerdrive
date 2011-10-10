@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim: set fileencoding=utf-8 :
 #
-# Hotchpotch
+# PeerDrive
 # Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -20,9 +20,9 @@
 import sys, itertools
 from PyQt4 import QtCore, QtGui
 
-from hotchpotch import struct
-from hotchpotch.connector import Connector, Watch
-from hotchpotch.gui.widgets import DocButton, RevButton
+from peerdrive import struct
+from peerdrive.connector import Connector, Watch
+from peerdrive.gui.widgets import DocButton, RevButton
 
 PROGRESS_SYNC = 0
 PROGRESS_REP_DOC = 1
@@ -66,7 +66,7 @@ class Launchbox(QtGui.QDialog):
 		self.mainLayout.addStretch()
 
 		self.setLayout(self.mainLayout)
-		self.setWindowTitle("Hotchpotch launch box")
+		self.setWindowTitle("PeerDrive launch box")
 		self.setWindowIcon(QtGui.QIcon("icons/launch.png"))
 		self.setWindowFlags(QtCore.Qt.Window
 			| QtCore.Qt.WindowCloseButtonHint
@@ -297,11 +297,11 @@ class SyncRules(object):
 		self.syncDoc = struct.Container(struct.DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
 		self.syncRev = Connector().lookupDoc(self.syncDoc).rev(self.sysStore)
 		with Connector().peek(self.sysStore, self.syncRev) as r:
-			self.rules = struct.loads(self.sysStore, r.readAll('HPSD'))
+			self.rules = struct.loads(self.sysStore, r.readAll('PDSD'))
 
 	def save(self):
 		with Connector().update(self.sysStore, self.syncDoc, self.syncRev) as w:
-			w.writeAll('HPSD', struct.dumps(self.rules))
+			w.writeAll('PDSD', struct.dumps(self.rules))
 			w.commit()
 			self.rev = w.getRev()
 

@@ -1,5 +1,5 @@
 
-In Hotchpotch the documents are stored in so called "stores". Each document is
+In PeerDrive the documents are stored in so called "stores". Each document is
 uniquely identified by a 128 bit random number (DId), where the document/DId
 can simultaneously live in more than one store. Each store maintains a mapping
 of DIds to the latest revision of the document (plus zero or more preliminary
@@ -52,12 +52,12 @@ uint32           .. RevLinkCount
 
 == Well known part FourCCs ==
 
-In Hotchpotch the following part FourCCs have a special meaning:
+In PeerDrive the following part FourCCs have a special meaning:
 	- 'META': standardized, extensible meta data
 	- 'FILE': byte stream (POSIX file content)
-	- 'HPSD': structured content (HotchPotch Structured Data)
+	- 'PDSD': structured content (PeerDrive Structured Data)
 
-The data in 'META' and 'HPSD' is semantically similar to JSON. See below for
+The data in 'META' and 'PDSD' is semantically similar to JSON. See below for
 its definition and binary representation.
 
 
@@ -68,12 +68,12 @@ navigational access there can be directed links between them. As entry point to
 the link chain there is a root document in each store, just like the root
 directory in file systems.
 
-There are two types of links in Hotchpotch:
+There are two types of links in PeerDrive:
 
 	- Document link: points to a document
 	- Revision link: points to a revision
 
-In essence Hotchpotch links are like symbolic links in the meaning that they
+In essence PeerDrive links are like symbolic links in the meaning that they
 symbolically refer to another document/revision. But they are also like hard
 links in the sense that they are independent of the target's location, even
 across stores.
@@ -110,14 +110,14 @@ garbage collector. By keeping the creating handle open the creating application
 can safely add a document link to the new document after committing the initial
 version.
 
-== Hotchpotch Structured Data ==
+== PeerDrive Structured Data ==
 
-The data in the 'HPSD' and 'META' parts of a revision has a defined semantics
+The data in the 'PDSD' and 'META' parts of a revision has a defined semantics
 and binary representation.
 
 === Semantics ===
 
-Hotchpotch can represent the following data types:
+PeerDrive can represent the following data types:
 	- Number
 		- Integer: 8..64 bits, signed/unsigned
 		- Floating point: float/double
@@ -126,17 +126,17 @@ Hotchpotch can represent the following data types:
 	- Link
 		- Document link
 		- Revision link
-	- List: ordered sequence of values (any Hotchpotch data type)
+	- List: ordered sequence of values (any PeerDrive data type)
 	- Dictionary: unordered sequence of key value pairs where
 		- the key is a string,
-		- and the value is of any Hotchpotch data type
+		- and the value is of any PeerDrive data type
 
 === Binary representation ===
 
 All data stored as little endian. The following is no strict EBNF but you
 should get the idea...
 
-HPSD = value
+PDSD = value
 
 value = dict | list | string | bool | link | real | int
 
@@ -172,7 +172,7 @@ sint64 = 0x67, ?signed long long?
 
 == Client interface ==
 
-Hotchpotch clients manipulate documents through a high level API...
+PeerDrive clients manipulate documents through a high level API...
 
 === Information requests ===
 

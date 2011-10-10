@@ -1,9 +1,9 @@
-/apps/hotchpotch/include/hotchpotch_client_pb.hrl
-/apps/hotchpotch/include/hotchpotch_netstore_pb.hrl
+/apps/peerdrive/include/peerdrive_client_pb.hrl
+/apps/peerdrive/include/peerdrive_netstore_pb.hrl
 /deps/
-/hotchpotch.config
+/peerdrive.config
 /rebar.config
-/rel/hotchpotch/
+/rel/peerdrive/
 /snapshots/
 /stores/
 /vfs/

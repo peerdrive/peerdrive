@@ -1,4 +1,4 @@
-== POSIX file system interface to Hotchpotch ==
+== POSIX file system interface to PeerDrive ==
 
 - FUSE, single mount point
 - Root directory shows all stores
@@ -11,10 +11,10 @@ examples:
 /usr/foo/bar.txt
   |   |    |
   |   |    \-- "public.text" document
-  |   \------- "org.hotchpotch.container" document
+  |   \------- "org.peerdrive.container" document
   \----------- store name
 
-== Access to legacy file system from Hotchpotch ==
+== Access to legacy file system from PeerDrive ==
 
 - not provided, too many problems
 	- user should see break instead of relying on not provided features

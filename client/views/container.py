@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim: set fileencoding=utf-8 :
 #
-# Hotchpotch
+# PeerDrive
 # Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -21,10 +21,10 @@ import os.path, copy
 from PyQt4 import QtCore, QtGui
 from datetime import datetime
 
-from hotchpotch import Connector, Registry
-from hotchpotch import struct, importer, fuse
-from hotchpotch.connector import Watch
-from hotchpotch.gui import widgets, utils
+from peerdrive import Connector, Registry
+from peerdrive import struct, importer, fuse
+from peerdrive.connector import Watch
+from peerdrive.gui import widgets, utils
 
 
 class NameColumnInfo(object):
@@ -288,7 +288,7 @@ class CollectionEntry(Watch):
 
 		# overwritable by external files?
 		self.__replacable = (not needMerge) and (
-			not Registry().conformes(self.__uti, "org.hotchpotch.container"))
+			not Registry().conformes(self.__uti, "org.peerdrive.container"))
 
 		self.__valid = True
 		self.__updateColumns()
@@ -332,7 +332,7 @@ class CollectionEntry(Watch):
 
 
 class CollectionModel(QtCore.QAbstractTableModel):
-	AUTOCLEAN = ["org.hotchpotch.container", "autoclean"]
+	AUTOCLEAN = ["org.peerdrive.container", "autoclean"]
 
 	def __init__(self, parent = None):
 		super(CollectionModel, self).__init__(parent)
@@ -345,7 +345,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__autoClean = False
 		self.__mutable = False
 		self.__store = None
-		self.setColumns(["public.item:org.hotchpotch.annotation/title"])
+		self.setColumns(["public.item:org.peerdrive.annotation/title"])
 
 		self._dropMenu = QtGui.QMenu()
 		self._docLinkAct = self._dropMenu.addAction("Link to Document")
@@ -360,7 +360,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__typeCodes = set()
 		self.__store = handle.getStore()
 		self._listing = []
-		data = struct.loads(handle.getStore(), handle.readAll('HPSD'))
+		data = struct.loads(handle.getStore(), handle.readAll('PDSD'))
 		listing = self.decode(data)
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
@@ -373,7 +373,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def doSave(self, handle):
 		data = self.encode()
-		handle.writeAll('HPSD', struct.dumps(data))
+		handle.writeAll('PDSD', struct.dumps(data))
 		self.__changedContent = False
 
 	def clear(self):
@@ -706,7 +706,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 
 class DictModel(CollectionModel):
-	UTIs = ["org.hotchpotch.dict"]
+	UTIs = ["org.peerdrive.dict"]
 
 	def __init__(self, parent = None):
 		super(DictModel, self).__init__(parent)
@@ -760,7 +760,7 @@ class DictModel(CollectionModel):
 
 
 class SetModel(CollectionModel):
-	UTIs = ["org.hotchpotch.set", "org.hotchpotch.store"]
+	UTIs = ["org.peerdrive.set", "org.peerdrive.store"]
 
 	def __init__(self, parent = None):
 		super(SetModel, self).__init__(parent)
@@ -818,7 +818,7 @@ class CollectionWidget(widgets.DocumentView):
 	selectionChanged = QtCore.pyqtSignal()
 
 	def __init__(self, browseTypes=[]):
-		super(CollectionWidget, self).__init__("org.hotchpotch.containerview")
+		super(CollectionWidget, self).__init__("org.peerdrive.containerview")
 
 		self.__settings = None
 		self.__browseTypes = browseTypes
@@ -888,18 +888,18 @@ class CollectionWidget(widgets.DocumentView):
 
 	def docMergeCheck(self, heads, types, changedParts):
 		(uti, handled) = super(CollectionWidget, self).docMergeCheck(heads, types, changedParts)
-		return (uti, handled | set(['HPSD']))
+		return (uti, handled | set(['PDSD']))
 
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
 		conflicts = super(CollectionWidget, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
-		if 'HPSD' in changedParts:
-			baseHpsd = struct.loads(self.store(), baseReader.readAll('HPSD'))
-			mergeHpsd = []
+		if 'PDSD' in changedParts:
+			basePdsd = struct.loads(self.store(), baseReader.readAll('PDSD'))
+			mergePdsd = []
 			for r in mergeReaders:
-				mergeHpsd.append(struct.loads(self.store(), r.readAll('HPSD')))
-			(newHpsd, newConflict) = struct.merge(baseHpsd, mergeHpsd)
+				mergePdsd.append(struct.loads(self.store(), r.readAll('PDSD')))
+			(newPdsd, newConflict) = struct.merge(basePdsd, mergePdsd)
 			conflicts = conflicts or newConflict
-			writer.writeAll('HPSD', struct.dumps(newHpsd))
+			writer.writeAll('PDSD', struct.dumps(newPdsd))
 
 		return conflicts
 
@@ -973,7 +973,7 @@ class CollectionWidget(widgets.DocumentView):
 			except IOError:
 				executables = []
 			self.itemOpen.emit(link, None,
-				"org.hotchpotch.containerbrowser.py" in executables)
+				"org.peerdrive.containerbrowser.py" in executables)
 
 	def __showProperties(self):
 		index = self.listView.selectionModel().currentIndex()
@@ -1060,7 +1060,7 @@ class CollectionWidget(widgets.DocumentView):
 				with c.peek(rev) as r:
 					metaData = struct.loads(r.readAll('META'))
 					try:
-						name = metaData["org.hotchpotch.annotation"]["title"]
+						name = metaData["org.peerdrive.annotation"]["title"]
 					except:
 						name = "Unknown store"
 					action = menu.addAction("Replicate item to '%s'" % name)
@@ -1113,7 +1113,7 @@ class CollectionWidget(widgets.DocumentView):
 		prefix = "Open"
 		browseHint = False
 		browsePreferred = False
-		if "org.hotchpotch.containerbrowser.py" in executables:
+		if "org.peerdrive.containerbrowser.py" in executables:
 			browsePreferred = True
 		for e in executables:
 			if e in self.__browseTypes:

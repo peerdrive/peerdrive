@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim: set fileencoding=utf-8 :
 #
-# Hotchpotch
+# PeerDrive
 # Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -17,8 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import hotchpotch.struct
-from hotchpotch.importer import importObjectByPath
+import peerdrive.struct
+from peerdrive.importer import importObjectByPath
 import json
 
 
@@ -27,11 +27,11 @@ with open("registry.json") as file:
 
 importObjectByPath(
 	"sys/registry",
-	"org.hotchpotch.registry",
+	"org.peerdrive.registry",
 	[
-		("HPSD", hotchpotch.struct.dumps(registry)),
-		("META", hotchpotch.struct.dumps({
-			"org.hotchpotch.annotation" : {
+		("PDSD", peerdrive.struct.dumps(registry)),
+		("META", peerdrive.struct.dumps({
+			"org.peerdrive.annotation" : {
 				"title"   : "registry",
 				"comment" : "Import by boot.py"
 			}
@@ -42,11 +42,11 @@ importObjectByPath(
 # set default sync rules
 importObjectByPath(
 	"sys/syncrules",
-	"org.hotchpotch.syncrules",
+	"org.peerdrive.syncrules",
 	[
-		("HPSD", hotchpotch.struct.dumps([])),
-		("META", hotchpotch.struct.dumps({
-			"org.hotchpotch.annotation" : {
+		("PDSD", peerdrive.struct.dumps([])),
+		("META", peerdrive.struct.dumps({
+			"org.peerdrive.annotation" : {
 				"title" : "syncrules",
 				"description" : "Static synchronization rules between stores"
 			}
@@ -59,8 +59,8 @@ importObjectByPath(
 	"public.plain-text",
 	[
 		("FILE", "Empty document"),
-		("META", hotchpotch.struct.dumps({
-			"org.hotchpotch.annotation" : {
+		("META", peerdrive.struct.dumps({
+			"org.peerdrive.annotation" : {
 				"title" : "New, empty text document",
 				"comment" : "Created from template"
 			}
@@ -68,30 +68,30 @@ importObjectByPath(
 	])
 importObjectByPath(
 	"sys/templates/Folder:",
-	"org.hotchpotch.set",
+	"org.peerdrive.set",
 	[
-		("HPSD", hotchpotch.struct.dumps( [] )),
-		("META", hotchpotch.struct.dumps({
-			"org.hotchpotch.annotation" : {
+		("PDSD", peerdrive.struct.dumps( [] )),
+		("META", peerdrive.struct.dumps({
+			"org.peerdrive.annotation" : {
 				"title" : "New folder",
 				"description" : "A unsorted collection of documents",
 				"comment" : "Created from template"
 			}
 		}))
 	],
-	flags=[hotchpotch.connector.Stat.FLAG_STICKY])
+	flags=[peerdrive.connector.Stat.FLAG_STICKY])
 #importObjectByPath(
 #	"sys/templates/Directory:",
-#	"org.hotchpotch.dict",
+#	"org.peerdrive.dict",
 #	[
-#		("HPSD", hotchpotch.struct.dumps( {} )),
-#		("META", hotchpotch.struct.dumps({
-#			"org.hotchpotch.annotation" : {
+#		("PDSD", peerdrive.struct.dumps( {} )),
+#		("META", peerdrive.struct.dumps({
+#			"org.peerdrive.annotation" : {
 #				"title" : "New directory",
 #				"description" : "A list of documents indexed by distinct names",
 #				"comment" : "Created from template"
 #			}
 #		}))
 #	],
-#	flags=[hotchpotch.connector.Stat.FLAG_STICKY])
+#	flags=[peerdrive.connector.Stat.FLAG_STICKY])
 

@@ -5,27 +5,27 @@
 		"display" : "Generic item",
 		"meta" : [
 			{
-				"key"     : ["org.hotchpotch.annotation", "title"],
+				"key"     : ["org.peerdrive.annotation", "title"],
 				"type"    : "string",
 				"display" : "Title"
 			},
 			{
-				"key"     : ["org.hotchpotch.annotation", "description"],
+				"key"     : ["org.peerdrive.annotation", "description"],
 				"type"    : "string",
 				"display" : "Description"
 			},
 			{
-				"key"     : ["org.hotchpotch.annotation", "comment"],
+				"key"     : ["org.peerdrive.annotation", "comment"],
 				"type"    : "string",
 				"display" : "Comment"
 			},
 			{
-				"key"     : ["org.hotchpotch.annotation", "tags"],
+				"key"     : ["org.peerdrive.annotation", "tags"],
 				"type"    : "list of string",
 				"display" : "Tags"
 			},
 			{
-				"key"     : ["org.hotchpotch.annotation", "origin"],
+				"key"     : ["org.peerdrive.annotation", "origin"],
 				"type"    : "string",
 				"display" : "Document origin"
 			}
@@ -47,7 +47,7 @@
 		"display" : "Generic text",
 		"conforming" : ["public.content", "public.data"],
 		"icon" : "uti/document.png",
-		"exec" : ["org.hotchpotch.textedit.py"]
+		"exec" : ["org.peerdrive.textedit.py"]
 	},
 	"public.plain-text" : {
 		"display" : "Plain text",
@@ -128,42 +128,42 @@
 		"display"    :  "Zip archive"
 	},
 
-	"org.hotchpotch.container" : {
+	"org.peerdrive.container" : {
 		"conforming" : ["public.item"],
 		"display" : "Collection",
-		"exec" : ["org.hotchpotch.containerbrowser.py", "org.hotchpotch.containerview.py"],
+		"exec" : ["org.peerdrive.containerbrowser.py", "org.peerdrive.containerview.py"],
 		"meta" : [
 			{
-				"key"     : ["org.hotchpotch.container", "autoclean"],
+				"key"     : ["org.peerdrive.container", "autoclean"],
 				"type"    : "bool",
 				"display" : "Auto clean"
 			}
 		]
 	},
-	"org.hotchpotch.set" : {
-		"conforming" : ["org.hotchpotch.container"],
+	"org.peerdrive.set" : {
+		"conforming" : ["org.peerdrive.container"],
 		"display" : "Folder",
 		"icon" : "uti/folder.png"
 	},
-	"org.hotchpotch.dict" : {
-		"conforming" : ["org.hotchpotch.container"],
+	"org.peerdrive.dict" : {
+		"conforming" : ["org.peerdrive.container"],
 		"display" : "Directory",
 		"icon" : "uti/directory.png"
 	},
-	"org.hotchpotch.store" : {
-		"conforming" : ["org.hotchpotch.set"],
-		"display" : "Hotchpotch store",
+	"org.peerdrive.store" : {
+		"conforming" : ["org.peerdrive.set"],
+		"display" : "PeerDrive store",
 		"icon" : "uti/store.png"
 	},
 
-	"org.hotchpotch.registry" : {
+	"org.peerdrive.registry" : {
 		"conforming" : ["public.content", "public.data"],
-		"display" : "Hotchpotch registry"
+		"display" : "PeerDrive registry"
 	},
 
-	"org.hotchpotch.syncrules" : {
+	"org.peerdrive.syncrules" : {
 		"conforming" : ["public.content", "public.data"],
-		"display" : "Hotchpotch sync rules"
+		"display" : "PeerDrive sync rules"
 	},
 
 	"public.message" : {
@@ -193,7 +193,7 @@
 		"extensions" : [".eml"],
 		"mimetypes"  : ["message/rfc822", "text/x-mail"],
 		"display" : "Internet Mail",
-		"exec" : ["org.hotchpotch.mailview.py"],
+		"exec" : ["org.peerdrive.mailview.py"],
 		"extractor" : "extract-rfc822.py",
 		"meta" : [
 			{
@@ -213,7 +213,7 @@
 	"public.image" : {
 		"conforming" : ["public.data", "public.content"],
 		"icon" : "uti/image.png",
-		"exec" : ["org.hotchpotch.imageview.py"],
+		"exec" : ["org.peerdrive.imageview.py"],
 		"extractor" : "extract-public.image.py",
 		"display" : "Image",
 		"meta" : [

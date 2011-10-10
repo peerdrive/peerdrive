@@ -38,7 +38,7 @@
 		- per store pair setting
 			- system automatic sync
 				- fast-forward (one-/two-way)
-				- automatic 
+				- automatic
 			- user:
 				- default conflict resolution strategy (ask/prefer/ff-only/auto merge)
 	- access control

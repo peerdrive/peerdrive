@@ -2,9 +2,9 @@ import unittest
 import time
 import subprocess
 import datetime
-from hotchpotch import Connector
-from hotchpotch import connector
-from hotchpotch import struct
+from peerdrive import Connector
+from peerdrive import connector
+from peerdrive import struct
 
 STORE1 = 'rem1'
 STORE2 = 'rem2'
@@ -57,12 +57,12 @@ class CommonParts(unittest.TestCase):
 	def disposeWatch(self, watch):
 		self._disposeWatches.append(watch)
 
-	def create(self, store, type="public.data", creator="org.hotchpotch.test-py"):
+	def create(self, store, type="public.data", creator="org.peerdrive.test-py"):
 		w = Connector().create(store, type, creator)
 		self.disposeHandle(w)
 		return w
 
-	def createCommon(self, stores, type="public.data", creator="org.hotchpotch.test-py", data={}):
+	def createCommon(self, stores, type="public.data", creator="org.peerdrive.test-py", data={}):
 		leadStore = stores.pop()
 		w = self.create(leadStore, type, creator)
 		for (part, blob) in data.items():
@@ -72,7 +72,7 @@ class CommonParts(unittest.TestCase):
 		rev = w.getRev()
 		for store in stores:
 			w = self.create(store)
-			w.writeAll('HPSD', struct.dumps([struct.DocLink(store, doc)]))
+			w.writeAll('PDSD', struct.dumps([struct.DocLink(store, doc)]))
 			w.commit()
 			Connector().replicateDoc(leadStore, doc, store)
 
@@ -84,7 +84,7 @@ class CommonParts(unittest.TestCase):
 
 		return (doc, rev)
 
-	def fork(self, store, rev, creator="org.hotchpotch.test-py"):
+	def fork(self, store, rev, creator="org.peerdrive.test-py"):
 		w = Connector().fork(store, rev, creator)
 		self.disposeHandle(w)
 		return w
@@ -110,7 +110,7 @@ class CommonParts(unittest.TestCase):
 		return w
 
 	def erlCall(self, command):
-		proc = subprocess.Popen(['erl_call', '-e', '-n', 'hotchpotch'],
+		proc = subprocess.Popen(['erl_call', '-e', '-n', 'peerdrive'],
 			stdout=subprocess.PIPE, stdin=subprocess.PIPE)
 		proc.stdin.write(command+'\n')
 		proc.stdin.close()
@@ -557,8 +557,8 @@ class TestGarbageCollector(CommonParts):
 	def gc(self, store):
 		guid = store.encode('hex')
 		result = self.erlCall(
-			"""case hotchpotch_volman:store(<<16#"""+guid+""":128>>) of
-				{ok, Pid} -> hotchpotch_file_store:gc(Pid);
+			"""case peerdrive_volman:store(<<16#"""+guid+""":128>>) of
+				{ok, Pid} -> peerdrive_file_store:gc(Pid);
 				error     -> {error, enoent}
 			end.""")
 		self.assertEqual(result, '{ok, ok}')
@@ -623,7 +623,7 @@ class TestGarbageCollector(CommonParts):
 				rev2 = w2.getRev()
 
 				# create a reference from w1 to w2
-				w1.write('HPSD', struct.dumps([struct.DocLink(self.store2, doc2)]))
+				w1.write('PDSD', struct.dumps([struct.DocLink(self.store2, doc2)]))
 				w1.commit()
 				doc1 = w1.getDoc()
 				rev1 = w1.getRev()
@@ -659,8 +659,8 @@ class TestReplicator(CommonParts):
 			contDoc = s.getDoc()
 
 			# need a dummy container on both stores
-			self.createCommon([self.store1, self.store2], "org.hotchpotch.set",
-				data={'HPSD' : struct.dumps([struct.DocLink(self.store1, contDoc)])})
+			self.createCommon([self.store1, self.store2], "org.peerdrive.set",
+				data={'PDSD' : struct.dumps([struct.DocLink(self.store1, contDoc)])})
 
 		watch1 = self.watchDoc(doc, connector.Watch.EVENT_REPLICATED)
 		watch2 = self.watchRev(rev, connector.Watch.EVENT_REPLICATED)
@@ -706,7 +706,7 @@ class TestSynchronization(CommonParts):
 	def startSync(self, mode, fromStore, toStore):
 		fromGuid = fromStore.encode('hex')
 		toGuid = toStore.encode('hex')
-		result = self.erlCall("hotchpotch_synchronizer:sync(" + mode +
+		result = self.erlCall("peerdrive_synchronizer:sync(" + mode +
 			", <<16#"+fromGuid+":128>>, <<16#"+toGuid+":128>>).")
 		self.assertTrue(result.startswith('{ok, {ok,'))
 
@@ -765,8 +765,8 @@ class TestSynchronization(CommonParts):
 
 		# wait until sync_worker moved on
 		result = self.erlCall(
-			"""hotchpotch_sync_locks:lock(<<16#"""+doc.encode('hex')+""":128>>),
-			hotchpotch_sync_locks:unlock(<<16#"""+doc.encode('hex')+""":128>>).""")
+			"""peerdrive_sync_locks:lock(<<16#"""+doc.encode('hex')+""":128>>),
+			peerdrive_sync_locks:unlock(<<16#"""+doc.encode('hex')+""":128>>).""")
 		self.assertEqual(result, '{ok, ok}')
 
 		return l
@@ -834,10 +834,10 @@ class TestSynchronization(CommonParts):
 
 	# Checks that the 'merge' strategy really merges
 	def test_sync_merge(self):
-		(doc, rev1, rev2) = self.createMerge("org.hotchpotch.dict",
-			{'HPSD' : struct.dumps({"a":1}) },
-			{'HPSD' : struct.dumps({"a":1, "b":2}) },
-			{'HPSD' : struct.dumps({"a":1, "c":3}) })
+		(doc, rev1, rev2) = self.createMerge("org.peerdrive.dict",
+			{'PDSD' : struct.dumps({"a":1}) },
+			{'PDSD' : struct.dumps({"a":1, "b":2}) },
+			{'PDSD' : struct.dumps({"a":1, "c":3}) })
 		l = self.performSync(doc, 'merge')
 
 		rev = l.revs()[0]
@@ -856,8 +856,8 @@ class TestSynchronization(CommonParts):
 
 		# see if merge was ok
 		with Connector().peek(self.store1, rev) as r:
-			hpsd = struct.loads(self.store1, r.readAll('HPSD'))
-			self.assertEqual(hpsd, {"a":1, "b":2, "c":3})
+			pdsd = struct.loads(self.store1, r.readAll('PDSD'))
+			self.assertEqual(pdsd, {"a":1, "b":2, "c":3})
 
 if __name__ == '__main__':
 	unittest.main()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim: set fileencoding=utf-8 :
 #
-# Hotchpotch
+# PeerDrive
 # Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,9 +18,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from hotchpotch import Connector, Registry, struct
-from hotchpotch.gui.widgets import DocButton, RevButton
-from hotchpotch.gui.utils import showDocument
+from peerdrive import Connector, Registry, struct
+from peerdrive.gui.widgets import DocButton, RevButton
+from peerdrive.gui.utils import showDocument
 
 def extractMetaData(metaData, path, default):
 	item = metaData
@@ -114,16 +114,16 @@ class PropertiesDialog(QtGui.QDialog):
 		with Connector().peek(self.__store, self.__rev) as r:
 			metaData = struct.loads(self.__store, r.readAll('META'))
 
-		setMetaData(metaData, ["org.hotchpotch.annotation", "title"],
+		setMetaData(metaData, ["org.peerdrive.annotation", "title"],
 			self.__annoTab.getTitle())
-		setMetaData(metaData, ["org.hotchpotch.annotation", "description"],
+		setMetaData(metaData, ["org.peerdrive.annotation", "description"],
 			self.__annoTab.getDescription())
 		tagString = self.__annoTab.getTags()
 		if tagString is not None:
 			tagList = [ tag.strip() for tag in tagString.split(',')]
 			tagList = [ tag for tag in tagList if tag != '' ]
 			tagList = list(set(tagList))
-			setMetaData(metaData, ["org.hotchpotch.annotation", "tags"], tagList)
+			setMetaData(metaData, ["org.peerdrive.annotation", "tags"], tagList)
 
 		with Connector().update(self.__store, self.__doc, self.__rev) as writer:
 			writer.writeAll('META', struct.dumps(metaData))
@@ -247,7 +247,7 @@ class HistoryTab(QtGui.QWidget):
 									metaData = struct.loads(store, r.readAll('META'))
 									comment = extractMetaData(
 										metaData,
-										["org.hotchpotch.annotation", "comment"],
+										["org.peerdrive.annotation", "comment"],
 										"")
 							except IOError:
 								pass
@@ -310,15 +310,15 @@ class AnnotationTab(QtGui.QWidget):
 				metaData = struct.loads(store, r.readAll('META'))
 				title = extractMetaData(
 					metaData,
-					["org.hotchpotch.annotation", "title"],
+					["org.peerdrive.annotation", "title"],
 					"")
 				description = extractMetaData(
 					metaData,
-					["org.hotchpotch.annotation", "description"],
+					["org.peerdrive.annotation", "description"],
 					"")
 				tags = extractMetaData(
 					metaData,
-					["org.hotchpotch.annotation", "tags"],
+					["org.peerdrive.annotation", "tags"],
 					[])
 		except IOError:
 			pass

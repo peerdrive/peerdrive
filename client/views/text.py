@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim: set fileencoding=utf-8 :
 #
-# Hotchpotch
+# PeerDrive
 # Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -20,17 +20,17 @@
 from __future__ import absolute_import
 
 from PyQt4 import QtGui
-from hotchpotch.gui import widgets
+from peerdrive.gui import widgets
 from . import diff3
 
 class TextEdit(widgets.DocumentView):
 
-	TE_FONT_SIZE  = ["org.hotchpotch.textedit", "format", "pointsize"]
-	TE_FONT_FIXED = ["org.hotchpotch.textedit", "format", "fixedpitch"]
-	TE_WORD_WRAP  = ["org.hotchpotch.textedit", "format", "wordwrap"]
+	TE_FONT_SIZE  = ["org.peerdrive.textedit", "format", "pointsize"]
+	TE_FONT_FIXED = ["org.peerdrive.textedit", "format", "fixedpitch"]
+	TE_WORD_WRAP  = ["org.peerdrive.textedit", "format", "wordwrap"]
 
 	def __init__(self):
-		super(TextEdit, self).__init__("org.hotchpotch.textedit")
+		super(TextEdit, self).__init__("org.peerdrive.textedit")
 		self.textEdit = QtGui.QTextEdit()
 		self.textEdit.setAcceptRichText(False)
 		self.textEdit.setReadOnly(True)

@@ -1,7 +1,7 @@
 
 == Introduction ==
 
-Hotchpotch tries to solve various problems which are common to every day file
+PeerDrive tries to solve various problems which are common to every day file
 management but which are poorly supported by traditional hierarchical file
 systems. In particular these are:
 
@@ -11,7 +11,7 @@ systems. In particular these are:
   - Arbitrary, non-hierarchical file organization
   - Annotation (e.g. tags) and rich meta data
 
-These problems are tackled by three main concepts in Hotchpotch...
+These problems are tackled by three main concepts in PeerDrive...
 
 === Split identity and organization ===
 
@@ -33,15 +33,15 @@ links can overcome this situation but they only work for files on the same
 volume and not for directories. Symlinks work for both files and directories
 but break as soon as the original file is moved.
 
-In Hotchpotch every document (file) is identified by a 128 bit random unique id
+In PeerDrive every document (file) is identified by a 128 bit random unique id
 (DId). Any document can "point" to another document by it's DId, even across
 volume boundaries. This allows for arbitrary organization schemes via
 "container" documents. The documents can be moved even between volumes (called
-'stores' in Hotchpotch) without breaking the links between them.
+'stores' in PeerDrive) without breaking the links between them.
 
 The same document (DId) may also exist on more than one store simultaneously.
 This is no error and is a common state when documents are replicated between
-different stores. In conjunction with versioning Hotchpotch is later able to
+different stores. In conjunction with versioning PeerDrive is later able to
 synchronize the replicas on the different stores.
 
 
@@ -66,7 +66,7 @@ which stores the revision exists.
                           E(2)---G(2)   <-- Doc (Store 2)
 
 If the user chooses to synchronize the two versions of the same document
-Hotchpotch is able to find the common ancestor (C) and merge the independent
+PeerDrive is able to find the common ancestor (C) and merge the independent
 changes into one version automatically. After the merge the document exists on
 both stores with the same revision and the same history.
 
@@ -84,8 +84,8 @@ data.
 Additionally this allows for a seamless integration of backups. Old revisions
 which are not needed anymore may be moved to a backup store. If such an old
 revision is needed again only the backup store needs to be mounted because
-Hotchpotch does not care on which store a revision is located. Therefore normal
-document handling and backup are seamlessly integrated in Hotchpotch.
+PeerDrive does not care on which store a revision is located. Therefore normal
+document handling and backup are seamlessly integrated in PeerDrive.
 
 === Rich meta data ===
 
@@ -95,7 +95,7 @@ attributes were added which are user definable key/value pairs, where keys are
 usually strings and values again streams of bytes. BeOS added indexing of these
 extended attributes and used them extensively for file management.
 
-Hotchpotch takes the concept even further and allows arbitrarily complex meta
+PeerDrive takes the concept even further and allows arbitrarily complex meta
 data. This includes key/value pairs but also lists, links to other documents,
 booleans, integers, floats and strings. Semantically this is close to JSON or
 other structured data representations. This allows for unrestricted, extensible
@@ -114,7 +114,7 @@ not visible on the other hard links.
 === Uniform type identifier ===
 
 The type of a document is indicated by a Uniform Type Identifier (UTI) in
-Hotchpotch.
+PeerDrive.
 
 http://en.wikipedia.org/wiki/Uniform_Type_Identifier
 
@@ -122,12 +122,12 @@ TODO
 
 === Multi part documents ===
 
-Hotchpotch documents consist of one or more parts, each identified by a FourCC.
+PeerDrive documents consist of one or more parts, each identified by a FourCC.
 TODO
 
 === Standardized structured data ===
 
-Data in the 'HPSD' part of a document has the same structure and encoding as in
+Data in the 'PDSD' part of a document has the same structure and encoding as in
 the 'META' part. TODO
 
 === Sticky documents ===

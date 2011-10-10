@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # vim: set fileencoding=utf-8 :
 #
-# Hotchpotch
+# PeerDrive
 # Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import sys, optparse, subprocess, os.path, stat, tempfile
-from hotchpotch import Connector, Registry, struct, fuse
+from peerdrive import Connector, Registry, struct, fuse
 
 usage = ("usage: %prog [options] <Document>\n\n"
 	"Document:\n"
@@ -48,8 +48,8 @@ if not path:
 		meta = struct.loads(link.store(), r.readAll('META'))
 
 	# first look into annotation meta data
-	if "org.hotchpotch.annotation" in meta:
-		annotation = meta["org.hotchpotch.annotation"]
+	if "org.peerdrive.annotation" in meta:
+		annotation = meta["org.peerdrive.annotation"]
 		# read title
 		if "title" in annotation:
 			(name, ext) = os.path.splitext(annotation["title"])
