@@ -531,7 +531,7 @@ class Dict(object):
 			self.__meta    = loads(self.__store, r.readAll('META'))
 			self.__content = loads(self.__store, r.readAll('PDSD'))
 
-	def create(self, store, name):
+	def create(self, store, name=None):
 		if self.__rev or self.__doc:
 			raise IOError("Not new")
 
@@ -649,7 +649,7 @@ class Set(object):
 				self.__content ]
 			self.__didCache = True
 
-	def create(self, store, name):
+	def create(self, store, name=None):
 		if self.__rev or self.__doc:
 			raise IOError("Not new")
 
@@ -833,4 +833,41 @@ def resolvePath(path):
 		if path not in enum.allStores():
 			raise IOError("Path not found")
 		return DocLink(enum.doc(path), enum.doc(path), False)
+
+
+def copyDoc(src, dstStore):
+	src.update()
+	if not src.rev():
+		raise IOError('Source not found!')
+
+	# create a dummy containter to prevent the garbage collection of the source rev
+	dummy = Set()
+	dummy['dummy'] = RevLink(dstStore, src.rev())
+	with dummy.create(dstStore) as dummyHandle:
+		connector.Connector().replicateRev(src.store(), src.rev(), dstStore)
+		handle = connector.Connector().fork(dstStore, src.rev(), 'org.peerdrive.cp')
+		try:
+			try:
+				meta = loads(dstStore, handle.readAll('META'))
+			except IOError:
+				meta = {}
+
+			if "org.peerdrive.annotation" in meta:
+				annotation = meta["org.peerdrive.annotation"]
+			else:
+				annotation = {}
+				meta["org.peerdrive.annotation"] = annotation
+
+			annotation["comment"] = "<<Copy document>>"
+			if "title" in annotation:
+				annotation["title"] = 'Copy of ' + annotation["title"]
+			else:
+				annotation["title"] = 'Copy of unnamed document'
+
+			handle.writeAll('META', dumps(meta))
+			handle.commit()
+			return handle
+		except:
+			handle.close()
+			raise
 

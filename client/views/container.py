@@ -347,12 +347,6 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__store = None
 		self.setColumns(["public.item:org.peerdrive.annotation/title"])
 
-		self._dropMenu = QtGui.QMenu()
-		self._docLinkAct = self._dropMenu.addAction("Link to Document")
-		self._revLinkAct = self._dropMenu.addAction("Link to Version")
-		self._dropMenu.addSeparator()
-		self._abortAct = self._dropMenu.addAction("Abort")
-
 	def doLoad(self, handle, readWrite, autoClean):
 		self.__mutable = readWrite
 		self.__changedContent = False
@@ -635,29 +629,35 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		if not links:
 			return False
 
-		for link in links:
-			link.update()
+		dropMenu = QtGui.QMenu()
+		repAct = dropMenu.addAction("Replicate here")
+		copyAct = dropMenu.addAction("Copy here")
+		dropMenu.addSeparator()
+		dropMenu.addAction("Abort")
 
-		self._docLinkAct.setEnabled(
-			any([isinstance(link, struct.DocLink) for l in links]))
-		self._revLinkAct.setEnabled(
-			any([bool(link.rev()) for link in links]))
-		action = self._dropMenu.exec_(QtGui.QCursor.pos())
-		if action is self._docLinkAct:
-			pass
-		elif action is self._revLinkAct:
-			links = [struct.RevLink(link.store(), link.rev()) for link in links
-				if link.rev() is not None]
+		copyAct.setEnabled(
+			any([isinstance(l, struct.DocLink) for l in links]))
+		action = dropMenu.exec_(QtGui.QCursor.pos())
+		if action is repAct:
+			for link in links:
+				self.insertLink(link)
+				self.__parent.save()
+				if isinstance(link, struct.DocLink):
+					Connector().replicateDoc(link.store(), link.doc(), self.__store)
+				else:
+					Connector().replicateRev(link.store(), link.rev(), self.__store)
+		elif action is copyAct:
+			for link in links:
+				if isinstance(link, struct.RevLink):
+					self.insertLink(link)
+					self.__parent.save()
+					Connector().replicateRev(link.store(), link.rev(), self.__store)
+				else:
+					with struct.copyDoc(link, self.__store) as handle:
+						self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
+						self.__parent.save()
 		else:
 			return False
-
-		for link in links:
-			self.insertLink(link)
-			self.__parent.save()
-			if isinstance(link, struct.DocLink):
-				Connector().replicateDoc(link.store(), link.doc(), self.__store)
-			else:
-				Connector().replicateRev(link.store(), link.rev(), self.__store)
 
 		return True
 
