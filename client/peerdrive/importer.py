@@ -65,11 +65,14 @@ def __merge(old, new):
 
 
 # returns a commited writer, None or throws an IOError
-def importFile(store, path, name=""):
+def importFile(store, path, name="", progress=None):
 	if not name:
 		name = os.path.basename(path)
 
 	if os.path.isfile(path):
+		if progress:
+			progress(path)
+
 		# determine file type
 		uti = None
 		if mimeGuess:
@@ -107,7 +110,7 @@ def importFile(store, path, name=""):
 		handles = []
 		try:
 			for entry in os.listdir(path):
-				handle = importFile(store, os.path.join(path, entry), entry)
+				handle = importFile(store, os.path.join(path, entry), entry, progress)
 				handles.append((entry, handle))
 
 			container = struct.Set()

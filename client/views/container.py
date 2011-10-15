@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os.path, copy
+import os, os.path, copy
 from PyQt4 import QtCore, QtGui
 from datetime import datetime
 
@@ -26,6 +26,32 @@ from peerdrive import struct, importer, fuse
 from peerdrive.connector import Watch
 from peerdrive.gui import widgets, utils
 
+class AbortException(Exception):
+	def __init__(self):
+		pass
+
+def countFilesRecursive(path):
+	QtCore.QCoreApplication.processEvents()
+	if os.path.isfile(path):
+		return 1
+	else:
+		return sum([countFilesRecursive(os.path.join(path, f)) for f in
+			os.listdir(path)])
+
+def makeProgressHelper(p):
+	i = [0]
+
+	def progressHelper(path):
+		QtCore.QCoreApplication.processEvents()
+		p.setValue(i[0])
+		if len(path) > 50:
+			path = '...' + path[-50:]
+		p.setLabelText(path)
+		i[0] += 1
+		if p.wasCanceled():
+			raise AbortException
+
+	return progressHelper
 
 class NameColumnInfo(object):
 	KEY = ":name"
@@ -609,20 +635,49 @@ class CollectionModel(QtCore.QAbstractTableModel):
 						pass
 					return False
 
+		# count the number of files
+		progress = QtGui.QProgressDialog("Counting files...", "Abort", 0,
+			len(urlList), self.__parent);
+		progress.setWindowModality(QtCore.Qt.WindowModal)
+		progress.setMinimumDuration(500)
+		numFiles = 0
+		i = 0
+		try:
+			for url in urlList:
+				progress.setValue(i)
+				if progress.wasCanceled():
+					return False
+				numFiles += countFilesRecursive(str(url.toLocalFile().toUtf8()))
+				i += 1
+		finally:
+			progress.setValue(len(urlList))
+
 		# import and add to container
-		for url in urlList:
-			try:
-				path = str(url.toLocalFile().toUtf8())
-				handle = importer.importFile(self.__store, path)
-				if handle:
-					try:
-						self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
-						self.__parent.save()
-					finally:
-						handle.close()
-			except IOError as error:
-				QtGui.QMessageBox.critical(self.__parent, "Import error",
-					"Error importing '"+path+"': "+str(error))
+		progress = QtGui.QProgressDialog("Importing files...", "Abort", 0,
+			numFiles, self.__parent);
+		progress.setWindowModality(QtCore.Qt.WindowModal)
+		progress.setMinimumDuration(500)
+
+		try:
+			helper = makeProgressHelper(progress)
+			for url in urlList:
+				try:
+					path = str(url.toLocalFile().toUtf8())
+					handle = importer.importFile(self.__store, path, progress=helper)
+					if handle:
+						try:
+							self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
+							self.__parent.save()
+						finally:
+							handle.close()
+				except IOError as error:
+					QtGui.QMessageBox.critical(self.__parent, "Import error",
+						"Error importing '"+path+"': "+str(error))
+		except AbortException:
+			pass
+		finally:
+			progress.setValue(numFiles)
+
 		return True
 
 	def __dropLinks(self, links):
