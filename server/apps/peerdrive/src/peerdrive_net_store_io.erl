@@ -27,6 +27,7 @@
 -include("store.hrl").
 -include("netstore.hrl").
 -include("peerdrive_netstore_pb.hrl").
+-include("utils.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...

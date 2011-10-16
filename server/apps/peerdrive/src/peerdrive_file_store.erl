@@ -962,11 +962,11 @@ check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
 		false ->
 			RootContent = [],
 			ContentPId = crd_write_part(RootContent, S),
-			Annotation1 = dict:new(),
-			Annotation2 = dict:store(<<"title">>, list_to_binary(Name), Annotation1),
-			Annotation3 = dict:store(<<"comment">>, list_to_binary("<<Initial store creation>>"), Annotation2),
-			RootMeta1 = dict:new(),
-			RootMeta2 = dict:store(<<"org.peerdrive.annotation">>, Annotation3, RootMeta1),
+			Annotation1 = gb_trees:empty(),
+			Annotation2 = gb_trees:enter(<<"title">>, list_to_binary(Name), Annotation1),
+			Annotation3 = gb_trees:enter(<<"comment">>, list_to_binary("<<Initial store creation>>"), Annotation2),
+			RootMeta1 = gb_trees:empty(),
+			RootMeta2 = gb_trees:enter(<<"org.peerdrive.annotation">>, Annotation3, RootMeta1),
 			MetaPId = crd_write_part(RootMeta2, S),
 			RootRev = #revision{
 				flags     = ?REV_FLAG_STICKY,

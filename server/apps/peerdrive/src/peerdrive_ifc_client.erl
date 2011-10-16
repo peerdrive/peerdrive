@@ -19,6 +19,7 @@
 
 -include("store.hrl").
 -include("peerdrive_client_pb.hrl").
+-include("utils.hrl").
 
 -record(state, {socket, handles, next, progreg=false}).
 -record(retpath, {socket, req, ref}).
@@ -68,11 +69,6 @@
 -define(PROGRESS_START_MSG,  16#025).
 -define(PROGRESS_MSG,        16#026).
 -define(PROGRESS_END_MSG,    16#027).
-
--define(ASSERT_GUID(G), ((is_binary(G) and (size(G) == 16)) orelse
-                         throw({error, einval}))).
--define(ASSERT_PART(G), ((is_binary(G) and (size(G) == 4)) orelse
-                         throw({error, einval}))).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Servlet callbacks

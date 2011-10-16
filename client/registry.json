@@ -128,9 +128,10 @@
 		"display"    :  "Zip archive"
 	},
 
-	"org.peerdrive.container" : {
+	"org.peerdrive.folder" : {
 		"conforming" : ["public.item"],
-		"display" : "Collection",
+		"display" : "Folder",
+		"icon" : "uti/folder.png",
 		"exec" : ["org.peerdrive.containerbrowser.py", "org.peerdrive.containerview.py"],
 		"meta" : [
 			{
@@ -140,18 +141,8 @@
 			}
 		]
 	},
-	"org.peerdrive.set" : {
-		"conforming" : ["org.peerdrive.container"],
-		"display" : "Folder",
-		"icon" : "uti/folder.png"
-	},
-	"org.peerdrive.dict" : {
-		"conforming" : ["org.peerdrive.container"],
-		"display" : "Directory",
-		"icon" : "uti/directory.png"
-	},
 	"org.peerdrive.store" : {
-		"conforming" : ["org.peerdrive.set"],
+		"conforming" : ["org.peerdrive.folder"],
 		"display" : "PeerDrive store",
 		"icon" : "uti/store.png"
 	},

@@ -20,6 +20,7 @@
 -include("store.hrl").
 -include("netstore.hrl").
 -include("peerdrive_netstore_pb.hrl").
+-include("utils.hrl").
 
 -record(state, {socket, handles, next, stores, store_pid, store_uuid}).
 -record(retpath, {socket, req, ref}).

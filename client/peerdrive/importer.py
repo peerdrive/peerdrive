@@ -111,15 +111,15 @@ def importFile(store, path, name="", progress=None):
 		try:
 			for entry in os.listdir(path):
 				handle = importFile(store, os.path.join(path, entry), entry, progress)
-				handles.append((entry, handle))
+				handles.append(handle)
 
-			container = struct.Set()
-			for (entry, handle) in handles:
-				container[entry] = struct.DocLink(store, handle.getDoc())
+			container = struct.Folder()
+			for handle in handles:
+				container.append(struct.DocLink(store, handle.getDoc()))
 
 			return container.create(store, name)
 		finally:
-			for (entry, handle) in handles:
+			for handle in handles:
 				handle.close()
 	else:
 		return None
@@ -216,7 +216,7 @@ def importObjectByPath(path, uti, spec, overwrite=False, flags=[]):
 		if not handle:
 			return False
 		try:
-			container[name] = struct.DocLink(store, handle.getDoc())
+			container.append(struct.DocLink(store, handle.getDoc()))
 			container.save()
 			return True
 		finally:

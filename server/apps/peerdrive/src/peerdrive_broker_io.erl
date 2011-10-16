@@ -21,6 +21,8 @@
 	get_type/1, set_type/2, commit/1, suspend/1, close/1, get_flags/1,
 	set_flags/2]).
 
+-include("utils.hrl").
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public broker operations...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -190,14 +192,14 @@ read_rev_part(Handle, Part) ->
 	end.
 
 
-read_rev_extract(Data) when is_record(Data, dict, 9) ->
-	dict:fold(
-		fun(_Key, Value, {AccDocs, AccRevs}) ->
+read_rev_extract(Data) when ?IS_GB_TREE(Data) ->
+	lists:foldl(
+		fun(Value, {AccDocs, AccRevs}) ->
 			{Docs, Revs} = read_rev_extract(Value),
 			{sets:union(Docs, AccDocs), sets:union(Revs, AccRevs)}
 		end,
 		{sets:new(), sets:new()},
-		Data);
+		gb_trees:values(Data));
 
 read_rev_extract(Data) when is_list(Data) ->
 	lists:foldl(

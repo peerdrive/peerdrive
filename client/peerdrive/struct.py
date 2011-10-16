@@ -494,136 +494,13 @@ def __mergeList(base, versions):
 # PDSD container objects
 ###############################################################################
 
-def Container(link):
-	link.update()
-	rev = link.rev()
-	if not rev:
-		return None
-	uti = connector.Connector().stat(rev, [link.store()]).type()
-	if uti in Dict.UTIs:
-		return Dict(link)
-	elif uti in Set.UTIs:
-		return Set(link)
-	else:
-		return None
-
-
-class Dict(object):
-	UTIs = ["org.peerdrive.dict"]
-
-	def __init__(self, link = None):
-		if link:
-			self.__rev = link.rev()
-			self.__doc = link.doc()
-			self.__store = link.store()
-			self.__load()
-		else:
-			self.__content = { }
-			self.__rev = None
-			self.__doc = None
-			self.__store = None
-
-	def __load(self):
-		uti = connector.Connector().stat(self.__rev, [self.__store]).type()
-		if uti not in Dict.UTIs:
-			raise IOError("Not a dict: "+uti)
-		with connector.Connector().peek(self.__store, self.__rev) as r:
-			self.__meta    = loads(self.__store, r.readAll('META'))
-			self.__content = loads(self.__store, r.readAll('PDSD'))
-
-	def create(self, store, name=None):
-		if self.__rev or self.__doc:
-			raise IOError("Not new")
-
-		self.__store = store
-		for link in self.__content:
-			link.update(self.__store)
-
-		if not name:
-			name = "New dict"
-		self.__meta = {
-			"org.peerdrive.annotation" : {
-				"title" : name,
-				"comment" : "<<Created by import>>"
-			}
-		}
-		w = connector.Connector().create(store, "org.peerdrive.dict", "")
-		try:
-			w.writeAll('META', dumps(self.__meta))
-			w.writeAll('PDSD', dumps(self.__content))
-			w.setFlags([connector.Stat.FLAG_STICKY])
-			w.commit()
-			self.__rev = w.getRev()
-			self.__doc = w.getDoc()
-			return w
-		except:
-			w.close()
-			raise
-
-	def save(self):
-		self.__meta["org.peerdrive.annotation"]["comment"] = "<<Changed by import>>"
-		if self.__rev and self.__doc and self.__store:
-			with connector.Connector().update(self.__store, self.__doc, self.__rev) as w:
-				w.writeAll('META', dumps(self.__meta))
-				w.writeAll('PDSD', dumps(self.__content))
-				self.__rev = w.commit()
-		else:
-			raise IOError('Not writable')
-
-	def title(self):
-		if "org.peerdrive.annotation" in self.__meta:
-			a = self.__meta["org.peerdrive.annotation"]
-			if "title" in a:
-				return a["title"]
-		return "Unnamed dictionary"
-
-	def __len__(self):
-		return len(self.__content)
-
-	def __getitem__(self, name):
-		key = name.split(':')[0]
-		return self.__content[key]
-
-	def __setitem__(self, name, link):
-		key = name.split(':')[0]
-		if self.__store:
-			link.update(self.__store)
-		self.__content[key] = link
-
-	def __delitem__(self, name):
-		key = name.split(':')[0]
-		del self.__content[key]
-
-	def __contains__(self, name):
-		key = name.split(':')[0]
-		return key in self.__content
-
-	def get(self, name):
-		key = name.split(':')[0]
-		return self.__content.get(key)
-
-	def items(self):
-		return self.__content.items()
-
-	def remove(self, name, link):
-		if self.__content.get(name) == link:
-			del self.__content[name]
-		else:
-			raise KeyError(name)
-
-	def getDoc(self):
-		return self.__doc
-
-	def getRev(self):
-		return self.__rev
-
-
-class Set(object):
-	UTIs = ["org.peerdrive.set", "org.peerdrive.store"]
+class Folder(object):
+	UTIs = ["org.peerdrive.folder", "org.peerdrive.store"]
 
 	def __init__(self, link = None):
 		self.__didCache = False
 		if link:
+			link.update()
 			self.__rev = link.rev()
 			self.__doc = link.doc()
 			self.__store = link.store()
@@ -635,9 +512,11 @@ class Set(object):
 			self.__store = None
 
 	def __load(self):
+		if not self.__rev:
+			raise IOError("Folder not found")
 		uti = connector.Connector().stat(self.__rev, [self.__store]).type()
-		if uti not in Set.UTIs:
-			raise IOError("Not a dict: "+uti)
+		if uti not in Folder.UTIs:
+			raise IOError("Not a folder: "+uti)
 		with connector.Connector().peek(self.__store, self.__rev) as r:
 			self.__meta = loads(self.__store, r.readAll('META'))
 			content = loads(self.__store, r.readAll('PDSD'))
@@ -645,7 +524,7 @@ class Set(object):
 
 	def __doCache(self):
 		if not self.__didCache:
-			self.__content = [ (readTitle(l), l) for (t, l) in
+			self.__content = [ (readTitle(i['']), i) for (t, i) in
 				self.__content ]
 			self.__didCache = True
 
@@ -655,15 +534,16 @@ class Set(object):
 
 		self.__store = store
 		if not name:
-			name = "New set"
+			name = "New folder"
 		self.__meta = {
 			"org.peerdrive.annotation" : {
-				"title" : name,
-				"comment" : "<<Created by import>>"
+				"title" : name
 			}
 		}
-		content = [ link.update(self.__store) for (descr, link) in self.__content ]
-		w = connector.Connector().create(store, "org.peerdrive.set", "")
+		for (descr, item) in self.__content:
+			item[''].update(self.__store)
+		content = [ item for (descr, item) in self.__content ]
+		w = connector.Connector().create(store, "org.peerdrive.folder", "")
 		try:
 			w.writeAll('META', dumps(self.__meta))
 			w.writeAll('PDSD', dumps(content))
@@ -679,7 +559,7 @@ class Set(object):
 	def save(self):
 		if self.__rev and self.__doc and self.__store:
 			self.__meta["org.peerdrive.annotation"]["comment"] = "<<Changed by import>>"
-			content = [ link for (descr, link) in self.__content ]
+			content = [ item for (descr, item) in self.__content ]
 			with connector.Connector().update(self.__store, self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
 				w.writeAll('PDSD', dumps(content))
@@ -692,17 +572,16 @@ class Set(object):
 			a = self.__meta["org.peerdrive.annotation"]
 			if "title" in a:
 				return a["title"]
-		return "Unnamed set"
+		return "Unnamed folder"
 
 	def __index(self, title, fail=True):
 		i = 0
-		for (key, link) in self.__content:
+		for (key, item) in self.__content:
 			if key == title:
 				return i
 			else:
 				i += 1
 		if fail:
-			print self.__content
 			raise IndexError(title)
 		else:
 			return None
@@ -710,19 +589,16 @@ class Set(object):
 	def __len__(self):
 		return len(self.__content)
 
-	def __getitem__(self, name):
-		self.__doCache()
-		i = self.__index(name)
-		return self.__content[i][1]
+	def __getitem__(self, i):
+		if isinstance(i, basestring):
+			self.__doCache()
+			i = self.__index(i)
+		return self.__content[i][1]['']
 
-	def __setitem__(self, name, link):
-		if self.__store:
-			link.update(self.__store)
-		self.__content.append( (readTitle(link), link) )
-
-	def __delitem__(self, name):
-		self.__doCache()
-		i = self.__index(name)
+	def __delitem__(self, select):
+		if isinstance(i, basestring):
+			self.__doCache()
+			i = self.__index(i)
 		del self.__content[i]
 
 	def __contains__(self, name):
@@ -730,21 +606,26 @@ class Set(object):
 		i = self.__index(name, False)
 		return i is not None
 
+	def append(self, link):
+		if self.__store:
+			link.update(self.__store)
+		self.__content.append( (readTitle(link), { '' : link }) )
+
 	def get(self, name):
 		self.__doCache()
 		i = self.__index(name, False)
 		if i is None:
 			return None
 		else:
-			return self.__content[i][1]
+			return self.__content[i][1]['']
 
 	def items(self):
 		self.__doCache()
-		return self.__content
+		return [ (name, item['']) for (name, item) in self.__content ]
 
 	def remove(self, name, link):
 		self.__doCache()
-		self.__content.remove((name, link))
+		self.__content.remove((name, {'' : link}))
 
 	def getDoc(self):
 		return self.__doc
@@ -773,13 +654,11 @@ def readTitle(link):
 # Path resolving
 ###############################################################################
 
-# return (store:uuid, container:Container, docName:str)
+# return (store:uuid, folder:Folder, docName:str)
 def walkPath(path, create=False):
 	steps = path.split('/')
 	storeName = steps[0]
-	docName  = steps[-1]
-	for i in xrange(1, len(steps)-1):
-		steps[i] = (steps[i], steps[i+1])
+	docName = steps[-1]
 	steps = steps[1:-1]
 
 	# search for store
@@ -796,38 +675,33 @@ def walkPath(path, create=False):
 		raise IOError("Store not found")
 
 	# walk the path
-	curContainer = Container(DocLink(storeDoc, storeDoc, False))
-	for (step, nextStep) in steps:
-		next = curContainer.get(step)
+	curFolder = Folder(DocLink(storeDoc, storeDoc, False))
+	for step in steps:
+		next = curFolder.get(step)
 		if next:
-			curContainer = Container(next)
+			curFolder = Folder(next)
 		elif create:
-			name = step.split(':')[-1]
-			if ':' in nextStep:
-				handle = Dict().create(storeDoc, name)
-			else:
-				handle = Set().create(storeDoc, name)
-
+			handle = Folder().create(storeDoc, step)
 			try:
 				next = DocLink(storeDoc, handle.getDoc())
-				curContainer[step] = next
-				curContainer.save()
+				curFolder.append(next)
+				curFolder.save()
 			finally:
 				handle.close()
-			curContainer = Container(next)
+			curFolder = Folder(next)
 		else:
 			raise IOError("Path not found")
 
 	# return result
-	return (storeDoc, curContainer, docName)
+	return (storeDoc, curFolder, docName)
 
 
 def resolvePath(path):
 	if '/' in path:
-		(storeDoc, container, docName) = walkPath(path)
-		if docName not in container:
+		(storeDoc, folder, docName) = walkPath(path)
+		if docName not in folder:
 			raise IOError("Path not found")
-		return container[docName]
+		return folder[docName]
 	else:
 		enum = connector.Connector().enum()
 		if path not in enum.allStores():
@@ -841,8 +715,8 @@ def copyDoc(src, dstStore):
 		raise IOError('Source not found!')
 
 	# create a dummy containter to prevent the garbage collection of the source rev
-	dummy = Set()
-	dummy['dummy'] = RevLink(dstStore, src.rev())
+	dummy = Folder()
+	dummy.append(RevLink(dstStore, src.rev()))
 	with dummy.create(dstStore) as dummyHandle:
 		connector.Connector().replicateRev(src.store(), src.rev(), dstStore)
 		handle = connector.Connector().fork(dstStore, src.rev(), 'org.peerdrive.cp')

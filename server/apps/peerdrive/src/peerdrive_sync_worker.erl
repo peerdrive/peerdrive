@@ -17,6 +17,7 @@
 -module(peerdrive_sync_worker).
 
 -include("store.hrl").
+-include("utils.hrl").
 
 -export([start_link/3]).
 -export([init/4]).
@@ -317,8 +318,7 @@ get_handler_fun(TypeSet) ->
 		[Type] ->
 			case Type of
 				<<"org.peerdrive.store">>  -> fun merge_pdsd/7;
-				<<"org.peerdrive.dict">>   -> fun merge_pdsd/7;
-				<<"org.peerdrive.set">>    -> fun merge_pdsd/7;
+				<<"org.peerdrive.folder">> -> fun merge_pdsd/7;
 				_ -> none
 			end;
 
@@ -449,15 +449,15 @@ merge_pdsd_update_meta(Data) ->
 		Data).
 
 
-update_meta_field([Key], Value, Meta) when is_record(Meta, dict, 9) ->
-	dict:store(Key, Value, Meta);
+update_meta_field([Key], Value, Meta) when ?IS_GB_TREE(Meta) ->
+	gb_trees:enter(Key, Value, Meta);
 
-update_meta_field([Key | Path], Value, Meta) when is_record(Meta, dict, 9) ->
-	NewValue = case dict:find(Key, Meta) of
-		{ok, OldValue} -> update_meta_field(Path, Value, OldValue);
-		error          -> update_meta_field(Path, Value, dict:new())
+update_meta_field([Key | Path], Value, Meta) when ?IS_GB_TREE(Meta) ->
+	NewValue = case gb_trees:lookup(Key, Meta) of
+		{value, OldValue} -> update_meta_field(Path, Value, OldValue);
+		none              -> update_meta_field(Path, Value, gb_trees:empty())
 	end,
-	dict:store(Key, NewValue, Meta);
+	gb_trees:enter(Key, NewValue, Meta);
 
 update_meta_field(_Path, _Value, Meta) ->
 	Meta. % Path conflicts with existing data

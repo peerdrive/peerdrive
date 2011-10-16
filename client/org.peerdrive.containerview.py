@@ -22,7 +22,7 @@ from PyQt4 import QtGui
 from peerdrive import struct, Registry
 from peerdrive.gui import main, utils
 
-from views.container import CollectionWidget, CollectionModel
+from views.container import CollectionWidget, FolderModel
 
 class CollectionWindow(main.MainWindow):
 
@@ -87,11 +87,11 @@ class CollectionWindow(main.MainWindow):
 			action.triggered.connect(lambda en, col=key: model.addColumn(col))
 
 	def __toggleAutoClean(self, checked):
-		self.viewWidget().metaDataSetField(CollectionModel.AUTOCLEAN, checked)
+		self.viewWidget().metaDataSetField(FolderModel.AUTOCLEAN, checked)
 
 	def __revChanged(self):
 		self.__cleanAct.setChecked(self.viewWidget().metaDataGetField(
-			CollectionModel.AUTOCLEAN, False))
+			FolderModel.AUTOCLEAN, False))
 
 	def __setMutable(self, mutable):
 		self.__cleanAct.setEnabled(mutable)

@@ -53,31 +53,6 @@ def makeProgressHelper(p):
 
 	return progressHelper
 
-class NameColumnInfo(object):
-	KEY = ":name"
-
-	def __init__(self):
-		pass
-
-	def removable(self):
-		return False
-
-	def editable(self):
-		return True
-
-	def derived(self):
-		return False
-
-	def default(self):
-		return None
-
-	def name(self):
-		return "Name"
-
-	def key(self):
-		return NameColumnInfo.KEY
-
-
 class MetaColumnInfo(object):
 	def __init__(self, key, spec):
 		self.__key = key
@@ -196,29 +171,28 @@ class StatColumnInfo(object):
 
 
 def _columnFactory(key):
-	if key == NameColumnInfo.KEY:
-		return NameColumnInfo()
+	(uti, path) = key.split(':')
+	if uti == "":
+		return StatColumnInfo(key)
 	else:
-		(uti, path) = key.split(':')
-		if uti == "":
-			return StatColumnInfo(key)
-		else:
-			for meta in Registry().search(uti, "meta", recursive=False, default=[]):
-				if path == reduce(lambda x,y: x+"/"+y, meta["key"]):
-					return MetaColumnInfo(key, meta)
+		for meta in Registry().search(uti, "meta", recursive=False, default=[]):
+			if path == reduce(lambda x,y: x+"/"+y, meta["key"]):
+				return MetaColumnInfo(key, meta)
 	return None
 
 
 class CollectionEntry(Watch):
-	def __init__(self, link, model, columns):
+	def __init__(self, item, model, columns):
 		self.__model = model
-		self.__link  = copy.deepcopy(link).update(self.__model.getStore())
+		self.__item  = copy.deepcopy(item)
 		self.__valid = False
 		self.__icon  = None
 		self.__uti   = None
 		self.__replacable = False
 		self.__columnValues = [ column.default() for column in columns ]
 		self.__columnDefs = columns[:]
+
+		link = self.__item[''].update(self.__model.getStore())
 
 		if isinstance(link, struct.DocLink):
 			super(CollectionEntry, self).__init__(Watch.TYPE_DOC, link.doc())
@@ -265,7 +239,10 @@ class CollectionEntry(Watch):
 		self.__updateColumns()
 
 	def getLink(self):
-		return self.__link
+		return self.__item['']
+
+	def getItem(self):
+		return self.__item
 
 	def getIcon(self):
 		if (not self.__valid) and (not self.__icon):
@@ -286,15 +263,15 @@ class CollectionEntry(Watch):
 
 		# determine revision
 		needMerge = False
-		if isinstance(self.__link, struct.DocLink):
-			revisions = Connector().lookupDoc(self.__link.doc()).revs()
+		if isinstance(self.__item[''], struct.DocLink):
+			revisions = Connector().lookupDoc(self.__item[''].doc()).revs()
 			if len(revisions) == 0:
 				return
 			elif len(revisions) > 1:
 				needMerge = True
-			self.__link.update()
+			self.__item[''].update()
 
-		self.__rev = self.__link.rev()
+		self.__rev = self.__item[''].rev()
 
 		# stat
 		try:
@@ -357,11 +334,12 @@ class CollectionEntry(Watch):
 			self.__model.entryRemoved(self)
 
 
-class CollectionModel(QtCore.QAbstractTableModel):
+class FolderModel(QtCore.QAbstractTableModel):
 	AUTOCLEAN = ["org.peerdrive.container", "autoclean"]
+	UTIs = ["org.peerdrive.folder", "org.peerdrive.store"]
 
 	def __init__(self, parent = None):
-		super(CollectionModel, self).__init__(parent)
+		super(FolderModel, self).__init__(parent)
 		self.__parent = parent
 
 		self._listing = []
@@ -381,7 +359,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.__store = handle.getStore()
 		self._listing = []
 		data = struct.loads(handle.getStore(), handle.readAll('PDSD'))
-		listing = self.decode(data)
+		listing = [ CollectionEntry(item, self, self._columns) for item in data ]
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
 				self.__typeCodes.add(entry.getTypeCode())
@@ -392,7 +370,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		self.reset()
 
 	def doSave(self, handle):
-		data = self.encode()
+		data = [ item.getItem() for item in self._listing ]
 		handle.writeAll('PDSD', struct.dumps(data))
 		self.__changedContent = False
 
@@ -717,7 +695,7 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		return True
 
 	def insertLink(self, link):
-		entry = CollectionEntry(link, self, self._columns)
+		entry = CollectionEntry({'' : link}, self, self._columns)
 		if not self.validateInsert(entry):
 			return False
 		self.__typeCodes.add(entry.getTypeCode())
@@ -739,6 +717,9 @@ class CollectionModel(QtCore.QAbstractTableModel):
 		return True
 
 	def validateDragEnter(self, link):
+		for item in self._listing:
+			if item.getLink() == link:
+				return False
 		return True
 
 	# === Callbacks from a CollectionEntry which has changed ===
@@ -758,84 +739,6 @@ class CollectionModel(QtCore.QAbstractTableModel):
 
 	def entryAppeared(self, entry):
 		self.entryChanged(entry)
-
-
-class DictModel(CollectionModel):
-	UTIs = ["org.peerdrive.dict"]
-
-	def __init__(self, parent = None):
-		super(DictModel, self).__init__(parent)
-
-	def setColumns(self, columns):
-		# make sure the static 'Name' column is included
-		if NameColumnInfo.KEY not in columns:
-			columns = [NameColumnInfo.KEY] + columns
-		super(DictModel, self).setColumns(columns)
-
-	def encode(self):
-		data = { }
-		for item in self._listing:
-			data[item.getColumnData(0)] = item.getLink()
-		return data
-
-	def decode(self, data):
-		listing = []
-		for (name, link) in data.items():
-			entry = CollectionEntry(link, self, self._columns)
-			entry.setColumnData(0, name)
-			listing.append(entry)
-		return listing
-
-	def validateEdit(self, index, newValue):
-		if index.column() == 0:
-			for item in self._listing:
-				if item.getColumnData(0) == newValue:
-					return False
-			return True
-		else:
-			return False
-
-	def validateInsert(self, entry):
-		# create new item with unique name
-		baseName = "Added document"
-		name = baseName
-		counter = 1
-		while True:
-			found = False
-			for item in self._listing:
-				if item.getColumnData(0) == name:
-					found = True
-			if found:
-				name = (baseName + " (%d)") % (counter)
-				counter = counter + 1
-			else:
-				break
-		entry.setColumnData(0, name)
-		return True
-
-
-class SetModel(CollectionModel):
-	UTIs = ["org.peerdrive.set", "org.peerdrive.store"]
-
-	def __init__(self, parent = None):
-		super(SetModel, self).__init__(parent)
-
-	def setColumns(self, columns):
-		# make sure the 'Name' column is not included
-		columns = [col for col in columns if col != NameColumnInfo.KEY]
-		super(SetModel, self).setColumns(columns)
-
-	def encode(self):
-		return [ item.getLink() for item in self._listing ]
-
-	def decode(self, data):
-		return [ CollectionEntry(link, self, self._columns) for link in data ]
-
-	def validateDragEnter(self, link):
-		for item in self._listing:
-			if item.getLink() == link:
-				return False
-		return True
 
 
 class CollectionTreeView(QtGui.QTreeView):
@@ -913,12 +816,9 @@ class CollectionWidget(widgets.DocumentView):
 	def docRead(self, readWrite, handle):
 		stat = Connector().stat(self.rev())
 		uti = stat.type()
-		if uti in DictModel.UTIs:
-			model = DictModel(self)
-		elif uti in SetModel.UTIs:
-			model = SetModel(self)
-		else:
+		if uti not in FolderModel.UTIs:
 			raise TypeError('Unhandled type code: %s' % (uti))
+		model = FolderModel(self)
 
 		self.__setModel(model)
 		if self.__settings:
@@ -932,7 +832,7 @@ class CollectionWidget(widgets.DocumentView):
 		self.listView.selectionModel().selectionChanged.connect(
 			lambda: self.selectionChanged.emit())
 
-		autoClean = self.metaDataGetField(CollectionModel.AUTOCLEAN, False)
+		autoClean = self.metaDataGetField(FolderModel.AUTOCLEAN, False)
 		model.doLoad(handle, readWrite, autoClean)
 		if model.hasChanged():
 			self._emitSaveNeeded()
@@ -974,7 +874,7 @@ class CollectionWidget(widgets.DocumentView):
 	# reimplemented to catch changes to "autoClean"
 	def metaDataSetField(self, field, value):
 		super(CollectionWidget, self).metaDataSetField(field, value)
-		if field == CollectionModel.AUTOCLEAN:
+		if field == FolderModel.AUTOCLEAN:
 			model = self.model()
 			if model:
 				model.setAutoClean(value)
@@ -1133,8 +1033,8 @@ class CollectionWidget(widgets.DocumentView):
 	def __addCreateActions(self, menu):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
 		sysStore = Connector().enum().sysStore()
-		sysDict = struct.Container(struct.DocLink(sysStore, sysStore))
-		templatesDict = struct.Container(sysDict.get("templates").update(sysStore))
+		sysDict = struct.Folder(struct.DocLink(sysStore, sysStore))
+		templatesDict = struct.Folder(sysDict.get("templates").update(sysStore))
 		items = templatesDict.items()
 		items.sort(key=lambda item: item[0])
 		for (name, link) in items:

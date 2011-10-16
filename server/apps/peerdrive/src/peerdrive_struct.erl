@@ -17,6 +17,8 @@
 -module(peerdrive_struct).
 -export([decode/1, encode/1, merge/2]).
 
+-include("utils.hrl").
+
 -define(DICT,   16#00).
 -define(LIST,   16#10).
 -define(STRING, 16#20).
@@ -64,14 +66,14 @@ decode_doc(<<Tag:8, Body/binary>>) ->
 
 
 decode_dict(<<Elements:32/little, Body/binary>>) ->
-	decode_dict_loop(Elements, dict:new(), Body).
+	decode_dict_loop(Elements, gb_trees:empty(), Body).
 
 decode_dict_loop(0, Dict, Rest) ->
 	{Dict, Rest};
 decode_dict_loop(Count, Dict1, Body1) ->
 	{Key, Body2} = decode_string(Body1),
 	{Value, Body3} = decode_doc(Body2),
-	Dict2 = dict:store(Key, Value, Dict1),
+	Dict2 = gb_trees:enter(Key, Value, Dict1),
 	decode_dict_loop(Count-1, Dict2, Body3).
 
 
@@ -129,15 +131,15 @@ decode_int(Size, Signed, Body) ->
 %% Encoding
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-encode(Dict) when is_record(Dict, dict, 9) ->
-	dict:fold(
-		fun(Key, Value, Acc) when is_binary(Key) ->
+encode(Dict) when ?IS_GB_TREE(Dict) ->
+	lists:foldl(
+		fun({Key, Value}, Acc) when is_binary(Key) ->
 			EncKey = <<(size(Key)):32/little, Key/binary>>,
 			EncVal = encode(Value),
 			<<Acc/binary, EncKey/binary, EncVal/binary>>
 		end,
-		<<?DICT, (dict:size(Dict)):32/little>>,
-		Dict);
+		<<?DICT, (gb_trees:size(Dict)):32/little>>,
+		gb_trees:to_list(Dict));
 
 encode(List) when is_list(List) ->
 	lists:foldl(
@@ -204,25 +206,25 @@ merge(Base, Versions) ->
 %%
 merge_dict(Base, Versions) ->
 	% compute the differences
-	BaseKeys = sets:from_list(dict:fetch_keys(Base)),
+	BaseKeys = sets:from_list(gb_trees:keys(Base)),
 	{Res, Added, Removed} = lists:foldl(
 		fun(Dict, {AccRes, AccAdd, AccRem}) ->
-			VerKeys = sets:from_list(dict:fetch_keys(Dict)),
+			VerKeys = sets:from_list(gb_trees:keys(Dict)),
 			% check for added keys
 			{NewRes, NewAdd} = sets:fold(
 				fun(Key, {InRes, InAdd}) ->
-					VerValue = dict:fetch(Key, Dict),
-					case dict:is_key(Key, InAdd) of
+					VerValue = gb_trees:get(Key, Dict),
+					case gb_trees:is_defined(Key, InAdd) of
 						true ->
 							% already added by another version; conflicting?
-							case cmp(VerValue, dict:fetch(Key, InAdd)) of
+							case cmp(VerValue, gb_trees:get(Key, InAdd)) of
 								true  -> {InRes, InAdd};
 								false -> {econflict, InAdd}
 							end;
 
 						false ->
 							% this one is new
-							{InRes, dict:store(Key, VerValue, InAdd)}
+							{InRes, gb_trees:enter(Key, VerValue, InAdd)}
 					end
 				end,
 				{AccRes, AccAdd},
@@ -231,12 +233,12 @@ merge_dict(Base, Versions) ->
 			NewRem = sets:union(AccRem, sets:subtract(BaseKeys, VerKeys)),
 			{NewRes, NewAdd, NewRem}
 		end,
-		{ok, dict:new(), sets:new()},
+		{ok, gb_trees:empty(), sets:new()},
 		Versions),
 	% construct new dict
-	{Res1, NewDict1} = dict:fold(
-		fun(Key, BaseValue, {AccRes, AccDict}) ->
-			OtherValues = [dict:fetch(Key, V) || V <- Versions, dict:is_key(Key, V)],
+	{Res1, NewDict1} = lists:foldl(
+		fun({Key, BaseValue}, {AccRes, AccDict}) ->
+			OtherValues = [gb_trees:get(Key, V) || V <- Versions, gb_trees:is_defined(Key, V)],
 			case sets:is_element(Key, Removed) of
 				true ->
 					% has been deleted; is there modify/delete conflict?
@@ -247,11 +249,11 @@ merge_dict(Base, Versions) ->
 						true ->
 							% yes :( -> take the latest version
 							Latest = hd(Versions),
-							case dict:is_key(Key, Latest) of
+							case gb_trees:is_defined(Key, Latest) of
 								true ->
 									% the latest version still has it.. retain
 									{_, NewVal} = merge(BaseValue, OtherValues),
-									{econflict, dict:store(Key, NewVal, AccDict)};
+									{econflict, gb_trees:enter(Key, NewVal, AccDict)};
 
 								false ->
 									% the latest version deleted it.. bye bye
@@ -267,14 +269,21 @@ merge_dict(Base, Versions) ->
 					% not deleted, descent merging
 					{Conflict, NewVal} = merge(BaseValue, OtherValues),
 					case AccRes of
-						ok -> {Conflict, dict:store(Key, NewVal, AccDict)};
-						_  -> {AccRes, dict:store(Key, NewVal, AccDict)}
+						ok -> {Conflict, gb_trees:enter(Key, NewVal, AccDict)};
+						_  -> {AccRes, gb_trees:enter(Key, NewVal, AccDict)}
 					end
 			end
 		end,
-		{Res, dict:new()},
-		Base),
-	{Res1, dict:merge(fun(_K, V1, _V2) -> V1 end, NewDict1, Added)}.
+		{Res, gb_trees:empty()},
+		gb_trees:to_list(Base)),
+	% Store the added keys
+	NewDict2 = lists:foldl(
+		fun({Key, AddValue}, AccDict) ->
+			gb_trees:enter(Key, AddValue, AccDict)
+		end,
+		NewDict1,
+		gb_trees:to_list(Added)),
+	{Res1, NewDict2}.
 
 
 %%
@@ -334,9 +343,9 @@ cmp(X1, X2) when is_list(X1) ->
 		_  -> false
 	end;
 
-cmp(X1, X2) when is_record(X1, dict, 9) ->
-	L1 = lists:sort(dict:to_list(X1)),
-	L2 = lists:sort(dict:to_list(X2)),
+cmp(X1, X2) when ?IS_GB_TREE(X1), ?IS_GB_TREE(X2) ->
+	L1 = gb_trees:to_list(X1),
+	L2 = gb_trees:to_list(X2),
 	cmp(L1, L2);
 
 cmp({rlink, R1}, {rlink, R2}) ->
@@ -382,8 +391,8 @@ check_type(Base, Versions) when is_list(Base) ->
 		false -> econflict
 	end;
 
-check_type(Base, Versions) when is_record(Base, dict, 9) ->
-	case lists:all(fun(V) -> is_record(V, dict, 9) end, Versions) of
+check_type(Base, Versions) when ?IS_GB_TREE(Base) ->
+	case lists:all(fun(V) -> ?IS_GB_TREE(V) end, Versions) of
 		true  -> dict;
 		false -> econflict
 	end;

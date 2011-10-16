@@ -21,6 +21,8 @@
 -export([init/1, handle_info/3, handle_event/3, handle_sync_event/4,
 	terminate/3, code_change/4]).
 
+-include("utils.hrl").
+
 -record(state, {store, sys, doc, rules=sets:new(), workers=sets:new()}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -147,14 +149,20 @@ find_sync_rules(Store, Doc) ->
 find_sync_rules_loop(_Store, []) ->
 	error;
 
-find_sync_rules_loop(Store, [{dlink, Doc} | Rest]) ->
-	try read_file_name(Store, Doc) of
-		<<"syncrules">> ->
-			{ok, Doc};
-		_ ->
-			find_sync_rules_loop(Store, Rest)
-	catch
-		throw:error ->
+find_sync_rules_loop(Store, [Entry | Rest]) when ?IS_GB_TREE(Entry) ->
+	case gb_trees:lookup(<<"">>, Entry) of
+		{value, {dlink, Doc}} ->
+			try read_file_name(Store, Doc) of
+				<<"syncrules">> ->
+					{ok, Doc};
+				_ ->
+					find_sync_rules_loop(Store, Rest)
+			catch
+				throw:error ->
+					find_sync_rules_loop(Store, Rest)
+			end;
+
+		value ->
 			find_sync_rules_loop(Store, Rest)
 	end;
 
@@ -175,7 +183,7 @@ read_file_name(Store, Doc) ->
 		erro -> throw(error)
 	end,
 	Meta = case peerdrive_util:read_rev_struct(Store, Rev, <<"META">>) of
-		{ok, Value1} when is_record(Value1, dict, 9) ->
+		{ok, Value1} when ?IS_GB_TREE(Value1) ->
 			Value1;
 		{ok, _} ->
 			throw(error);
@@ -194,10 +202,10 @@ read_file_name(Store, Doc) ->
 
 meta_read_entry(Meta, []) ->
 	{ok, Meta};
-meta_read_entry(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
-	case dict:find(Step, Meta) of
-		{ok, Value} -> meta_read_entry(Value, Path);
-		error       -> error
+meta_read_entry(Meta, [Step|Path]) when ?IS_GB_TREE(Meta) ->
+	case gb_trees:lookup(Step, Meta) of
+		{value, Value} -> meta_read_entry(Value, Path);
+		none           -> error
 	end;
 meta_read_entry(_Meta, _Path) ->
 	error.
@@ -214,31 +222,31 @@ read_sync_rules(Store, Doc) ->
 	end.
 
 
-parse_rule(Rule, Acc) when is_record(Rule, dict, 9) ->
-	case dict:find(<<"from">>, Rule) of
-		{ok, StoreHex} ->
+parse_rule(Rule, Acc) when ?IS_GB_TREE(Rule) ->
+	case gb_trees:lookup(<<"from">>, Rule) of
+		{value, StoreHex} ->
 			Store = peerdrive_util:hexstr_to_bin(binary_to_list(StoreHex)),
-			case dict:find(<<"to">>, Rule) of
-				{ok, PeerHex} ->
+			case gb_trees:lookup(<<"to">>, Rule) of
+				{value, PeerHex} ->
 					Peer = peerdrive_util:hexstr_to_bin(binary_to_list(PeerHex)),
-					case dict:find(<<"mode">>, Rule) of
-						{ok, <<"ff">>}     ->
+					case gb_trees:lookup(<<"mode">>, Rule) of
+						{value, <<"ff">>}     ->
 							sets:add_element({ff, Store, Peer}, Acc);
-						{ok, <<"latest">>} ->
+						{value, <<"latest">>} ->
 							sets:add_element({latest, Store, Peer}, Acc);
-						{ok, <<"merge">>} ->
+						{value, <<"merge">>} ->
 							sets:add_element({merge, Store, Peer}, Acc);
-						{ok, _} ->
+						{value, _} ->
 							Acc;
-						error ->
+						none ->
 							Acc
 					end;
 
-				error ->
+				none ->
 					Acc
 			end;
 
-		error ->
+		none ->
 			Acc
 	end;
 
@@ -251,7 +259,7 @@ check_workers(#state{rules=Rules, workers=Workers} = S) ->
 	Stopped = sets:subtract(Workers, Rules),
 	lists:foreach(
 		fun({_Mode, Store, Peer}) ->
-			Ret = peerdrive_sync_sup:stop_sync(Store, Peer),
+			Ret = peerdrive_synchronizer:stop_sync(Store, Peer),
 			Ret == ok orelse error_logger:warning_report([{module, ?MODULE},
 				{warning, 'stop sync failed'}, {reason, Ret}])
 		end,
@@ -263,7 +271,7 @@ check_workers(#state{rules=Rules, workers=Workers} = S) ->
 				{ok, _} ->
 					case peerdrive_volman:store(Peer) of
 						{ok, _} ->
-							case peerdrive_sync_sup:start_sync(Mode, Store, Peer) of
+							case peerdrive_synchronizer:start_sync(Mode, Store, Peer) of
 								ok ->
 									true;
 								Error ->

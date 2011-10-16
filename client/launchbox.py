@@ -75,11 +75,11 @@ class Launchbox(QtGui.QDialog):
 		Connector().regProgressHandler(start=self.progressStart,
 			stop=self.progressStop)
 
-	def progressStart(self, tag, typ, info):
+	def progressStart(self, tag, typ, src, dst):
 		if typ == PROGRESS_SYNC:
-			widget = SyncWidget(tag, info)
+			widget = SyncWidget(tag, src, dst)
 		else:
-			widget = ReplicationWidget(tag, typ, info)
+			widget = ReplicationWidget(tag, typ, src, dst)
 		self.progressWidgets[tag] = widget
 		self.progressLayout.addWidget(widget)
 
@@ -219,11 +219,9 @@ class StoreWidget(QtGui.QWidget):
 
 
 class SyncWidget(QtGui.QFrame):
-	def __init__(self, tag, info, parent=None):
+	def __init__(self, tag, fromStore, toStore, parent=None):
 		super(SyncWidget, self).__init__(parent)
 		self.tag = tag
-		fromStore = info[0:16]
-		toStore = info[16:32]
 
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
@@ -253,11 +251,9 @@ class SyncWidget(QtGui.QFrame):
 
 
 class ReplicationWidget(QtGui.QFrame):
-	def __init__(self, tag, typ, info, parent=None):
+	def __init__(self, tag, typ, uuid, store, parent=None):
 		super(ReplicationWidget, self).__init__(parent)
 		self.tag = tag
-		uuid = info[0:16]
-		store = info[16:32]
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
 		if typ == PROGRESS_REP_DOC:
@@ -294,7 +290,7 @@ class ReplicationWidget(QtGui.QFrame):
 class SyncRules(object):
 	def __init__(self):
 		self.sysStore = Connector().enum().sysStore()
-		self.syncDoc = struct.Container(struct.DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
+		self.syncDoc = struct.Folder(struct.DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
 		self.syncRev = Connector().lookupDoc(self.syncDoc).rev(self.sysStore)
 		with Connector().peek(self.sysStore, self.syncRev) as r:
 			self.rules = struct.loads(self.sysStore, r.readAll('PDSD'))

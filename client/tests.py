@@ -652,15 +652,15 @@ class TestReplicator(CommonParts):
 		rev = w.getRev()
 
 		# create sticky contianer on first store
-		s = struct.Set()
+		s = struct.Folder()
 		with s.create(self.store1, "foo") as dummy:
-			s['dummy'] = struct.DocLink(self.store1, doc)
+			s.append(struct.DocLink(self.store1, doc))
 			s.save()
 			contDoc = s.getDoc()
 
 			# need a dummy container on both stores
-			self.createCommon([self.store1, self.store2], "org.peerdrive.set",
-				data={'PDSD' : struct.dumps([struct.DocLink(self.store1, contDoc)])})
+			self.createCommon([self.store1, self.store2], "org.peerdrive.folder",
+				data={'PDSD' : struct.dumps([{'':struct.DocLink(self.store1, contDoc)}])})
 
 		watch1 = self.watchDoc(doc, connector.Watch.EVENT_REPLICATED)
 		watch2 = self.watchRev(rev, connector.Watch.EVENT_REPLICATED)
@@ -706,9 +706,9 @@ class TestSynchronization(CommonParts):
 	def startSync(self, mode, fromStore, toStore):
 		fromGuid = fromStore.encode('hex')
 		toGuid = toStore.encode('hex')
-		result = self.erlCall("peerdrive_synchronizer:sync(" + mode +
+		result = self.erlCall("peerdrive_synchronizer:start_sync(" + mode +
 			", <<16#"+fromGuid+":128>>, <<16#"+toGuid+":128>>).")
-		self.assertTrue(result.startswith('{ok, {ok,'))
+		self.assertEqual(result, '{ok, ok}')
 
 	def createFastForward(self):
 		(doc, rev1) = self.createCommon([self.store1, self.store2])
@@ -834,7 +834,7 @@ class TestSynchronization(CommonParts):
 
 	# Checks that the 'merge' strategy really merges
 	def test_sync_merge(self):
-		(doc, rev1, rev2) = self.createMerge("org.peerdrive.dict",
+		(doc, rev1, rev2) = self.createMerge("org.peerdrive.folder",
 			{'PDSD' : struct.dumps({"a":1}) },
 			{'PDSD' : struct.dumps({"a":1, "b":2}) },
 			{'PDSD' : struct.dumps({"a":1, "c":3}) })

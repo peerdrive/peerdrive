@@ -55,43 +55,28 @@ importObjectByPath(
 
 # import templates to store
 importObjectByPath(
-	"sys/templates/Plain text:",
+	"sys/templates/Text document",
 	"public.plain-text",
 	[
 		("FILE", "Empty document"),
 		("META", peerdrive.struct.dumps({
 			"org.peerdrive.annotation" : {
-				"title" : "New, empty text document",
+				"title" : "Text document",
 				"comment" : "Created from template"
 			}
 		}))
 	])
 importObjectByPath(
-	"sys/templates/Folder:",
-	"org.peerdrive.set",
+	"sys/templates/Folder",
+	"org.peerdrive.folder",
 	[
 		("PDSD", peerdrive.struct.dumps( [] )),
 		("META", peerdrive.struct.dumps({
 			"org.peerdrive.annotation" : {
-				"title" : "New folder",
-				"description" : "A unsorted collection of documents",
+				"title" : "Folder",
 				"comment" : "Created from template"
 			}
 		}))
 	],
 	flags=[peerdrive.connector.Stat.FLAG_STICKY])
-#importObjectByPath(
-#	"sys/templates/Directory:",
-#	"org.peerdrive.dict",
-#	[
-#		("PDSD", peerdrive.struct.dumps( {} )),
-#		("META", peerdrive.struct.dumps({
-#			"org.peerdrive.annotation" : {
-#				"title" : "New directory",
-#				"description" : "A list of documents indexed by distinct names",
-#				"comment" : "Created from template"
-#			}
-#		}))
-#	],
-#	flags=[peerdrive.connector.Stat.FLAG_STICKY])
 

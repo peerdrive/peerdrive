@@ -18,7 +18,7 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
--export([sync/3]).
+-export([start_sync/3, stop_sync/2]).
 -export([init/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -28,8 +28,11 @@
 start_link() ->
 	supervisor:start_link({local, peerdrive_synchronizer}, ?MODULE, []).
 
-sync(Mode, Store, Peer) ->
-	peerdrive_sync_sup:sync(Mode, Store, Peer).
+start_sync(Mode, Store, Peer) ->
+	peerdrive_sync_sup:start_sync(Mode, Store, Peer).
+
+stop_sync(Store, Peer) ->
+	peerdrive_sync_sup:stop_sync(Store, Peer).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...

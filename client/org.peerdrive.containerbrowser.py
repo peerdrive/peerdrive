@@ -25,7 +25,7 @@ from peerdrive import Connector, Registry, struct, connector
 from peerdrive.gui import utils
 from peerdrive.gui.widgets import DocumentView, DocButton
 
-from views.container import CollectionWidget, CollectionModel
+from views.container import CollectionWidget
 from views.text import TextEdit
 
 class HistoryItem(object):

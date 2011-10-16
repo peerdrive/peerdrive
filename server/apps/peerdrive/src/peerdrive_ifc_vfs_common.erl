@@ -22,6 +22,7 @@
 
 -include("store.hrl").
 -include("vfs.hrl").
+-include("utils.hrl").
 
 -define(VFS_CC, <<"org.peerdrive.vfs">>).  % creator code
 
@@ -65,8 +66,7 @@
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Options) ->
-	put(dir_type, proplists:get_value(dir_type, Options, set)),
+init(_Options) ->
 	#state{
 		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
 		imap   = gb_trees:empty(),
@@ -791,7 +791,7 @@ docdir_read_entry(Store, Doc, {CacheRev, CacheEntry}=Cache) ->
 
 read_file_name(Store, _Doc, Rev) ->
 	Meta = case peerdrive_util:read_rev_struct(Store, Rev, <<"META">>) of
-		{ok, Value1} when is_record(Value1, dict, 9) ->
+		{ok, Value1} when ?IS_GB_TREE(Value1) ->
 			Value1;
 		{ok, _} ->
 			throw(error);
@@ -818,11 +818,9 @@ doc_make_node({doc, Store, Doc} = Oid) ->
 				{ok, #rev_stat{type=Type}} ->
 					case Type of
 						<<"org.peerdrive.store">> ->
-							doc_make_node_set(Oid);
-						<<"org.peerdrive.dict">> ->
-							doc_make_node_dict(Oid);
-						<<"org.peerdrive.set">> ->
-							doc_make_node_set(Oid);
+							doc_make_node_folder(Oid);
+						<<"org.peerdrive.folder">> ->
+							doc_make_node_folder(Oid);
 						_ ->
 							doc_make_node_file(Oid)
 					end;
@@ -837,307 +835,31 @@ doc_make_node({doc, Store, Doc} = Oid) ->
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Directory documents
+%% Folder documents
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-doc_make_node_dict(Oid) ->
+-record(fe, {oid, rev, disp, title, suffix, orig=gb_trees:empty()}).
+
+doc_make_node_folder(Oid) ->
 	{ok, #vnode{
 		timeout = 1000,
 		oid     = Oid,
 		ifc     = #ifc{
-			getattr = fun dict_getattr/1,
-			lookup  = fun dict_lookup/3,
-			getnode = fun dict_getnode/1,
-			readdir = fun dict_readdir/2,
-			create  = fun dict_create/4,
-			link    = fun dict_link/4,
-			unlink  = fun dict_unlink/3,
-			mkdir   = fun dict_mkdir/3,
-			rename  = fun dict_rename/4
-		},
-		cache = {undefined, undefined}
-	}}.
-
-
-dict_getattr({doc, Store, Doc}) ->
-	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
-		{ok, Rev} ->
-			case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
-				{ok, #rev_stat{mtime=Mtime}} ->
-					{ok, #vfs_attr{
-						dir   = true,
-						atime = Mtime,
-						mtime = Mtime,
-						ctime = Mtime
-					}};
-				Error ->
-					Error
-			end;
-		error ->
-			{error, enoent}
-	end.
-
-
-dict_lookup({doc, Store, Doc}, Name, Cache) ->
-	case dict_read_entries(Store, Doc, Cache) of
-		{ok, Entries, NewCache} ->
-			case dict:find(Name, Entries) of
-				{ok, {dlink, ChildDoc}} ->
-					{entry, {doc, Store, ChildDoc}, NewCache};
-
-				_ ->
-					{error, enoent, NewCache}
-			end;
-
-		_ ->
-			{error, enoent}
-	end.
-
-
-dict_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
-	case dict_read_entries(Store, Doc, Cache) of
-		{ok, Entries, NewCache} ->
-			case dict:find(Name, Entries) of
-				{ok, {dlink, ChildDoc}} ->
-					case MustCreate of
-						true ->
-							{error, eexist, NewCache};
-						false ->
-							{entry, {doc, Store, ChildDoc}, NewCache}
-					end;
-
-				{ok, _} ->
-					{error, eacces, NewCache};
-
-				error ->
-					case create_empty_file(Store, Name) of
-						{ok, Handle, NewDoc, _NewRev} ->
-							try
-								Update = fun(Dict) ->
-									dict:store(Name, {dlink, NewDoc}, Dict)
-								end,
-								case dict_update(Store, Doc, NewCache, Update) of
-									{ok, AddCache} ->
-										{entry, {doc, Store, NewDoc}, AddCache};
-									{error, _Reason, _AddCache} = Error ->
-										Error
-								end
-							after
-								peerdrive_broker:close(Handle)
-							end;
-
-						{error, Reason} ->
-							{error, Reason, NewCache}
-					end
-			end;
-
-		_ ->
-			{error, eacces}
-	end.
-
-
-dict_mkdir({doc, Store, Doc}, Name, Cache) ->
-	case dict_read_entries(Store, Doc, Cache) of
-		{ok, Entries, NewCache} ->
-			case dict:find(Name, Entries) of
-				{ok, _} ->
-					{error, eexist, NewCache};
-
-				error ->
-					case create_empty_directory(Store, Name) of
-						{ok, Handle, NewDoc, _NewRev} ->
-							try
-								Update = fun(Dict) ->
-									dict:store(Name, {dlink, NewDoc}, Dict)
-								end,
-								case dict_update(Store, Doc, NewCache, Update) of
-									{ok, AddCache} ->
-										{ok, {doc, Store, NewDoc}, AddCache};
-									{error, _Reason, _AddCache} = Error ->
-										Error
-								end
-							after
-								peerdrive_broker:close(Handle)
-							end;
-
-						{error, Reason} ->
-							{error, Reason, NewCache}
-					end
-			end;
-
-		_ ->
-			{error, eacces}
-	end.
-
-
-dict_getnode({doc, _Store, _Doc} = Oid) ->
-	doc_make_node(Oid);
-dict_getnode(_) ->
-	error.
-
-
-dict_readdir({doc, Store, Doc}, Cache) ->
-	case dict_read_entries(Store, Doc, Cache) of
-		{ok, Entries, NewCache} ->
-			Content = map_filter(
-				fun(E) -> dict_readdir_filter(Store, E) end,
-				dict:to_list(Entries)),
-			{ok, Content, NewCache};
-
-		error ->
-			{error, enoent}
-	end.
-
-
-dict_readdir_filter(Store, {Name, {dlink, Child}}) ->
-	Oid = {doc, Store, Child},
-	case doc_make_node(Oid) of
-		{ok, #vnode{ifc=#ifc{getattr=GetAttr}}} ->
-			case catch GetAttr(Oid) of
-				{ok, Attr} ->
-					{ok, #vfs_direntry{name=Name, attr=Attr}};
-				{error, _} ->
-					skip
-			end;
-		error ->
-			skip
-	end;
-
-dict_readdir_filter(_, _) ->
-	skip.
-
-
-dict_read_entries(Store, Doc, {CacheRev, CacheEntries}=Cache) ->
-	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
-		{ok, CacheRev} ->
-			{ok, CacheEntries, Cache};
-
-		{ok, Rev} ->
-			case peerdrive_util:read_rev_struct(Store, Rev, <<"PDSD">>) of
-				{ok, Entries} when is_record(Entries, dict, 9) ->
-					{ok, Entries, {Rev, Entries}};
-				{ok, _} ->
-					error;
-				{error, _} ->
-					error
-			end;
-		error ->
-			error
-	end.
-
-
-dict_link({doc, Store, ParentDoc}, {doc, Store, ChildDoc}, Name, Cache) ->
-	case peerdrive_ifc_vfs_broker:lookup(Store, ChildDoc) of
-		{ok, _ChildRev} ->
-			Update = fun(Entries) ->
-				dict:store(Name, {dlink, ChildDoc}, Entries)
-			end,
-			dict_update(Store, ParentDoc, Cache, Update);
-
-		error ->
-			{error, enoent}
-	end;
-
-dict_link(_, _, _, _) ->
-	{error, eacces}.
-
-
-dict_unlink({doc, Store, Doc}, Name, Cache) ->
-	Update = fun(Entries) -> dict:erase(Name, Entries) end,
-	dict_update(Store, Doc, Cache, Update).
-
-
-dict_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
-	Update = fun(Entries) ->
-		case dict:find(OldName, Entries) of
-			{ok, Entry} ->
-				dict:store(NewName, Entry, dict:erase(OldName, Entries));
-			error ->
-				{error, enoent}
-		end
-	end,
-	dict_update(Store, Doc, Cache, Update).
-
-
-dict_update(Store, Doc, Cache, Fun) ->
-	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
-		{ok, Rev, Handle} ->
-			case dict_update_cache(Handle, Rev, Cache) of
-				{ok, Entries, NewCache} ->
-					case Fun(Entries) of
-						{error, Reason} ->
-							peerdrive_ifc_vfs_broker:abort(Handle),
-							{error, Reason, NewCache};
-						NewEntries ->
-							dict_write_entries(Handle, NewEntries, NewCache)
-					end;
-
-				Error ->
-					peerdrive_ifc_vfs_broker:abort(Handle),
-					Error
-			end;
-
-		Error ->
-			Error
-	end.
-
-
-dict_update_cache(_Handle, Rev, {Rev, Struct} = Cache) ->
-	{ok, Struct, Cache};
-
-dict_update_cache(Handle, Rev, _Cache) ->
-	case catch read_struct(Handle, <<"PDSD">>) of
-		Struct when is_record(Struct, dict, 9) ->
-			{ok, Struct, {Rev, Struct}};
-		{error, _} = Error ->
-			Error;
-		_ ->
-			{error, einval}
-	end.
-
-
-dict_write_entries(Handle, Entries, Cache) ->
-	case write_struct(Handle, <<"PDSD">>, Entries) of
-		ok ->
-			case peerdrive_ifc_vfs_broker:close(Handle) of
-				{ok, Rev} ->
-					{ok, {Rev, Entries}};
-				{error, Reason} ->
-					{error, Reason, Cache}
-			end;
-
-		{error, Error} ->
-			peerdrive_ifc_vfs_broker:abort(Handle),
-			{error, Error, Cache}
-	end.
-
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Set documents
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
--record(se, {oid, rev, disp, title, suffix}).
-
-doc_make_node_set(Oid) ->
-	{ok, #vnode{
-		timeout = 1000,
-		oid     = Oid,
-		ifc     = #ifc{
-			getattr = fun set_getattr/1,
-			lookup  = fun set_lookup/3,
-			getnode = fun set_getnode/1,
-			readdir = fun set_readdir/2,
-			create  = fun set_create/4,
-			link    = fun set_link/4,
-			unlink  = fun set_unlink/3,
-			mkdir   = fun set_mkdir/3,
-			rename  = fun set_rename/4
+			getattr = fun folder_getattr/1,
+			lookup  = fun folder_lookup/3,
+			getnode = fun folder_getnode/1,
+			readdir = fun folder_readdir/2,
+			create  = fun folder_create/4,
+			link    = fun folder_link/4,
+			unlink  = fun folder_unlink/3,
+			mkdir   = fun folder_mkdir/3,
+			rename  = fun folder_rename/4
 		},
 		cache = {undefined, undefined, {0, 0, 0}}
 	}}.
 
 
-set_getattr({doc, Store, Doc}) ->
+folder_getattr({doc, Store, Doc}) ->
 	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
@@ -1156,10 +878,10 @@ set_getattr({doc, Store, Doc}) ->
 	end.
 
 
-set_lookup({doc, Store, Doc}, Name, Cache) ->
-	case set_read_entries(Store, Doc, Cache) of
+folder_lookup({doc, Store, Doc}, Name, Cache) ->
+	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			case set_find_name(Name, Entries) of
+			case folder_find_name(Name, Entries) of
 				{ok, Oid} -> {entry, Oid, NewCache};
 				error     -> {error, enoent, NewCache}
 			end;
@@ -1169,16 +891,16 @@ set_lookup({doc, Store, Doc}, Name, Cache) ->
 	end.
 
 
-set_getnode({doc, _Store, _Doc} = Oid) ->
+folder_getnode({doc, _Store, _Doc} = Oid) ->
 	doc_make_node(Oid);
-set_getnode(_) ->
+folder_getnode(_) ->
 	error.
 
 
-set_readdir({doc, Store, Doc}, Cache) ->
-	case set_read_entries(Store, Doc, Cache) of
+folder_readdir({doc, Store, Doc}, Cache) ->
+	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			Content = map_filter(fun set_readdir_filter/1, Entries),
+			Content = map_filter(fun folder_readdir_filter/1, Entries),
 			{ok, Content, NewCache};
 
 		error ->
@@ -1186,10 +908,10 @@ set_readdir({doc, Store, Doc}, Cache) ->
 	end.
 
 
-set_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
-	case set_read_entries(Store, Doc, Cache) of
+folder_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
+	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			case set_find_name(Name, Entries) of
+			case folder_find_name(Name, Entries) of
 				{ok, {doc, _, _}=ChildOid} ->
 					case MustCreate of
 						true ->
@@ -1205,16 +927,16 @@ set_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
 					case create_empty_file(Store, Name) of
 						{ok, Handle, NewDoc, NewRev} ->
 							try
-								NewSetEntry = #se{
+								NewEntry = #fe{
 									oid    = {doc, Store, NewDoc},
 									rev    = NewRev,
 									title  = Name,
 									suffix = peerdrive_util:bin_to_hexstr(NewDoc)
 								},
 								Update = fun(List) ->
-									[NewSetEntry | List]
+									[NewEntry | List]
 								end,
-								case set_update(Store, Doc, NewCache, Update) of
+								case folder_update(Store, Doc, NewCache, Update) of
 									{ok, AddCache} ->
 										{entry, {doc, Store, NewDoc}, AddCache};
 									{error, _Reason, _AddCache} = Error ->
@@ -1234,10 +956,10 @@ set_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
 	end.
 
 
-set_mkdir({doc, Store, Doc}, Name, Cache) ->
-	case set_read_entries(Store, Doc, Cache) of
+folder_mkdir({doc, Store, Doc}, Name, Cache) ->
+	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			case set_find_name(Name, Entries) of
+			case folder_find_name(Name, Entries) of
 				{ok, _} ->
 					{error, eexist, NewCache};
 
@@ -1245,16 +967,16 @@ set_mkdir({doc, Store, Doc}, Name, Cache) ->
 					case create_empty_directory(Store, Name) of
 						{ok, Handle, NewDoc, NewRev} ->
 							try
-								NewSetEntry = #se{
+								NewEntry = #fe{
 									oid    = {doc, Store, NewDoc},
 									rev    = NewRev,
 									title  = Name,
 									suffix = peerdrive_util:bin_to_hexstr(NewDoc)
 								},
 								Update = fun(List) ->
-									[NewSetEntry | List]
+									[NewEntry | List]
 								end,
-								case set_update(Store, Doc, NewCache, Update) of
+								case folder_update(Store, Doc, NewCache, Update) of
 									{ok, AddCache} ->
 										{ok, {doc, Store, NewDoc}, AddCache};
 									{error, _Reason, _AddCache} = Error ->
@@ -1274,11 +996,11 @@ set_mkdir({doc, Store, Doc}, Name, Cache) ->
 	end.
 
 
-set_link({doc, Store, ParentDoc}, {doc, Store, ChildDoc}, Name, Cache) ->
-	{Title, _DocId} = set_split_name(Name),
+folder_link({doc, Store, ParentDoc}, {doc, Store, ChildDoc}, Name, Cache) ->
+	{Title, _DocId} = folder_split_name(Name),
 	ChildRev = case peerdrive_ifc_vfs_broker:lookup(Store, ChildDoc) of
 		{ok, Rev} ->
-			case set_read_title(Store, Rev) of
+			case folder_read_title(Store, Rev) of
 				Title -> Rev;
 				_     -> throw({error, eacces})
 			end;
@@ -1286,37 +1008,37 @@ set_link({doc, Store, ParentDoc}, {doc, Store, ChildDoc}, Name, Cache) ->
 		error ->
 			throw({error, enoent})
 	end,
-	NewEntry = #se{
+	NewEntry = #fe{
 		oid    = {doc, Store, ChildDoc},
 		rev    = ChildRev,
 		title  = Title,
 		suffix = peerdrive_util:bin_to_hexstr(ChildDoc)
 	},
-	case set_read_entries(Store, ParentDoc, Cache) of
+	case folder_read_entries(Store, ParentDoc, Cache) of
 		{ok, Entries, NewCache} ->
-			Update = case set_find_name(Name, Entries) of
+			Update = case folder_find_name(Name, Entries) of
 				{ok, Oid} ->
-					fun(List) -> [NewEntry | lists:keydelete(Oid, #se.oid, List)] end;
+					fun(List) -> [NewEntry | lists:keydelete(Oid, #fe.oid, List)] end;
 				error ->
 					fun(List) -> [NewEntry | List] end
 			end,
-			set_update(Store, ParentDoc, NewCache, Update);
+			folder_update(Store, ParentDoc, NewCache, Update);
 
 		_ ->
 			{error, enoent}
 	end;
 
-set_link(_, _, _, _) ->
+folder_link(_, _, _, _) ->
 	{error, eacces}.
 
 
-set_unlink({doc, Store, Doc}, Name, Cache) ->
-	case set_read_entries(Store, Doc, Cache) of
+folder_unlink({doc, Store, Doc}, Name, Cache) ->
+	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			case set_find_name(Name, Entries) of
+			case folder_find_name(Name, Entries) of
 				{ok, Oid} ->
-					Update = fun(List) -> lists:keydelete(Oid, #se.oid, List) end,
-					set_update(Store, Doc, NewCache, Update);
+					Update = fun(List) -> lists:keydelete(Oid, #fe.oid, List) end,
+					folder_update(Store, Doc, NewCache, Update);
 
 				error ->
 					{error, enoent, NewCache}
@@ -1327,18 +1049,18 @@ set_unlink({doc, Store, Doc}, Name, Cache) ->
 	end.
 
 
-set_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
-	case set_read_entries(Store, Doc, Cache) of
+folder_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
+	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
-			case set_find_name(OldName, Entries) of
+			case folder_find_name(OldName, Entries) of
 				{ok, {doc, Store, ChildDoc}} ->
-					case set_set_title(Store, ChildDoc, NewName) of
+					case folder_set_title(Store, ChildDoc, NewName) of
 						ok ->
 							% Did we replace a file?
-							case set_find_name(NewName, Entries) of
+							case folder_find_name(NewName, Entries) of
 								{ok, Oid} ->
-									Update = fun(List) -> lists:keydelete(Oid, #se.oid, List) end,
-									set_update(Store, Doc, NewCache, Update);
+									Update = fun(List) -> lists:keydelete(Oid, #fe.oid, List) end,
+									folder_update(Store, Doc, NewCache, Update);
 
 								error ->
 									{ok, NewCache}
@@ -1359,15 +1081,15 @@ set_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
 	end.
 
 
-set_find_name(FullName, Entries) ->
-	{Name, DocId} = set_split_name(FullName),
-	case find_entry(fun(E) -> set_lookup_cmp(Name, DocId, E) end, Entries) of
+folder_find_name(FullName, Entries) ->
+	{Name, DocId} = folder_split_name(FullName),
+	case find_entry(fun(E) -> folder_lookup_cmp(Name, DocId, E) end, Entries) of
 		{value, Oid} -> {ok, Oid};
 		none         -> error
 	end.
 
 
-set_split_name(Name) ->
+folder_split_name(Name) ->
 	% FIXME: precompile
 	RegExp = <<"(.*)~([[:xdigit:]]+)(\\.\\w+)?">>,
 	case re:run(Name, RegExp, [{capture, all_but_first, binary}]) of
@@ -1380,7 +1102,7 @@ set_split_name(Name) ->
 	end.
 
 
-set_lookup_cmp(Name, DocId, #se{oid=Oid, title=Title, suffix=Suffix}) ->
+folder_lookup_cmp(Name, DocId, #fe{oid=Oid, title=Title, suffix=Suffix}) ->
 	case Name of
 		Title ->
 			case lists:prefix(DocId, Suffix) of
@@ -1391,11 +1113,11 @@ set_lookup_cmp(Name, DocId, #se{oid=Oid, title=Title, suffix=Suffix}) ->
 			error
 	end;
 
-set_lookup_cmp(_, _, _) ->
+folder_lookup_cmp(_, _, _) ->
 	error.
 
 
-set_readdir_filter(#se{oid={doc,_,_}=Oid, disp=Name}) ->
+folder_readdir_filter(#fe{oid={doc,_,_}=Oid, disp=Name}) ->
 	case doc_make_node(Oid) of
 		{ok, #vnode{ifc=#ifc{getattr=GetAttr}}} ->
 			case catch GetAttr(Oid) of
@@ -1408,24 +1130,24 @@ set_readdir_filter(#se{oid={doc,_,_}=Oid, disp=Name}) ->
 			skip
 	end;
 
-set_readdir_filter(_) ->
+folder_readdir_filter(_) ->
 	skip.
 
 
-%% Sets are special. First we have to check if the set itself has changed. Then
-%% we have to lookup every child document if it has changed and re-read the
-%% title if so. In any case we have to eliminate duplicates and sanitize the
-%% names.
+%% Folders are special. First we have to check if the folder itself has
+%% changed. Then we have to lookup every child document if it has changed and
+%% re-read the title if so. In any case we have to eliminate duplicates and
+%% sanitize the names.
 %%
 %% Entry list format: [{Oid, Rev, DispTitle, RealTitle, Suffix}]
 %% Cache format: {Rev, Entries}
 %%
-set_read_entries(Store, Doc, {CacheRev, CacheEntries, CacheTime}=OldCache) ->
+folder_read_entries(Store, Doc, {CacheRev, CacheEntries, CacheTime}=OldCache) ->
 	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, CacheRev} ->
-			case set_need_update(CacheTime) of
+			case folder_need_update(CacheTime) of
 				true ->
-					NewCacheEntries = set_update_entries(CacheEntries),
+					NewCacheEntries = folder_update_entries(CacheEntries),
 					{ok, NewCacheEntries, {CacheRev, NewCacheEntries, now()}};
 				false ->
 					{ok, CacheEntries, OldCache}
@@ -1434,7 +1156,7 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries, CacheTime}=OldCache) ->
 		{ok, Rev} ->
 			case peerdrive_util:read_rev_struct(Store, Rev, <<"PDSD">>) of
 				{ok, List} when is_list(List) ->
-					Entries = set_read_entries_list(Store, List),
+					Entries = folder_read_entries_list(Store, List),
 					{ok, Entries, {Rev, Entries, now()}};
 
 				{ok, _} ->
@@ -1448,68 +1170,76 @@ set_read_entries(Store, Doc, {CacheRev, CacheEntries, CacheTime}=OldCache) ->
 	end.
 
 
-set_need_update({CacheMS, CacheS, CacheUS}) ->
+folder_need_update({CacheMS, CacheS, CacheUS}) ->
 	{NowMS, NowS, NowUS} = now(),
 	Delta = (NowMS-CacheMS)*1000000 + (NowS-CacheS) + (NowUS-CacheUS)/1000000,
 	Delta > 1.
 
 
-set_update_entries(Cache) ->
-	case lists:foldl(fun set_find_update/2, [], Cache) of
+folder_update_entries(Cache) ->
+	case lists:foldl(fun folder_find_update/2, [], Cache) of
 		[] ->
 			Cache;
 		Updates ->
-			NewCache = set_apply_updates(Cache, lists:reverse(Updates), []),
-			set_sanitize_entries(NewCache, 0)
+			NewCache = folder_apply_updates(Cache, lists:reverse(Updates), []),
+			folder_sanitize_entries(NewCache, 0)
 	end.
 
 
-set_find_update(#se{oid={doc, Store, Doc}, rev=CacheRev}=Entry, Acc) ->
+folder_find_update(#fe{oid={doc, Store, Doc}, rev=CacheRev}=Entry, Acc) ->
 	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, CacheRev} ->
 			Acc;
 		{ok, NewRev} ->
-			[Entry#se{rev=NewRev, title=set_read_title(Store, NewRev)} | Acc];
+			[Entry#fe{rev=NewRev, title=folder_read_title(Store, NewRev)} | Acc];
 		error ->
-			[Entry#se{rev=undefined, title= <<"">>} | Acc]
+			[Entry#fe{rev=undefined, title= <<"">>} | Acc]
 	end.
 
 
-set_apply_updates([], _, Acc) ->
+folder_apply_updates([], _, Acc) ->
 	Acc;
 
-set_apply_updates([#se{oid=Oid} | Cache], [#se{oid=Oid}=New | Updates], Acc) ->
-	set_apply_updates(Cache, Updates, [New | Acc]);
+folder_apply_updates([#fe{oid=Oid} | Cache], [#fe{oid=Oid}=New | Updates], Acc) ->
+	folder_apply_updates(Cache, Updates, [New | Acc]);
 
-set_apply_updates([Entry | Cache], Updates, Acc) ->
-	set_apply_updates(Cache, Updates, [Entry | Acc]).
+folder_apply_updates([Entry | Cache], Updates, Acc) ->
+	folder_apply_updates(Cache, Updates, [Entry | Acc]).
 
 
 
-set_read_entries_list(Store, List) ->
+folder_read_entries_list(Store, List) ->
 	RawEntries = map_filter(
-		fun(E) -> set_read_entries_filter(Store, E) end,
+		fun(E) -> folder_read_entries_filter(Store, E) end,
 		List),
-	set_sanitize_entries(RawEntries, 0).
+	folder_sanitize_entries(RawEntries, 0).
 
 
-set_read_entries_filter(Store, {dlink, Doc}) ->
-	Oid = {doc, Store, Doc},
-	Suffix = peerdrive_util:bin_to_hexstr(Doc),
-	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
-		{ok, Rev} ->
-			Title = set_read_title(Store, Rev),
-			{ok, #se{oid=Oid, rev=Rev, title=Title, suffix=Suffix}};
+folder_read_entries_filter(Store, Entry) when ?IS_GB_TREE(Entry) ->
+	case gb_trees:lookup(<<"">>, Entry) of
+		{value, {dlink, Doc}} ->
+			FE = #fe{
+				oid    = {doc, Store, Doc},
+				suffix = peerdrive_util:bin_to_hexstr(Doc),
+				orig   = Entry
+			},
+			case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
+				{ok, Rev} ->
+					Title = folder_read_title(Store, Rev),
+					{ok, FE#fe{rev=Rev, title=Title}};
 
-		error ->
-			{ok, #se{oid=Oid, title= <<"">>, suffix=Suffix}}
+				error ->
+					{ok, FE#fe{title= <<"">>}}
+			end;
+		none ->
+			skip
 	end;
 
-set_read_entries_filter(_, _) ->
+folder_read_entries_filter(_, _) ->
 	skip.
 
 
-set_read_title(Store, Rev) ->
+folder_read_title(Store, Rev) ->
 	case peerdrive_util:read_rev_struct(Store, Rev, <<"META">>) of
 		{ok, Meta} ->
 			case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
@@ -1525,10 +1255,10 @@ set_read_title(Store, Rev) ->
 	end.
 
 
-set_sanitize_entries(Cache, SuffixLen) ->
+folder_sanitize_entries(Cache, SuffixLen) ->
 	Dict = lists:foldl(
-		fun(#se{title=Title, suffix=Suffix}=Entry, Acc) ->
-			dict:append(set_apply_suffix(Title, Suffix, SuffixLen), Entry, Acc)
+		fun(#fe{title=Title, suffix=Suffix}=Entry, Acc) ->
+			dict:append(folder_apply_suffix(Title, Suffix, SuffixLen), Entry, Acc)
 		end,
 		dict:new(),
 		Cache),
@@ -1536,46 +1266,46 @@ set_sanitize_entries(Cache, SuffixLen) ->
 		fun(Title, Entries, Acc) ->
 			case Entries of
 				[Entry] ->
-					[Entry#se{disp=Title} | Acc];
+					[Entry#fe{disp=Title} | Acc];
 				_ ->
-					set_sanitize_entries(Entries, SuffixLen+4) ++ Acc
+					folder_sanitize_entries(Entries, SuffixLen+4) ++ Acc
 			end
 		end,
 		[],
 		Dict).
 
 
-set_apply_suffix(Title, _Suffix, 0) ->
+folder_apply_suffix(Title, _Suffix, 0) ->
 	Title;
 
-set_apply_suffix(Title, Suffix, Len) ->
+folder_apply_suffix(Title, Suffix, Len) ->
 	BinSuffix = unicode:characters_to_binary(lists:sublist(Suffix, Len)),
 	Components = re:split(Title, <<"\\.">>),
-	set_join_components(Components, BinSuffix).
+	folder_join_components(Components, BinSuffix).
 
 
-set_join_components([Title], Suffix) ->
+folder_join_components([Title], Suffix) ->
 	<<Title/binary, "~", Suffix/binary>>;
 
-set_join_components([Title, Ext], Suffix) ->
+folder_join_components([Title, Ext], Suffix) ->
 	<<Title/binary, "~", Suffix/binary, ".", Ext/binary>>;
 
-set_join_components([Comp | Rest], Suffix) ->
-	Joined = set_join_components(Rest, Suffix),
+folder_join_components([Comp | Rest], Suffix) ->
+	Joined = folder_join_components(Rest, Suffix),
 	<<Comp/binary, ".", Joined/binary>>.
 
 
-set_update(Store, Doc, Cache, Fun) ->
+folder_update(Store, Doc, Cache, Fun) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
 		{ok, Rev, Handle} ->
-			case set_update_cache(Store, Handle, Rev, Cache) of
+			case folder_update_cache(Store, Handle, Rev, Cache) of
 				{ok, Entries, NewCache} ->
 					case Fun(Entries) of
 						{error, Reason} ->
 							peerdrive_ifc_vfs_broker:abort(Handle),
 							{error, Reason, NewCache};
 						NewEntries ->
-							set_write_entries(Handle, NewEntries, NewCache)
+							folder_write_entries(Handle, NewEntries, NewCache)
 					end;
 
 				Error ->
@@ -1588,14 +1318,14 @@ set_update(Store, Doc, Cache, Fun) ->
 	end.
 
 
-set_update_cache(_Store, _Handle, Rev, {Rev, Entries, _LastUpdate}) ->
-	NewEntries = set_update_entries(Entries),
+folder_update_cache(_Store, _Handle, Rev, {Rev, Entries, _LastUpdate}) ->
+	NewEntries = folder_update_entries(Entries),
 	{ok, NewEntries, {Rev, NewEntries, now()}};
 
-set_update_cache(Store, Handle, Rev, _Cache) ->
+folder_update_cache(Store, Handle, Rev, _Cache) ->
 	case catch read_struct(Handle, <<"PDSD">>) of
 		List when is_list(List) ->
-			Entries = set_read_entries_list(Store, List),
+			Entries = folder_read_entries_list(Store, List),
 			{ok, Entries, {Rev, Entries, now()}};
 		{error, _} = Error ->
 			Error;
@@ -1604,13 +1334,14 @@ set_update_cache(Store, Handle, Rev, _Cache) ->
 	end.
 
 
-set_write_entries(Handle, Entries, Cache) ->
-	List = [{dlink, Doc} || #se{oid={doc, _, Doc}} <- Entries],
+folder_write_entries(Handle, Entries, Cache) ->
+	List = [gb_trees:enter(<<"">>, {dlink, Doc}, Entry) ||
+		#fe{oid={doc, _, Doc}, orig=Entry} <- Entries],
 	case write_struct(Handle, <<"PDSD">>, List) of
 		ok ->
 			case peerdrive_ifc_vfs_broker:close(Handle) of
 				{ok, Rev} ->
-					{ok, {Rev, set_sanitize_entries(Entries, 0), now()}};
+					{ok, {Rev, folder_sanitize_entries(Entries, 0), now()}};
 				{error, Reason} ->
 					{error, Reason, Cache}
 			end;
@@ -1621,7 +1352,7 @@ set_write_entries(Handle, Entries, Cache) ->
 	end.
 
 
-set_set_title(Store, Doc, NewTitle) ->
+folder_set_title(Store, Doc, NewTitle) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
 		{ok, _OldRev, Handle} ->
 			try
@@ -1812,10 +1543,10 @@ find_entry(F, [H|T]) ->
 
 meta_read_entry(Meta, []) ->
 	{ok, Meta};
-meta_read_entry(Meta, [Step|Path]) when is_record(Meta, dict, 9) ->
-	case dict:find(Step, Meta) of
-		{ok, Value} -> meta_read_entry(Value, Path);
-		error       -> error
+meta_read_entry(Meta, [Step|Path]) when ?IS_GB_TREE(Meta) ->
+	case gb_trees:lookup(Step, Meta) of
+		{value, Value} -> meta_read_entry(Value, Path);
+		none           -> error
 	end;
 meta_read_entry(_Meta, _Path) ->
 	error.
@@ -1824,12 +1555,12 @@ meta_read_entry(_Meta, _Path) ->
 meta_write_entry(_Meta, [], Value) ->
 	Value;
 
-meta_write_entry(Meta, [Step|Path], Value) when is_record(Meta, dict, 9) ->
-	Sub = case dict:find(Step, Meta) of
-		{ok, V} -> V;
-		error   -> dict:new()
+meta_write_entry(Meta, [Step|Path], Value) when ?IS_GB_TREE(Meta) ->
+	Sub = case gb_trees:lookup(Step, Meta) of
+		{value, V} -> V;
+		none       -> gb_trees:empty()
 	end,
-	dict:store(Step, meta_write_entry(Sub, Path, Value), Meta);
+	gb_trees:enter(Step, meta_write_entry(Sub, Path, Value), Meta);
 
 meta_write_entry(_Meta, _Path, _Value) ->
 	throw({error, einval}).
@@ -1872,16 +1603,16 @@ write_struct(Handle, Part, Struct) ->
 
 
 create_empty_file(Store, Name) ->
-	MetaData = dict:store(
+	MetaData = gb_trees:enter(
 		<<"org.peerdrive.annotation">>,
-		dict:store(
+		gb_trees:enter(
 			<<"title">>,
 			Name,
-			dict:store(
+			gb_trees:enter(
 				<<"comment">>,
-				<<"Created by FUSE interface">>,
-				dict:new())),
-		dict:new()),
+				<<"Created by VFS interface">>,
+				gb_trees:empty())),
+		gb_trees:empty()),
 	case peerdrive_broker:create(Store, <<"public.text">>, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:write(Handle, <<"META">>, 0, peerdrive_struct:encode(MetaData)),
@@ -1901,24 +1632,18 @@ create_empty_file(Store, Name) ->
 
 
 create_empty_directory(Store, Name) ->
-	MetaData = dict:store(
+	MetaData = gb_trees:enter(
 		<<"org.peerdrive.annotation">>,
-		dict:store(
+		gb_trees:enter(
 			<<"title">>,
 			Name,
-			dict:store(
+			gb_trees:enter(
 				<<"comment">>,
-				<<"Created by FUSE interface">>,
-				dict:new())),
-		dict:new()),
-	case get(dir_type) of
-		dict ->
-			TypeCode = <<"org.peerdrive.dict">>,
-			Pdsd = dict:new();
-		set ->
-			TypeCode = <<"org.peerdrive.set">>,
-			Pdsd = []
-	end,
+				<<"Created by VFS interface">>,
+				gb_trees:empty())),
+		gb_trees:empty()),
+	TypeCode = <<"org.peerdrive.folder">>,
+	Pdsd = [],
 	case peerdrive_broker:create(Store, TypeCode, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:write(Handle, <<"META">>, 0,

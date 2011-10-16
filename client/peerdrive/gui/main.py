@@ -370,7 +370,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			else:
 				link = struct.RevLink(store, rev)
 			try:
-				container = struct.Container(self.__referrer)
+				container = struct.Folder(self.__referrer)
 				title = container.title()
 				for (name, ref) in container.items():
 					if ref == link:
@@ -397,7 +397,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 	def __unlink(self, name, link):
 		try:
-			container = struct.Container(self.__referrer)
+			container = struct.Folder(self.__referrer)
 			container.remove(name, link)
 			container.save()
 			self.close()
@@ -414,7 +414,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 					link = struct.DocLink(store, doc, autoUpdate=False)
 				else:
 					link = struct.RevLink(store, self.__view.rev())
-				container = struct.Container(self.__referrer)
+				container = struct.Folder(self.__referrer)
 				candidates = [(name, ref) for (name, ref) in container.items()
 					if ref == link]
 				if len(candidates) == 1:

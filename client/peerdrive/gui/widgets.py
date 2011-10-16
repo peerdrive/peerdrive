@@ -141,7 +141,7 @@ class DocButton(QtGui.QToolButton, Watch):
 
 	def __fillMenu(self, menu, menuLink):
 		menu.clear()
-		c = struct.Container(menuLink)
+		c = struct.Folder(menuLink)
 		for (title, link) in c.items():
 			link.update(self.__store)
 			try:

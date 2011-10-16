@@ -62,10 +62,3 @@
 -define(SYNC_FINISH_MSG,      16#028).
 -define(TRIGGER_MSG,          16#029).
 
-
--define(ASSERT_GUID(G), ((is_binary(G) and (size(G) == 16)) orelse
-                         begin throw({error, einval}), false end)).
--define(ASSERT_GUID_LIST(L), lists:all(fun(G) -> ?ASSERT_GUID(G) end, L)).
--define(ASSERT_PART(G), ((is_binary(G) and (size(G) == 4)) orelse
-                         begin throw({error, einval}), false end)).
-
