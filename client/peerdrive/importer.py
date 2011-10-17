@@ -113,11 +113,11 @@ def importFile(store, path, name="", progress=None):
 				handle = importFile(store, os.path.join(path, entry), entry, progress)
 				handles.append(handle)
 
-			container = struct.Folder()
+			folder = struct.Folder()
 			for handle in handles:
-				container.append(struct.DocLink(store, handle.getDoc()))
+				folder.append(struct.DocLink(store, handle.getDoc()))
 
-			return container.create(store, name)
+			return folder.create(store, name)
 		finally:
 			for handle in handles:
 				handle.close()
@@ -202,12 +202,12 @@ def overwriteObject(link, uti, spec, flags):
 def importObjectByPath(path, uti, spec, overwrite=False, flags=[]):
 	try:
 		# resolve the path
-		(store, container, name) = struct.walkPath(path, True)
-		if name in container:
+		(store, folder, name) = struct.walkPath(path, True)
+		if name in folder:
 			if not overwrite:
 				return False
 			try:
-				return overwriteObject(container[name], uti, spec, flags)
+				return overwriteObject(folder[name], uti, spec, flags)
 			except IOError:
 				pass
 
@@ -216,8 +216,8 @@ def importObjectByPath(path, uti, spec, overwrite=False, flags=[]):
 		if not handle:
 			return False
 		try:
-			container.append(struct.DocLink(store, handle.getDoc()))
-			container.save()
+			folder.append(struct.DocLink(store, handle.getDoc()))
+			folder.save()
 			return True
 		finally:
 			handle.close()
@@ -228,7 +228,7 @@ def importObjectByPath(path, uti, spec, overwrite=False, flags=[]):
 
 def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=None):
 	# resolve the path
-	(store, container, name) = struct.walkPath(impPath, True)
+	(store, folder, name) = struct.walkPath(impPath, True)
 
 	# create the object and add to dict
 	if isinstance(impFile, list):
@@ -237,7 +237,7 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 		nn = "%s%d" % (name, counter)
 		try:
 			for f in impFile:
-				while nn in container:
+				while nn in folder:
 					counter += 1
 					nn = "%s%d" % (name, counter)
 				if progress:
@@ -245,22 +245,22 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 				handle = importFile(store, f)
 				if handle:
 					handles.append(handle)
-					container[nn] = struct.DocLink(store, handle.getDoc())
+					folder[nn] = struct.DocLink(store, handle.getDoc())
 				elif error:
 					error(f, nn)
-			container.save()
+			folder.save()
 		finally:
 			for handle in handles:
 				handle.close()
 	else:
-		if (name in container) and (not overwrite):
+		if (name in folder) and (not overwrite):
 			raise ImporterError("Duplicate item name")
 
 		handle = importFile(store, impFile, name)
 		try:
 			if handle:
-				container[name] = struct.DocLink(store, handle.getDoc())
-				container.save()
+				folder[name] = struct.DocLink(store, handle.getDoc())
+				folder.save()
 			else:
 				raise ImporterError("Invalid file")
 		finally:

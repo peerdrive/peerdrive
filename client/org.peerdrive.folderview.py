@@ -22,13 +22,13 @@ from PyQt4 import QtGui
 from peerdrive import struct, Registry
 from peerdrive.gui import main, utils
 
-from views.container import CollectionWidget, FolderModel
+from views.folder import FolderWidget, FolderModel
 
-class CollectionWindow(main.MainWindow):
+class FolderWindow(main.MainWindow):
 
 	def __init__(self):
-		widget = CollectionWidget()
-		super(CollectionWindow, self).__init__(widget, True)
+		widget = FolderWidget()
+		super(FolderWindow, self).__init__(widget, True)
 
 		self.__colMenu = self.menuBar().addMenu("Columns")
 		self.__colMenu.aboutToShow.connect(self.__columnsShow)
@@ -112,7 +112,7 @@ if __name__ == '__main__':
 	import sys
 
 	app = QtGui.QApplication(sys.argv)
-	mainWin = CollectionWindow()
+	mainWin = FolderWindow()
 	mainWin.open(sys.argv)
 	mainWin.show()
 	sys.exit(app.exec_())

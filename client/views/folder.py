@@ -181,7 +181,7 @@ def _columnFactory(key):
 	return None
 
 
-class CollectionEntry(Watch):
+class FolderEntry(Watch):
 	def __init__(self, item, model, columns):
 		self.__model = model
 		self.__item  = copy.deepcopy(item)
@@ -195,9 +195,9 @@ class CollectionEntry(Watch):
 		link = self.__item[''].update(self.__model.getStore())
 
 		if isinstance(link, struct.DocLink):
-			super(CollectionEntry, self).__init__(Watch.TYPE_DOC, link.doc())
+			super(FolderEntry, self).__init__(Watch.TYPE_DOC, link.doc())
 		else:
-			super(CollectionEntry, self).__init__(Watch.TYPE_REV, link.rev())
+			super(FolderEntry, self).__init__(Watch.TYPE_REV, link.rev())
 
 		self.update()
 
@@ -291,7 +291,7 @@ class CollectionEntry(Watch):
 
 		# overwritable by external files?
 		self.__replacable = (not needMerge) and (
-			not Registry().conformes(self.__uti, "org.peerdrive.container"))
+			not Registry().conformes(self.__uti, "org.peerdrive.folder"))
 
 		self.__valid = True
 		self.__updateColumns()
@@ -335,7 +335,7 @@ class CollectionEntry(Watch):
 
 
 class FolderModel(QtCore.QAbstractTableModel):
-	AUTOCLEAN = ["org.peerdrive.container", "autoclean"]
+	AUTOCLEAN = ["org.peerdrive.folder", "autoclean"]
 	UTIs = ["org.peerdrive.folder", "org.peerdrive.store"]
 
 	def __init__(self, parent = None):
@@ -359,7 +359,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		self.__store = handle.getStore()
 		self._listing = []
 		data = struct.loads(handle.getStore(), handle.readAll('PDSD'))
-		listing = [ CollectionEntry(item, self, self._columns) for item in data ]
+		listing = [ FolderEntry(item, self, self._columns) for item in data ]
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
 				self.__typeCodes.add(entry.getTypeCode())
@@ -630,7 +630,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		finally:
 			progress.setValue(len(urlList))
 
-		# import and add to container
+		# import and add to folder
 		progress = QtGui.QProgressDialog("Importing files...", "Abort", 0,
 			numFiles, self.__parent);
 		progress.setWindowModality(QtCore.Qt.WindowModal)
@@ -695,7 +695,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		return True
 
 	def insertLink(self, link):
-		entry = CollectionEntry({'' : link}, self, self._columns)
+		entry = FolderEntry({'' : link}, self, self._columns)
 		if not self.validateInsert(entry):
 			return False
 		self.__typeCodes.add(entry.getTypeCode())
@@ -722,7 +722,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 				return False
 		return True
 
-	# === Callbacks from a CollectionEntry which has changed ===
+	# === Callbacks from a FolderEntry which has changed ===
 
 	def entryChanged(self, entry):
 		i = self._listing.index(entry)
@@ -741,9 +741,9 @@ class FolderModel(QtCore.QAbstractTableModel):
 		self.entryChanged(entry)
 
 
-class CollectionTreeView(QtGui.QTreeView):
+class FolderTreeView(QtGui.QTreeView):
 	def __init__(self, parent):
-		super(CollectionTreeView, self).__init__()
+		super(FolderTreeView, self).__init__()
 		self.__parent = parent
 
 	def dragEnterEvent(self, event):
@@ -768,7 +768,7 @@ class CollectionTreeView(QtGui.QTreeView):
 		menu.exec_(event.globalPos())
 
 
-class CollectionWidget(widgets.DocumentView):
+class FolderWidget(widgets.DocumentView):
 
 	# itemOpen(link, executable, browseHint)
 	itemOpen = QtCore.pyqtSignal(object, object, bool)
@@ -776,11 +776,11 @@ class CollectionWidget(widgets.DocumentView):
 	selectionChanged = QtCore.pyqtSignal()
 
 	def __init__(self, browseTypes=[]):
-		super(CollectionWidget, self).__init__("org.peerdrive.containerview")
+		super(FolderWidget, self).__init__("org.peerdrive.folderview")
 
 		self.__settings = None
 		self.__browseTypes = browseTypes
-		self.__containerModel = None
+		self.__folderModel = None
 		self.__filterModel = QtGui.QSortFilterProxyModel()
 		self.__filterModel.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
 		self.mutable.connect(self.__setMutable)
@@ -792,7 +792,7 @@ class CollectionWidget(widgets.DocumentView):
 		self.itemPropertiesAct = QtGui.QAction("&Properties", self)
 		self.itemPropertiesAct.triggered.connect(self.__showProperties)
 
-		self.listView = CollectionTreeView(self)
+		self.listView = FolderTreeView(self)
 		self.listView.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
 		self.listView.setDragEnabled(True)
 		self.listView.setAutoScroll(True)
@@ -810,7 +810,7 @@ class CollectionWidget(widgets.DocumentView):
 		self.setCentralWidget(self.listView)
 
 	def docClose(self):
-		super(CollectionWidget, self).docClose()
+		super(FolderWidget, self).docClose()
 		self.__setModel(None)
 
 	def docRead(self, readWrite, handle):
@@ -842,11 +842,11 @@ class CollectionWidget(widgets.DocumentView):
 			self.model().doSave(handle)
 
 	def docMergeCheck(self, heads, types, changedParts):
-		(uti, handled) = super(CollectionWidget, self).docMergeCheck(heads, types, changedParts)
+		(uti, handled) = super(FolderWidget, self).docMergeCheck(heads, types, changedParts)
 		return (uti, handled | set(['PDSD']))
 
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-		conflicts = super(CollectionWidget, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
+		conflicts = super(FolderWidget, self).docMergePerform(writer, baseReader, mergeReaders, changedParts)
 		if 'PDSD' in changedParts:
 			basePdsd = struct.loads(self.store(), baseReader.readAll('PDSD'))
 			mergePdsd = []
@@ -859,47 +859,47 @@ class CollectionWidget(widgets.DocumentView):
 		return conflicts
 
 	def model(self):
-		return self.__containerModel
+		return self.__folderModel
 
 	def modelMapIndex(self, index):
 		return self.__filterModel.mapToSource(index)
 
 	def __setModel(self, model):
 		self.__filterModel.setSourceModel(model)
-		if self.__containerModel:
-			self.__containerModel.clear()
-			self.__containerModel.deleteLater()
-		self.__containerModel = model
+		if self.__folderModel:
+			self.__folderModel.clear()
+			self.__folderModel.deleteLater()
+		self.__folderModel = model
 
 	# reimplemented to catch changes to "autoClean"
 	def metaDataSetField(self, field, value):
-		super(CollectionWidget, self).metaDataSetField(field, value)
+		super(FolderWidget, self).metaDataSetField(field, value)
 		if field == FolderModel.AUTOCLEAN:
 			model = self.model()
 			if model:
 				model.setAutoClean(value)
 
 	def _saveSettings(self, settings):
-		super(CollectionWidget, self)._saveSettings(settings)
-		if self.__containerModel:
-			settings["columns"] = self.__containerModel.getColumns()
+		super(FolderWidget, self)._saveSettings(settings)
+		if self.__folderModel:
+			settings["columns"] = self.__folderModel.getColumns()
 			settings["colwidths"] = [self.listView.columnWidth(i)
-				for i in xrange(self.__containerModel.columnCount(None))]
+				for i in xrange(self.__folderModel.columnCount(None))]
 			settings["sortcol"] = self.__filterModel.sortColumn()
 			settings["sortorder"] = self.__filterModel.sortOrder()
 
 	def _loadSettings(self, settings):
-		super(CollectionWidget, self)._loadSettings(settings)
+		super(FolderWidget, self)._loadSettings(settings)
 		self.__settings = settings
 		self.__applySettings(settings)
 
 	def __applySettings(self, settings):
-		if not self.__containerModel:
+		if not self.__folderModel:
 			return
 		columns = settings.get("columns")
 		if columns:
-			self.__containerModel.setColumns(columns)
-		widths = settings.get("colwidths", [])[:self.__containerModel.columnCount(None)]
+			self.__folderModel.setColumns(columns)
+		widths = settings.get("colwidths", [])[:self.__folderModel.columnCount(None)]
 		i = 0
 		for w in widths[:-1]:
 			self.listView.setColumnWidth(i, w)
@@ -928,7 +928,7 @@ class CollectionWidget(widgets.DocumentView):
 			except IOError:
 				executables = []
 			self.itemOpen.emit(link, None,
-				"org.peerdrive.containerbrowser.py" in executables)
+				"org.peerdrive.browser.py" in executables)
 
 	def __showProperties(self):
 		index = self.listView.selectionModel().currentIndex()
@@ -1068,7 +1068,7 @@ class CollectionWidget(widgets.DocumentView):
 		prefix = "Open"
 		browseHint = False
 		browsePreferred = False
-		if "org.peerdrive.containerbrowser.py" in executables:
+		if "org.peerdrive.browser.py" in executables:
 			browsePreferred = True
 		for e in executables:
 			if e in self.__browseTypes:

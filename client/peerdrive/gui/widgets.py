@@ -131,7 +131,7 @@ class DocButton(QtGui.QToolButton, Watch):
 				action.triggered.connect(
 					lambda x,s=self.__store,d=self.__doc,e=e: showDocument(struct.DocLink(s, d, False), executable=e))
 
-		if Registry().conformes(type, "org.peerdrive.container"):
+		if Registry().conformes(type, "org.peerdrive.folder"):
 			menu.addSeparator()
 			m = menu.addMenu(self.__docName)
 			l = struct.DocLink(self.__store, self.__doc, False)
@@ -156,7 +156,7 @@ class DocButton(QtGui.QToolButton, Watch):
 				title = title[:40] + '...'
 
 			icon = QtGui.QIcon(Registry().getIcon(type))
-			if Registry().conformes(type, "org.peerdrive.container"):
+			if Registry().conformes(type, "org.peerdrive.folder"):
 				m = menu.addMenu(icon, title)
 				m.aboutToShow.connect(lambda m=m, l=link: self.__fillMenu(m, l))
 			else:
@@ -503,11 +503,11 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__setSaveNeeded(True)
 
 	def _loadSettings(self, settings):
-		# will be called by container, may be reimplemented...
+		# will be called by folder, may be reimplemented...
 		pass
 
 	def _saveSettings(self, settings):
-		# will be called by container, may be reimplemented...
+		# will be called by folder, may be reimplemented...
 		pass
 
 	# === private methods

@@ -25,7 +25,7 @@ from peerdrive import Connector, Registry, struct, connector
 from peerdrive.gui import utils
 from peerdrive.gui.widgets import DocumentView, DocButton
 
-from views.container import CollectionWidget
+from views.folder import FolderWidget
 from views.text import TextEdit
 
 class HistoryItem(object):
@@ -527,10 +527,10 @@ class ViewHandler(object):
 		self._main.setCaption(caption)
 
 
-class ContainerViewHandler(ViewHandler):
+class FolderViewHandler(ViewHandler):
 	def __init__(self, mainWindow):
 		ViewHandler.__init__(self, mainWindow,
-			CollectionWidget(BrowserWindow.TYPES.keys()))
+			FolderWidget(BrowserWindow.TYPES.keys()))
 		self._view.itemOpen.connect(self._main.itemOpen)
 
 		self.__fileMenu = self._main.menuBar().addMenu("File")
@@ -539,7 +539,7 @@ class ContainerViewHandler(ViewHandler):
 		self.__colMenu.aboutToShow.connect(self.__columnsShow)
 
 	def getClass(self):
-		return CollectionWidget
+		return FolderWidget
 
 	def __showFileMenu(self):
 		self.__fileMenu.clear()
@@ -598,7 +598,7 @@ class TextViewHandler(ViewHandler):
 class BrowserWindow(QtGui.QMainWindow):
 
 	TYPES = {
-		"org.peerdrive.containerbrowser.py" : ContainerViewHandler,
+		"org.peerdrive.browser.py" : FolderViewHandler,
 		"org.peerdrive.textedit.py" : TextViewHandler
 	}
 

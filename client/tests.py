@@ -658,14 +658,14 @@ class TestReplicator(CommonParts):
 			s.save()
 			contDoc = s.getDoc()
 
-			# need a dummy container on both stores
+			# need a dummy folder on both stores
 			self.createCommon([self.store1, self.store2], "org.peerdrive.folder",
 				data={'PDSD' : struct.dumps([{'':struct.DocLink(self.store1, contDoc)}])})
 
 		watch1 = self.watchDoc(doc, connector.Watch.EVENT_REPLICATED)
 		watch2 = self.watchRev(rev, connector.Watch.EVENT_REPLICATED)
 
-		# now replicate the container to 2nd store
+		# now replicate the folder to 2nd store
 		Connector().replicateDoc(self.store1, contDoc, self.store2)
 
 		# wait for sticky replicatin to happen

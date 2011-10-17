@@ -370,9 +370,9 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			else:
 				link = struct.RevLink(store, rev)
 			try:
-				container = struct.Folder(self.__referrer)
-				title = container.title()
-				for (name, ref) in container.items():
+				folder = struct.Folder(self.__referrer)
+				title = folder.title()
+				for (name, ref) in folder.items():
 					if ref == link:
 						action = self.__delMenu.addAction("Unlink '" + name +
 							"' from '" + title + "'")
@@ -397,13 +397,13 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 	def __unlink(self, name, link):
 		try:
-			container = struct.Folder(self.__referrer)
-			container.remove(name, link)
-			container.save()
+			folder = struct.Folder(self.__referrer)
+			folder.remove(name, link)
+			folder.save()
 			self.close()
 		except IOError:
 			QtGui.QMessageBox.warning(self, 'Unlink failed',
-				'Could not unlink from container. Try again...')
+				'Could not unlink from folder. Try again...')
 
 	def __delete(self):
 		try:
@@ -414,13 +414,13 @@ class MainWindow(QtGui.QMainWindow, Watch):
 					link = struct.DocLink(store, doc, autoUpdate=False)
 				else:
 					link = struct.RevLink(store, self.__view.rev())
-				container = struct.Folder(self.__referrer)
-				candidates = [(name, ref) for (name, ref) in container.items()
+				folder = struct.Folder(self.__referrer)
+				candidates = [(name, ref) for (name, ref) in folder.items()
 					if ref == link]
 				if len(candidates) == 1:
 					[(name, ref)] = candidates
-					container.remove(name, ref)
-					container.save()
+					folder.remove(name, ref)
+					folder.save()
 					self.close()
 					return
 		except IOError:

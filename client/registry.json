@@ -132,10 +132,10 @@
 		"conforming" : ["public.item"],
 		"display" : "Folder",
 		"icon" : "uti/folder.png",
-		"exec" : ["org.peerdrive.containerbrowser.py", "org.peerdrive.containerview.py"],
+		"exec" : ["org.peerdrive.browser.py", "org.peerdrive.folderview.py"],
 		"meta" : [
 			{
-				"key"     : ["org.peerdrive.container", "autoclean"],
+				"key"     : ["org.peerdrive.folder", "autoclean"],
 				"type"    : "bool",
 				"display" : "Auto clean"
 			}
