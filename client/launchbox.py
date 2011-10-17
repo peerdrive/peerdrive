@@ -77,9 +77,9 @@ class Launchbox(QtGui.QDialog):
 
 	def progressStart(self, tag, typ, src, dst):
 		if typ == PROGRESS_SYNC:
-			widget = SyncWidget(tag, src, dst)
+			widget = SyncProgressWidget(tag, src, dst)
 		else:
-			widget = ReplicationWidget(tag, typ, src, dst)
+			widget = ReplicationProgressWidget(tag, typ, src, dst)
 		self.progressWidgets[tag] = widget
 		self.progressLayout.addWidget(widget)
 
@@ -103,48 +103,51 @@ class SyncEditor(QtGui.QDialog):
 		self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
 
 		self.__changed = False
-		self.__buttons = []
+		self.__lines = []
 		self.__rules = SyncRules()
-		enum = Connector().enum()
-		stores = zip(itertools.count(1), [enum.doc(s) for s in enum.allStores()
-			if not enum.isSystem(s) and enum.isMounted(s)])
 
-		mainLayout = QtGui.QVBoxLayout()
+		self.__addChooser = QtGui.QComboBox()
+		self.__addChooser.setSizePolicy(
+			QtGui.QSizePolicy.MinimumExpanding,
+			QtGui.QSizePolicy.Minimum)
+		self.__addBtn = QtGui.QPushButton('Add')
+		self.__addBtn.clicked.connect(self.__add)
+		frame = QtGui.QFrame()
+		frame.setFrameShape(QtGui.QFrame.HLine)
 
-		layout = QtGui.QGridLayout()
-		layout.addWidget(QtGui.QLabel("From \\ To"), 0, 0)
-		for (pos, store) in stores:
-			button = DocButton(store, store, True)
-			self.__buttons.append(button)
-			layout.addWidget(button, 0, pos)
-			button = DocButton(store, store, True)
-			self.__buttons.append(button)
-			layout.addWidget(button, pos, 0)
-		for (row, store) in stores:
-			for (col, peer) in stores:
-				if store==peer:
-					continue
-				box = QtGui.QComboBox()
-				box.addItems([SyncEditor.MAP[m] for m in SyncEditor.MODES])
-				box.setCurrentIndex(SyncEditor.MODES.index(self.__rules.mode(store, peer)))
-				box.currentIndexChanged.connect(
-					lambda i, store=store, peer=peer: self.__setRule(store, peer, i))
-				layout.addWidget(box, row, col)
+		addLayout = QtGui.QHBoxLayout()
+		addLayout.addWidget(self.__addChooser)
+		addLayout.addWidget(self.__addBtn)
 
-		mainLayout.addLayout(layout)
+		# Add rules
+		self.__ruleLayout = QtGui.QVBoxLayout()
+		rules = self.__rules.rules()
+		# filter out 2nd rules in other direction
+		rules = [(s,p) for (s,p) in rules if not (((p,s) in rules) and (p<=s))]
+		for (store, peer) in rules:
+			line = SyncRuleWidget(store, peer, self.__rules, self)
+			line.removed.connect(self.__removed)
+			self.__lines.append(line)
+			self.__ruleLayout.addWidget(line)
 
 		buttonBox = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok
 			| QtGui.QDialogButtonBox.Cancel);
 		buttonBox.accepted.connect(self.accept)
 		buttonBox.rejected.connect(self.reject)
+
+		mainLayout = QtGui.QVBoxLayout()
+		mainLayout.addLayout(addLayout)
+		mainLayout.addWidget(frame)
+		mainLayout.addLayout(self.__ruleLayout)
+		mainLayout.addStretch()
 		mainLayout.addWidget(buttonBox)
 
 		self.setLayout(mainLayout)
 		self.setWindowTitle("Synchronization rules")
+		self.__fillAddChooser()
 
 	def accept(self):
-		if self.__changed:
-			self.__rules.save()
+		self.__rules.save()
 		super(SyncEditor, self).accept()
 		self.__cleanup()
 
@@ -152,16 +155,113 @@ class SyncEditor(QtGui.QDialog):
 		super(SyncEditor, self).reject()
 		self.__cleanup()
 
+	def __add(self):
+		(store, peer) = self.__addItems[self.__addChooser.currentIndex()]
+		self.__rules.setMode(store, peer, 'ff')
+		self.__rules.setDescr(store, peer, "Sync '" +
+			struct.readTitle(struct.DocLink(store, store, False), '?') +	"' and '" +
+			struct.readTitle(struct.DocLink(peer, peer, False), '?') + "'")
+		line = SyncRuleWidget(store, peer, self.__rules, self)
+		line.removed.connect(self.__removed)
+		self.__lines.append(line)
+		self.__ruleLayout.addWidget(line)
+		self.__fillAddChooser()
+
+	def __fillAddChooser(self):
+		self.__addChooser.clear()
+		self.__addItems = []
+
+		enum = Connector().enum()
+		rules = self.__rules.rules()
+		stores = [enum.doc(s) for s in enum.allStores()
+			if not enum.isSystem(s) and enum.isMounted(s)]
+		self.__addItems = [(s, p) for s in stores for p in stores
+			if s < p and (s,p) not in rules and (p,s) not in rules ]
+
+		self.__addBtn.setEnabled(bool(self.__addItems))
+		for (store, peer) in self.__addItems:
+			title = (struct.readTitle(struct.DocLink(store, store, False), '?') +
+				' - ' + struct.readTitle(struct.DocLink(peer, peer, False), '?'))
+			self.__addChooser.addItem(title)
+
 	def __cleanup(self):
-		for btn in self.__buttons:
-			btn.cleanup()
-		self.__buttons = []
+		for line in self.__lines:
+			line.cleanup()
+		self.__lines = []
 
-	def __setRule(self, store, peer, index):
-		mode = SyncEditor.MODES[index]
-		self.__rules.setMode(store, peer, mode)
-		self.__changed = True
+	def __removed(self, line):
+		self.__lines.remove(line)
+		self.__fillAddChooser()
 
+class SyncRuleWidget(QtGui.QWidget):
+	MODES = [("ff", None), ("merge", None), ("merge", "merge")]
+	MAP = {
+		("ff", None)       : "Forward",
+		("merge", None)    : "One way sync",
+		("merge", "merge") : "Full sync"
+	}
+
+	removed = QtCore.pyqtSignal(object)
+
+	def __init__(self, store, peer, rules, parent):
+		super(SyncRuleWidget, self).__init__(parent)
+
+		self.__store = store
+		self.__peer = peer
+		self.__rules = rules
+
+		self.__descrEdit = QtGui.QLineEdit()
+		self.__descrEdit.textEdited.connect(self.__setRule)
+		self.__storeBtn = DocButton(store, store, True)
+		self.__peerBtn = DocButton(peer, peer, True)
+		self.__modeSel = QtGui.QComboBox()
+		self.__modeSel.addItems([SyncRuleWidget.MAP[m] for m in SyncRuleWidget.MODES])
+		self.__modeSel.currentIndexChanged.connect(self.__setRule)
+		self.__reverseBtn = QtGui.QPushButton('Reverse')
+		self.__reverseBtn.clicked.connect(self.__reverse)
+		self.__removeBtn = QtGui.QPushButton('Remove')
+		self.__removeBtn.clicked.connect(self.__remove)
+
+		layout = QtGui.QHBoxLayout()
+		layout.addWidget(self.__descrEdit)
+		layout.addWidget(self.__storeBtn)
+		layout.addWidget(self.__modeSel)
+		layout.addWidget(self.__peerBtn)
+		layout.addWidget(self.__reverseBtn)
+		layout.addWidget(self.__removeBtn)
+		self.setLayout(layout)
+
+		mode = (rules.mode(store, peer), rules.mode(peer, store))
+		self.__modeSel.setCurrentIndex(SyncRuleWidget.MODES.index(mode))
+		self.__descrEdit.setText(rules.descr(store, peer))
+
+	def cleanup(self):
+		self.__storeBtn.cleanup()
+		self.__peerBtn.cleanup()
+
+	def __setRule(self):
+		descr = unicode(self.__descrEdit.text())
+		(ltrMode, rtlMode) = SyncRuleWidget.MODES[self.__modeSel.currentIndex()]
+		self.__rules.setMode(self.__store, self.__peer, ltrMode)
+		self.__rules.setDescr(self.__store, self.__peer, descr)
+		self.__rules.setMode(self.__peer, self.__store, rtlMode)
+		if rtlMode:
+			self.__rules.setDescr(self.__peer, self.__store, descr)
+
+	def __reverse(self):
+		store = self.__store
+		self.__store = self.__peer
+		self.__peer = store
+		self.__storeBtn.setDocument(self.__store, self.__store)
+		self.__peerBtn.setDocument(self.__peer, self.__peer)
+		self.__setRule()
+
+	def __remove(self):
+		self.__rules.setMode(self.__store, self.__peer, None)
+		self.__rules.setMode(self.__peer, self.__store, None)
+		self.removed.emit(self)
+		self.cleanup()
+		self.deleteLater()
 
 class StoreWidget(QtGui.QWidget):
 	class StoreWatch(Watch):
@@ -218,9 +318,9 @@ class StoreWidget(QtGui.QWidget):
 			self.update()
 
 
-class SyncWidget(QtGui.QFrame):
+class SyncProgressWidget(QtGui.QFrame):
 	def __init__(self, tag, fromStore, toStore, parent=None):
-		super(SyncWidget, self).__init__(parent)
+		super(SyncProgressWidget, self).__init__(parent)
 		self.tag = tag
 
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
@@ -250,9 +350,9 @@ class SyncWidget(QtGui.QFrame):
 			self.progressBar.setValue(value)
 
 
-class ReplicationWidget(QtGui.QFrame):
+class ReplicationProgressWidget(QtGui.QFrame):
 	def __init__(self, tag, typ, uuid, store, parent=None):
-		super(ReplicationWidget, self).__init__(parent)
+		super(ReplicationProgressWidget, self).__init__(parent)
 		self.tag = tag
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
@@ -293,40 +393,53 @@ class SyncRules(object):
 		self.syncDoc = struct.Folder(struct.DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
 		self.syncRev = Connector().lookupDoc(self.syncDoc).rev(self.sysStore)
 		with Connector().peek(self.sysStore, self.syncRev) as r:
-			self.rules = struct.loads(self.sysStore, r.readAll('PDSD'))
+			rules = struct.loads(self.sysStore, r.readAll('PDSD'))
+
+		self.__changed = False
+		self.__rules = {}
+		for rule in rules:
+			self.__rules[(rule['from'].decode('hex'), rule['to'].decode('hex'))] = rule
 
 	def save(self):
+		if not self.__changed:
+			return
+
+		rules = [ rule for rule in self.__rules.values() ]
 		with Connector().update(self.sysStore, self.syncDoc, self.syncRev) as w:
-			w.writeAll('PDSD', struct.dumps(self.rules))
+			w.writeAll('PDSD', struct.dumps(rules))
 			w.commit()
 			self.rev = w.getRev()
 
+	def rules(self):
+		return self.__rules.keys()
+
 	def mode(self, store, peer):
-		for rule in self.rules:
-			if (rule["from"].decode('hex') == store) and (rule["to"].decode('hex') == peer):
-				return rule["mode"]
+		key = (store, peer)
+		if key in self.__rules:
+			return self.__rules[key]['mode']
 		return None
 
 	def setMode(self, store, peer, mode):
-		if mode:
-			# try to update rule
-			for rule in self.rules:
-				if ((rule["from"].decode('hex') == store) and
-					(rule["to"].decode('hex') == peer)):
-					rule["mode"] = mode
-					return
-
-			# add new rule
+		key = (store, peer)
+		if key in self.__rules:
+			if mode:
+				self.__rules[key]['mode'] = mode
+			else:
+				del self.__rules[(store, peer)]
+		elif mode:
 			rule = {}
 			rule["from"] = store.encode('hex')
 			rule["to"]   = peer.encode('hex')
 			rule["mode"] = mode
-			self.rules.append(rule)
-		else:
-			# delete rule
-			self.rules = [r for r in self.rules if (r["from"].decode('hex') != store)
-				or (r["to"].decode('hex') != peer)]
+			self.__rules[key] = rule
+		self.__changed = True
 
+	def descr(self, store, peer):
+		return self.__rules[(store, peer)].get('descr', '')
+
+	def setDescr(self, store, peer, descr):
+		self.__rules[(store, peer)]['descr'] = descr
+		self.__changed = True
 
 
 app = QtGui.QApplication(sys.argv)

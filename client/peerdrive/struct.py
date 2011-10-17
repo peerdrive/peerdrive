@@ -634,7 +634,7 @@ class Folder(object):
 		return self.__rev
 
 # tiny helper function
-def readTitle(link):
+def readTitle(link, default=None):
 	rev = link.rev()
 	if rev:
 		try:
@@ -647,7 +647,7 @@ def readTitle(link):
 		except IOError:
 			pass
 
-	return None
+	return default
 
 
 ###############################################################################

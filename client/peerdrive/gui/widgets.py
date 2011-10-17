@@ -66,7 +66,10 @@ class DocButton(QtGui.QToolButton, Watch):
 		if self.__doc:
 			self.setEnabled(True)
 			try:
-				rev = Connector().lookupDoc(self.__doc, [self.__store]).rev(self.__store)
+				l = Connector().lookupDoc(self.__doc, [self.__store])
+				if self.__store not in l.stores():
+					raise IOError()
+				rev = l.rev(self.__store)
 				docIcon = None
 				with Connector().peek(self.__store, rev) as r:
 					try:
