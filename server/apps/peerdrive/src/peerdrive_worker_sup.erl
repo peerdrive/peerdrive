@@ -60,14 +60,6 @@ init([]) ->
 			infinity,
 			supervisor,
 			[peerdrive_synchronizer]
-		},
-		{
-			peerdrive_dispatcher,
-			{peerdrive_dispatcher, start_link, []},
-			permanent,
-			1000,
-			worker,
-			[peerdrive_dispatcher]
 		}
 	],
 

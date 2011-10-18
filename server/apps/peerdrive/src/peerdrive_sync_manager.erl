@@ -14,7 +14,7 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(peerdrive_dispatcher).
+-module(peerdrive_sync_manager).
 -behaviour(gen_fsm).
 
 -export([start_link/0]).
@@ -259,7 +259,7 @@ check_workers(#state{rules=Rules, workers=Workers} = S) ->
 	Stopped = sets:subtract(Workers, Rules),
 	lists:foreach(
 		fun({_Mode, Store, Peer}) ->
-			Ret = peerdrive_synchronizer:stop_sync(Store, Peer),
+			Ret = peerdrive_sync_sup:stop_sync(Store, Peer),
 			Ret == ok orelse error_logger:warning_report([{module, ?MODULE},
 				{warning, 'stop sync failed'}, {reason, Ret}])
 		end,
@@ -271,7 +271,7 @@ check_workers(#state{rules=Rules, workers=Workers} = S) ->
 				{ok, _} ->
 					case peerdrive_volman:store(Peer) of
 						{ok, _} ->
-							case peerdrive_synchronizer:start_sync(Mode, Store, Peer) of
+							case peerdrive_sync_sup:start_sync(Mode, Store, Peer) of
 								ok ->
 									true;
 								Error ->

@@ -18,7 +18,6 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
--export([start_sync/3, stop_sync/2]).
 -export([init/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -27,12 +26,6 @@
 
 start_link() ->
 	supervisor:start_link({local, peerdrive_synchronizer}, ?MODULE, []).
-
-start_sync(Mode, Store, Peer) ->
-	peerdrive_sync_sup:start_sync(Mode, Store, Peer).
-
-stop_sync(Store, Peer) ->
-	peerdrive_sync_sup:stop_sync(Store, Peer).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
@@ -58,6 +51,14 @@ init([]) ->
 			infinity,
 			supervisor,
 			[peerdrive_sync_sup]
+		},
+		{
+			peerdrive_sync_manager,
+			{peerdrive_sync_manager, start_link, []},
+			permanent,
+			1000,
+			worker,
+			[peerdrive_sync_manager]
 		}
 	],
 	{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}}.

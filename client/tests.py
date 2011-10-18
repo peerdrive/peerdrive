@@ -706,7 +706,7 @@ class TestSynchronization(CommonParts):
 	def startSync(self, mode, fromStore, toStore):
 		fromGuid = fromStore.encode('hex')
 		toGuid = toStore.encode('hex')
-		result = self.erlCall("peerdrive_synchronizer:start_sync(" + mode +
+		result = self.erlCall("peerdrive_sync_sup:start_sync(" + mode +
 			", <<16#"+fromGuid+":128>>, <<16#"+toGuid+":128>>).")
 		self.assertEqual(result, '{ok, ok}')
 
