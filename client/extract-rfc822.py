@@ -31,9 +31,9 @@ allRecipients = email.utils.getaddresses(tos + ccs + resent_tos + resent_ccs)
 
 def __decode(data, coding):
 	if coding:
-		return data.decode(coding)
+		return data.decode(coding).replace('\n', '')
 	else:
-		return data
+		return data.replace('\n', '')
 
 def decodeHeader(header):
 	return reduce(
