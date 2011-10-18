@@ -311,11 +311,15 @@ class StoreWidget(QtGui.QWidget):
 			self.mounted = False
 
 	def mountUnmount(self):
-		if self.mounted:
-			Connector().unmount(self.mountId)
-		else:
-			Connector().mount(self.mountId)
-			self.update()
+		try:
+			if self.mounted:
+				Connector().unmount(self.mountId)
+			else:
+				Connector().mount(self.mountId)
+				self.update()
+		except IOError as e:
+			QtGui.QMessageBox.warning(self, 'Error', 'Mount opertaion failed: ' +
+				str(e))
 
 
 class SyncProgressWidget(QtGui.QFrame):
