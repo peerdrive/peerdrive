@@ -67,7 +67,7 @@ class TextEdit(widgets.DocumentView):
 
 	def docSave(self, w):
 		if self.textEdit.document().isModified():
-			w.writeAll('FILE', self.textEdit.toPlainText().toUtf8())
+			w.writeAll('FILE', str(self.textEdit.toPlainText().toUtf8()))
 
 	def docMergeCheck(self, heads, types, changedParts):
 		(uti, handled) = super(TextEdit, self).docMergeCheck(heads, types, changedParts)
