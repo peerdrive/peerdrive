@@ -49,7 +49,7 @@ init({Store, DId, PreRId, Rev, User}) ->
 		store    = Store,
 		did      = DId,
 		prerid   = PreRId,
-		rev      = Rev,
+		rev      = Rev#revision{parts=orddict:from_list(Rev#revision.parts)},
 		parts    = [],
 		readonly = not is_binary(DId),
 		locks    = [PId || {_, PId} <- Rev#revision.parts]

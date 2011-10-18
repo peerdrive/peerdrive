@@ -970,7 +970,7 @@ check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
 			MetaPId = crd_write_part(RootMeta2, S),
 			RootRev = #revision{
 				flags     = ?REV_FLAG_STICKY,
-				parts     = [{<<"PDSD">>, ContentPId}, {<<"META">>, MetaPId}],
+				parts     = [{<<"META">>, MetaPId}, {<<"PDSD">>, ContentPId}],
 				parents   = [],
 				mtime     = peerdrive_util:get_time(),
 				type      = <<"org.peerdrive.store">>,
