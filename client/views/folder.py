@@ -751,15 +751,10 @@ class FolderTreeView(QtGui.QTreeView):
 			return
 		else:
 			data = event.mimeData()
-			link = struct.loadMimeData(data)
-			if link:
-				# ourself?
-				if isinstance(link, struct.DocLink):
-					if link.doc() == self.__parent.doc():
-						return
-				# already contained?
-				if not self.__parent.model().validateDragEnter(link):
-					return
+			links = struct.loadMimeData(data)
+			# drag to ourself or already contained?
+			if any([l.doc() == self.__parent.doc() or not self.__parent.model().validateDragEnter(l) for l in links]):
+				return
 		QtGui.QTreeView.dragEnterEvent(self, event)
 
 	def contextMenuEvent(self, event):

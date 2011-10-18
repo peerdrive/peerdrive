@@ -211,60 +211,88 @@ class RevisionTab(QtGui.QWidget):
 
 
 class HistoryTab(QtGui.QWidget):
+
+	# TODO: implement something nice gitk like...
+	class HistoryList(QtGui.QListWidget):
+		def __init__(self, parent=None):
+			super(HistoryTab.HistoryList, self).__init__(parent)
+			self.__revs = []
+			self.itemDoubleClicked.connect(self.__open)
+			self.setDragEnabled(True)
+
+		def setRevs(self, store, revs):
+			self.__store = store
+			self.__revs = revs[:]
+			self.clear()
+			self.insertItems(0, [self.__loadComment(rev) for rev in revs])
+
+		def supportedDropActions(self):
+			return QtCore.Qt.IgnoreAction
+
+		def mimeTypes(self):
+			types = QtCore.QStringList()
+			types << struct.LINK_MIME_TYPE
+			return types
+
+		def mimeData(self, items):
+			links = [ struct.RevLink(self.__store, self.__revs[self.row(item)])
+				for item in items ]
+			if not links:
+				return None
+
+			mimeData = QtCore.QMimeData()
+			struct.dumpMimeData(mimeData, links)
+			return mimeData
+
+		def __loadComment(self, rev):
+			stat = Connector().stat(rev, [self.__store])
+			mtime = str(stat.mtime())
+			comment = ""
+			if 'META' in stat.parts():
+				try:
+					with Connector().peek(self.__store, rev) as r:
+						metaData = struct.loads(self.__store, r.readAll('META'))
+						comment = extractMetaData(
+							metaData,
+							["org.peerdrive.annotation", "comment"],
+							"")
+				except IOError:
+					pass
+			return mtime + " - " + comment
+
+		def __open(self, item):
+			row = self.row(item)
+			rev = self.__revs[row]
+			showDocument(struct.RevLink(self.__store, rev))
+
+
 	def __init__(self, parent=None):
 		super(HistoryTab, self).__init__(parent)
 
-		self.__historyListBox = QtGui.QListWidget()
+		self.__historyListBox = HistoryTab.HistoryList(self)
 		self.__historyListBox.setSizePolicy(
 			QtGui.QSizePolicy.Ignored,
 			QtGui.QSizePolicy.Ignored )
-		QtCore.QObject.connect(
-			self.__historyListBox,
-			QtCore.SIGNAL("itemDoubleClicked(QListWidgetItem *)"),
-			self.__open)
 
 		layout = QtGui.QVBoxLayout()
 		layout.addWidget(self.__historyListBox)
 		self.setLayout(layout)
 
 	def load(self, store, rev):
-		# TODO: implement something nice gitk like...
-		self.__store = store
-		self.__historyList = []
-		self.__historyRevs = []
+		revs = []
 		heads = [rev]
 		while len(heads) > 0:
 			newHeads = []
 			for rev in heads:
 				try:
-					if rev not in self.__historyRevs:
-						stat = Connector().stat(rev, [store])
-						mtime = str(stat.mtime())
-						comment = ""
-						if 'META' in stat.parts():
-							try:
-								with Connector().peek(store, rev) as r:
-									metaData = struct.loads(store, r.readAll('META'))
-									comment = extractMetaData(
-										metaData,
-										["org.peerdrive.annotation", "comment"],
-										"")
-							except IOError:
-								pass
-						self.__historyList.append(mtime + " - " + comment)
-						self.__historyRevs.append(rev)
-						newHeads.extend(stat.parents())
+					if rev not in revs:
+						revs.append(rev)
+						newHeads.extend(Connector().stat(rev, [store]).parents())
 				except IOError:
 					pass
 			heads = newHeads
 
-		self.__historyListBox.clear()
-		self.__historyListBox.insertItems(0, self.__historyList)
-
-	def __open(self, item):
-		row = self.__historyListBox.row(item)
-		rev = self.__historyRevs[row]
-		showDocument(struct.RevLink(self.__store, rev))
+		self.__historyListBox.setRevs(store, revs)
 
 
 class AnnotationTab(QtGui.QWidget):
