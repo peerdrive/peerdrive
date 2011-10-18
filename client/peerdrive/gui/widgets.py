@@ -24,7 +24,7 @@ import sys, os, subprocess, pickle, datetime
 from ..connector import Watch, Connector
 from ..registry import Registry
 from .. import struct
-from .utils import showDocument
+from .utils import showDocument, showProperties
 
 
 class DocButton(QtGui.QToolButton, Watch):
@@ -124,6 +124,13 @@ class DocButton(QtGui.QToolButton, Watch):
 			pass
 
 		menu = QtGui.QMenu()
+
+		if Registry().conformes(type, "org.peerdrive.folder"):
+			m = menu.addMenu(self.__docName)
+			l = struct.DocLink(self.__store, self.__doc, False)
+			m.aboutToShow.connect(lambda m=m, l=l: self.__fillMenu(m, l))
+			menu.addSeparator()
+
 		action = menu.addAction("Open")
 		action.triggered.connect(self.__clicked)
 		menu.setDefaultAction(action)
@@ -133,12 +140,10 @@ class DocButton(QtGui.QToolButton, Watch):
 				action = openMenu.addAction(e)
 				action.triggered.connect(
 					lambda x,s=self.__store,d=self.__doc,e=e: showDocument(struct.DocLink(s, d, False), executable=e))
-
-		if Registry().conformes(type, "org.peerdrive.folder"):
-			menu.addSeparator()
-			m = menu.addMenu(self.__docName)
-			l = struct.DocLink(self.__store, self.__doc, False)
-			m.aboutToShow.connect(lambda m=m, l=l: self.__fillMenu(m, l))
+		menu.addSeparator()
+		action = menu.addAction("Properties")
+		action.triggered.connect(lambda x,s=self.__store,d=self.__doc:
+			showProperties(struct.DocLink(s, d, False)))
 
 		menu.exec_(self.mapToGlobal(pos))
 

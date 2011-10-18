@@ -275,21 +275,21 @@ class AnnotationTab(QtGui.QWidget):
 		super(AnnotationTab, self).__init__(parent)
 
 		if edit:
-				self.__titleEdit = QtGui.QLineEdit()
-				self.__titleEdit.textEdited.connect(self.__changed)
-				self.__descEdit = QtGui.QLineEdit()
-				self.__descEdit.textEdited.connect(self.__changed)
-				self.__tagsEdit = QtGui.QLineEdit()
-				self.__tagsEdit.setValidator(QtGui.QRegExpValidator(
-					QtCore.QRegExp("(\\s*\\w+\\s*(,\\s*\\w+\\s*)*)?"),
-					self))
-				self.__tagsEdit.textEdited.connect(self.__changed)
+			self.__titleEdit = QtGui.QLineEdit()
+			self.__titleEdit.textEdited.connect(self.__changed)
+			self.__descEdit = QtGui.QLineEdit()
+			self.__descEdit.textEdited.connect(self.__changed)
+			self.__tagsEdit = QtGui.QLineEdit()
+			self.__tagsEdit.setValidator(QtGui.QRegExpValidator(
+				QtCore.QRegExp("(\\s*\\w+\\s*(,\\s*\\w+\\s*)*)?"),
+				self))
+			self.__tagsEdit.textEdited.connect(self.__changed)
 		else:
-				self.__titleEdit = QtGui.QLabel()
-				self.__descEdit = QtGui.QLabel(description)
-				self.__descEdit.setWordWrap(True)
-				self.__descEdit.setScaledContents(True)
-				self.__tagsEdit = QtGui.QLabel()
+			self.__titleEdit = QtGui.QLabel()
+			self.__descEdit = QtGui.QLabel()
+			self.__descEdit.setWordWrap(True)
+			self.__descEdit.setScaledContents(True)
+			self.__tagsEdit = QtGui.QLabel()
 
 		layout = QtGui.QGridLayout()
 		layout.addWidget(QtGui.QLabel("Title:"), 0, 0)

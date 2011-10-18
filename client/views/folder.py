@@ -790,7 +790,9 @@ class FolderWidget(widgets.DocumentView):
 		self.itemDelAct.setStatusTip("Delete selected item(s)")
 		self.itemDelAct.triggered.connect(self.__removeRows)
 		self.itemPropertiesAct = QtGui.QAction("&Properties", self)
-		self.itemPropertiesAct.triggered.connect(self.__showProperties)
+		self.itemPropertiesAct.triggered.connect(self.__showItemProperties)
+		self.selfPropertiesAct = QtGui.QAction("&Properties", self)
+		self.selfPropertiesAct.triggered.connect(self.__showSelfProperties)
 
 		self.listView = FolderTreeView(self)
 		self.listView.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
@@ -930,11 +932,18 @@ class FolderWidget(widgets.DocumentView):
 			self.itemOpen.emit(link, None,
 				"org.peerdrive.browser.py" in executables)
 
-	def __showProperties(self):
+	def __showItemProperties(self):
 		index = self.listView.selectionModel().currentIndex()
 		link = self.model().getItemLink(self.modelMapIndex(index))
 		if link:
 			utils.showProperties(link)
+
+	def __showSelfProperties(self):
+		if self.doc():
+			link = struct.DocLink(self.store(), self.doc(), False)
+		else:
+			link = struct.RevLink(self.store(), self.rev())
+		utils.showProperties(link)
 
 	def __removeRows(self):
 		rows = [self.modelMapIndex(i) for i in self.listView.selectionModel().selectedRows()]
@@ -984,8 +993,11 @@ class FolderWidget(widgets.DocumentView):
 				menu.addAction(self.itemDelAct)
 			menu.addSeparator()
 			menu.addAction(self.itemPropertiesAct)
-		elif self.isMutable:
-			self.__addCreateActions(menu)
+		else:
+			if self.isMutable:
+				self.__addCreateActions(menu)
+			menu.addSeparator()
+			menu.addAction(self.selfPropertiesAct)
 
 	def __addReplicateActions(self, menu, link):
 		c = Connector()
