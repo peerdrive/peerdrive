@@ -316,7 +316,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__store = store
 		self.__mutable = isDoc
 		if isDoc:
-			print "doc:%s" % guid.encode("hex")
+			#print "doc:%s" % guid.encode("hex")
 			self.__doc = guid
 			Watch.__init__(self, Watch.TYPE_DOC, guid)
 			self.__chooseRevWidget = _ChooseWidget(self, guid, self.__chooseRev)
@@ -543,8 +543,8 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.mergeNeeded.emit(state)
 
 	def __emitNewRev(self):
-		print "rev:%s" % self.__rev.encode("hex")
-		sys.stdout.flush()
+		#print "rev:%s" % self.__rev.encode("hex")
+		#sys.stdout.flush()
 		self.revChanged.emit()
 
 	def __postEvent(self, action):
