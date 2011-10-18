@@ -778,6 +778,7 @@ class FolderWidget(widgets.DocumentView):
 		self.__folderModel = None
 		self.__filterModel = QtGui.QSortFilterProxyModel()
 		self.__filterModel.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
+		self.__filterModel.setDynamicSortFilter(True)
 		self.mutable.connect(self.__setMutable)
 
 		self.itemDelAct = QtGui.QAction(QtGui.QIcon('icons/edittrash.png'), "&Delete", self)
@@ -818,7 +819,7 @@ class FolderWidget(widgets.DocumentView):
 		model = FolderModel(self)
 
 		self.__setModel(model)
-		if self.__settings:
+		if self.__settings is not None:
 			self.__applySettings(self.__settings)
 
 		model.rowsInserted.connect(self._emitSaveNeeded)
@@ -902,7 +903,7 @@ class FolderWidget(widgets.DocumentView):
 			self.listView.setColumnWidth(i, w)
 			i += 1
 		self.listView.resizeColumnToContents(i)
-		sortColumn = settings.get("sortcol", -1)
+		sortColumn = settings.get("sortcol", 0)
 		sortOrder  = settings.get("sortorder", QtCore.Qt.AscendingOrder)
 		self.listView.sortByColumn(sortColumn, sortOrder)
 

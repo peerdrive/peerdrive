@@ -187,9 +187,9 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			isDoc = False
 
 		# open the document
+		self.__loadSettings(guid)
 		self.__view.docOpen(store, guid, isDoc)
 		self.__updateStoreButtons()
-		self.__loadSettings()
 
 	# === re-implemented inherited methods
 
@@ -209,8 +209,10 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		settings["posy"] = self.pos().y()
 
 	def _loadSettings(self, settings):
-		self.resize(settings["resx"], settings["resy"])
-		self.move(settings["posx"], settings["posy"])
+		if "resx" in settings and "resy" in settings:
+			self.resize(settings["resx"], settings["resy"])
+		if "posx" in settings and "posy" in settings:
+			self.move(settings["posx"], settings["posy"])
 
 	def __saveSettings(self):
 		if self.__view.doc():
@@ -226,20 +228,20 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			self.__view._saveSettings(settings)
 			pickle.dump(settings, f)
 
-	def __loadSettings(self):
-		if self.__view.doc():
-			hash = self.__view.doc().encode('hex')
-		else:
-			hash = self.__view.rev().encode('hex')
-		path = ".settings/" + hash[0:2] + "/" + hash[2:]
+	def __loadSettings(self, guid):
+		settings = { }
+
+		guid = guid.encode('hex')
+		path = ".settings/" + guid[0:2] + "/" + guid[2:]
 		try:
 			if os.path.isfile(path):
 				with open(path, 'r') as f:
 					settings = pickle.load(f)
-				self.__view._loadSettings(settings)
-				self._loadSettings(settings)
-		except:
-			print "Failed to load settings!"
+		except Exception as e:
+			print "Failed to load settings!:", e
+
+		self.__view._loadSettings(settings)
+		self._loadSettings(settings)
 
 	def __setMutable(self, mutable):
 		self.__mutable = mutable
