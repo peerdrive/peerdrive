@@ -186,6 +186,7 @@ class FolderEntry(Watch):
 		self.__model = model
 		self.__item  = copy.deepcopy(item)
 		self.__valid = False
+		self.__isFolder = False
 		self.__icon  = None
 		self.__uti   = None
 		self.__replacable = False
@@ -203,6 +204,9 @@ class FolderEntry(Watch):
 
 	def isValid(self):
 		return self.__valid
+
+	def isFolder(self):
+		return self.__isFolder
 
 	def overwritable(self):
 		return self.__valid and self.__replacable
@@ -289,10 +293,8 @@ class FolderEntry(Watch):
 		else:
 			self.__icon = QtGui.QIcon(Registry().getIcon(s.type()))
 
-		# overwritable by external files?
-		self.__replacable = (not needMerge) and (
-			not Registry().conformes(self.__uti, "org.peerdrive.folder"))
-
+		self.__isFolder = Registry().conformes(self.__uti, "org.peerdrive.folder")
+		self.__replacable = not needMerge and not self.__isFolder
 		self.__valid = True
 		self.__updateColumns()
 
@@ -763,6 +765,20 @@ class FolderTreeView(QtGui.QTreeView):
 		menu.exec_(event.globalPos())
 
 
+class FolderSortProxy(QtGui.QSortFilterProxyModel):
+	def __init__(self, parent=None):
+		super(FolderSortProxy, self).__init__(parent)
+
+	def lessThan(self, left, right):
+		src = self.sourceModel()
+		leftItem = src.getItem(left)
+		rightItem = src.getItem(right)
+		if leftItem.isFolder() != rightItem.isFolder():
+			return leftItem.isFolder() and not rightItem.isFolder()
+		return (leftItem.getColumnData(left.column()) <
+			rightItem.getColumnData(right.column()))
+
+
 class FolderWidget(widgets.DocumentView):
 
 	# itemOpen(link, executable, browseHint)
@@ -776,7 +792,7 @@ class FolderWidget(widgets.DocumentView):
 		self.__settings = None
 		self.__browseTypes = browseTypes
 		self.__folderModel = None
-		self.__filterModel = QtGui.QSortFilterProxyModel()
+		self.__filterModel = FolderSortProxy()
 		self.__filterModel.setSortCaseSensitivity(QtCore.Qt.CaseInsensitive)
 		self.__filterModel.setDynamicSortFilter(True)
 		self.mutable.connect(self.__setMutable)
