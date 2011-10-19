@@ -43,12 +43,6 @@
 }).
 
 -define(UNKNOWN_INO, 16#ffffffff).
--define(DIRATTR, #stat{st_mode=?S_IFDIR bor 8#0555, st_nlink=1}).
--define(DIRATTR(I), #stat{
-	st_ino   = (I),
-	st_mode  = ?S_IFDIR bor 8#0555,
-	st_nlink = 1
-}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -168,7 +162,7 @@ init({Dir, Options}) ->
 		handles   = gb_trees:from_orddict([{0, undefined}]),
 		uid       = proplists:get_value(uid, Options, 0),
 		gid       = proplists:get_value(gid, Options, 0),
-		umask     = 8#777 band (bnot proplists:get_value(umask, Options, 8#022))
+		umask     = 8#177777 band (bnot proplists:get_value(umask, Options, 0))
 	},
 	{ok, State}.
 
@@ -466,7 +460,10 @@ call_vfs_handle(Fun, Args, FuseHandle, S) ->
 make_fuse_attr(Ino, #vfs_attr{dir=Dir, size=Size, mtime=MTime}, S) ->
 	#stat{
 		st_ino   = Ino,
-		st_mode  = (if Dir -> ?S_IFDIR; true -> ?S_IFREG end) bor S#state.umask,
+		st_mode  = (if
+			Dir  -> ?S_IFDIR bor 8#0777;
+			true -> ?S_IFREG bor 8#0666
+		end) band S#state.umask,
 		st_nlink = 1,
 		st_uid   = S#state.uid,
 		st_gid   = S#state.gid,
