@@ -70,11 +70,21 @@ resume(Store, Doc, PreRev, Creator) ->
 read({_, Handle}, Part, Offset, Length) ->
 	peerdrive_store:read(Handle, Part, Offset, Length).
 
-write({_, Handle}, Part, Offset, Data) ->
-	peerdrive_store:write(Handle, Part, Offset, Data).
+write({_, Handle}, Part, Offset, Data) when Part == <<"FILE">>;
+                                            Part == <<"META">>;
+                                            Part == <<"PDSD">> ->
+	peerdrive_store:write(Handle, Part, Offset, Data);
 
-truncate({_, Handle}, Part, Offset) ->
-	peerdrive_store:truncate(Handle, Part, Offset).
+write(_, _, _, _) ->
+	{error, einval}.
+
+truncate({_, Handle}, Part, Offset) when Part == <<"FILE">>;
+                                         Part == <<"META">>;
+                                         Part == <<"PDSD">> ->
+	peerdrive_store:truncate(Handle, Part, Offset);
+
+truncate(_, _, _) ->
+	{error, einval}.
 
 get_parents({_, Handle}) ->
 	peerdrive_store:get_parents(Handle).

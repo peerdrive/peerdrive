@@ -835,9 +835,18 @@ class TestSynchronization(CommonParts):
 	# Checks that the 'merge' strategy really merges
 	def test_sync_merge(self):
 		(doc, rev1, rev2) = self.createMerge("org.peerdrive.folder",
-			{'PDSD' : struct.dumps({"a":1}) },
-			{'PDSD' : struct.dumps({"a":1, "b":2}) },
-			{'PDSD' : struct.dumps({"a":1, "c":3}) })
+			{
+				'META':struct.dumps({"a":1}),
+				'PDSD':struct.dumps([{'':1}, {'':2}])
+			},
+			{
+				'META':struct.dumps({"a":4, "b":2}),
+				'PDSD':struct.dumps([{'':1}, {'':2}, {'':3}])
+			},
+			{
+				'META':struct.dumps({"a":1, "c":3}),
+				'PDSD':struct.dumps([{'':2}])
+			})
 		l = self.performSync(doc, 'merge')
 
 		rev = l.revs()[0]
@@ -856,8 +865,12 @@ class TestSynchronization(CommonParts):
 
 		# see if merge was ok
 		with Connector().peek(self.store1, rev) as r:
-			pdsd = struct.loads(self.store1, r.readAll('PDSD'))
-			self.assertEqual(pdsd, {"a":1, "b":2, "c":3})
+			meta = struct.loads(self.store1, r.readAll('META'))
+			if 'org.peerdrive.annotation' in meta:
+				del meta['org.peerdrive.annotation']
+			self.assertEqual(meta, {"a":4, "b":2, "c":3})
+			pdsd = sorted(struct.loads(self.store1, r.readAll('PDSD')))
+			self.assertEqual(pdsd, [{'':2},{'':3}])
 
 if __name__ == '__main__':
 	unittest.main()

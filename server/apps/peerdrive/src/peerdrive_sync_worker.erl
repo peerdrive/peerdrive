@@ -228,7 +228,7 @@ sync_doc_latest(Doc, From, FromRev, To, ToRev) ->
 
 
 sync_doc_merge(Doc, From, FromRev, To, ToRev) ->
-	sync_doc_merge(Doc, From, FromRev, To, ToRev, fun simple_strategy/6).
+	sync_doc_merge(Doc, From, FromRev, To, ToRev, fun merge_strategy/6).
 
 
 sync_doc_merge(Doc, From, FromRev, To, ToRev, Strategy) ->
@@ -293,7 +293,7 @@ latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
 %% 'simple' strategy
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-simple_strategy(Doc, From, FromRev, To, ToRev, BaseRev) ->
+merge_strategy(Doc, From, FromRev, To, ToRev, BaseRev) ->
 	FromStat = throws(peerdrive_broker:stat(FromRev, [From])),
 	ToStat = throws(peerdrive_broker:stat(ToRev, [To])),
 	BaseStat = throws(peerdrive_broker:stat(BaseRev, [From, To])),
@@ -308,18 +308,21 @@ simple_strategy(Doc, From, FromRev, To, ToRev, BaseRev) ->
 			latest_strategy(Doc, From, FromRev, To, ToRev, BaseRev);
 
 		HandlerFun ->
-			HandlerFun(Doc, From, To, BaseRev, FromRev, ToRev, TypeSet)
+			HandlerFun(Doc, From, To, BaseRev, FromRev, ToRev)
 	end.
 
 
 % FIXME: hard coded at the moment
 get_handler_fun(TypeSet) ->
 	case sets:to_list(TypeSet) of
-		[Type] ->
-			case Type of
-				<<"org.peerdrive.store">>  -> fun merge_pdsd/7;
-				<<"org.peerdrive.folder">> -> fun merge_pdsd/7;
-				_ -> none
+		[Folder] when Folder =:= <<"org.peerdrive.store">>;
+		              Folder =:= <<"org.peerdrive.folder">> ->
+			Handlers = orddict:from_list([
+				{<<"META">>, fun merge_meta/3},
+				{<<"PDSD">>, fun merge_folder/3}
+			]),
+			fun(Doc, From, To, BaseRev, FromRev, ToRev) ->
+				merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers)
 			end;
 
 		_ ->
@@ -328,111 +331,94 @@ get_handler_fun(TypeSet) ->
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Content handlers
+%% Generic merge algoritm
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%
-%% Content handler for PDSD only documents. Will crash if any rev contains a
-%% part *not* containing PDSD data.
+%% TODO: Support addition and removal of whole parts
 %%
+merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers) ->
+	#rev_stat{parts=FromParts} = throws(peerdrive_broker:stat(FromRev, [From])),
+	#rev_stat{parts=ToParts} = throws(peerdrive_broker:stat(ToRev, [To])),
+	#rev_stat{parts=BaseParts} = throws(peerdrive_broker:stat(BaseRev, [From, To])),
+	OtherParts = ToParts ++ FromParts,
 
-merge_pdsd(Doc, From, To, BaseRev, FromRev, ToRev, TypeSet) ->
-	#rev_stat{parts=Parts} = throws(peerdrive_broker:stat(FromRev, [From])),
-	FCCs = [ FourCC || {FourCC, _Size, _Hash} <- Parts ],
+	% Merge only changed parts, except META because we want to update the comment
+	Parts = [ FourCC || {FourCC, _Size, Hash} <- BaseParts,
+		(FourCC == <<"META">>) orelse
+		lists:any(
+			fun({F,_,H}) -> (F =:= FourCC) and (H =/= Hash) end,
+			OtherParts) ],
 
-	FromData = merge_pdsd_read(FromRev, FCCs, [From]),
-	ToData   = merge_pdsd_read(ToRev, FCCs, [To]),
-	BaseData = merge_pdsd_read(BaseRev, FCCs, [From, To]),
+	% Read all changed parts
+	FromData = merge_read(FromRev, Parts, [From]),
+	ToData   = merge_read(ToRev, Parts, [To]),
+	BaseData = merge_read(BaseRev, Parts, [From, To]),
 
-	NewData = merge_pdsd_parts(BaseData, FromData, ToData, []),
-	[Type] = sets:to_list(TypeSet),
-	merge_pdsd_write(Doc, From, FromRev, To, ToRev, Type, NewData).
+	{_Conflict, NewData} = merge_parts(BaseData, FromData, ToData, Handlers,
+		false, []),
+
+	% TODO: set a 'conflict' flag in the future?
+	merge_write(Doc, From, FromRev, To, ToRev, NewData).
 
 
-merge_pdsd_read(_Rev, _FCCs, []) ->
+merge_read(_Rev, _Parts, []) ->
 	throw({error, enoent});
 
-merge_pdsd_read(Rev, FCCs, [Store | Rest]) ->
+merge_read(Rev, Parts, [Store | Rest]) ->
 	case peerdrive_broker:peek(Store, Rev) of
 		{ok, Reader} ->
 			try
-				merge_pdsd_read_parts(Reader, FCCs)
+				[ {Part, merge_read_part(Reader, Part)} || Part <- Parts ]
 			after
 				peerdrive_broker:close(Reader)
 			end;
 
 		{error, enoent} ->
-			merge_pdsd_read(Rev, FCCs, Rest);
+			merge_read(Rev, Parts, Rest);
 
 		Error ->
 			throw(Error)
 	end.
 
 
-merge_pdsd_read_parts(Reader, FCCs) ->
-	merge_pdsd_read_parts(Reader, FCCs, []).
+merge_read_part(Reader, Part) ->
+	merge_read_part(Reader, Part, 0, <<>>).
 
 
-merge_pdsd_read_parts(_Reader, [], Acc) ->
-	Acc;
-
-merge_pdsd_read_parts(Reader, [Part | Remaining], Acc) ->
-	Data = read_loop(Reader, Part, 0, <<>>),
-	case catch peerdrive_struct:decode(Data) of
-		{'EXIT', _Reason} ->
-			throw({error, econvert});
-
-		Struct ->
-			merge_pdsd_read_parts(Reader, Remaining, [{Part, Struct} | Acc])
-	end.
-
-
-read_loop(Reader, Part, Offset, Acc) ->
-	Length = 16#10000,
-	case throws(peerdrive_broker:read(Reader, Part, Offset, Length)) of
+merge_read_part(Reader, Part, Offset, Acc) ->
+	case throws(peerdrive_broker:read(Reader, Part, Offset, 16#10000)) of
 		<<>> ->
 			Acc;
 		Data ->
-			read_loop(Reader, Part, Offset+size(Data),
+			merge_read_part(Reader, Part, Offset+size(Data),
 				<<Acc/binary, Data/binary>>)
 	end.
 
 
-merge_pdsd_parts([], [], [], Acc) ->
-	Acc;
+merge_parts([], [], [], _Handlers, Conflicts, Acc) ->
+	{Conflicts, Acc};
 
-merge_pdsd_parts(
+merge_parts(
 		[{Part, Base} | BaseData],
 		[{Part, From} | FromData],
 		[{Part, To} | ToData],
-		Acc) ->
-	case peerdrive_struct:merge(Base, [From, To]) of
-		{ok, Data} ->
-			merge_pdsd_parts(BaseData, FromData, ToData, [{Part, Data} | Acc]);
-
-		{econflict, Data} ->
-			% ignore conflicts
-			merge_pdsd_parts(BaseData, FromData, ToData, [{Part, Data} | Acc]);
-
-		error ->
-			throw({error, baddata})
-	end.
+		Handlers, Conflicts, Acc) ->
+	Handler = orddict:fetch(Part, Handlers),
+	{NewConflict, Data} = Handler(Base, From, To),
+	merge_parts(BaseData, FromData, ToData, Handlers, Conflicts or NewConflict,
+		[{Part, Data} | Acc]).
 
 
-merge_pdsd_write(Doc, From, FromRev, To, ToRev, Type, NewData) ->
+merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
 	Writer = throws(peerdrive_broker:update(From, Doc, FromRev,
 		<<"org.peerdrive.syncer">>)),
 	try
 		throws(peerdrive_broker:merge(Writer, To, ToRev, 0)),
-		throws(peerdrive_broker:set_type(Writer, Type)),
 		lists:foreach(
 			fun({Part, Data}) ->
-				FinalData = if
-					Part == <<"META">> -> merge_pdsd_update_meta(Data);
-					true               -> Data
-				end,
 				throws(peerdrive_broker:truncate(Writer, Part, 0)),
-				throws(peerdrive_broker:write(Writer, Part, 0, peerdrive_struct:encode(FinalData)))
+				throws(peerdrive_broker:write(Writer, Part, 0, Data))
 			end,
 			NewData),
 		throws(peerdrive_broker:commit(Writer))
@@ -441,8 +427,56 @@ merge_pdsd_write(Doc, From, FromRev, To, ToRev, Type, NewData) ->
 	end.
 
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Content handlers
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+merge_meta(Base, From, To) ->
+	case peerdrive_struct:merge(decode(Base), [decode(From), decode(To)]) of
+		{ok, Data} ->
+			{false, peerdrive_struct:encode(merge_update_meta(Data))};
+		{econflict, Data} ->
+			{true, peerdrive_struct:encode(merge_update_meta(Data))};
+		error ->
+			throw({error, eio})
+	end.
+
+
+merge_folder(RawBase, RawFrom, RawTo) ->
+	Base = folder_make_gb_tree(decode(RawBase)),
+	From = folder_make_gb_tree(decode(RawFrom)),
+	To   = folder_make_gb_tree(decode(RawTo)),
+	{Conflict, New} = case peerdrive_struct:merge(Base, [From, To]) of
+		{ok, Data} ->
+			{false, Data};
+		{econflict, Data} ->
+			{true, Data};
+		error ->
+			throw({error, eio})
+	end,
+	{Conflict, peerdrive_struct:encode(gb_trees:values(New))}.
+
+
+folder_make_gb_tree(Folder) ->
+	lists:foldl(
+		fun(Entry, Acc) ->
+			gb_trees:enter(gb_trees:get(<<>>, Entry), Entry, Acc)
+		end,
+		gb_trees:empty(),
+		Folder).
+
+
+decode(Data) ->
+	try
+		peerdrive_struct:decode(Data)
+	catch
+		error:_ ->
+			throw({error, eio})
+	end.
+
+
 %% update comment
-merge_pdsd_update_meta(Data) ->
+merge_update_meta(Data) ->
 	update_meta_field(
 		[<<"org.peerdrive.annotation">>, <<"comment">>],
 		<<"<<Synchronized by system>>">>,

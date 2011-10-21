@@ -283,7 +283,12 @@ merge_dict(Base, Versions) ->
 		end,
 		NewDict1,
 		gb_trees:to_list(Added)),
-	{Res1, NewDict2}.
+	% Delete the removed keys
+	NewDict3 = sets:fold(
+		fun(Key, Acc) -> gb_trees:delete(Key, Acc) end,
+		NewDict2,
+		Removed),
+	{Res1, NewDict3}.
 
 
 %%
