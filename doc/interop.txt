@@ -1,26 +1,29 @@
-== POSIX file system interface to PeerDrive ==
+POSIX file system interface to PeerDrive
+========================================
 
 - FUSE, single mount point
 - Root directory shows all stores
 - Under each store directory only the documents on that store -> per store access
-- Synchronization/replication handled by external rules
-- direct access to doc/rev by special '.docs' resp. '.revs' directory
+- direct access to doc/rev by virtual '.docs' resp. '.revs' directories
 
 examples:
 /sys/.revs/00112233445566778899aabbccddeeff/MyFileTitle
 /usr/foo/bar.txt
   |   |    |
   |   |    \-- "public.text" document
-  |   \------- "org.peerdrive.container" document
+  |   \------- "org.peerdrive.folder" document
   \----------- store name
 
-== Access to legacy file system from PeerDrive ==
 
-- not provided, too many problems
-	- user should see break instead of relying on not provided features
+Access to legacy file system from PeerDrive
+===========================================
+
+Access to regular file systems through PeerDrive APIs is not provided because
+this creates too many problems. The user should see the break instead of
+relying on unavailable or fragile features.
 
 - cannot guarantee semantics
-	- transactinal features (commit/close)
+	- transactinal features (write/commit/close)
 	- extended meta data
 		- could be stored in hidden files
 		- would break if file is moved/edited/replaced/... in legacy app

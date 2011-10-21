@@ -9,6 +9,7 @@
 		- add query API (virtual collections)
 	- network stores
 		- rev cache
+		- local sharing groups
 	- automatically detect/mount stores
 		- local stores when removable drive connected (inotify/WM_DEVICECHANGE)
 		- network stores (bonjour)
@@ -24,23 +25,13 @@
 			- added (but not saved yet)
 			- needs merge
 			- may need replication
-		- drag operations: copy as new document
 	- possibility to cancel ongoing replication/synchronzation
 
 - Libs
 	- command line interface
+	- other language bindings
 
 - Security
-	- merging and synchronization
-		- default
-			- always ask when opening on merge condition (explicit merge)
-			- no automatic synchronization
-		- per store pair setting
-			- system automatic sync
-				- fast-forward (one-/two-way)
-				- automatic
-			- user:
-				- default conflict resolution strategy (ask/prefer/ff-only/auto merge)
 	- access control
 		- principle
 			- attached to each uuid/rev
@@ -51,19 +42,10 @@
 			- ACL's
 	- crpyto
 		- revision signing
-			- 'SIGN' part, signature of hashes, uti, mtime
+			- 'SIGN' part, signature of RId without 'SIGN' part
 		- encryption
-			- 'ENCR' part
-				- proxy links of encrypted parts
-				- crypto method info
-			- decryption cache in client for performance
-
-
-================================ brainstorming ================================
-
-- extend semantics
-	- shared updates
-		- allow dirty reads
-		- only one writer per store and doc
-		- usable to emulate old file model (simultanious read/write)
+			- transparent layer to wrap around store
+			- encrypt all revision fields and parts, except RevLinks/DocLinks
+			- store must not verify PId's and RId's in this case
+			- decryption cache in client for performance?
 

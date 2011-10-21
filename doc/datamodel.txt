@@ -28,7 +28,9 @@ documents between multiple stores. It also stores all necessary information to
 link to other documents/revisions, independent of the actual link encoding in
 one of the parts.
 
-== Binary object representation ==
+
+Binary object representation
+============================
 
 To compute the hash of a revision a common binary representation is needed.
 All values are encoded as little endian...
@@ -50,18 +52,22 @@ uint32           .. RevLinkCount
 	uint128      .. Revision link
 
 
-== Well known part FourCCs ==
+Well known part FourCCs
+=======================
 
-In PeerDrive the following part FourCCs have a special meaning:
+In PeerDrive the following part FourCCs are currently defined:
+
 	- 'META': standardized, extensible meta data
 	- 'FILE': byte stream (POSIX file content)
 	- 'PDSD': structured content (PeerDrive Structured Data)
 
 The data in 'META' and 'PDSD' is semantically similar to JSON. See below for
-its definition and binary representation.
+its definition and binary representation. The 'FILE' part is not interpreted by
+the PeerDrive server. Other part FourCC will be rejected.
 
 
-== Document linking ==
+Document linking
+================
 
 Each document is treated completely independent of any other document. For
 navigational access there can be directed links between them. As entry point to
@@ -79,12 +85,12 @@ links in the sense that they are independent of the target's location, even
 across stores.
 
 To make the document linking independent from the actual encoding the links are
-stored as meta data in each revision. There are two types of links:
+stored as meta data in each revision. They are extracted from known parts
+(currently 'META' and 'PDSD') when a new revision is created.
 
-	- Document links
-	- Revision links
 
-== Garbage collection ==
+Garbage collection
+==================
 
 Even though documents and revisions can be deleted explicitly they are normally
 garbage collected implicitly. When there is no path from the root document of a
@@ -106,16 +112,19 @@ kept open.
 The rationale behind this exception is that new documents cannot be linked
 before they are committed for the first time, simply because they don't exist
 yet. This makes it impossible to satisfy the reachability criterion of the
-garbage collector. By keeping the creating handle open the creating application
+garbage collector. By keeping the document handle open the creating application
 can safely add a document link to the new document after committing the initial
 version.
 
-== PeerDrive Structured Data ==
+
+PeerDrive Structured Data
+=========================
 
 The data in the 'PDSD' and 'META' parts of a revision has a defined semantics
 and binary representation.
 
-=== Semantics ===
+Semantics
+---------
 
 PeerDrive can represent the following data types:
 	- Number
@@ -131,7 +140,8 @@ PeerDrive can represent the following data types:
 		- the key is a string,
 		- and the value is of any PeerDrive data type
 
-=== Binary representation ===
+Binary representation
+---------------------
 
 All data stored as little endian. The following is no strict EBNF but you
 should get the idea...
@@ -168,149 +178,4 @@ uint32 = 0x64, ?unsigned long?
 sint32 = 0x65, ?signed long?
 uint64 = 0x66, ?unsigned long long?
 sint64 = 0x67, ?signed long long?
-
-
-== Client interface ==
-
-PeerDrive clients manipulate documents through a high level API...
-
-=== Information requests ===
-
-enum() -- Enumerate stores
-
-lookup_doc(Doc, Stores) -- Query available document revisions
-	Doc: Searched document
-	Stores: Optional set of stores where to search. If empty search on all
-		mounted stores.
-
-lookup_rev(Rev, Stores) -- Find stores which have the revison
-	Rev: Revision to look for
-	Stores: Optional set of stores where to search. If empty search on all
-		mounted stores.
-
-stat(Rev, Stores) -- Get information about a revision
-	Rev: Rev to stat
-	Stores: Optional set of stores where to search. If empty search on all
-		mounted stores.
-
-=== Document manipulation ===
-
-peek(Store, Rev) -- Open a rev for read only access
-	Rev: Rev to open
-	Stores: Optional set of stores where to search the rev. If empty search on
-		all mounted stores.
-
-create(Store, Type, Creator) -- Create a new document
-	Type: Type UTI of the new document.
-	Creator: Reverse DNS identifier of the calling application
-	Stores: Optional set of stores where to create the document. If empty
-		create on all mounted stores.
-
-fork(Store, Rev, Creator) -- Create a new document from an existing one
-	Rev: Starting Rev of the new document (parent and initial content).
-	Creator: Reverse DNS identifier of the calling application
-	Stores: Optional set of stores where to search the Rev. If empty try on all
-		mounted stores where Rev exists.
-
-update(Store, Doc, Rev, Creator) -- Update a document
-	Doc: Document to be updated
-	Rev: Old or current revision of the document from which the update will
-		start. At least one store must have this revision or the operation will
-		fail immediately. The document can only be committed when one of the
-		parent revisions is the current document revision.
-	Creator: Optional new creator code. Keep the previous value if left empty
-	Stores: Optional set of stores where to update the document. If empty try
-		on all mounted stores where Doc exists and is currently pointing to
-		Rev.
-
-resume(Store, Doc, Rev, Creator) -- Resume updating a document
-	Doc: Document with a pending preliminary revision
-	Rev: A pending preliminary revision of the document
-	Creator: Optional new creator code. Keep the previous value if left empty
-	Stores: Optional set of stores where to update the document. If empty try
-		on all mounted stores where Doc exists and where it has a preliminary
-		revision Rev.
-
-read(Handle, Part, Offset, Length)
-	Handle: as returned by peek/create/fork/update/resume
-	Part: FourCC
-	Offset, Length: guess what ;)
-
-write(Handle, Part, Offset, Data)
-	Handle: as returned by create/fork/update/resume
-	Part: FourCC
-	Offset
-	Data
-
-trunc(Handle, Part, Offset)
-	Handle: as returned by create/fork/update/resume
-	Part: FourCC
-	Offset
-
-merge(Handle, Store, Rev, Depth) -- Merge document with another revision
-	Handle: as returned by create/fork/update/resume
-	Store: Store where to merge from
-	Rev: The RId which is merged into the document
-	Depth: Optional. Date of oldest revision which should get replicated.
-
-rebase(Handle, Parent) -- Rebase document to a new parent revision
-	Handle: as returned by create/fork/update/resume
-	Parent: New parent revision.
-
-get_parents(Handle) -- Get current parents
-	Handle: as returned by create/fork/update/resume
-
-get_type(Handle) -- Get current type code UTI
-	Handle: as returned by create/fork/update/resume
-
-set_type(Handle, Uti) -- Change the type of a document
-	Handle: as returned by create/fork/update/resume
-	Uti: new Type UTI
-
-commit(Handle) -- Commit changes as new revision of the document
-	Handle: as returned by create/fork/update/resume
-
-suspend(Handle) -- Suspend handle and enqueue as preliminary revision
-	Handle: as returned by create/fork/update/resume
-
-close(Handle) -- Discard handle
-	Handle: as returned by peek/create/fork/update/resume
-
-=== Data distribution ===
-
-forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) -- Fast-forward a document
-	Doc: Document which should be unified among the stores
-	Depth: Date of oldest revision which should get replicated
-	Stores: Optional set of stores where the document is synchronized. If empty
-		perform on all stores.
-
-replicate_doc(SrcStore, Doc, DstStore, Depth) -- Replicate a document to other stores
-	Doc: Document which should be replicated. Must be unambigous throughout
-		all involved stores.
-	SrcStores: Where to replicate from. If empty search all mounted stores.
-	DstStores: Where to replicate to. If empty replicate to all mounted stores.
-	Depth: Date of oldest revision which should get replicated
-
-replicate_rev(SrcStore, Rev, DstStore, Depth) -- Replicate a revision to other stores
-	Rev: Revision, must be referenced on the destination stores
-	SrcStores: Where to replicate from. If empty search all mounted stores.
-	DstStores: Where to replicate to. If empty replicate to all mounted stores.
-	Depth: Date of oldest revision which should get replicated
-
-forget(Store, Doc, Rev) -- Dispose a pending preliminary revision
-	Doc: Document
-	Rev: Pending preliminary revision of the document
-	Stores: List of stores where the preliminary revision should be disposed
-		from the document. If empty try on all stores.
-
-delete_doc(Store, Doc, Rev) -- Delete a document
-	Doc: Document to be deleted
-	Rev: Current revision of the document
-	Stores: Optional set of stores where to delete the doc. If empty delete on
-		all mounted stores.
-
-delete_rev(Store, Rev) -- Delete a revision
-	Rev: Revision to be deleted
-	Stores: Optional set of stores where to delete the rev. If empty delete on
-		all mounted stores.
 

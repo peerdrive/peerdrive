@@ -1,13 +1,14 @@
 
-PeerDrive is a document oriented file system with revision control and
-database concepts. It is a open source solution to securely access, distribute,
-share and sync your data from everywhere. It is built on a purely distributed
-data model, will allow optional encryption and should be a perfect solution
-when you need your data on different devices in different locations without
-relying on a permanent internet connection.
+PeerDrive is a open source file system to securely store, organize, share and
+sync your files from everywhere. It is built on a purely distributed
+peer-to-peer data model and will be a perfect solution when you need your data
+on different devices in different locations without relying on a permanent
+network connection or central infrastructure.
 
-For an introduction into PeerDrive's features see the Wiki on the project home
-and the doc/ directory.
+For an introduction into PeerDrive's features see http://www.peerdrive.org, the
+Wiki on the project home and the doc/ directory.
+
+Homepage: http://www.peerdrive.org
 
 Project home: http://github.com/jkloetzke/peerdrive
 
@@ -17,10 +18,11 @@ Mailing list: hotchpotch@freelists.org (the projects former name)
 Current status
 ==============
 
-Currently PeerDrive is in the early alpha stage. The basic design is settled
-and there is a prototype implementation of the file system in Erlang. Mounting
-via FUSE/Dokan, network transparency and automatic synchronization/replication
-are working.  Additionally some small GUI applications exist to demonstrate the
+Currently PeerDrive is in the early alpha stage and hence (unless you're really
+brave) for *developers only*. The basic design is settled and there is a
+prototype implementation of the file system in Erlang. Mounting via FUSE/Dokan,
+network transparency and automatic synchronization/replication are roughly
+working.  Additionally some small GUI applications exist to demonstrate the
 full feature set.
 
 Requirements
@@ -28,10 +30,11 @@ Requirements
 
 * Python 2.6
     * PyQt >=4.6.x
-    * protobuf
+    * protobuf (http://code.google.com/p/protobuf/)
     * magic (optional)
-* Erlang >= R14A
+* Erlang >= R14A (Windows: >= R14B03)
     * rebar (http://github.com/basho/rebar)
+    * protobuffs (fetched automatically, git://github.com/freke/erlang_protobuffs.git)
     * fuserl (optional, http://code.google.com/p/fuserl/)
     * erldokan (optional, http://github.com/jkloetzke/erldokan)
 
@@ -46,10 +49,13 @@ out. It is assumed that Erlang, Rebar and Python are all in your path.
 3. Type in the 1st terminal:
     * `cd server`
     * `./configure`
+    * `rebar get-deps`
     * `rebar compile`
     * `./peerdrive.sh` or on Windows: `peerdrive.bat`
-    * This will start the PeerDrive server in the foreground. To gracefully shut down the server type `q().`.
-    * The stores will be mounted to ./vfs by default
+    * This will start the PeerDrive server in the foreground. To gracefully
+      shut down the server type `q().`.
+    * The stores will be mounted to ./vfs by default (assuming fuserl resp.
+      erldokan are installed)
 4. In the 2nd terminal type:
     * `cd client`
     * `./boot.py`

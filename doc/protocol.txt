@@ -1,5 +1,11 @@
 
-=============================== Client API ====================================
+Currently there are two interfaces to the PeerDrive server: a client interface
+which is used by other applications to access documents in PeerDrive and a
+netstore interface for store access between servers.
+
+Both interfaces are realized through the same light weight RPC protocol over
+TCP, but with their own set of messages. All messages are encoded via Google
+Protocol Buffers. The generic packet definition looks like the following:
 
 Packet ::= Length::UINT16, Reference::UINT32, PacketType::Type, Body
 
@@ -10,6 +16,21 @@ Type ::= UINT4
 	CONFIRM     1
 	INDICATION  2
 	RESPONSE    3
+
+Body ::=
+	<Protobuf Message>
+
+The Message types and protobuf messages are distinct for the client and
+netstore interfaces. For each message type there are up to four protobuf
+messages, e.g. for FOO_MSG there might be one or more of the following
+protobuf message definitions: FooReq, FooCnf, FooInd and FooRsp. The
+definitions can be found in the following locations:
+
+* Client:   server/apps/peerdrive/src/peerdrive_client.proto
+* NetStore: server/apps/peerdrive/src/peerdrive_netstore.proto
+
+Client API
+==========
 
 Message ::= UINT12
 	ERROR_MSG           0x000
@@ -53,97 +74,51 @@ Message ::= UINT12
 	PROGRESS_MSG        0x026
 	PROGRESS_END_MSG    0x027
 
-Body ::=
-	<Protobuf Message>
 
-============================ Network Store API ================================
+Network Store API
+=================
 
-Packet ::= Length::UINT16, Reference::UINT32, Opcode::Opcode, Body
-
-Opcode ::=
-	INIT_REQ             0x0000
-	INIT_CNF             0x0001
-
-	STATFS_REQ           0x0010
-	STATFS_CNF           0x0011
-	LOOKUP_REQ           0x0020
-	LOOKUP_CNF           0x0021
-	CONTAINS_REQ         0x0030
-	CONTAINS_CNF         0x0031
-	STAT_REQ             0x0040
-	STAT_CNF             0x0041
-
-	PEEK_REQ             0x0050
-	PEEK_CNF             0x0051
-	CREATE_REQ           0x0060
-	CREATE_CNF           0x0061
-	FORK_REQ             0x0070
-	FORK_CNF             0x0071
-	UPDATE_REQ           0x0080
-	UPDATE_CNF           0x0081
-	RESUME_REQ           0x0090
-	RESUME_CNF           0x0091
-
-	READ_REQ             0x00A0
-	READ_CNF             0x00A1
-	TRUNC_REQ            0x00B0
-	TRUNC_CNF            0x00B1
-	WRITE_REQ            0x00C0
-	WRITE_CNF            0x00C1
-	GET_TYPE_REQ         0x00D0
-	GET_TYPE_CNF         0x00D1
-	SET_TYPE_REQ         0x00E0
-	SET_TYPE_CNF         0x00E1
-	GET_PARENTS_REQ      0x00F0
-	GET_PARENTS_CNF      0x00F1
-	SET_PARENTS_REQ      0x0100
-	SET_PARENTS_CNF      0x0101
-	GET_LINKS_REQ        0x0110
-	GET_LINKS_CNF        0x0111
-	SET_LINKS_REQ        0x0120
-	SET_LINKS_CNF        0x0121
-	COMMIT_REQ           0x0130
-	COMMIT_CNF           0x0131
-	SUSPEND_REQ          0x0140
-	SUSPEND_CNF          0x0141
-	CLOSE_REQ            0x0150
-	CLOSE_CNF            0x0151
-
-	FORGET_REQ           0x0160
-	FORGET_CNF           0x0161
-	DELETE_DOC_REQ       0x0170
-	DELETE_DOC_CNF       0x0171
-	DELETE_REV_REQ       0x0180
-	DELETE_REV_CNF       0x0181
-
-	FF_DOC_START_REQ     0x0190
-	FF_DOC_START_CNF     0x0191
-	FF_DOC_COMMIT_REQ    0x01A0
-	FF_DOC_COMMIT_CNF    0x01A1
-	FF_DOC_ABORT_REQ     0x01B0
-	FF_DOC_ABORT_CNF     0x01B1
-
-	PUT_DOC_REQ          0x01C0
-	PUT_DOC_CNF          0x01C1
-
-	PUT_REV_START_REQ    0x01D0
-	PUT_REV_START_CNF    0x01D1
-	PUT_REV_PART_REQ     0x01E0
-	PUT_REV_PART_CNF     0x01E1
-	PUT_REV_ABORT_REQ    0x01F0
-	PUT_REV_ABORT_CNF    0x01F1
-	PUT_REV_COMMIT_REQ   0x0200
-	PUT_REV_COMMIT_CNF   0x0201
-	SYNC_GET_CHANGES_REQ 0x0210
-	SYNC_GET_CHANGES_CNF 0x0211
-	SYNC_SET_ANCHOR_REQ  0x0220
-	SYNC_SET_ANCHOR_CNF  0x0221
-	SYNC_FINISH_REQ      0x0230
-	SYNC_FINISH_CNF      0x0231
-
-	ADD_REV_IND          0x0002
-	REM_REV_IND          0x0012
-	ADD_DOC_IND          0x0022
-	REM_DOC_IND          0x0032
-	MOD_DOC_IND          0x0042
+Message ::= UINT12
+	ERROR_MSG            0x000
+	INIT_MSG             0x001
+	STATFS_MSG           0x002
+	LOOKUP_MSG           0x003
+	CONTAINS_MSG         0x004
+	STAT_MSG             0x005
+	PEEK_MSG             0x006
+	CREATE_MSG           0x007
+	FORK_MSG             0x008
+	UPDATE_MSG           0x009
+	RESUME_MSG           0x00a
+	READ_MSG             0x00b
+	TRUNC_MSG            0x00c
+	WRITE_MSG            0x00d
+	GET_FLAGS_MSG        0x00e
+	SET_FLAGS_MSG        0x00f
+	GET_TYPE_MSG         0x010
+	SET_TYPE_MSG         0x011
+	GET_PARENTS_MSG      0x012
+	SET_PARENTS_MSG      0x013
+	GET_LINKS_MSG        0x014
+	SET_LINKS_MSG        0x015
+	COMMIT_MSG           0x016
+	SUSPEND_MSG          0x017
+	CLOSE_MSG            0x018
+	FORGET_MSG           0x019
+	DELETE_DOC_MSG       0x01a
+	DELETE_REV_MSG       0x01b
+	PUT_DOC_START_MSG    0x01c
+	PUT_DOC_COMMIT_MSG   0x01d
+	PUT_DOC_ABORT_MSG    0x01e
+	FF_DOC_START_MSG     0x01f
+	FF_DOC_COMMIT_MSG    0x020
+	FF_DOC_ABORT_MSG     0x021
+	PUT_REV_START_MSG    0x022
+	PUT_REV_PART_MSG     0x023
+	PUT_REV_ABORT_MSG    0x024
+	PUT_REV_COMMIT_MSG   0x025
+	SYNC_GET_CHANGES_MSG 0x026
+	SYNC_SET_ANCHOR_MSG  0x027
+	SYNC_FINISH_MSG      0x028
+	TRIGGER_MSG          0x029
 
