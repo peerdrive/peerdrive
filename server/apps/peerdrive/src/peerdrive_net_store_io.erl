@@ -19,8 +19,6 @@
 
 -export([start_link/4]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
--import(peerdrive_netencode, [encode_list/1, encode_list_32/1, encode_string/1,
-	parse_string/1, parse_uuid/1, parse_uuid_list/1, parse_list_32/2]).
 
 -record(state, {store, handle, mps}).
 
