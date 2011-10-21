@@ -15,13 +15,15 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_ifc_vfs_fuse).
+-export([start_link/1]).
+
 -ifdef(have_fuserl).
+
 %-behaviour(fuserl).
 
 %-define(DEBUG(X), X).
 -define(DEBUG(X), ok).
 
--export([start_link/1]).
 -export([code_change/3, handle_info/2, init/1, terminate/2]).
 -export([create/7, forget/5, getattr/4, link/6, lookup/5, mkdir/6, open/5,
          opendir/5, read/7, readdir/7, release/5, releasedir/5, rename/7,
@@ -521,5 +523,12 @@ epoch2fuse(Epoch) ->
 
 fuse2epoch(Fuse) ->
 	Fuse * 1000000.
+
+-else. % have_fuserl
+
+start_link(_) ->
+	error_logger:warning_msg("FUSE support was not compiled and is therefore "
+		"not available.~n"),
+	ignore.
 
 -endif.

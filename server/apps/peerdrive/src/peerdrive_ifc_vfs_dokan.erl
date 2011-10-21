@@ -15,9 +15,10 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_ifc_vfs_dokan).
+-export([start_link/1]).
+
 -ifdef(have_dokan).
 
--export([start_link/1]).
 -export([init/1, handle_info/2, terminate/2, code_change/3]).
 -export([close_file/4, create_directory/4, create_file/8, delete_directory/4,
          delete_file/4, find_files/4, get_disk_free_space/3,
@@ -901,5 +902,12 @@ epoch2win(Epoch) ->
 
 win2epoch(Win) ->
 	Win div 10 - 134774*24*3600*1000000.
+
+-else. % have_dokan
+
+start_link(_) ->
+	error_logger:warning_msg("Dokan support was not compiled and is therefore "
+		"not available.~n"),
+	ignore.
 
 -endif.
