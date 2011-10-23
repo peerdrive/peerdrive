@@ -532,6 +532,7 @@ class FolderViewHandler(ViewHandler):
 		ViewHandler.__init__(self, mainWindow,
 			FolderWidget(BrowserWindow.TYPES.keys()))
 		self._view.itemOpen.connect(self._main.itemOpen)
+		self._view.checkpointNeeded.connect(self.__checkpoint)
 
 		self.__fileMenu = self._main.menuBar().addMenu("File")
 		self.__fileMenu.aboutToShow.connect(self.__showFileMenu)
@@ -540,6 +541,10 @@ class FolderViewHandler(ViewHandler):
 
 	def getClass(self):
 		return FolderWidget
+
+	def __checkpoint(self, cpNeeded):
+		if cpNeeded:
+			self._view.checkpoint("<<Changed by browser>>")
 
 	def __showFileMenu(self):
 		self.__fileMenu.clear()
