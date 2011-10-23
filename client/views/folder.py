@@ -65,13 +65,14 @@ class MetaColumnInfo(object):
 			self.__convert = MetaColumnInfo.__convertDateTime
 		else:
 			self.__convert = MetaColumnInfo.__convertNone
+		self.__editable = typ == "string"
 		self.__default = ""
 
 	def removable(self):
 		return True
 
 	def editable(self):
-		return False
+		return self.__editable
 
 	def derived(self):
 		return True
@@ -93,6 +94,16 @@ class MetaColumnInfo(object):
 			else:
 				return self.__default
 		return self.__convert(item)
+
+	def update(self, metaData, data):
+		metaData.setdefault("org.peerdrive.annotation", {})["comment"] = \
+			"Changed " + self.__name + " from folder"
+		for step in self.__path[:-1]:
+			if step not in metaData:
+				metaData[step] = {}
+			metaData = metaData[step]
+		[lastStep] = self.__path[-1:]
+		metaData[lastStep] = data
 
 	@staticmethod
 	def __convertNone(item):
@@ -192,8 +203,11 @@ class FolderEntry(Watch):
 		self.__replacable = False
 		self.__columnValues = [ column.default() for column in columns ]
 		self.__columnDefs = columns[:]
+		self.__metaData = None
 
 		link = self.__item[''].update(self.__model.getStore())
+		self.__store = model.getStore()
+		self.__doc = link.doc()
 
 		if isinstance(link, struct.DocLink):
 			super(FolderEntry, self).__init__(Watch.TYPE_DOC, link.doc())
@@ -208,6 +222,9 @@ class FolderEntry(Watch):
 	def isFolder(self):
 		return self.__isFolder
 
+	def editable(self):
+		return self.__doc is not None
+
 	def overwritable(self):
 		return self.__valid and self.__replacable
 
@@ -215,7 +232,21 @@ class FolderEntry(Watch):
 		return self.__columnValues[index]
 
 	def setColumnData(self, index, data):
-		self.__columnValues[index] = data
+		if self.__doc and (self.__metaData is not None):
+			meta = copy.deepcopy(self.__metaData) # make sure we can revert!
+			self.__columnDefs[index].update(meta, data)
+			try:
+				with Connector().update(self.__store, self.__doc, self.__rev) as w:
+					w.writeAll('META', struct.dumps(meta))
+					w.commit()
+				self.__rev = w.getRev()
+				self.__metaData = meta
+				self.__columnValues[index] = data
+				return True
+			except IOError:
+				pass
+
+		return False
 
 	def insColumn(self, index, column):
 		self.__columnValues.insert(index, column.default())
@@ -267,8 +298,8 @@ class FolderEntry(Watch):
 
 		# determine revision
 		needMerge = False
-		if isinstance(self.__item[''], struct.DocLink):
-			revisions = Connector().lookupDoc(self.__item[''].doc()).revs()
+		if self.__doc:
+			revisions = Connector().lookupDoc(self.__doc).revs()
 			if len(revisions) == 0:
 				return
 			elif len(revisions) > 1:
@@ -305,9 +336,9 @@ class FolderEntry(Watch):
 
 		try:
 			stat = Connector().stat(self.__rev)
-			with Connector().peek(self.__model.getStore(), self.__rev) as r:
+			with Connector().peek(self.__store, self.__rev) as r:
 				try:
-					metaData = struct.loads(self.__model.getStore(), r.readAll('META'))
+					metaData = struct.loads(self.__store, r.readAll('META'))
 				except:
 					metaData = { }
 
@@ -316,7 +347,10 @@ class FolderEntry(Watch):
 				if column.derived():
 					self.__columnValues[i] = column.extract(stat, metaData)
 
+			self.__metaData = metaData
+
 		except IOError:
+			self.__metaData = None
 			for i in xrange(len(self.__columnDefs)):
 				column = self.__columnDefs[i]
 				if column.derived():
@@ -494,10 +528,12 @@ class FolderModel(QtCore.QAbstractTableModel):
 				if not self.validateEdit(index, text):
 					return False
 				# valid... do it
-				self._listing[index.row()].setColumnData(col, text)
-				self.__changedContent = True
-				self.emit(QtCore.SIGNAL("dataChanged(const QModelIndex&,const QModelIndex&)"), index, index)
-				return True
+				if self._listing[index.row()].setColumnData(col, text):
+					self.__changedContent = True
+					self.dataChanged.emit(index, index)
+					return True
+				else:
+					return False
 		return False
 
 	def headerData(self, section, orientation, role):
@@ -523,7 +559,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 	def flags(self, index):
 		if index.isValid():
 			flags = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsDragEnabled
-			if self._columns[index.column()].editable() and self.__mutable:
+			if self._columns[index.column()].editable() and self._listing[index.row()].editable():
 				flags |= QtCore.Qt.ItemIsEditable
 			if self._listing[index.row()].overwritable():
 				flags |= QtCore.Qt.ItemIsDropEnabled
