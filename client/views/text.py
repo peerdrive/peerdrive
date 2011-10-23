@@ -82,7 +82,15 @@ class TextEdit(widgets.DocumentView):
 			baseFile = baseReader.readAll('FILE')
 			rev1File = mergeReaders[0].readAll('FILE')
 			rev2File = mergeReaders[1].readAll('FILE')
-			newFile = diff3.text_merge(baseFile, rev1File, rev2File)
+			if rev1File == baseFile:
+				newFile = rev2File
+			elif rev2File == baseFile:
+				newFile = rev1File
+			else:
+				newFile = diff3.text_merge(baseFile, rev1File, rev2File)
+				# the diff3 module is broken, basically there's never a clean
+				# merge
+				conflicts = True
 			writer.writeAll('FILE', newFile)
 
 		return conflicts

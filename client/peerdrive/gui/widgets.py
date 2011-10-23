@@ -27,6 +27,10 @@ from .. import struct
 from .utils import showDocument, showProperties
 
 
+class AbortException(Exception):
+	def __init__(self):
+		pass
+
 class DocButton(QtGui.QToolButton, Watch):
 
 	def __init__(self, store=None, doc=None, withText=False, checkable=False):
@@ -599,7 +603,8 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 					self.__setMergeNeeded(bool(currentRevs - validRevs))
 				else:
 					if self.__preliminary:
-						self.__setState(DocumentView.STATE_CHOOSE_REBASE)
+						if not self.__tryRebase():
+							self.__setState(DocumentView.STATE_CHOOSE_REBASE)
 					else:
 						self.__setState(DocumentView.STATE_CHOOSE_FF)
 			else:
@@ -737,6 +742,23 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__setState(DocumentView.STATE_EDITING)
 		self.__emitNewRev()
 
+	# Tries to handle the common case where the meta data was changed externally.
+	# We'll look if our preRev and the current main rev have the same parent
+	# and then try a automatic merge...
+	def __tryRebase(self):
+		mainRev = Connector().lookupDoc(self.__doc, [self.__store]).rev(self.__store)
+		mainStat = Connector().stat(mainRev, [self.__store])
+		preStat = Connector().stat(self.__rev, [self.__store])
+
+		# common single parent?
+		parents = set(mainStat.parents()) & set(preStat.parents())
+		if len(parents) != 1:
+			return False
+		[baseRev] = parents
+
+		# ler's try
+		return self.__mergeAuto(self.__store, mainRev, baseRev, True)
+
 	def __loadFile(self):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 		try:
@@ -831,7 +853,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		else:
 			return False
 
-	def __mergeAuto(self, mergeStore, mergeRev, baseRev):
+	def __mergeAuto(self, mergeStore, mergeRev, baseRev, rebase=False):
 		stores = [self.__store, mergeStore]
 
 		# see what has changed...
@@ -868,14 +890,26 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			mergeReaders.append(Connector().peek(self.__store, self.__rev))
 			mergeReaders.append(Connector().peek(mergeStore, mergeRev))
 
+			if self.__preliminary:
+				updateFun = Connector().resume
+			else:
+				updateFun = Connector().update
+
 			with Connector().peek(Connector().lookupRev(baseRev)[0], baseRev) as baseReader:
-				with Connector().update(self.__store, self.__doc, self.__rev, self.__creator) as writer:
+				with updateFun(self.__store, self.__doc, self.__rev, self.__creator) as writer:
 					writer.setType(uti)
-					writer.merge(mergeStore, mergeRev)
 					conflicts = self.docMergePerform(writer, baseReader, mergeReaders, changedParts)
+					if rebase:
+						if conflicts:
+							raise AbortException
+						writer.rebase(mergeRev)
+					else:
+						writer.merge(mergeStore, mergeRev)
 					writer.suspend()
 				self.__rev = writer.getRev()
 				self.__setPreliminary(True)
+		except AbortException:
+			return False
 		finally:
 			for r in mergeReaders:
 				r.close()
