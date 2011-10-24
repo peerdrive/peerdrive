@@ -349,7 +349,12 @@ req_put_doc(Doc, Rev, From, S) ->
 cnf_put_doc(Body, User) ->
 	#putdocstartcnf{handle=Handle} =
 		peerdrive_netstore_pb:decode_putdocstartcnf(Body),
-	peerdrive_net_store_put:start_link(self(), Handle, User).
+	case Handle of
+		undefined ->
+			ok;
+		_ ->
+			peerdrive_net_store_put:start_link(self(), Handle, User)
+	end.
 
 
 req_forward_doc(Doc, RevPath, From, S) ->

@@ -350,9 +350,14 @@ do_put_doc_start(Store, NetHandle, ReqData) ->
 		peerdrive_netstore_pb:decode_putdocstartreq(ReqData),
 	?ASSERT_GUID(Doc),
 	?ASSERT_GUID(Rev),
-	{ok, StoreHandle} = check(peerdrive_store:put_doc(Store, Doc, Rev)),
-	Cnf = #putdocstartcnf{handle=NetHandle},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_putdocstartcnf(Cnf)}.
+	case check(peerdrive_store:put_doc(Store, Doc, Rev)) of
+		ok ->
+			{stop, <<>>};
+
+		{ok, StoreHandle} ->
+			Cnf = #putdocstartcnf{handle=NetHandle},
+			{start, StoreHandle, peerdrive_netstore_pb:encode_putdocstartcnf(Cnf)}
+	end.
 
 
 do_forward_doc_start(Store, NetHandle, ReqData) ->

@@ -370,7 +370,7 @@ message PutDocStartReq {
 }
 
 message PutDocStartCnf {
-	required uint32 handle = 1;
+	optional uint32 handle = 1;
 }
 
 message PutDocCommitReq {
