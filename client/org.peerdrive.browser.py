@@ -19,7 +19,7 @@
 
 from PyQt4 import QtCore, QtGui#, QtOpenGL
 from datetime import datetime
-import itertools, optparse, copy
+import itertools, optparse, copy, pickle, os.path
 
 from peerdrive import Connector, Registry, struct, connector
 from peerdrive.gui import utils
@@ -542,6 +542,9 @@ class FolderViewHandler(ViewHandler):
 	def getClass(self):
 		return FolderWidget
 
+	def getName(self):
+		return 'org.peerdrive.folder'
+
 	def __checkpoint(self, cpNeeded):
 		if cpNeeded:
 			self._view.checkpoint("<<Changed by browser>>")
@@ -599,6 +602,9 @@ class TextViewHandler(ViewHandler):
 	def getClass(self):
 		return TextEdit
 
+	def getName(self):
+		return 'public.plain-text'
+
 
 class BrowserWindow(QtGui.QMainWindow):
 
@@ -649,6 +655,7 @@ class BrowserWindow(QtGui.QMainWindow):
 	def closeEvent(self, event):
 		super(BrowserWindow, self).closeEvent(event)
 		if self.__viewHandler:
+			self.__saveSettings()
 			self.__viewHandler.leave()
 
 	def open(self, argv):
@@ -678,6 +685,8 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__store = link.store()
 		if not self.itemOpen(link):
 			parser.error("cannot browse item")
+
+		self.__loadSettings()
 
 	def setCaption(self, caption):
 		self.__history.currentItem().setText(caption)
@@ -797,6 +806,30 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__store = store
 		self.__viewHandler.getView().switchStore(store)
 		self.__updateStoreButtons()
+
+	def __saveSettings(self):
+		if not os.path.exists('.settings'):
+			os.makedirs('.settings')
+		with open(".settings/browser-" + self.__viewHandler.getName(), 'w') as f:
+			settings = { }
+			settings["resx"] = self.size().width()
+			settings["resy"] = self.size().height()
+			self.__viewHandler.getView()._saveSettings(settings)
+			pickle.dump(settings, f)
+
+	def __loadSettings(self):
+		settings = { }
+		path = ".settings/browser-" + self.__viewHandler.getName()
+		try:
+			if os.path.isfile(path):
+				with open(path, 'r') as f:
+					settings = pickle.load(f)
+		except Exception as e:
+			print "Failed to load settings!:", e
+
+		self.__viewHandler.getView()._loadSettings(settings)
+		if "resx" in settings and "resy" in settings:
+			self.resize(settings["resx"], settings["resy"])
 
 
 if __name__ == '__main__':
