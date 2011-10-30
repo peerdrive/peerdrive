@@ -1613,7 +1613,7 @@ create_empty_file(Store, Name) ->
 				<<"Created by VFS interface">>,
 				gb_trees:empty())),
 		gb_trees:empty()),
-	case peerdrive_broker:create(Store, <<"public.text">>, ?VFS_CC) of
+	case peerdrive_broker:create(Store, <<"public.data">>, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:write(Handle, <<"META">>, 0, peerdrive_struct:encode(MetaData)),
 			peerdrive_broker:write(Handle, <<"FILE">>, 0, <<>>),
