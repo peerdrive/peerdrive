@@ -170,10 +170,20 @@ handle_call({unmount, StoreId}, _From, #state{stores=Stores} = S) ->
 	{reply, Reply, S}.
 
 
-handle_info({'EXIT', Pid, _Reason}, #state{stores=Stores1} = S) ->
+handle_info({'EXIT', Pid, Reason}, #state{specs=Specs, stores=Stores1} = S) ->
 	case lists:keytake(Pid, 1, Stores1) of
-		{value, {_Pid, _Id, Guid}, Stores2} ->
+		{value, {_Pid, StoreId, Guid}, Stores2} ->
 			peerdrive_vol_monitor:trigger_rem_store(Guid),
+			% restart stores if they terminated by themselves, e.g. the network
+			% store when the connection was interrupted
+			case Reason of
+				normal ->
+					{Id, _Descr, Disposition, Module, Args} =
+						lists:keyfind(StoreId, 1, Specs),
+					spawn(fun() -> do_mount(Id, Disposition, Module, Args) end);
+				_ ->
+					ok
+			end,
 			{noreply, S#state{stores=Stores2}};
 		false ->
 			{noreply, S}
@@ -235,6 +245,8 @@ start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs]) ->
 			end;
 
 		true ->
+			% try to mount the store but don't care if it failed
+			peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args),
 			start_permanent_stores(Specs)
 	end.
 

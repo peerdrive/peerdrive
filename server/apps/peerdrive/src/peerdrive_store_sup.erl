@@ -43,6 +43,8 @@ spawn_store(Id, Disposition, Module, Arg) ->
 	case supervisor:start_child(peerdrive_store_sup, ChildSpec) of
 		{error, already_present} ->
 			supervisor:restart_child(peerdrive_store_sup, Id);
+		{error, {already_started, PId}} ->
+			{ok, PId};
 		{error, {Reason, _ChildSpec}} ->
 			{error, Reason};
 		Else ->
