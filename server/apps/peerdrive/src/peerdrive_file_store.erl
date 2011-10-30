@@ -634,7 +634,7 @@ do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
 						RevPath),
 					{ok, Handle} = peerdrive_file_store_fwd:start_link(DId,
 						RevPath, User),
-					{{ok, Missing, Handle}, S2}
+					{{ok, lists:reverse(Missing), Handle}, S2}
 			end;
 
 		[_] ->

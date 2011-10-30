@@ -347,6 +347,7 @@ message MergeReq {
 	required bytes store = 2;
 	required bytes rev = 3;
 	optional uint64 depth = 4;
+	optional bool verbose = 5 [default = false];
 }
 
 message MergeCnf {
@@ -449,6 +450,7 @@ message ForwardDocReq {
 	required bytes to_rev = 4;
 	required bytes src_store = 5;
 	optional uint64 depth = 6;
+	optional bool verbose = 7 [default = false];
 }
 
 message ForwardDocCnf {
@@ -459,6 +461,7 @@ message ReplicateDocReq {
 	required bytes doc = 2;
 	required bytes dst_store = 3;
 	optional uint64 depth = 4;
+	optional bool verbose = 5 [default = false];
 }
 
 message ReplicateDocCnf {
@@ -469,6 +472,7 @@ message ReplicateRevReq {
 	required bytes rev = 2;
 	required bytes dst_store = 3;
 	optional uint64 depth = 4;
+	optional bool verbose = 5 [default = false];
 }
 
 message ReplicateRevCnf {

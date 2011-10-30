@@ -419,13 +419,16 @@ do_forward(Body) ->
 		from_rev = FromRev,
 		to_rev = ToRev,
 		src_store = SrcStore,
-		depth = Depth
+		depth = Depth,
+		verbose = Verbose
 	} = peerdrive_client_pb:decode_forwarddocreq(Body),
 	?ASSERT_GUID(Doc),
 	?ASSERT_GUID(FromRev),
 	?ASSERT_GUID(ToRev),
+	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
+	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:forward_doc(get_store(Store), Doc, FromRev,
-		ToRev, get_store(SrcStore), get_depth(Depth))),
+		ToRev, get_store(SrcStore), Opt2)),
 	<<>>.
 
 
@@ -434,11 +437,14 @@ do_replicate_doc(Body) ->
 		src_store = SrcStore,
 		doc = Doc,
 		dst_store = DstStore,
-		depth = Depth
+		depth = Depth,
+		verbose = Verbose
 	} = peerdrive_client_pb:decode_replicatedocreq(Body),
 	?ASSERT_GUID(Doc),
+	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
+	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:replicate_doc(get_store(SrcStore), Doc,
-		get_store(DstStore), get_depth(Depth))),
+		get_store(DstStore), Opt2)),
 	<<>>.
 
 
@@ -447,11 +453,14 @@ do_replicate_rev(Body) ->
 		src_store = SrcStore,
 		rev = Rev,
 		dst_store = DstStore,
-		depth = Depth
+		depth = Depth,
+		verbose = Verbose
 	} = peerdrive_client_pb:decode_replicaterevreq(Body),
 	?ASSERT_GUID(Rev),
+	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
+	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:replicate_rev(get_store(SrcStore), Rev,
-		get_store(DstStore), get_depth(Depth))),
+		get_store(DstStore), Opt2)),
 	<<>>.
 
 
@@ -605,11 +614,13 @@ io_loop_process(Handle, Request, ReqData) ->
 			peerdrive_client_pb:encode_suspendcnf(#suspendcnf{rev=Rev});
 
 		?MERGE_MSG ->
-			#mergereq{store=Store, rev=Rev, depth=Depth} =
+			#mergereq{store=Store, rev=Rev, depth=Depth, verbose=Verbose} =
 				peerdrive_client_pb:decode_mergereq(ReqData),
 			?ASSERT_GUID(Rev),
+			Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
+			Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 			ok = check(peerdrive_broker:merge(Handle, get_store(Store), Rev,
-				get_depth(Depth))),
+				Opt2)),
 			<<>>;
 
 		?REBASE_MSG ->
@@ -697,12 +708,6 @@ check({error, _} = Error) ->
 check(Result) ->
 	Result.
 
-
-get_depth(Depth) when is_integer(Depth) ->
-	Depth;
-
-get_depth(undefined) ->
-	0.
 
 fork(Body, RetPath, Fun) ->
 	spawn_link(

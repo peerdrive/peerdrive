@@ -56,6 +56,7 @@ class PropertiesDialog(QtGui.QDialog):
 			isDoc = True
 			banner = "document"
 			stores = Connector().lookupDoc(self.__doc).stores()
+			stores = list(set(stores) & set(Connector().lookupRev(self.__rev)))
 		else:
 			isDoc = False
 			banner = "revision"

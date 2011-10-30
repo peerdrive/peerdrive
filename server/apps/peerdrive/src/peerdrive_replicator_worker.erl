@@ -22,19 +22,19 @@
 -export([cancel/1]).
 -export([init/6]).
 
--record(state, {backlog, srcstore, dststore, depth, monitor, count, done}).
+-record(state, {backlog, srcstore, dststore, depth, verbose, monitor, count, done}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Request, SrcStore, DstStore, Depth) ->
+start_link(Request, SrcStore, DstStore, Options) ->
 	proc_lib:start_link(?MODULE, init, [self(), Request, none, SrcStore,
-		DstStore, Depth]).
+		DstStore, Options]).
 
-start_link(Request, SrcStore, DstStore, Depth, From) ->
+start_link(Request, SrcStore, DstStore, Options, From) ->
 	proc_lib:start_link(?MODULE, init, [self(), Request, From, SrcStore,
-		DstStore, Depth]).
+		DstStore, Options]).
 
 cancel(Worker) ->
 	Worker ! cancel.
@@ -43,7 +43,7 @@ cancel(Worker) ->
 %% Callback functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Parent, Request, From, SrcStore, DstStore, Depth) ->
+init(Parent, Request, From, SrcStore, DstStore, Options) ->
 	Info = case Request of
 		{replicate_doc, Doc, _First} ->
 			{rep_doc, Doc, peerdrive_store:guid(DstStore)};
@@ -58,7 +58,8 @@ init(Parent, Request, From, SrcStore, DstStore, Depth) ->
 		backlog  = queue:in(Request, queue:new()),
 		srcstore = SrcStore,
 		dststore = DstStore,
-		depth    = Depth,
+		depth    = proplists:get_value(depth, Options, 0),
+		verbose  = proplists:get_bool(verbose, Options),
 		monitor  = Monitor,
 		count    = 1,
 		done     = 0
@@ -124,13 +125,19 @@ run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = S) ->
 replicate_doc(Doc, First, S) ->
 	#state{
 		srcstore = SrcStore,
-		dststore = DstStore
+		dststore = DstStore,
+		verbose  = Verbose
 	} = S,
 	case peerdrive_store:lookup(SrcStore, Doc) of
 		{ok, Rev, _PreRevs} ->
 			case peerdrive_store:put_doc(DstStore, Doc, Rev) of
 				ok ->
-					{ok, S};
+					case Verbose of
+						false ->
+							{ok, S};
+						true ->
+							replicate_rev(queue:in(Rev, queue:new()), First, S)
+					end;
 
 				{ok, Handle} ->
 					% replicate corresponding rev
@@ -166,14 +173,16 @@ replicate_doc(Doc, First, S) ->
 	end.
 
 
-replicate_rev(Revs, First, S) ->
+replicate_rev(Revs, First, #state{verbose=Verbose} = S) ->
 	receive
 		cancel -> {stop, S}
 	after
 		0 ->
 			case queue:out(Revs) of
 				{{value, Rev}, RemainRevs} ->
-					case peerdrive_store:contains(S#state.dststore, Rev) of
+					Contains = (not Verbose) andalso peerdrive_store:contains(
+						S#state.dststore, Rev),
+					case Contains of
 						false ->
 							case do_replicate_rev(Rev, RemainRevs, First, S) of
 								{ok, NewRevs, S2} ->

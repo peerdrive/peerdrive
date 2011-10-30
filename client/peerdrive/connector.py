@@ -397,7 +397,7 @@ class _Connector(QtCore.QObject):
 		req.rev = _checkUuid(rev)
 		self._rpc(_Connector.DELETE_REV_MSG, req.SerializeToString())
 
-	def forwardDoc(self, store, doc, fromRev, toRev, srcStore, depth=None):
+	def forwardDoc(self, store, doc, fromRev, toRev, srcStore, depth=None, verbose=False):
 		req = pb.ForwardDocReq()
 		req.store = _checkUuid(store)
 		req.doc = _checkUuid(doc)
@@ -406,24 +406,27 @@ class _Connector(QtCore.QObject):
 		req.src_store = _checkUuid(srcStore)
 		if depth is not None:
 			req.depth = depth
+		if verbose: req.verbose = verbose
 		self._rpc(_Connector.FORWARD_DOC_MSG, req.SerializeToString())
 
-	def replicateDoc(self, srcStore, doc, dstStore, depth=None):
+	def replicateDoc(self, srcStore, doc, dstStore, depth=None, verbose=False):
 		req = pb.ReplicateDocReq()
 		req.src_store = _checkUuid(srcStore)
 		req.doc = _checkUuid(doc)
 		req.dst_store = _checkUuid(dstStore)
 		if depth is not None:
 			req.depth = depth
+		if verbose: req.verbose = verbose
 		self._rpc(_Connector.REPLICATE_DOC_MSG, req.SerializeToString())
 
-	def replicateRev(self, srcStore, rev, dstStore, depth=None):
+	def replicateRev(self, srcStore, rev, dstStore, depth=None, verbose=False):
 		req = pb.ReplicateRevReq()
 		req.src_store = _checkUuid(srcStore)
 		req.rev = _checkUuid(rev)
 		req.dst_store = _checkUuid(dstStore)
 		if depth is not None:
 			req.depth = depth
+		if verbose: req.verbose = verbose
 		self._rpc(_Connector.REPLICATE_REV_MSG, req.SerializeToString())
 
 	def mount(self, store):
@@ -969,7 +972,7 @@ class Handle(object):
 		reply = self.connector._rpc(_Connector.GET_PARENTS_MSG, req.SerializeToString())
 		return pb.GetParentsCnf.FromString(reply).parents
 
-	def merge(self, store, rev, depth=None):
+	def merge(self, store, rev, depth=None, verbose=False):
 		if not self.active:
 			raise IOError('Handle expired')
 		req = pb.MergeReq()
@@ -978,6 +981,7 @@ class Handle(object):
 		req.rev = _checkUuid(rev)
 		if depth is not None:
 			req.depth = depth
+		if verbose: req.verbose = verbose
 		self.connector._rpc(_Connector.MERGE_MSG, req.SerializeToString())
 
 	def rebase(self, parent):

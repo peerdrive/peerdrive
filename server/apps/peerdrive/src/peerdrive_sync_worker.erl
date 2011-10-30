@@ -209,7 +209,7 @@ sync_doc_ff(_Doc, _From, _NewRev, _To, _OldRev, 0) ->
 	{error, econflict};
 
 sync_doc_ff(Doc, From, NewRev, To, OldRev, Tries) ->
-	case peerdrive_broker:forward_doc(To, Doc, OldRev, NewRev, From, 0) of
+	case peerdrive_broker:forward_doc(To, Doc, OldRev, NewRev, From, []) of
 		ok ->
 			ok;
 		{error, econflict} ->
@@ -276,7 +276,7 @@ latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
 			% worker will pick up again the new merge rev
 			Handle = throws(peerdrive_broker:update(From, Doc, FromRev, undefined)),
 			try
-				throws(peerdrive_broker:merge(Handle, To, ToRev, 0)),
+				throws(peerdrive_broker:merge(Handle, To, ToRev, [])),
 				throws(peerdrive_broker:commit(Handle))
 			after
 				peerdrive_broker:close(Handle)
@@ -414,7 +414,7 @@ merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
 	Writer = throws(peerdrive_broker:update(From, Doc, FromRev,
 		<<"org.peerdrive.syncer">>)),
 	try
-		throws(peerdrive_broker:merge(Writer, To, ToRev, 0)),
+		throws(peerdrive_broker:merge(Writer, To, ToRev, [])),
 		lists:foreach(
 			fun({Part, Data}) ->
 				throws(peerdrive_broker:truncate(Writer, Part, 0)),

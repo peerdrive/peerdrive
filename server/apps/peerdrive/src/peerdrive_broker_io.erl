@@ -89,8 +89,8 @@ truncate(_, _, _) ->
 get_parents({_, Handle}) ->
 	peerdrive_store:get_parents(Handle).
 
-merge({DstStore, Handle}, SrcStore, Rev, Depth) ->
-	do_merge(Handle, DstStore, SrcStore, Rev, Depth).
+merge({DstStore, Handle}, SrcStore, Rev, Options) ->
+	do_merge(Handle, DstStore, SrcStore, Rev, Options).
 
 rebase({_, Handle}, Rev) ->
 	do_rebase(Handle, Rev).
@@ -121,7 +121,7 @@ close({_, Handle}) ->
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_merge(Handle, DstStore, SrcStore, Rev, Depth) ->
+do_merge(Handle, DstStore, SrcStore, Rev, Options) ->
 	case peerdrive_store:contains(SrcStore, Rev) of
 		true ->
 			case peerdrive_store:get_parents(Handle) of
@@ -132,7 +132,7 @@ do_merge(Handle, DstStore, SrcStore, Rev, Depth) ->
 						ok ->
 							% FIXME: _sync?
 							peerdrive_replicator:replicate_rev(SrcStore, Rev,
-								DstStore, Depth),
+								DstStore, Options),
 							ok;
 						{error, _} = Error ->
 							Error

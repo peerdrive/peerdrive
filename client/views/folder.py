@@ -711,17 +711,19 @@ class FolderModel(QtCore.QAbstractTableModel):
 		action = dropMenu.exec_(QtGui.QCursor.pos())
 		if action is repAct:
 			for link in links:
-				self.insertLink(link)
-				self.__parent.save()
+				if self.validateDragEnter(link):
+					self.insertLink(link)
+					self.__parent.save()
 				if isinstance(link, struct.DocLink):
-					Connector().replicateDoc(link.store(), link.doc(), self.__store)
+					Connector().replicateDoc(link.store(), link.doc(), self.__store, verbose=True)
 				else:
-					Connector().replicateRev(link.store(), link.rev(), self.__store)
+					Connector().replicateRev(link.store(), link.rev(), self.__store, verbose=True)
 		elif action is copyAct:
 			for link in links:
 				if isinstance(link, struct.RevLink):
-					self.insertLink(link)
-					self.__parent.save()
+					if self.validateDragEnter(link):
+						self.insertLink(link)
+						self.__parent.save()
 					Connector().replicateRev(link.store(), link.rev(), self.__store)
 				else:
 					with struct.copyDoc(link, self.__store) as handle:
@@ -734,8 +736,6 @@ class FolderModel(QtCore.QAbstractTableModel):
 
 	def insertLink(self, link):
 		entry = FolderEntry({'' : link}, self, self._columns)
-		if not self.validateInsert(entry):
-			return False
 		self.__typeCodes.add(entry.getTypeCode())
 
 		# append new item
@@ -749,9 +749,6 @@ class FolderModel(QtCore.QAbstractTableModel):
 		return True
 
 	def validateEdit(self, index, newValue):
-		return True
-
-	def validateInsert(self, entry):
 		return True
 
 	def validateDragEnter(self, link):
@@ -791,7 +788,7 @@ class FolderTreeView(QtGui.QTreeView):
 			data = event.mimeData()
 			links = struct.loadMimeData(data)
 			# drag to ourself or already contained?
-			if any([l.doc() == self.__parent.doc() or not self.__parent.model().validateDragEnter(l) for l in links]):
+			if any([l.doc() == self.__parent.doc() for l in links]):
 				return
 		QtGui.QTreeView.dragEnterEvent(self, event)
 
@@ -1070,25 +1067,16 @@ class FolderWidget(widgets.DocumentView):
 		srcVol = list(curVolumes)[0]
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
-			try:
-				rev = c.lookupDoc(store).rev(store)
-				with c.peek(rev) as r:
-					metaData = struct.loads(r.readAll('META'))
-					try:
-						name = metaData["org.peerdrive.annotation"]["title"]
-					except:
-						name = "Unknown store"
-					action = menu.addAction("Replicate item to '%s'" % name)
-					action.triggered.connect(
-						lambda x,l=link,s=store: self.__doReplicate(srcVol, l, s))
-			except:
-				pass
+			name = struct.readTitle(struct.DocLink(store, store), "Unknown store")
+			action = menu.addAction("Replicate item to '%s'" % name)
+			action.triggered.connect(
+				lambda x,l=link,s=store: self.__doReplicate(srcVol, l, s))
 
 	def __doReplicate(self, srcStore, link, dstStore):
 		if isinstance(link, struct.DocLink):
-			Connector().replicateDoc(srcStore, link.doc(), dstStore)
+			Connector().replicateDoc(srcStore, link.doc(), dstStore, verbose=True)
 		else:
-			Connector().replicateRev(srcStore, link.rev(), dstStore)
+			Connector().replicateRev(srcStore, link.rev(), dstStore, verbose=True)
 
 	def __addCreateActions(self, menu):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")

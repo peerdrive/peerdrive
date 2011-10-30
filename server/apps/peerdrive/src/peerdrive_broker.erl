@@ -271,15 +271,15 @@ get_parents(Handle) ->
 %% successor of any parent then this(these) parent(s) will be replaced by the
 %% new revision.
 %%
-%% @spec merge(Handle, Store, Rev, Depth) -> Result
+%% @spec merge(Handle, Store, Rev, Options) -> Result
 %%       Result = ok | {error, Reason}
 %%       Handle = handle()
 %%       Store = pid()
 %%       Rev = guid()
-%%       Depth = integer()
+%%       Options = [{depth, interger()} | verbose]
 %%       Reason = ecode()
-merge(Handle, Store, Rev, Depth) ->
-	peerdrive_broker_io:merge(Handle, Store, Rev, Depth).
+merge(Handle, Store, Rev, Options) ->
+	peerdrive_broker_io:merge(Handle, Store, Rev, Options).
 
 
 rebase(Handle, Parent) ->
@@ -390,21 +390,16 @@ delete_rev(Store, Rev) ->
 %% Forwards the document Doc from FromRev to ToRev. Any intermediate revisions
 %% are searched on SrcStore and replicated to the documents store.
 %%
-%% @spec forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) -> Result
+%% @spec forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Options) -> Result
 %%       Result = ok | {error, Reason}
 %%       Doc, Rev = guid()
-%%       Depth = interger()
+%%       Options = [{depth, interger()} | verbose]
 %%       Stores = [guid()]
 %%       Reason = ecode()
-forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) ->
+forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Options) ->
 	case search_path([SrcStore, Store], FromRev, ToRev) of
 		{ok, Path} ->
-			case replicate_rev(SrcStore, ToRev, Store, Depth) of
-				ok ->
-					do_forward_doc(Store, Doc, SrcStore, Path);
-				Error ->
-					Error
-			end;
+			do_forward_doc(Store, Doc, SrcStore, Path, ToRev, Options);
 		error ->
 			{error, enoent}
 	end.
@@ -416,13 +411,13 @@ forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Depth) ->
 %% source stores. The Doc may already exist on the destination stores. An empty
 %% (src- or dst-)stores list is replaced by the list of all mounted stores.
 %%
-%% @spec replicate_doc(SrcStore, Doc, DstStore, Depth) -> Result
+%% @spec replicate_doc(SrcStore, Doc, DstStore, Options) -> Result
 %%       Doc = guid()
-%%       Depth = integer()
+%%       Options = [{depth, interger()} | verbose]
 %%       SrcStore, DstStore = guid()
 %%       Result = ok | {error, Reason}
-replicate_doc(SrcStore, Doc, DstStore, Depth) ->
-	peerdrive_replicator:replicate_doc_sync(SrcStore, Doc, DstStore, Depth).
+replicate_doc(SrcStore, Doc, DstStore, Options) ->
+	peerdrive_replicator:replicate_doc_sync(SrcStore, Doc, DstStore, Options).
 
 
 %% @doc Replicate a revision to another store.
@@ -431,13 +426,13 @@ replicate_doc(SrcStore, Doc, DstStore, Depth) ->
 %% stores, otherwise the revision is immediately eligible for garbage collection
 %% or the destination store may refuse to replicate the revision entirely.
 %%
-%% @spec replicate_rev(SrcStore, Rev, DstStore, Depth) -> Result
+%% @spec replicate_rev(SrcStore, Rev, DstStore, Options) -> Result
 %%       Rev = guid()
-%%       Depth = integer()
+%%       Options = [{depth, interger()} | verbose]
 %%       SrcStore, DstStore = guid()
 %%       Result = ok | {error, Reason}
-replicate_rev(SrcStore, Rev, DstStore, Depth) ->
-	peerdrive_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Depth).
+replicate_rev(SrcStore, Rev, DstStore, Options) ->
+	peerdrive_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Options).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -469,18 +464,40 @@ search_path(Stores, FromRev, ToRev, Path) ->
 	end.
 
 
-do_forward_doc(DstStore, Doc, SrcStore, RevPath) ->
+do_forward_doc(DstStore, Doc, SrcStore, RevPath, ToRev, Options) ->
 	case peerdrive_store:forward_doc_start(DstStore, Doc, RevPath) of
 		ok ->
+			% Do an explicit asynchronous replication if verbose operation
+			% requested
+			case proplists:get_bool(verbose, Options) of
+				true ->
+					peerdrive_replicator:replicate_rev(SrcStore, ToRev,
+						DstStore, Options);
+				false ->
+					ok
+			end,
 			ok;
 
 		{ok, MissingRevs, Handle} ->
 			try
+				case proplists:get_bool(verbose, Options) of
+					true ->
+						% Verbose replicating is very heavy. Just do it for the
+						% final Rev. This will anyways bring in the other
+						% missing revs.
+						case replicate_rev(SrcStore, ToRev, DstStore, Options) of
+							ok   -> ok;
+							Err1 -> throw(Err1)
+						end,
+						MissingOpt = [{depth, peerdrive_util:get_time()}];
+					false ->
+						MissingOpt = Options
+				end,
 				lists:foreach(
 					fun(Rev) ->
-						case replicate_rev(SrcStore, Rev, DstStore, 0) of
-							ok    -> ok;
-							Error -> throw(Error)
+						case replicate_rev(SrcStore, Rev, DstStore, MissingOpt) of
+							ok   -> ok;
+							Err2 -> throw(Err2)
 						end
 					end,
 					MissingRevs),
