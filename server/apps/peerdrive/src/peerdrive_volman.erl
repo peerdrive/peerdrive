@@ -148,20 +148,17 @@ handle_call({store, Guid}, _From, #state{stores=Stores} = S) ->
 	end,
 	{reply, Reply, S};
 
-handle_call({mount, StoreId}, _From, #state{specs=Specs} = S) ->
-	Reply = case lists:keysearch(StoreId, 1, Specs) of
+handle_call({mount, StoreId}, From, #state{specs=Specs} = S) ->
+	case lists:keysearch(StoreId, 1, Specs) of
 		{value, {Id, _Descr, Disposition, Module, Args}} ->
-			case peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args) of
-				{ok, Pid} ->
-					Guid = peerdrive_store:guid(Pid),
-					{ok, Guid};
-				Else ->
-					Else
-			end;
+			spawn_link(fun() ->
+				Reply = do_mount(Id, Disposition, Module, Args),
+				gen_server:reply(From, Reply)
+			end),
+			{noreply, S};
 		false ->
-			{error, enoent}
-	end,
-	{reply, Reply, S};
+			{reply, {error, enoent}, S}
+	end;
 
 handle_call({unmount, StoreId}, _From, #state{stores=Stores} = S) ->
 	Reply = case lists:keysearch(StoreId, 2, Stores) of
@@ -272,4 +269,14 @@ check_store_spec({Id, Descr, Disposition, Module, _Args}) when
 
 check_store_spec(_) ->
 	false.
+
+
+do_mount(Id, Disposition, Module, Args) ->
+	case peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args) of
+		{ok, Pid} ->
+			Guid = peerdrive_store:guid(Pid),
+			{ok, Guid};
+		Else ->
+			Else
+	end.
 
