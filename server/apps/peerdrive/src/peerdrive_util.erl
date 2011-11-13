@@ -16,7 +16,7 @@
 
 -module(peerdrive_util).
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
--export([read_rev/3, read_rev_struct/3, hash_file/1]).
+-export([read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Hex conversions
@@ -125,7 +125,7 @@ get_time() ->
 
 % returns {ok, Sha1} | {error, Reason}
 hash_file(File) ->
-	file:position(File, 0),
+	{ok, _} = file:position(File, 0),
 	hash_file_loop(File, crypto:sha_init()).
 
 hash_file_loop(File, Ctx1) ->
@@ -136,6 +136,18 @@ hash_file_loop(File, Ctx1) ->
 		eof ->
 			{ok, binary_part(crypto:sha_final(Ctx1), 0, 16)};
 		Else ->
-			Else
+			fixup_file(Else)
 	end.
+
+
+fixup_file({error, Reason} = Error) ->
+	case Reason of
+		badarg -> {error, einval};
+		terminated -> {error, eio};
+		system_limit -> {error, emfile};
+		_ -> Error
+	end;
+
+fixup_file(Ok) ->
+	Ok.
 

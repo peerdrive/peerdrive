@@ -134,7 +134,7 @@ do_write(Part, Data, #state{parts=Parts} = S) ->
 					{ok, S#state{parts=NewParts}};
 
 				{error, _Reason} = Error ->
-					{Error, S}
+					{peerdrive_util:fixup_file(Error), S}
 			end;
 
 		error ->
@@ -176,7 +176,7 @@ commit_parts(Store, [{_FCC, {PId, Data, _}} | Rest]) when is_binary(Data) ->
 	end;
 
 commit_parts(Store, [{_FCC, {PId, {FileName, IoDev}, _}} | Rest]) ->
-	file:close(IoDev),
+	ok = file:close(IoDev),
 	case peerdrive_file_store:part_put(Store, PId, FileName) of
 		ok ->
 			commit_parts(Store, Rest);
@@ -197,10 +197,10 @@ create_tmp_file(Data, #state{store=Store}) ->
 				Error ->
 					file:close(IoDev),
 					file:delete(TmpName),
-					Error
+					peerdrive_util:fixup_file(Error)
 			end;
 
 		Error ->
-			Error
+			peerdrive_util:fixup_file(Error)
 	end.
 

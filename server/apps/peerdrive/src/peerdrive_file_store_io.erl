@@ -177,7 +177,7 @@ do_read(Part, Offset, Length, S) ->
 		{ok, {_, IoDev}, S2} ->
 			case file:pread(IoDev, Offset, Length) of
 				eof -> {{ok, <<>>}, S2};
-				Else -> {Else, S2}
+				Else -> {peerdrive_util:fixup_file(Else), S2}
 			end;
 
 		{error, _} = Error ->
@@ -196,7 +196,7 @@ do_write(Part, Offset, Data, S) ->
 			{ok, S3};
 
 		{ok, {_, IoDev}, S2} ->
-			{file:pwrite(IoDev, Offset, Data), S2};
+			{peerdrive_util:fixup_file(file:pwrite(IoDev, Offset, Data)), S2};
 
 		{error, _} = Error ->
 			{Error, S}
@@ -214,8 +214,8 @@ do_truncate(Part, Offset, S) ->
 			{ok, S3};
 
 		{ok, {_, IoDev}, S2} ->
-			file:position(IoDev, Offset),
-			{file:truncate(IoDev), S2};
+			{ok, _} = file:position(IoDev, Offset),
+			{peerdrive_util:fixup_file(file:truncate(IoDev)), S2};
 
 		{error, _} = Error ->
 			{Error, S}
@@ -261,7 +261,7 @@ close_and_writeback(#state{parts=[{Part, Content} | RemParts]} = S) ->
 		{rw, {FileName, IoDev}} ->
 			case peerdrive_util:hash_file(IoDev) of
 				{ok, PId} ->
-					file:close(IoDev),
+					ok = file:close(IoDev),
 					S2 = lock_part(PId, S),
 					case peerdrive_file_store:part_put(S2#state.store, PId, FileName) of
 						ok ->
@@ -294,7 +294,7 @@ close_and_writeback(#state{parts=[{Part, Content} | RemParts]} = S) ->
 			end;
 
 		{ro, {_FileName, IoDev}} ->
-			file:close(IoDev),
+			ok = file:close(IoDev),
 			close_and_writeback(S#state{parts=RemParts});
 
 		{ro, Data} when is_binary(Data) ->
@@ -339,7 +339,7 @@ part_open_read(Part, #state{rev=Rev} = S) ->
 							{ok, Content, S2};
 
 						{error, _} = Error ->
-							Error
+							peerdrive_util:fixup_file(Error)
 					end
 			end;
 
@@ -378,7 +378,7 @@ get_part_writable(Part, Conv, S) ->
 part_bin_to_file(Part, Data, S) ->
 	case create_tmp_file(S) of
 		{ok, FileName, IoDev} ->
-			file:pwrite(IoDev, 0, Data),
+			ok = file:pwrite(IoDev, 0, Data),
 			Content = {FileName, IoDev},
 			S2 = S#state{parts=orddict:store(Part, {rw, Content}, S#state.parts)},
 			{ok, Content, S2};
@@ -401,7 +401,7 @@ part_file_to_bin(Part, {_FileName, IoDev}, S) ->
 			{ok, <<>>, S3};
 
 		{error, _} = Error ->
-			Error
+			peerdrive_util:fixup_file(Error)
 	end.
 
 
@@ -443,22 +443,22 @@ part_read_bin(Part, FileName, S) ->
 		{ok, IoDev} ->
 			case file:pread(IoDev, 0, ?THRESHOLD) of
 				{ok, Data} ->
-					file:close(IoDev),
+					ok = file:close(IoDev),
 					S2 = S#state{parts=orddict:store(Part, {rw, Data}, S#state.parts)},
 					{ok, Data, S2};
 
 				eof ->
-					file:close(IoDev),
+					ok = file:close(IoDev),
 					S2 = S#state{parts=orddict:store(Part, {rw, <<>>}, S#state.parts)},
 					{ok, <<>>, S2};
 
 				{error, _} = Error ->
 					file:close(IoDev),
-					Error
+					peerdrive_util:fixup_file(Error)
 			end;
 
 		{error, _} = Error ->
-			Error
+			peerdrive_util:fixup_file(Error)
 	end.
 
 
@@ -474,11 +474,11 @@ part_copy_and_open(Part, OrigName, S) ->
 
 				Error ->
 					file:delete(TmpName),
-					Error
+					peerdrive_util:fixup_file(Error)
 			end;
 
 		Error ->
-			Error
+			peerdrive_util:fixup_file(Error)
 	end.
 
 
@@ -553,6 +553,6 @@ create_tmp_file(S) ->
 		{ok, IoDev} ->
 			{ok, TmpName, IoDev};
 		Error ->
-			Error
+			peerdrive_util:fixup_file(Error)
 	end.
 

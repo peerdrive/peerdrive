@@ -600,7 +600,7 @@ do_part_put(PId, TmpName, #state{part_tbl=PartTbl} = S) ->
 			end;
 
 		{error, _} = Error ->
-			Error
+			peerdrive_util:fixup_file(Error)
 	end.
 
 
