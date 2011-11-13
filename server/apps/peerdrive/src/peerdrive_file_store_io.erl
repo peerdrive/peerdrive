@@ -340,7 +340,10 @@ part_open_read(Part, #state{rev=Rev} = S) ->
 
 						{error, _} = Error ->
 							peerdrive_util:fixup_file(Error)
-					end
+					end;
+
+				{error, _} = Error ->
+					Error
 			end;
 
 		false ->
@@ -424,7 +427,10 @@ part_open_write(Part, Conv, #state{rev=Rev, parts=Parts} = S) ->
 							part_read_bin(Part, FileName, S);
 						true ->
 							part_copy_and_open(Part, FileName, S)
-					end
+					end;
+
+				{error, _} = Error ->
+					Error
 			end;
 
 		false ->
