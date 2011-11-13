@@ -87,43 +87,43 @@ gc(Store) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 tmp_name(Store) ->
-	gen_server:call(Store, tmp_name, infinity).
+	call_store(Store, tmp_name).
 
 doc_unlock(Store, DId) ->
 	gen_server:cast(Store, {unlock, {doc, DId}}).
 
 rev_lock(Store, RId) ->
-	gen_server:call(Store, {lock, {rev, RId}}, infinity).
+	call_store(Store, {lock, {rev, RId}}).
 
 rev_unlock(Store, RId) ->
 	gen_server:cast(Store, {unlock, {rev, RId}}).
 
 part_lock(Store, PId) ->
-	gen_server:call(Store, {lock, {part, PId}}, infinity).
+	call_store(Store, {lock, {part, PId}}).
 
 part_unlock(Store, PId) ->
 	gen_server:cast(Store, {unlock, {part, PId}}).
 
 part_put(Store, PId, Content) ->
-	gen_server:call(Store, {part_put, PId, Content}, infinity).
+	call_store(Store, {part_put, PId, Content}).
 
 part_get(Store, PId) ->
-	gen_server:call(Store, {part_get, PId}, infinity).
+	call_store(Store, {part_get, PId}).
 
 commit(Store, Doc, PreRev, Revision) ->
-	gen_server:call(Store, {commit, Doc, PreRev, Revision}, infinity).
+	call_store(Store, {commit, Doc, PreRev, Revision}).
 
 suspend(Store, Doc, PreRev, Revision) ->
-	gen_server:call(Store, {suspend, Doc, PreRev, Revision}, infinity).
+	call_store(Store, {suspend, Doc, PreRev, Revision}).
 
 forward_commit(Store, Doc, RevPath) ->
-	gen_server:call(Store, {forward_commit, Doc, RevPath}, infinity).
+	call_store(Store, {forward_commit, Doc, RevPath}).
 
 put_doc_commit(Store, DId, RId) ->
-	gen_server:call(Store, {put_doc_commit, DId, RId}, infinity).
+	call_store(Store, {put_doc_commit, DId, RId}).
 
 put_rev_commit(Store, RId, Rev) ->
-	gen_server:call(Store, {put_rev_commit, RId, Rev}, infinity).
+	call_store(Store, {put_rev_commit, RId, Rev}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Gen_server callbacks...
@@ -742,7 +742,7 @@ do_sync_get_changes(PeerSId, Caller, S) ->
 			Backlog = lists:sort(
 				fun({_Doc1, Seq1}, {_Doc2, Seq2}) -> Seq1 =< Seq2 end,
 				Changes),
-			{{ok, Backlog}, S2};
+			{{ok, lists:sublist(Backlog, 1024)}, S2};
 
 		error ->
 			{{error, ebusy}, S}
@@ -1062,4 +1062,12 @@ next_gen(#state{wb_tmr=WbTmr, gc_gen=GcGen, gen=Gen} = S) ->
 			end
 	end,
 	S2#state{gen=Gen+1}.
+
+
+call_store(Store, Request) ->
+	try
+		gen_server:call(Store, Request, infinity)
+	catch
+		exit:_ -> {error, enxio}
+	end.
 
