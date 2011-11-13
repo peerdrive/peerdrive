@@ -1,147 +1,147 @@
 
-message ErrorCnf {
-	enum ErrorCode {
-		econflict = 0;
-		e2big = 1;
-		eacces = 2;
-		eaddrinuse = 3;
-		eaddrnotavail = 4;
-		eadv = 5;
-		eafnosupport = 6;
-		eagain = 7;
-		ealign = 8;
-		ealready = 9;
-		ebade = 10;
-		ebadf = 11;
-		ebadfd = 12;
-		ebadmsg = 13;
-		ebadr = 14;
-		ebadrpc = 15;
-		ebadrqc = 16;
-		ebadslt = 17;
-		ebfont = 18;
-		ebusy = 19;
-		echild = 20;
-		echrng = 21;
-		ecomm = 22;
-		econnaborted = 23;
-		econnrefused = 24;
-		econnreset = 25;
-		edeadlk = 26;
-		edeadlock = 27;
-		edestaddrreq = 28;
-		edirty = 29;
-		edom = 30;
-		edotdot = 31;
-		edquot = 32;
-		eduppkg = 33;
-		eexist = 34;
-		efault = 35;
-		efbig = 36;
-		ehostdown = 37;
-		ehostunreach = 38;
-		eidrm = 39;
-		einit = 40;
-		einprogress = 41;
-		eintr = 42;
-		einval = 43;
-		eio = 44;
-		eisconn = 45;
-		eisdir = 46;
-		eisnam = 47;
-		elbin = 48;
-		el2hlt = 49;
-		el2nsync = 50;
-		el3hlt = 51;
-		el3rst = 52;
-		elibacc = 53;
-		elibbad = 54;
-		elibexec = 55;
-		elibmax = 56;
-		elibscn = 57;
-		elnrng = 58;
-		eloop = 59;
-		emfile = 60;
-		emlink = 61;
-		emsgsize = 62;
-		emultihop = 63;
-		enametoolong = 64;
-		enavail = 65;
-		enet = 66;
-		enetdown = 67;
-		enetreset = 68;
-		enetunreach = 69;
-		enfile = 70;
-		enoano = 71;
-		enobufs = 72;
-		enocsi = 73;
-		enodata = 74;
-		enodev = 75;
-		enoent = 76;
-		enoexec = 77;
-		enolck = 78;
-		enolink = 79;
-		enomem = 80;
-		enomsg = 81;
-		enonet = 82;
-		enopkg = 83;
-		enoprotoopt = 84;
-		enospc = 85;
-		enosr = 86;
-		enosym = 87;
-		enosys = 88;
-		enotblk = 89;
-		enotconn = 90;
-		enotdir = 91;
-		enotempty = 92;
-		enotnam = 93;
-		enotsock = 94;
-		enotsup = 95;
-		enotty = 96;
-		enotuniq = 97;
-		enxio = 98;
-		eopnotsupp = 99;
-		eperm = 100;
-		epfnosupport = 101;
-		epipe = 102;
-		eproclim = 103;
-		eprocunavail = 104;
-		eprogmismatch = 105;
-		eprogunavail = 106;
-		eproto = 107;
-		eprotonosupport = 108;
-		eprototype = 109;
-		erange = 110;
-		erefused = 111;
-		eremchg = 112;
-		eremdev = 113;
-		eremote = 114;
-		eremoteio = 115;
-		eremoterelease = 116;
-		erofs = 117;
-		erpcmismatch = 118;
-		erremote = 119;
-		eshutdown = 120;
-		esocktnosupport = 121;
-		espipe = 122;
-		esrch = 123;
-		esrmnt = 124;
-		estale = 125;
-		esuccess = 126;
-		etime = 127;
-		etimedout = 128;
-		etoomanyrefs = 129;
-		etxtbsy = 130;
-		euclean = 131;
-		eunatch = 132;
-		eusers = 133;
-		eversion = 134;
-		ewouldblock = 135;
-		exdev = 136;
-		exfull = 137;
-		nxdomain = 138;
-	}
+enum ErrorCode {
+	econflict = 0;
+	e2big = 1;
+	eacces = 2;
+	eaddrinuse = 3;
+	eaddrnotavail = 4;
+	eadv = 5;
+	eafnosupport = 6;
+	eagain = 7;
+	ealign = 8;
+	ealready = 9;
+	ebade = 10;
+	ebadf = 11;
+	ebadfd = 12;
+	ebadmsg = 13;
+	ebadr = 14;
+	ebadrpc = 15;
+	ebadrqc = 16;
+	ebadslt = 17;
+	ebfont = 18;
+	ebusy = 19;
+	echild = 20;
+	echrng = 21;
+	ecomm = 22;
+	econnaborted = 23;
+	econnrefused = 24;
+	econnreset = 25;
+	edeadlk = 26;
+	edeadlock = 27;
+	edestaddrreq = 28;
+	edirty = 29;
+	edom = 30;
+	edotdot = 31;
+	edquot = 32;
+	eduppkg = 33;
+	eexist = 34;
+	efault = 35;
+	efbig = 36;
+	ehostdown = 37;
+	ehostunreach = 38;
+	eidrm = 39;
+	einit = 40;
+	einprogress = 41;
+	eintr = 42;
+	einval = 43;
+	eio = 44;
+	eisconn = 45;
+	eisdir = 46;
+	eisnam = 47;
+	elbin = 48;
+	el2hlt = 49;
+	el2nsync = 50;
+	el3hlt = 51;
+	el3rst = 52;
+	elibacc = 53;
+	elibbad = 54;
+	elibexec = 55;
+	elibmax = 56;
+	elibscn = 57;
+	elnrng = 58;
+	eloop = 59;
+	emfile = 60;
+	emlink = 61;
+	emsgsize = 62;
+	emultihop = 63;
+	enametoolong = 64;
+	enavail = 65;
+	enet = 66;
+	enetdown = 67;
+	enetreset = 68;
+	enetunreach = 69;
+	enfile = 70;
+	enoano = 71;
+	enobufs = 72;
+	enocsi = 73;
+	enodata = 74;
+	enodev = 75;
+	enoent = 76;
+	enoexec = 77;
+	enolck = 78;
+	enolink = 79;
+	enomem = 80;
+	enomsg = 81;
+	enonet = 82;
+	enopkg = 83;
+	enoprotoopt = 84;
+	enospc = 85;
+	enosr = 86;
+	enosym = 87;
+	enosys = 88;
+	enotblk = 89;
+	enotconn = 90;
+	enotdir = 91;
+	enotempty = 92;
+	enotnam = 93;
+	enotsock = 94;
+	enotsup = 95;
+	enotty = 96;
+	enotuniq = 97;
+	enxio = 98;
+	eopnotsupp = 99;
+	eperm = 100;
+	epfnosupport = 101;
+	epipe = 102;
+	eproclim = 103;
+	eprocunavail = 104;
+	eprogmismatch = 105;
+	eprogunavail = 106;
+	eproto = 107;
+	eprotonosupport = 108;
+	eprototype = 109;
+	erange = 110;
+	erefused = 111;
+	eremchg = 112;
+	eremdev = 113;
+	eremote = 114;
+	eremoteio = 115;
+	eremoterelease = 116;
+	erofs = 117;
+	erpcmismatch = 118;
+	erremote = 119;
+	eshutdown = 120;
+	esocktnosupport = 121;
+	espipe = 122;
+	esrch = 123;
+	esrmnt = 124;
+	estale = 125;
+	esuccess = 126;
+	etime = 127;
+	etimedout = 128;
+	etoomanyrefs = 129;
+	etxtbsy = 130;
+	euclean = 131;
+	eunatch = 132;
+	eusers = 133;
+	eversion = 134;
+	ewouldblock = 135;
+	exdev = 136;
+	exfull = 137;
+	nxdomain = 138;
+}
 
+message ErrorCnf {
 	required ErrorCode error = 1;
 }
 
@@ -531,14 +531,43 @@ message ProgressStartInd {
 	required Type type = 2;
 	required bytes source = 3;
 	required bytes dest = 4;
+	optional bytes item = 5;
+}
+
+message ProgressStartReq {
+	required uint32 tag = 1;
 }
 
 message ProgressInd {
+	enum State {
+		running = 0;
+		paused = 1;
+		error = 2;
+	}
+
 	required uint32 tag = 1;
 	required uint32 progress = 2;
+	required State state = 3;
+	optional ErrorCode err_code = 4;
+	optional bytes err_doc = 5;
+	optional bytes err_rev = 6;
 }
 
 message ProgressEndInd {
 	required uint32 tag = 1;
+}
+
+message ProgressEndReq {
+	required uint32 tag = 1;
+	required bool pause = 2;
+}
+
+message ProgressQueryCnf {
+	message Item {
+		required ProgressStartInd item = 1;
+		required ProgressInd state = 2;
+	}
+
+	repeated Item items = 1;
 }
 

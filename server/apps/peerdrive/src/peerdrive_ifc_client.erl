@@ -69,6 +69,7 @@
 -define(PROGRESS_START_MSG,  16#025).
 -define(PROGRESS_MSG,        16#026).
 -define(PROGRESS_END_MSG,    16#027).
+-define(PROGRESS_QUERY_MSG,  16#028).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Servlet callbacks
@@ -81,7 +82,7 @@ init(Socket, _Options) ->
 
 terminate(#state{progreg=ProgReg} = State) ->
 	if
-		ProgReg -> peerdrive_work_monitor:deregister_proc(self());
+		ProgReg -> peerdrive_work_monitor:deregister_proc();
 		true    -> ok
 	end,
 	peerdrive_change_monitor:remove(),
@@ -94,14 +95,21 @@ terminate(#state{progreg=ProgReg} = State) ->
 handle_info({work_event, Event, Tag, Info}, S) ->
 	case Event of
 		progress ->
-			Ind = #progressind{tag=Tag, progress=Info},
+			{State, Progress, ErrInfo} = Info,
+			Ind = #progressind{
+				tag      = Tag,
+				progress = Progress,
+				state    = State,
+				err_code = proplists:get_value(code, ErrInfo, undefined),
+				err_doc  = proplists:get_value(doc, ErrInfo, undefined),
+				err_rev  = proplists:get_value(rev, ErrInfo, undefined)
+			},
 			send_indication(S#state.socket, ?PROGRESS_MSG,
 				peerdrive_client_pb:encode_progressind(Ind));
 
 		started ->
-			% Type = sync | rep_doc | rep_rev
-			{Type, Source, Dest} = Info,
-			Ind = #progressstartind{tag=Tag, type=Type, source=Source, dest=Dest},
+			{_Proc, StartInfo} = Info,
+			Ind = encode_progress_start(Tag, StartInfo),
 			send_indication(S#state.socket, ?PROGRESS_START_MSG,
 				peerdrive_client_pb:encode_progressstartind(Ind));
 
@@ -222,6 +230,18 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 
 		?SYS_INFO_MSG ->
 			fork(Body, RetPath, fun do_sys_info_req/1),
+			{ok, S};
+
+		?PROGRESS_START_MSG ->
+			do_progress_start(Body, RetPath),
+			{ok, S};
+
+		?PROGRESS_END_MSG ->
+			do_progress_end(Body, RetPath),
+			{ok, S};
+
+		?PROGRESS_QUERY_MSG ->
+			do_progress_query(RetPath),
 			{ok, S};
 
 		_ ->
@@ -444,7 +464,7 @@ do_replicate_doc(Body) ->
 	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:replicate_doc(get_store(SrcStore), Doc,
-		get_store(DstStore), Opt2)),
+		get_store(DstStore), [pauseonerror | Opt2])),
 	<<>>.
 
 
@@ -460,7 +480,7 @@ do_replicate_rev(Body) ->
 	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:replicate_rev(get_store(SrcStore), Rev,
-		get_store(DstStore), Opt2)),
+		get_store(DstStore), [pauseonerror | Opt2])),
 	<<>>.
 
 
@@ -515,10 +535,10 @@ do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->
 		ProgReg ->
 			S;
 		true ->
-			peerdrive_work_monitor:register_proc(self()),
+			peerdrive_work_monitor:register_proc(),
 			S#state{progreg=true};
 		false ->
-			peerdrive_work_monitor:deregister_proc(self()),
+			peerdrive_work_monitor:deregister_proc(),
 			S#state{progreg=false}
 	end,
 	send_reply(RetPath, <<>>),
@@ -534,6 +554,42 @@ do_sys_info_req(Body) ->
 		Int when is_integer(Int) -> #sysinfocnf{as_int=Int}
 	end,
 	peerdrive_client_pb:encode_sysinfocnf(Reply).
+
+
+do_progress_start(Body, RetPath) ->
+	#progressstartreq{tag=Tag} = peerdrive_client_pb:decode_progressstartreq(Body),
+	peerdrive_work_roster:resume(Tag),
+	send_reply(RetPath, <<>>).
+
+
+do_progress_end(Body, RetPath) ->
+	#progressendreq{tag=Tag, pause=Pause} =
+		peerdrive_client_pb:decode_progressendreq(Body),
+	case Pause of
+		true  -> peerdrive_work_roster:pause(Tag);
+		false -> peerdrive_work_roster:stop(Tag)
+	end,
+	send_reply(RetPath, <<>>).
+
+
+do_progress_query(RetPath) ->
+	Items = [
+		#progressquerycnf_item{
+			item  = encode_progress_start(Tag, Info),
+			state = #progressind{
+				tag      = Tag,
+				progress = Progress,
+				state    = State,
+				err_code = proplists:get_value(code, ErrInfo, undefined),
+				err_doc  = proplists:get_value(doc, ErrInfo, undefined),
+				err_rev  = proplists:get_value(rev, ErrInfo, undefined)
+			}
+		} || {Tag, Info, State, Progress, ErrInfo} <- peerdrive_work_roster:all() ],
+	Reply = peerdrive_client_pb:encode_progressquerycnf(
+		#progressquerycnf{items=Items}),
+	send_reply(RetPath, Reply).
+
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% IO handler loop
@@ -752,5 +808,17 @@ send_indication(Socket, Ind, Data) ->
 			error_logger:warning_msg(
 				"[~w] Failed to send indication: ~w~n",
 				[self(), Reason])
+	end.
+
+
+encode_progress_start(Tag, Info) ->
+	case Info of
+		{sync, Source, Dest} ->
+			#progressstartind{tag=Tag, type=sync, source=Source,
+				dest=Dest};
+		{Type, Source, Item, Dest} when Type == rep_doc;
+										Type == rep_rev ->
+			#progressstartind{tag=Tag, type=Type, source=Source,
+				item=Item, dest=Dest}
 	end.
 

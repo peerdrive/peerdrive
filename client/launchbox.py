@@ -24,10 +24,6 @@ from peerdrive import struct
 from peerdrive.connector import Connector, Watch
 from peerdrive.gui.widgets import DocButton, RevButton
 
-PROGRESS_SYNC = 0
-PROGRESS_REP_DOC = 1
-PROGRESS_REP_REV = 2
-
 class Launchbox(QtGui.QDialog):
 	def __init__(self, parent=None):
 		super(Launchbox, self).__init__(parent)
@@ -75,29 +71,19 @@ class Launchbox(QtGui.QDialog):
 		Connector().regProgressHandler(start=self.progressStart,
 			stop=self.progressStop)
 
-	def progressStart(self, tag, typ, src, dst):
-		if typ == PROGRESS_SYNC:
-			widget = SyncProgressWidget(tag, src, dst)
-		else:
-			widget = ReplicationProgressWidget(tag, typ, src, dst)
+	def progressStart(self, tag, typ, src, dst, item=None):
+		widget = ProgressWidget(tag, typ, src, dst, item)
 		self.progressWidgets[tag] = widget
 		self.progressLayout.addWidget(widget)
 
 	def progressStop(self, tag):
-		widget = self.progressWidgets[tag]
-		del self.progressWidgets[tag]
-		widget.remove()
+		if tag in self.progressWidgets:
+			widget = self.progressWidgets[tag]
+			del self.progressWidgets[tag]
+			widget.remove()
 
 
 class SyncEditor(QtGui.QDialog):
-	MODES = [None, "ff", "latest", "merge"]
-	MAP = {
-		None     : "",
-		"ff"     : "Fast-forward",
-		"latest" : "Take latest revision",
-		"merge"  : "3-way merge"
-	}
-
 	def __init__(self, parent=None):
 		super(SyncEditor, self).__init__(parent)
 		self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
@@ -322,23 +308,51 @@ class StoreWidget(QtGui.QWidget):
 				str(e))
 
 
-class SyncProgressWidget(QtGui.QFrame):
-	def __init__(self, tag, fromStore, toStore, parent=None):
-		super(SyncProgressWidget, self).__init__(parent)
+class ProgressWidget(QtGui.QFrame):
+	def __init__(self, tag, typ, fromStore, toStore, item):
+		super(ProgressWidget, self).__init__()
 		self.tag = tag
+		self.__type = typ
+		self.__state = Connector().PROGRESS_RUNNING
+		self.__store = fromStore
 
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
-		self.fromBtn = DocButton(fromStore, fromStore, True)
+		self.__progressInd = QtGui.QLabel()
+		self.__progressInd.setMargin(4)
+		if typ == Connector().PROGRESS_SYNC:
+			self.fromBtn = DocButton(fromStore, fromStore, True)
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-sync.png"))
+		elif typ == Connector().PROGRESS_REP_DOC:
+			self.fromBtn = DocButton(fromStore, item, True)
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
+		elif typ == Connector().PROGRESS_REP_REV:
+			self.fromBtn = RevButton(fromStore, item, True)
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
 		self.toBtn = DocButton(toStore, toStore, True)
 		self.progressBar = QtGui.QProgressBar()
 		self.progressBar.setMaximum(255)
+		self.__pauseBtn = QtGui.QToolButton()
+		self.__pauseBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+		self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
+		self.__pauseBtn.clicked.connect(self.__pause)
+		self.__stopBtn = QtGui.QToolButton()
+		self.__stopBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+		self.__stopBtn.setIcon(QtGui.QIcon("icons/progress-stop.png"))
+		self.__stopBtn.clicked.connect(self.__stop)
+		self.__errorMsg = QtGui.QLabel()
+		self.__errorMsg.setWordWrap(True)
+		self.__errorMsg.hide()
 
 		layout = QtGui.QHBoxLayout()
 		layout.setMargin(0)
+		layout.addWidget(self.__progressInd)
 		layout.addWidget(self.fromBtn)
 		layout.addWidget(self.progressBar)
+		layout.addWidget(self.__errorMsg)
 		layout.addWidget(self.toBtn)
+		layout.addWidget(self.__pauseBtn)
+		layout.addWidget(self.__stopBtn)
 		self.setLayout(layout)
 
 		Connector().regProgressHandler(progress=self.progress)
@@ -349,46 +363,40 @@ class SyncProgressWidget(QtGui.QFrame):
 		self.toBtn.cleanup()
 		self.deleteLater()
 
-	def progress(self, tag, value):
-		if self.tag == tag:
-			self.progressBar.setValue(value)
+	def progress(self, tag, state, value, err_code=None, err_doc=None, err_rev=None):
+		if self.tag != tag:
+			return
 
+		self.progressBar.setValue(value)
+		if self.__state == state:
+			return
 
-class ReplicationProgressWidget(QtGui.QFrame):
-	def __init__(self, tag, typ, uuid, store, parent=None):
-		super(ReplicationProgressWidget, self).__init__(parent)
-		self.tag = tag
-		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
+		self.__state = state
+		self.progressBar.setVisible(state != Connector().PROGRESS_ERROR)
+		self.__errorMsg.setVisible(state == Connector().PROGRESS_ERROR)
+		if state == Connector().PROGRESS_RUNNING:
+			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
+			if self.__type == Connector().PROGRESS_SYNC:
+				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-sync.png"))
+			else:
+				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
+		elif state == Connector().PROGRESS_PAUSED:
+			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-start.png"))
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-pause.png"))
+		elif state == Connector().PROGRESS_ERROR:
+			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-retry.png"))
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-error.png"))
+			self.__errorMsg.setText("Error '" + err_code[1] + "' while processing '" +
+				struct.readTitle(struct.RevLink(self.__store, err_rev), 'unknown document') + "'!")
 
-		if typ == PROGRESS_REP_DOC:
-			self.docBtn = DocButton(store, uuid, True)
+	def __pause(self):
+		if self.__state == Connector().PROGRESS_RUNNING:
+			Connector().progressPause(self.tag)
 		else:
-			self.docBtn = RevButton(store, uuid, True)
-		self.progressBar = QtGui.QProgressBar()
-		self.progressBar.setMaximum(255)
+			Connector().progressResume(self.tag)
 
-		self.storeButtons = []
-		layout = QtGui.QHBoxLayout()
-		layout.setMargin(0)
-		layout.addWidget(self.docBtn)
-		layout.addWidget(self.progressBar)
-		button = DocButton(store, store)
-		self.storeButtons.append(button)
-		layout.addWidget(button)
-		self.setLayout(layout)
-
-		Connector().regProgressHandler(progress=self.progress)
-
-	def remove(self):
-		Connector().unregProgressHandler(progress=self.progress)
-		self.docBtn.cleanup()
-		for button in self.storeButtons:
-			button.cleanup()
-		self.deleteLater()
-
-	def progress(self, tag, value):
-		if self.tag == tag:
-			self.progressBar.setValue(value)
+	def __stop(self):
+		Connector().progressStop(self.tag)
 
 
 class SyncRules(object):

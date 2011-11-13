@@ -17,41 +17,26 @@
 -module(peerdrive_work_monitor).
 -behaviour(gen_event).
 
--export([register_proc/1, deregister_proc/1, started/1, done/1, progress/2]).
--export([start_link/0]).
+-export([register_proc/0, deregister_proc/0]).
 -export([init/1, handle_event/2, handle_call/2, handle_info/2, terminate/2, code_change/3]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link() ->
-	gen_event:start_link({local, ?MODULE}).
+register_proc() ->
+	gen_event:add_sup_handler(peerdrive_work, {?MODULE, self()}, self()).
 
 
-started(Info) ->
-	Tag = peerdrive_work_tags:create(),
-	gen_event:notify(?MODULE, {work_event, started, Tag, Info}),
-	Tag.
-
-
-done(Tag) ->
-	gen_event:notify(?MODULE, {work_event, done, Tag, ok}).
-
-
-progress(Tag, Progress) ->
-	gen_event:notify(?MODULE, {work_event, progress, Tag, Progress}).
-
-
-register_proc(Id) ->
-	gen_event:add_sup_handler(?MODULE, {?MODULE, Id}, self()).
-
-
-deregister_proc(Id) ->
-	Handler = {?MODULE, Id},
-	gen_event:delete_handler(?MODULE, Handler, []),
-	receive
-		{gen_event_EXIT, Handler, _Reason} -> ok
+deregister_proc() ->
+	Handler = {?MODULE, self()},
+	case gen_event:delete_handler(peerdrive_work, Handler, []) of
+		ok ->
+			receive
+				{gen_event_EXIT, Handler, _Reason} -> ok
+			end;
+		_ ->
+			ok
 	end.
 
 
@@ -59,16 +44,13 @@ deregister_proc(Id) ->
 %% Callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
 init(Pid) ->
 	{ok, Pid}.
 
 
-handle_event(Event, State) ->
-	Pid = State,
+handle_event(Event, Pid) ->
 	Pid ! Event,
-	{ok, State}.
-
+	{ok, Pid}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs

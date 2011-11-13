@@ -221,11 +221,19 @@ class _Connector(QtCore.QObject):
 	PROGRESS_START_MSG  = 0x0025
 	PROGRESS_MSG        = 0x0026
 	PROGRESS_END_MSG    = 0x0027
+	PROGRESS_QUERY_MSG  = 0x0028
 
 	FLAG_REQ = 0
 	FLAG_CNF = 1
 	FLAG_IND = 2
 	FLAG_RSP = 3
+
+	PROGRESS_RUNNING = pb.ProgressInd.running
+	PROGRESS_PAUSED = pb.ProgressInd.paused
+	PROGRESS_ERROR = pb.ProgressInd.error
+	PROGRESS_SYNC = pb.ProgressStartInd.sync
+	PROGRESS_REP_DOC = pb.ProgressStartInd.rep_doc
+	PROGRESS_REP_REV = pb.ProgressStartInd.rep_rev
 
 	watchReady = QtCore.pyqtSignal()
 
@@ -461,10 +469,16 @@ class _Connector(QtCore.QObject):
 		self.__dispatchIndications()
 
 	def regProgressHandler(self, start=None, progress=None, stop=None):
+		if start or progress:
+			cnf = pb.ProgressQueryCnf.FromString(self._rpc(_Connector.PROGRESS_QUERY_MSG, ''))
 		if start:
 			self.__regProgressHandler(_Connector.PROGRESS_START_MSG, start)
+			for item in cnf.items:
+				self.__dispatchProgressStart(item.item, [start])
 		if progress:
 			self.__regProgressHandler(_Connector.PROGRESS_MSG, progress)
+			for item in cnf.items:
+				self.__dispatchProgress(item.state, [progress])
 		if stop:
 			self.__regProgressHandler(_Connector.PROGRESS_END_MSG, stop)
 
@@ -489,6 +503,23 @@ class _Connector(QtCore.QObject):
 			req = pb.WatchProgressReq()
 			req.enable = False
 			self._rpc(_Connector.WATCH_PROGRESS_MSG, req.SerializeToString())
+
+	def progressPause(self, tag):
+		req = pb.ProgressEndReq()
+		req.tag = tag
+		req.pause = True
+		self._rpc(_Connector.PROGRESS_END_MSG, req.SerializeToString())
+
+	def progressStop(self, tag):
+		req = pb.ProgressEndReq()
+		req.tag = tag
+		req.pause = False
+		self._rpc(_Connector.PROGRESS_END_MSG, req.SerializeToString())
+
+	def progressResume(self, tag):
+		req = pb.ProgressStartReq()
+		req.tag = tag
+		self._rpc(_Connector.PROGRESS_START_MSG, req.SerializeToString())
 
 	# protected functions
 
@@ -559,16 +590,12 @@ class _Connector(QtCore.QObject):
 								i.triggered(ind.event)
 					elif msg == _Connector.PROGRESS_START_MSG:
 						ind = pb.ProgressStartInd.FromString(packet)
-						handlers = self.progressHandlers[:]
-						for (event, handler) in handlers:
-							if event == msg:
-								handler(ind.tag, ind.type, ind.source, ind.dest)
+						handlers = [h for (e,h) in self.progressHandlers if e == msg]
+						self.__dispatchProgressStart(ind, handlers)
 					elif msg == _Connector.PROGRESS_MSG:
 						ind = pb.ProgressInd.FromString(packet)
-						handlers = self.progressHandlers[:]
-						for (event, handler) in handlers:
-							if event == msg:
-								handler(ind.tag, ind.progress)
+						handlers = [h for (e,h) in self.progressHandlers if e == msg]
+						self.__dispatchProgress(ind, handlers)
 					elif msg == _Connector.PROGRESS_END_MSG:
 						ind = pb.ProgressEndInd.FromString(packet)
 						handlers = self.progressHandlers[:]
@@ -577,6 +604,21 @@ class _Connector(QtCore.QObject):
 								handler(ind.tag)
 		else:
 			self.watchReady.emit()
+
+	def __dispatchProgressStart(self, ind, handlers):
+		for handler in handlers:
+			if ind.HasField('item'):
+				handler(ind.tag, ind.type, ind.source, ind.dest, ind.item)
+			else:
+				handler(ind.tag, ind.type, ind.source, ind.dest)
+
+	def __dispatchProgress(self, ind, handlers):
+		kwargs = {}
+		if ind.HasField('err_code'): kwargs['err_code'] = (ind.err_code, _errorCodes.get(ind.err_code, 'unknown'))
+		if ind.HasField('err_doc'): kwargs['err_doc'] = ind.err_doc
+		if ind.HasField('err_rev'): kwargs['err_rev'] = ind.err_rev
+		for handler in handlers:
+			handler(ind.tag, ind.state, ind.progress, **kwargs)
 
 	def __poll(self, ref):
 		self.recursion += 1

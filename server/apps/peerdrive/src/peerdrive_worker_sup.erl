@@ -38,12 +38,12 @@ init([]) ->
 			[peerdrive_work_tags]
 		},
 		{
-			peerdrive_work_monitor,
-			{peerdrive_work_monitor, start_link, []},
+			peerdrive_work,
+			{peerdrive_work, start_link, []},
 			permanent,
 			1000,
 			worker,
-			[peerdrive_work_monitor]
+			[peerdrive_work]
 		},
 		{
 			peerdrive_replicator,

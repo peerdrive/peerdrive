@@ -48,7 +48,7 @@ init(Parent, Mode, FromSId, ToSId) ->
 			case peerdrive_volman:store(ToSId) of
 				{ok, ToPid} ->
 					Id = {FromSId, ToSId},
-					{ok, Monitor} = peerdrive_hysteresis:start({sync, FromSId, ToSId}),
+					{ok, Monitor} = peerdrive_work:new({sync, FromSId, ToSId}),
 					peerdrive_vol_monitor:register_proc(Id),
 					proc_lib:init_ack(Parent, {ok, self()}),
 					process_flag(trap_exit, true),
@@ -72,7 +72,7 @@ init(Parent, Mode, FromSId, ToSId) ->
 					end,
 					error_logger:info_report([{sync, stop}, {from, FromSId},
 						{to, ToSId}, {reason, Reason}]),
-					peerdrive_hysteresis:stop(Monitor),
+					peerdrive_work:delete(Monitor),
 					peerdrive_vol_monitor:deregister_proc(Id),
 					exit(Reason);
 
@@ -103,7 +103,7 @@ loop(State, OldBacklog) ->
 			NewRemain = length(Backlog),
 			case NewRemain of
 				0 -> ok;
-				_ -> peerdrive_hysteresis:started(Monitor)
+				_ -> peerdrive_work:start(Monitor)
 			end;
 
 		_  ->
@@ -116,8 +116,8 @@ loop(State, OldBacklog) ->
 			sync_step(Change, State),
 			Timeout = 0,
 			case NewBacklog of
-				[] -> peerdrive_hysteresis:done(Monitor);
-				_  -> peerdrive_hysteresis:progress(Monitor, NewDone * 256 div NewRemain)
+				[] -> peerdrive_work:stop(Monitor);
+				_  -> peerdrive_work:progress(Monitor, NewDone * 256 div NewRemain)
 			end;
 
 		[] ->

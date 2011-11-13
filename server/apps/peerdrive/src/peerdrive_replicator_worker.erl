@@ -15,110 +15,186 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_replicator_worker).
+-behavior(gen_fsm).
 
 -include("store.hrl").
 
 -export([start_link/4, start_link/5]).
--export([cancel/1]).
--export([init/6]).
+-export([init/1, code_change/4, handle_event/3, handle_info/3,
+	handle_sync_event/4, terminate/3]).
+-export([working/2, paused/2, error/2]).
 
--record(state, {backlog, srcstore, dststore, depth, verbose, monitor, count, done}).
+-record(state, {parent_backlog, req_backlog, srcstore, dststore, depth,
+	verbose, monitor, count, done, pauseonerror, from, result}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(Request, SrcStore, DstStore, Options) ->
-	proc_lib:start_link(?MODULE, init, [self(), Request, none, SrcStore,
-		DstStore, Options]).
+	gen_fsm:start_link(?MODULE, {Request, none, SrcStore, DstStore, Options}, []).
 
 start_link(Request, SrcStore, DstStore, Options, From) ->
-	proc_lib:start_link(?MODULE, init, [self(), Request, From, SrcStore,
-		DstStore, Options]).
-
-cancel(Worker) ->
-	Worker ! cancel.
+	gen_fsm:start_link(?MODULE, {Request, From, SrcStore, DstStore, Options}, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Parent, Request, From, SrcStore, DstStore, Options) ->
+init({Request, From, SrcStore, DstStore, Options}) ->
+	process_flag(trap_exit, true),
 	Info = case Request of
 		{replicate_doc, Doc, _First} ->
-			{rep_doc, Doc, peerdrive_store:guid(DstStore)};
+			{rep_doc, peerdrive_store:guid(SrcStore), Doc,
+				peerdrive_store:guid(DstStore)};
 
 		{replicate_rev, Rev, _First} ->
-			{rep_rev, Rev, peerdrive_store:guid(DstStore)}
+			{rep_rev, peerdrive_store:guid(SrcStore), Rev,
+				peerdrive_store:guid(DstStore)}
 	end,
-	{ok, Monitor} = peerdrive_hysteresis:start(Info),
-	peerdrive_hysteresis:started(Monitor),
-	proc_lib:init_ack(Parent, {ok, self()}),
+	{ok, Monitor} = peerdrive_work:new(Info),
+	peerdrive_work:start(Monitor),
 	S = #state{
-		backlog  = queue:in(Request, queue:new()),
-		srcstore = SrcStore,
-		dststore = DstStore,
-		depth    = proplists:get_value(depth, Options, 0),
-		verbose  = proplists:get_bool(verbose, Options),
-		monitor  = Monitor,
-		count    = 1,
-		done     = 0
+		parent_backlog = queue:new(),
+		req_backlog    = queue:in(Request, queue:new()),
+		srcstore       = SrcStore,
+		dststore       = DstStore,
+		depth          = proplists:get_value(depth, Options, 0),
+		verbose        = proplists:get_bool(verbose, Options),
+		monitor        = Monitor,
+		count          = 1,
+		done           = 0,
+		pauseonerror   = proplists:get_bool(pauseonerror, Options),
+		from           = From,
+		result         = ok
 	},
-	Result = loop(S),
-	peerdrive_hysteresis:done(Monitor),
-	peerdrive_hysteresis:stop(Monitor),
-	case From of
-		{Pid, Ref} -> Pid ! {Ref, Result};
-		_Else      -> ok
-	end,
-	normal.
+	{ok, working, S, 0}.
 
+
+terminate(_Reason, _State, #state{monitor=Monitor, from=From, result=Result}) ->
+	peerdrive_work:stop(Monitor),
+	peerdrive_work:delete(Monitor),
+	case From of
+		{Pid, Ref} ->
+			Pid ! {Ref, Result};
+		_Else ->
+			ok
+	end.
+
+
+working(timeout, S) ->
+	try
+		S2 = run_queues(S),
+		#state{count=Count, done=Done, monitor=Monitor} = S2,
+		peerdrive_work:progress(Monitor, Done * 255 div Count),
+		{next_state, working, S2, 0}
+	catch
+		throw:done ->
+			{stop, normal, S};
+
+		throw:{error, ErrInfo} ->
+			case S#state.pauseonerror of
+				true ->
+					peerdrive_work:error(S#state.monitor, ErrInfo),
+					{next_state, error, S};
+				false ->
+					Result = {error, proplists:get_value(code, ErrInfo, eio)},
+					{stop, normal, S#state{result=Result}}
+			end
+	end.
+
+
+paused(_, S) ->
+	{next_state, paused, S}.
+
+
+error(_, S) ->
+	{next_state, error, S}.
+
+
+handle_info({work_req, Req}, State, #state{monitor=Monitor} = S) ->
+	case State of
+		working ->
+			case Req of
+				pause ->
+					peerdrive_work:pause(Monitor),
+					{next_state, paused, S};
+				stop ->
+					{stop, normal, S#state{result={error, eintr}}};
+				_ ->
+					{next_state, working, S, 0}
+			end;
+
+		Halted ->
+			case Req of
+				resume ->
+					peerdrive_work:resume(Monitor),
+					{next_state, working, S, 0};
+				stop ->
+					{stop, normal, S#state{result={error, eintr}}};
+				_ ->
+					{next_state, Halted, S}
+			end
+	end;
+
+handle_info(_, working, S) ->
+	{next_state, working, S, 0};
+
+handle_info(_, State, S) ->
+	{next_state, State, S}.
+
+
+handle_event(_Event, StateName, StateData) ->
+	{next_state, StateName, StateData, 0}.
+
+handle_sync_event(_Event, _From, StateName, StateData) ->
+	{next_state, StateName, StateData, 0}.
+
+code_change(_OldVsn, StateName, StateData, _Extra) ->
+	{ok, StateName, StateData}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-push_doc(Doc, #state{backlog=Backlog} = S) ->
+push_doc(Doc, #state{req_backlog=Backlog} = S) ->
 	NewBacklog = queue:in({replicate_doc, Doc, false}, Backlog),
-	S#state{backlog=NewBacklog}.
+	S#state{req_backlog=NewBacklog}.
 
 
-push_rev(Rev, #state{backlog=Backlog} = S) ->
+push_rev(Rev, #state{req_backlog=Backlog} = S) ->
 	NewBacklog = queue:in({replicate_rev, Rev, false}, Backlog),
-	S#state{backlog=NewBacklog}.
+	S#state{req_backlog=NewBacklog}.
 
 
-loop(State) ->
-	case run_queue(State) of
-		{ok, NewState} ->
-			#state{count=Count, done=Done, monitor=Monitor} = NewState,
-			peerdrive_hysteresis:progress(Monitor, Done * 255 div Count),
-			loop(NewState);
-
-		{stop, _NewState} ->
-			ok;
-
-		{{error, _} = Error, _NewState} ->
-			Error
-	end.
+push_parent(Rev, First, #state{parent_backlog=Backlog} = S) ->
+	NewBacklog = queue:in({Rev, First}, Backlog),
+	S#state{parent_backlog=NewBacklog}.
 
 
-run_queue(#state{backlog=Backlog, count=OldCount, done=Done} = S) ->
-	case queue:out(Backlog) of
-		{{value, Item}, Remaining} ->
-			PrevSize = queue:len(Remaining),
-			S2 = S#state{backlog=Remaining},
-			{Result, S3} = case Item of
-				{replicate_doc, Doc, First} ->
-					replicate_doc(Doc, First, S2);
-				{replicate_rev, Rev, First} ->
-					replicate_rev(queue:in(Rev, queue:new()), First, S2)
-			end,
-			NextSize = queue:len(S3#state.backlog),
-			{Result, S3#state{count=OldCount+NextSize-PrevSize, done=Done+1}};
+run_queues(#state{parent_backlog=ParentBL} = S) ->
+	case queue:out(ParentBL) of
+		{{value, {Rev, First}}, NewParentBL} ->
+			replicate_rev(Rev, First, S#state{parent_backlog=NewParentBL});
 
-		{empty, _Backlog} ->
-			{stop, S}
+		{empty, _ParentBL} ->
+			#state{req_backlog=ReqBacklog, count=OldCount, done=Done} = S,
+			case queue:out(ReqBacklog) of
+				{{value, Item}, Remaining} ->
+					PrevSize = queue:len(Remaining),
+					S2 = S#state{req_backlog=Remaining},
+					S3 = case Item of
+						{replicate_doc, Doc, First} ->
+							replicate_doc(Doc, First, S2);
+						{replicate_rev, Rev, First} ->
+							replicate_rev(Rev, First, S2)
+					end,
+					NextSize = queue:len(S3#state.req_backlog),
+					S3#state{count=OldCount+NextSize-PrevSize, done=Done+1};
+
+				{empty, _ReqBacklog} ->
+					throw(done)
+			end
 	end.
 
 
@@ -133,74 +209,56 @@ replicate_doc(Doc, First, S) ->
 			case peerdrive_store:put_doc(DstStore, Doc, Rev) of
 				ok ->
 					case Verbose of
-						false ->
-							{ok, S};
-						true ->
-							replicate_rev(queue:in(Rev, queue:new()), First, S)
+						false -> S;
+						true  -> replicate_rev(Rev, First, S)
 					end;
 
 				{ok, Handle} ->
 					% replicate corresponding rev
-					case replicate_rev(queue:in(Rev, queue:new()), First, S) of
-						{ok, _} = Ok ->
-							case peerdrive_store:put_doc_commit(Handle) of
-								ok ->
-									Ok;
-								{error, econflict} when not First ->
-									% Not treated as an error but deliberately
-									% drop new state
-									{ok, S};
-								Error ->
-									% Drop new state
-									{Error, S}
-							end;
-						Error ->
+					S2 = try
+						replicate_rev(Rev, First, S)
+					catch
+						throw:RepError ->
 							peerdrive_store:put_doc_abort(Handle),
-							Error
+							throw(RepError)
+					end,
+					case peerdrive_store:put_doc_commit(Handle) of
+						ok ->
+							S2;
+						{error, econflict} when not First ->
+							% Not treated as an error but deliberately
+							% drop new state
+							S;
+						{error, Reason} ->
+							ErrInfo = [{code, Reason}, {doc, Doc}, {rev, Rev}],
+							throw({error, ErrInfo})
 					end;
 
 				{error, econflict} when not First ->
-					{ok, S};
-				{error, _Reason} = Error ->
-					{Error, S}
+					S;
+				{error, Reason} ->
+					ErrInfo = [{code, Reason}, {doc, Doc}, {rev, Rev}],
+					throw({error, ErrInfo})
 			end;
 
 		error when First ->
-			{{error, enoent}, S};
+			throw({error, [{code, enoent}, {doc, Doc}]});
 
 		error ->
-			{ok, S}
+			S
 	end.
 
 
-replicate_rev(Revs, First, #state{verbose=Verbose} = S) ->
-	receive
-		cancel -> {stop, S}
-	after
-		0 ->
-			case queue:out(Revs) of
-				{{value, Rev}, RemainRevs} ->
-					Contains = (not Verbose) andalso peerdrive_store:contains(
-						S#state.dststore, Rev),
-					case Contains of
-						false ->
-							case do_replicate_rev(Rev, RemainRevs, First, S) of
-								{ok, NewRevs, S2} ->
-									replicate_rev(NewRevs, false, S2);
-								Else ->
-									Else
-							end;
-						true ->
-							replicate_rev(RemainRevs, false, S)
-					end;
-
-				{empty, _} ->
-					{ok, S}
-			end
+replicate_rev(Rev, First, #state{verbose=Verbose} = S) ->
+	Contains = (not Verbose) andalso peerdrive_store:contains(S#state.dststore,
+		Rev),
+	case Contains of
+		false -> do_replicate_rev(Rev, First, S);
+		true  -> S
 	end.
 
 
-do_replicate_rev(Rev, Backlog, First, S) ->
+do_replicate_rev(Rev, First, S) ->
 	#state{
 		srcstore = SrcStore,
 		dststore = DstStore,
@@ -211,36 +269,35 @@ do_replicate_rev(Rev, Backlog, First, S) ->
 		when (Mtime >= Depth) or First ->
 			case put_rev(SrcStore, DstStore, Rev) of
 				ok ->
-					NewBacklog = lists:foldl(
-						fun(Parent, BackAcc) -> queue:in(Parent, BackAcc) end,
-						Backlog,
+					S2 = lists:foldl(
+						fun(Parent, Acc) -> push_parent(Parent, First, Acc) end,
+						S,
 						Parents),
-					S2 = case is_sticky(Stat) of
+					case is_sticky(Stat) of
 						true ->
 							lists:foldl(
 								fun(Ref, Acc) -> push_doc(Ref, Acc) end,
 								lists:foldl(
 									fun(Ref, Acc) -> push_rev(Ref, Acc) end,
-									S,
+									S2,
 									Stat#rev_stat.rev_links),
 								Stat#rev_stat.doc_links);
 						false ->
-							S
-					end,
-					{ok, NewBacklog, S2};
+							S2
+					end;
 
-				{error, _} = Error ->
-					{Error, S}
+				{error, Reason} ->
+					throw({error, [{code, Reason}, {rev, Rev}]})
 			end;
 
 		{ok, _} ->
-			{ok, Backlog, S};
+			S;
 
-		{error, _} = Error when First ->
-			{Error, S};
+		{error, Reason} when First ->
+			throw({error, [{code, Reason}, {rev, Rev}]});
 
 		{error, _} ->
-			{ok, Backlog, S}
+			S
 	end.
 
 
