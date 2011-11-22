@@ -401,7 +401,7 @@ forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Options) ->
 		{ok, Path} ->
 			do_forward_doc(Store, Doc, SrcStore, Path, ToRev, Options);
 		error ->
-			{error, enoent}
+			{error, einval}
 	end.
 
 
