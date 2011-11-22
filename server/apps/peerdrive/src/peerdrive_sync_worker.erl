@@ -15,29 +15,32 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_sync_worker).
+-behavior(gen_fsm).
 
 -include("store.hrl").
 -include("utils.hrl").
 
 -export([start_link/3]).
--export([init/4]).
+-export([init/1, code_change/4, handle_event/3, handle_info/3,
+	handle_sync_event/4, terminate/3]).
+-export([working/2, waiting/2, paused/2, error/2]).
 
 -record(state, {syncfun, from, to, fromsid, tosid, monitor, numdone,
-	numremain, parent}).
+	numremain, backlog}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(Mode, Store, Peer) ->
-	proc_lib:start_link(?MODULE, init, [self(), Mode, Store, Peer]).
+	gen_fsm:start_link(?MODULE, {Mode, Store, Peer}, []).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% High level store sync logic
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Parent, Mode, FromSId, ToSId) ->
+init({Mode, FromSId, ToSId}) ->
 	SyncFun = case Mode of
 		ff     -> fun sync_doc_ff/5;
 		latest -> fun sync_doc_latest/5;
@@ -47,12 +50,10 @@ init(Parent, Mode, FromSId, ToSId) ->
 		{ok, FromPid} ->
 			case peerdrive_volman:store(ToSId) of
 				{ok, ToPid} ->
-					Id = {FromSId, ToSId},
 					{ok, Monitor} = peerdrive_work:new({sync, FromSId, ToSId}),
-					peerdrive_vol_monitor:register_proc(Id),
-					proc_lib:init_ack(Parent, {ok, self()}),
+					peerdrive_vol_monitor:register_proc({FromSId, ToSId}),
 					process_flag(trap_exit, true),
-					State = #state{
+					S = #state{
 						syncfun   = SyncFun,
 						from      = FromPid,
 						fromsid   = FromSId,
@@ -61,99 +62,160 @@ init(Parent, Mode, FromSId, ToSId) ->
 						monitor   = Monitor,
 						numdone   = 0,
 						numremain = 0,
-						parent    = Parent
+						backlog   = []
 					},
 					error_logger:info_report([{sync, start}, {from, FromSId},
 						{to, ToSId}]),
-					Reason = try
-						loop(State, [])
-					catch
-						throw:Term -> Term
-					end,
-					error_logger:info_report([{sync, stop}, {from, FromSId},
-						{to, ToSId}, {reason, Reason}]),
-					peerdrive_work:delete(Monitor),
-					peerdrive_vol_monitor:deregister_proc(Id),
-					exit(Reason);
+					gen_fsm:send_event(self(), changed),
+					{ok, waiting, S};
 
 				error ->
-					proc_lib:init_ack(Parent, {error, enxio})
+					{stop, enxio}
 			end;
 
 		error ->
-			proc_lib:init_ack(Parent, {error, enxio})
+			{stop, enxio}
 	end.
 
 
-loop(State, OldBacklog) ->
-	#state{
-		from      = FromStore,
-		tosid     = ToSId,
-		monitor   = Monitor,
-		numdone   = OldDone,
-		numremain = OldRemain
-	} = State,
-	case OldBacklog of
-		[] ->
-			NewDone = 1,
-			Backlog = case peerdrive_store:sync_get_changes(FromStore, ToSId) of
-				{ok, Value} -> Value;
-				Error       -> throw(Error)
-			end,
-			NewRemain = length(Backlog),
-			case NewRemain of
-				0 -> ok;
-				_ -> peerdrive_work:start(Monitor)
+terminate(Reason, _State, #state{from=FromStore, tosid=ToSId} = S) ->
+	error_logger:info_report([{sync, stop}, {from, S#state.fromsid},
+		{to, S#state.tosid}, {reason, Reason}]),
+	peerdrive_work:delete(S#state.monitor),
+	peerdrive_vol_monitor:deregister_proc({S#state.fromsid, ToSId}),
+	FromStore == undefined orelse peerdrive_store:sync_finish(FromStore, ToSId).
+
+
+handle_info({trigger_rem_store, FromSId}, _, #state{fromsid=FromSId} = S) ->
+	{stop, normal, S#state{from=undefined}};
+
+handle_info({trigger_rem_store, ToSId}, _, #state{tosid=ToSId} = S) ->
+	{stop, normal, S};
+
+handle_info({trigger_mod_doc, FromSId, _Doc}, waiting, #state{fromsid=FromSId} = S) ->
+	gen_fsm:send_event(self(), changed),
+	{next_state, waiting, S};
+
+handle_info({work_req, Req}, State, #state{monitor=Monitor} = S) ->
+	case State of
+		working ->
+			case Req of
+				pause ->
+					peerdrive_work:pause(Monitor),
+					{next_state, paused, S};
+				_ ->
+					{next_state, working, S, 0}
 			end;
 
-		_  ->
-			Backlog    = OldBacklog,
-			NewDone    = OldDone + 1,
-			NewRemain  = OldRemain
-	end,
-	case Backlog of
-		[Change | NewBacklog] ->
-			sync_step(Change, State),
-			Timeout = 0,
-			case NewBacklog of
-				[] -> peerdrive_work:stop(Monitor);
-				_  -> peerdrive_work:progress(Monitor, NewDone * 256 div NewRemain)
-			end;
+		waiting ->
+			{next_state, waiting, S};
 
-		[] ->
-			NewBacklog = [],
-			Timeout = infinity
-	end,
-	loop_check_msg(State#state{numdone=NewDone, numremain=NewRemain}, NewBacklog, Timeout).
+		Halted ->
+			case Req of
+				{resume, false} ->
+					peerdrive_work:resume(Monitor),
+					{next_state, working, S, 0};
+				{resume, true} ->
+					peerdrive_work:resume(Monitor),
+					{next_state, working, skip(S), 0};
+				_ ->
+					{next_state, Halted, S}
+			end
+	end;
+
+handle_info(_, working, S) ->
+	{next_state, working, S, 0};
+
+handle_info(_, State, S) ->
+	{next_state, State, S}.
 
 
-loop_check_msg(State, Backlog, Timeout) ->
+handle_event(_Event, working, StateData) ->
+	{next_state, working, StateData, 0};
+
+handle_event(_Event, StateName, StateData) ->
+	{next_state, StateName, StateData}.
+
+
+handle_sync_event(_Event, _From, working, StateData) ->
+	{next_state, working, StateData, 0};
+
+handle_sync_event(_Event, _From, StateName, StateData) ->
+	{next_state, StateName, StateData}.
+
+
+code_change(_OldVsn, StateName, StateData, _Extra) ->
+	{ok, StateName, StateData}.
+
+
+waiting(changed, S) ->
 	#state{
-		from    = FromStore,
-		fromsid = FromSId,
-		tosid   = ToSId,
-		parent  = Parent
-	} = State,
-	receive
-		{trigger_mod_doc, FromSId, _Doc} ->
-			loop_check_msg(State, Backlog, 0);
-		{trigger_rem_store, FromSId} ->
-			normal;
-		{trigger_rem_store, ToSId} ->
-			peerdrive_store:sync_finish(FromStore, ToSId),
-			normal;
-		{'EXIT', Parent, Reason} ->
-			Reason;
-		{'EXIT', _, normal} ->
-			loop_check_msg(State, Backlog, Timeout);
-		{'EXIT', _, Reason} ->
-			Reason;
-
-		% deliberately ignore all other messages
-		_ -> loop_check_msg(State, Backlog, Timeout)
-	after
-		Timeout -> loop(State, Backlog)
+		from=FromStore,
+		tosid=ToSId,
+		monitor=Monitor
+	} = S,
+	case peerdrive_store:sync_get_changes(FromStore, ToSId) of
+		{ok, []} ->
+			{next_state, waiting, S};
+		{ok, Backlog} ->
+			peerdrive_work:start(Monitor),
+			S2 = S#state{backlog=Backlog, numdone=0, numremain=length(Backlog)},
+			{next_state, working, S2, 0};
+		{error, Reason} ->
+			peerdrive_work:start(Monitor),
+			peerdrive_work:error(Monitor, [{code, Reason}]),
+			{next_state, error, S}
 	end.
+
+
+working(timeout, #state{backlog=[]} = S) ->
+	#state{from=FromStore, tosid=ToSId, monitor=Monitor} = S,
+	case peerdrive_store:sync_get_changes(FromStore, ToSId) of
+		{ok, []} ->
+			peerdrive_work:stop(Monitor),
+			{next_state, waiting, S};
+
+		{ok, NewBacklog} ->
+			NewRemain = S#state.numremain + length(NewBacklog),
+			peerdrive_work:progress(Monitor, S#state.numdone * 256 div NewRemain),
+			S2 = S#state{backlog=NewBacklog, numremain=NewRemain},
+			{next_state, working, S2, 0};
+
+		{error, Reason} ->
+			peerdrive_work:error(Monitor, [{code, Reason}]),
+			{next_state, error, S}
+	end;
+
+working(timeout, #state{backlog=[Change|Backlog], monitor=Monitor} = S) ->
+	try
+		sync_step(Change, S),
+		NewDone = S#state.numdone + 1,
+		peerdrive_work:progress(Monitor, NewDone * 256 div S#state.numremain),
+		S2 = S#state{backlog=Backlog, numdone=NewDone},
+		{next_state, working, S2, 0}
+	catch
+		throw:ErrInfo ->
+			peerdrive_work:error(Monitor, ErrInfo),
+			{next_state, error, S}
+	end;
+
+working(changed, S) ->
+	{next_state, working, S, 0}.
+
+
+paused(changed, S) ->
+	{next_state, paused, S}.
+
+
+error(changed, S) ->
+	{next_state, error, S}.
+
+
+skip(#state{backlog=[]} = S) ->
+	S;
+
+skip(#state{backlog=[_|Backlog], numdone=Done} = S) ->
+	S#state{backlog=Backlog, numdone=Done+1}.
 
 
 sync_step({Doc, SeqNum}, S) ->
@@ -163,36 +225,36 @@ sync_step({Doc, SeqNum}, S) ->
 		to       = ToStore,
 		tosid    = ToSId
 	} = S,
-	sync_doc(Doc, FromStore, ToStore, SyncFun),
+	peerdrive_sync_locks:lock(Doc),
+	try
+		sync_doc(Doc, FromStore, ToStore, SyncFun)
+	after
+		peerdrive_sync_locks:unlock(Doc)
+	end,
 	case peerdrive_store:sync_set_anchor(FromStore, ToSId, SeqNum) of
-		ok -> ok;
-		Error -> throw(Error)
+		ok ->
+			ok;
+		{error, Reason} ->
+			throw([{code, Reason}])
 	end.
 
 
 sync_doc(Doc, From, To, SyncFun) ->
-	peerdrive_sync_locks:lock(Doc),
-	try
-		case peerdrive_store:lookup(To, Doc) of
-			{ok, ToRev, _PreRevs} ->
-				case peerdrive_store:lookup(From, Doc) of
-					{ok, ToRev, _} ->
-						% alread the same
-						ok;
-					{ok, FromRev, _} ->
-						SyncFun(Doc, From, FromRev, To, ToRev);
-					error ->
-						% deleted -> ignore
-						ok
-				end;
-			error ->
-				% doesn't exist on destination -> ignore
-				ok
-		end
-	catch
-		throw:Term -> Term
-	after
-		peerdrive_sync_locks:unlock(Doc)
+	case peerdrive_store:lookup(To, Doc) of
+		{ok, ToRev, _PreRevs} ->
+			case peerdrive_store:lookup(From, Doc) of
+				{ok, ToRev, _} ->
+					% alread the same
+					ok;
+				{ok, FromRev, _} ->
+					SyncFun(Doc, From, FromRev, To, ToRev);
+				error ->
+					% deleted -> ignore
+					ok
+			end;
+		error ->
+			% doesn't exist on destination -> ignore
+			ok
 	end.
 
 
@@ -205,8 +267,8 @@ sync_doc_ff(Doc, From, FromRev, To, ToRev) ->
 	sync_doc_ff(Doc, From, FromRev, To, ToRev, 3).
 
 
-sync_doc_ff(_Doc, _From, _NewRev, _To, _OldRev, 0) ->
-	{error, econflict};
+sync_doc_ff(Doc, _From, NewRev, _To, _OldRev, 0) ->
+	throw([{code, econflict}, {doc, Doc}, {rev, NewRev}]);
 
 sync_doc_ff(Doc, From, NewRev, To, OldRev, Tries) ->
 	case peerdrive_broker:forward_doc(To, Doc, OldRev, NewRev, From, []) of
@@ -214,8 +276,8 @@ sync_doc_ff(Doc, From, NewRev, To, OldRev, Tries) ->
 			ok;
 		{error, econflict} ->
 			sync_doc_ff(Doc, From, NewRev, To, OldRev, Tries-1);
-		{error, _} = Error ->
-			Error
+		{error, Reason} ->
+			throw([{code, Reason}, {doc, Doc}, {rev, NewRev}])
 	end.
 
 
@@ -269,15 +331,16 @@ sync_doc_merge(Doc, From, FromRev, To, ToRev, Strategy) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
-	FromStat = throws(peerdrive_broker:stat(FromRev, [From])),
-	ToStat = throws(peerdrive_broker:stat(ToRev, [To])),
+	FromStat = check(peerdrive_broker:stat(FromRev, [From]), Doc, FromRev),
+	ToStat = check(peerdrive_broker:stat(ToRev, [To]), Doc, ToRev),
 	if
 		FromStat#rev_stat.mtime >= ToStat#rev_stat.mtime ->
 			% worker will pick up again the new merge rev
-			Handle = throws(peerdrive_broker:update(From, Doc, FromRev, undefined)),
+			Handle = check(peerdrive_broker:update(From, Doc, FromRev, undefined),
+				Doc, FromRev),
 			try
-				throws(peerdrive_broker:merge(Handle, To, ToRev, [])),
-				throws(peerdrive_broker:commit(Handle))
+				check(peerdrive_broker:merge(Handle, To, ToRev, []), Doc, ToRev),
+				check(peerdrive_broker:commit(Handle), Doc, FromRev)
 			after
 				peerdrive_broker:close(Handle)
 			end;
@@ -294,9 +357,9 @@ latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 merge_strategy(Doc, From, FromRev, To, ToRev, BaseRev) ->
-	FromStat = throws(peerdrive_broker:stat(FromRev, [From])),
-	ToStat = throws(peerdrive_broker:stat(ToRev, [To])),
-	BaseStat = throws(peerdrive_broker:stat(BaseRev, [From, To])),
+	FromStat = check(peerdrive_broker:stat(FromRev, [From]), Doc, FromRev),
+	ToStat = check(peerdrive_broker:stat(ToRev, [To]), Doc, ToRev),
+	BaseStat = check(peerdrive_broker:stat(BaseRev, [From, To]), Doc, BaseRev),
 	TypeSet = sets:from_list([
 		BaseStat#rev_stat.type,
 		FromStat#rev_stat.type,
@@ -318,8 +381,8 @@ get_handler_fun(TypeSet) ->
 		[Folder] when Folder =:= <<"org.peerdrive.store">>;
 		              Folder =:= <<"org.peerdrive.folder">> ->
 			Handlers = orddict:from_list([
-				{<<"META">>, fun merge_meta/3},
-				{<<"PDSD">>, fun merge_folder/3}
+				{<<"META">>, fun merge_meta/4},
+				{<<"PDSD">>, fun merge_folder/4}
 			]),
 			fun(Doc, From, To, BaseRev, FromRev, ToRev) ->
 				merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers)
@@ -338,9 +401,12 @@ get_handler_fun(TypeSet) ->
 %% TODO: Support addition and removal of whole parts
 %%
 merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers) ->
-	#rev_stat{parts=FromParts} = throws(peerdrive_broker:stat(FromRev, [From])),
-	#rev_stat{parts=ToParts} = throws(peerdrive_broker:stat(ToRev, [To])),
-	#rev_stat{parts=BaseParts} = throws(peerdrive_broker:stat(BaseRev, [From, To])),
+	#rev_stat{parts=FromParts} = check(peerdrive_broker:stat(FromRev, [From]),
+		Doc, FromRev),
+	#rev_stat{parts=ToParts} = check(peerdrive_broker:stat(ToRev, [To]), Doc,
+		ToRev),
+	#rev_stat{parts=BaseParts} = check(peerdrive_broker:stat(BaseRev, [From, To]),
+		Doc, BaseRev),
 	OtherParts = ToParts ++ FromParts,
 
 	% Merge only changed parts, except META because we want to update the comment
@@ -351,77 +417,77 @@ merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers) ->
 			OtherParts) ],
 
 	% Read all changed parts
-	FromData = merge_read(FromRev, Parts, [From]),
-	ToData   = merge_read(ToRev, Parts, [To]),
-	BaseData = merge_read(BaseRev, Parts, [From, To]),
+	FromData = merge_read(Doc, FromRev, Parts, [From]),
+	ToData   = merge_read(Doc, ToRev, Parts, [To]),
+	BaseData = merge_read(Doc, BaseRev, Parts, [From, To]),
 
-	{_Conflict, NewData} = merge_parts(BaseData, FromData, ToData, Handlers,
+	{_Conflict, NewData} = merge_parts(Doc, BaseData, FromData, ToData, Handlers,
 		false, []),
 
 	% TODO: set a 'conflict' flag in the future?
 	merge_write(Doc, From, FromRev, To, ToRev, NewData).
 
 
-merge_read(_Rev, _Parts, []) ->
-	throw({error, enoent});
+merge_read(Doc, Rev, _Parts, []) ->
+	throw([{code, enoent}, {doc, Doc}, {rev, Rev}]);
 
-merge_read(Rev, Parts, [Store | Rest]) ->
+merge_read(Doc, Rev, Parts, [Store | Rest]) ->
 	case peerdrive_broker:peek(Store, Rev) of
 		{ok, Reader} ->
 			try
-				[ {Part, merge_read_part(Reader, Part)} || Part <- Parts ]
+				[ {Part, merge_read_part(Doc, Rev, Reader, Part)} || Part <- Parts ]
 			after
 				peerdrive_broker:close(Reader)
 			end;
 
 		{error, enoent} ->
-			merge_read(Rev, Parts, Rest);
+			merge_read(Doc, Rev, Parts, Rest);
 
-		Error ->
-			throw(Error)
+		{error, Reason} ->
+			throw([{code, Reason}, {doc, Doc}, {rev, Rev}])
 	end.
 
 
-merge_read_part(Reader, Part) ->
-	merge_read_part(Reader, Part, 0, <<>>).
+merge_read_part(Doc, Rev, Reader, Part) ->
+	merge_read_part(Doc, Rev, Reader, Part, 0, <<>>).
 
 
-merge_read_part(Reader, Part, Offset, Acc) ->
-	case throws(peerdrive_broker:read(Reader, Part, Offset, 16#10000)) of
+merge_read_part(Doc, Rev, Reader, Part, Offset, Acc) ->
+	case check(peerdrive_broker:read(Reader, Part, Offset, 16#10000), Doc, Rev) of
 		<<>> ->
 			Acc;
 		Data ->
-			merge_read_part(Reader, Part, Offset+size(Data),
+			merge_read_part(Doc, Rev, Reader, Part, Offset+size(Data),
 				<<Acc/binary, Data/binary>>)
 	end.
 
 
-merge_parts([], [], [], _Handlers, Conflicts, Acc) ->
+merge_parts(_Doc, [], [], [], _Handlers, Conflicts, Acc) ->
 	{Conflicts, Acc};
 
-merge_parts(
+merge_parts(Doc,
 		[{Part, Base} | BaseData],
 		[{Part, From} | FromData],
 		[{Part, To} | ToData],
 		Handlers, Conflicts, Acc) ->
 	Handler = orddict:fetch(Part, Handlers),
-	{NewConflict, Data} = Handler(Base, From, To),
-	merge_parts(BaseData, FromData, ToData, Handlers, Conflicts or NewConflict,
+	{NewConflict, Data} = Handler(Doc, Base, From, To),
+	merge_parts(Doc, BaseData, FromData, ToData, Handlers, Conflicts or NewConflict,
 		[{Part, Data} | Acc]).
 
 
 merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
-	Writer = throws(peerdrive_broker:update(From, Doc, FromRev,
-		<<"org.peerdrive.syncer">>)),
+	Writer = check(peerdrive_broker:update(From, Doc, FromRev,
+		<<"org.peerdrive.syncer">>), Doc, FromRev),
 	try
-		throws(peerdrive_broker:merge(Writer, To, ToRev, [])),
+		check(peerdrive_broker:merge(Writer, To, ToRev, []), Doc, ToRev),
 		lists:foreach(
 			fun({Part, Data}) ->
-				throws(peerdrive_broker:truncate(Writer, Part, 0)),
-				throws(peerdrive_broker:write(Writer, Part, 0, Data))
+				check(peerdrive_broker:truncate(Writer, Part, 0), Doc, FromRev),
+				check(peerdrive_broker:write(Writer, Part, 0, Data), Doc, FromRev)
 			end,
 			NewData),
-		throws(peerdrive_broker:commit(Writer))
+		check(peerdrive_broker:commit(Writer), Doc, FromRev)
 	after
 		peerdrive_broker:close(Writer)
 	end.
@@ -431,28 +497,28 @@ merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
 %% Content handlers
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-merge_meta(Base, From, To) ->
-	case peerdrive_struct:merge(decode(Base), [decode(From), decode(To)]) of
+merge_meta(Doc, Base, From, To) ->
+	case peerdrive_struct:merge(decode(Doc, Base), [decode(Doc, From), decode(Doc, To)]) of
 		{ok, Data} ->
 			{false, peerdrive_struct:encode(merge_update_meta(Data))};
 		{econflict, Data} ->
 			{true, peerdrive_struct:encode(merge_update_meta(Data))};
 		error ->
-			throw({error, eio})
+			throw([{code, eio}, {doc, Doc}])
 	end.
 
 
-merge_folder(RawBase, RawFrom, RawTo) ->
-	Base = folder_make_gb_tree(decode(RawBase)),
-	From = folder_make_gb_tree(decode(RawFrom)),
-	To   = folder_make_gb_tree(decode(RawTo)),
+merge_folder(Doc, RawBase, RawFrom, RawTo) ->
+	Base = folder_make_gb_tree(decode(Doc, RawBase)),
+	From = folder_make_gb_tree(decode(Doc, RawFrom)),
+	To   = folder_make_gb_tree(decode(Doc, RawTo)),
 	{Conflict, New} = case peerdrive_struct:merge(Base, [From, To]) of
 		{ok, Data} ->
 			{false, Data};
 		{econflict, Data} ->
 			{true, Data};
 		error ->
-			throw({error, eio})
+			throw([{code, eio}, {doc, Doc}])
 	end,
 	{Conflict, peerdrive_struct:encode(gb_trees:values(New))}.
 
@@ -466,12 +532,12 @@ folder_make_gb_tree(Folder) ->
 		Folder).
 
 
-decode(Data) ->
+decode(Doc, Data) ->
 	try
 		peerdrive_struct:decode(Data)
 	catch
 		error:_ ->
-			throw({error, eio})
+			throw([{code, eio}, {doc, Doc}])
 	end.
 
 
@@ -497,10 +563,10 @@ update_meta_field(_Path, _Value, Meta) ->
 	Meta. % Path conflicts with existing data
 
 
-throws(BrokerResult) ->
+check(BrokerResult, Doc, Rev) ->
 	case BrokerResult of
-		{error, _Reason} = Error ->
-			throw(Error);
+		{error, Reason} ->
+			throw([{code, Reason}, {doc, Doc}, {rev, Rev}]);
 		{ok, Result} ->
 			Result;
 		ok ->

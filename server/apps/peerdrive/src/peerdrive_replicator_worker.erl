@@ -127,9 +127,12 @@ handle_info({work_req, Req}, State, #state{monitor=Monitor} = S) ->
 
 		Halted ->
 			case Req of
-				resume ->
+				{resume, false} ->
 					peerdrive_work:resume(Monitor),
 					{next_state, working, S, 0};
+				{resume, true} ->
+					peerdrive_work:resume(Monitor),
+					{next_state, working, skip(S), 0};
 				stop ->
 					{stop, normal, S#state{result={error, eintr}}};
 				_ ->
@@ -195,6 +198,17 @@ run_queues(#state{parent_backlog=ParentBL} = S) ->
 				{empty, _ReqBacklog} ->
 					throw(done)
 			end
+	end.
+
+
+skip(#state{parent_backlog=ParentBL} = S) ->
+	case queue:out(ParentBL) of
+		{{value, _}, NewParentBL} ->
+			S#state{parent_backlog=NewParentBL};
+
+		{empty, _ParentBL} ->
+			{_, NewReqBacklog} = queue:out(S#state.req_backlog),
+			S#state{req_backlog=NewReqBacklog}
 	end.
 
 

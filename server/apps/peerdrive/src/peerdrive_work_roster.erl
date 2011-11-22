@@ -17,7 +17,7 @@
 -module(peerdrive_work_roster).
 -behaviour(gen_event).
 
--export([register/0, all/0, pause/1, stop/1, resume/1]).
+-export([register/0, all/0, pause/1, stop/1, resume/2]).
 -export([init/1, handle_event/2, handle_call/2, handle_info/2, terminate/2,
 	code_change/3]).
 
@@ -43,8 +43,8 @@ stop(Tag) ->
 	gen_event:call(peerdrive_work, ?MODULE, {send, Tag, stop}).
 
 
-resume(Tag) ->
-	gen_event:call(peerdrive_work, ?MODULE, {send, Tag, resume}).
+resume(Tag, Skip) ->
+	gen_event:call(peerdrive_work, ?MODULE, {send, Tag, {resume, Skip}}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callbacks

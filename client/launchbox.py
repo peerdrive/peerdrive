@@ -340,6 +340,11 @@ class ProgressWidget(QtGui.QFrame):
 		self.__stopBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
 		self.__stopBtn.setIcon(QtGui.QIcon("icons/progress-stop.png"))
 		self.__stopBtn.clicked.connect(self.__stop)
+		self.__skipBtn = QtGui.QToolButton()
+		self.__skipBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+		self.__skipBtn.setIcon(QtGui.QIcon("icons/progress-skip.png"))
+		self.__skipBtn.clicked.connect(self.__skip)
+		self.__skipBtn.hide()
 		self.__errorMsg = QtGui.QLabel()
 		self.__errorMsg.setWordWrap(True)
 		self.__errorMsg.hide()
@@ -352,7 +357,9 @@ class ProgressWidget(QtGui.QFrame):
 		layout.addWidget(self.__errorMsg)
 		layout.addWidget(self.toBtn)
 		layout.addWidget(self.__pauseBtn)
-		layout.addWidget(self.__stopBtn)
+		layout.addWidget(self.__skipBtn)
+		if typ != Connector().PROGRESS_SYNC:
+			layout.addWidget(self.__stopBtn)
 		self.setLayout(layout)
 
 		Connector().regProgressHandler(progress=self.progress)
@@ -374,6 +381,7 @@ class ProgressWidget(QtGui.QFrame):
 		self.__state = state
 		self.progressBar.setVisible(state != Connector().PROGRESS_ERROR)
 		self.__errorMsg.setVisible(state == Connector().PROGRESS_ERROR)
+		self.__skipBtn.setVisible(state == Connector().PROGRESS_ERROR)
 		if state == Connector().PROGRESS_RUNNING:
 			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
 			if self.__type == Connector().PROGRESS_SYNC:
@@ -397,6 +405,9 @@ class ProgressWidget(QtGui.QFrame):
 
 	def __stop(self):
 		Connector().progressStop(self.tag)
+
+	def __skip(self):
+		Connector().progressResume(self.tag, True)
 
 
 class SyncRules(object):

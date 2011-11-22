@@ -516,9 +516,11 @@ class _Connector(QtCore.QObject):
 		req.pause = False
 		self._rpc(_Connector.PROGRESS_END_MSG, req.SerializeToString())
 
-	def progressResume(self, tag):
+	def progressResume(self, tag, skip=None):
 		req = pb.ProgressStartReq()
 		req.tag = tag
+		if skip is not None:
+			req.skip = skip
 		self._rpc(_Connector.PROGRESS_START_MSG, req.SerializeToString())
 
 	# protected functions

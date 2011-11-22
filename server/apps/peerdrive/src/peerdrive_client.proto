@@ -536,6 +536,7 @@ message ProgressStartInd {
 
 message ProgressStartReq {
 	required uint32 tag = 1;
+	optional bool skip = 2 [default = false];
 }
 
 message ProgressInd {

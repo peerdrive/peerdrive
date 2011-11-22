@@ -557,8 +557,9 @@ do_sys_info_req(Body) ->
 
 
 do_progress_start(Body, RetPath) ->
-	#progressstartreq{tag=Tag} = peerdrive_client_pb:decode_progressstartreq(Body),
-	peerdrive_work_roster:resume(Tag),
+	#progressstartreq{tag=Tag, skip=Skip} =
+		peerdrive_client_pb:decode_progressstartreq(Body),
+	peerdrive_work_roster:resume(Tag, Skip),
 	send_reply(RetPath, <<>>).
 
 
