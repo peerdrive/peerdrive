@@ -99,15 +99,17 @@ starting(publish, #state{parent=Parent, actual=Actual, info=Info} = S) ->
 starting({progress, Progress}, S) ->
 	{next_state, starting, S#state{actual=Progress}};
 
-starting(pause, #state{tag=Tag, actual=Actual, timeout=Timer} = S) ->
+starting(pause, #state{parent=Parent, info=Info, actual=Actual, timeout=Timer} = S) ->
 	gen_fsm:cancel_timer(Timer),
+	Tag = notify_started(Parent, Info),
 	notify_progress(Tag, paused, Actual, []),
-	{next_state, interrupted, S#state{informed=Actual}};
+	{next_state, interrupted, S#state{tag=Tag, informed=Actual}};
 
-starting({error, Info}, #state{tag=Tag, actual=Actual, timeout=Timer} = S) ->
+starting({error, ErrInfo}, #state{parent=Parent, info=Info, actual=Actual, timeout=Timer} = S) ->
 	gen_fsm:cancel_timer(Timer),
-	notify_progress(Tag, error, Actual, Info),
-	{next_state, interrupted, S#state{informed=Actual}}.
+	Tag = notify_started(Parent, Info),
+	notify_progress(Tag, error, Actual, ErrInfo),
+	{next_state, interrupted, S#state{tag=Tag, informed=Actual}}.
 
 
 busy({progress, Progress}, #state{tag=Tag, informed=Informed} = S) ->
