@@ -76,6 +76,6 @@ if not path:
 
 # start external program
 if sys.platform == "win32":
-	subprocess.Popen(["start", path], shell=True)
+	subprocess.Popen(["start", path, path], shell=True)
 else:
 	subprocess.Popen(["xdg-open", path])
