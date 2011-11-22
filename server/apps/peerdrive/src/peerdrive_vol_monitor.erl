@@ -54,9 +54,13 @@ register_proc(Id) ->
 
 deregister_proc(Id) ->
 	Handler = {?MODULE, Id},
-	gen_event:delete_handler(?MODULE, Handler, []),
-	receive
-		{gen_event_EXIT, Handler, normal} -> ok
+	case gen_event:delete_handler(?MODULE, Handler, []) of
+		ok ->
+			receive
+				{gen_event_EXIT, Handler, normal} -> ok
+			end;
+		Error ->
+			Error
 	end.
 
 
