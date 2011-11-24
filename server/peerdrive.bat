@@ -15,5 +15,4 @@ REM Configure additional code paths
 SET PA=apps\peerdrive\ebin
 FOR /D %%D IN (deps\*) DO SET PA=%PA% %%D\ebin
 
-erl -pa %PA% +A4 +Ww -config peerdrive -boot start_sasl -s crypto -s peerdrive
-
+start werl -pa %PA% +A4 +Ww -config peerdrive -boot start_sasl -s crypto -s peerdrive
