@@ -154,6 +154,7 @@ class DocButton(QtGui.QToolButton, Watch):
 	def __fillMenu(self, menu, menuLink):
 		menu.clear()
 		c = struct.Folder(menuLink)
+		listing = []
 		for (title, link) in c.items():
 			link.update(self.__store)
 			try:
@@ -167,13 +168,25 @@ class DocButton(QtGui.QToolButton, Watch):
 			if len(title) > 40:
 				title = title[:40] + '...'
 
-			icon = QtGui.QIcon(Registry().getIcon(type))
-			if Registry().conformes(type, "org.peerdrive.folder"):
+			listing.append((title, link, Registry().conformes(type,
+				"org.peerdrive.folder"), QtGui.QIcon(Registry().getIcon(type))))
+
+		listing = sorted(listing, cmp=DocButton.__cmp)
+
+		for (title, link, folder, icon) in listing:
+			if folder:
 				m = menu.addMenu(icon, title)
 				m.aboutToShow.connect(lambda m=m, l=link: self.__fillMenu(m, l))
 			else:
 				a = menu.addAction(icon, title)
 				a.triggered.connect(lambda x,l=link,r=menuLink: showDocument(l, referrer=r))
+
+	@staticmethod
+	def __cmp((t1,l1,f1,i1), (t2,l2,f2,i2)):
+		ret = f2 - f1
+		if ret == 0:
+			ret = cmp(t1.lower(), t2.lower())
+		return ret
 
 
 class RevButton(QtGui.QToolButton):
