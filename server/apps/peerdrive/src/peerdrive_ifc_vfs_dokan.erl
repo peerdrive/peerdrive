@@ -178,8 +178,26 @@ create_directory(S, _From, FileName, _DFI) ->
 	end.
 
 
-open_directory(S, From, FileName, DFI) ->
-	create_file(S, From, FileName, ?GENERIC_READ, 0, ?OPEN_EXISTING, 0, DFI).
+open_directory(S, _From, FileName, _DFI) ->
+	case walk(FileName, S) of
+		{ok, Parent, Name, Ino, S2} ->
+			case get_vnode(Ino, S2) of
+				{ok, #vnode{attr=#vfs_attr{dir=true}}, S3} ->
+					opendir(Parent, Name, Ino, true, S3);
+
+				{ok, _, S3} ->
+					{reply, {error, ?ERROR_ACCESS_DENIED}, S3};
+
+				{error, Reason, S3} ->
+					{reply, {error, posix2win(Reason)}, S3}
+			end;
+
+		{stop, _, _, S2} ->
+			{reply, {error, ?ERROR_PATH_NOT_FOUND}, S2};
+
+		{error, Reason, S2} ->
+			{reply, {error, posix2win(Reason)}, S2}
+	end.
 
 
 close_file(S, _From, _FileName, DFI) ->
