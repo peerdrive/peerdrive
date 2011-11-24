@@ -7,6 +7,6 @@
 	{
 		protobuffs,
 		"0.6.*",
-		{git, "git://github.com/freke/erlang_protobuffs.git", {branch, "master"}}
+		{git, "https://github.com/freke/erlang_protobuffs.git", {branch, "master"}}
 	}
 ]}.
