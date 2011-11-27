@@ -20,67 +20,178 @@
 import sys, itertools
 from PyQt4 import QtCore, QtGui
 
-from peerdrive import struct
+from peerdrive import struct, Registry
 from peerdrive.connector import Connector, Watch
 from peerdrive.gui.widgets import DocButton, RevButton
+from peerdrive.gui.utils import showDocument, showProperties
 
 class Launchbox(QtGui.QDialog):
 	def __init__(self, parent=None):
 		super(Launchbox, self).__init__(parent)
 
-		self.setSizePolicy(
-			QtGui.QSizePolicy.Preferred,
-			QtGui.QSizePolicy.Minimum )
+		self.setSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Minimum)
 		self.progressWidgets = {}
-		self.progressContainer = QtGui.QWidget()
+		self.__idleMessage = QtGui.QLabel("PeerDrive is idle...")
+		self.__idleMessage.setAlignment(QtCore.Qt.AlignCenter)
 
 		self.progressLayout = QtGui.QVBoxLayout()
 		self.progressLayout.setMargin(0)
-		self.progressContainer.setLayout(self.progressLayout)
-
-		self.mainLayout = QtGui.QVBoxLayout()
-		self.mainLayout.setSizeConstraint(QtGui.QLayout.SetMinimumSize)
-		enum = Connector().enum()
-		for store in enum.allStores():
-			if not enum.isSystem(store):
-				self.mainLayout.addWidget(StoreWidget(store))
-
-		syncButton = QtGui.QPushButton("Synchronization")
-		syncButton.clicked.connect(lambda: SyncEditor().exec_())
-		setupLayout = QtGui.QHBoxLayout()
-		setupLayout.addWidget(syncButton)
-		setupLayout.addStretch()
-		hLine = QtGui.QFrame()
-		hLine.setFrameStyle(QtGui.QFrame.HLine | QtGui.QFrame.Raised)
-		self.mainLayout.addWidget(hLine)
-		self.mainLayout.addLayout(setupLayout)
-
-		hLine = QtGui.QFrame()
-		hLine.setFrameStyle(QtGui.QFrame.HLine | QtGui.QFrame.Raised)
-		self.mainLayout.addWidget(hLine)
-		self.mainLayout.addWidget(self.progressContainer)
-		self.mainLayout.addStretch()
-
-		self.setLayout(self.mainLayout)
-		self.setWindowTitle("PeerDrive launch box")
+		self.progressLayout.setSizeConstraint(QtGui.QLayout.SetMinimumSize)
+		self.progressLayout.addWidget(self.__idleMessage)
+		self.setLayout(self.progressLayout)
+		self.setWindowTitle("PeerDrive status")
 		self.setWindowIcon(QtGui.QIcon("icons/launch.png"))
 		self.setWindowFlags(QtCore.Qt.Window
 			| QtCore.Qt.WindowCloseButtonHint
 			| QtCore.Qt.WindowMinimizeButtonHint)
 
-		Connector().regProgressHandler(start=self.progressStart,
-			stop=self.progressStop)
+		self.__syncRulesAction = QtGui.QAction("Manage synchronization...", self)
+		self.__syncRulesAction.triggered.connect(lambda: SyncEditor().exec_())
+		self.__quitAction = QtGui.QAction("Quit", self)
+		self.__quitAction.triggered.connect(QtCore.QCoreApplication.instance().quit)
+		self.__restoreAction = QtGui.QAction("Show status", self)
+		self.__restoreAction.triggered.connect(lambda: self.setVisible(True))
 
-	def progressStart(self, tag, typ, src, dst, item=None):
-		widget = ProgressWidget(tag, typ, src, dst, item)
+		self.__trayIconMenu = QtGui.QMenu(self)
+		self.__trayIconMenu.aboutToShow.connect(self.__trayMenuShow)
+
+		self.__trayIcon = QtGui.QSystemTrayIcon(self)
+		self.__trayIcon.setContextMenu(self.__trayIconMenu)
+		self.__trayIcon.setIcon(QtGui.QIcon("icons/launch.png"))
+		self.__trayIcon.setToolTip("PeerDrive")
+		self.__trayIcon.activated.connect(self.__trayActivated)
+		self.__trayIcon.show()
+
+		Connector().regProgressHandler(start=self.__progressStart,
+			stop=self.__progressStop)
+
+	def __trayMenuShow(self):
+		self.__trayIconMenu.clear()
+		enum = Connector().enum()
+		for store in [s for s in enum.allStores() if not enum.isSystem(s)]:
+			if enum.isMounted(store):
+				try:
+					self.__addStoreMenu(store, enum.doc(store), enum.isRemovable(store))
+				except IOError:
+					pass
+			else:
+				action = self.__trayIconMenu.addAction("Mount "+store)
+				action.triggered.connect(lambda x,s=store: self.__mount(s))
+		self.__trayIconMenu.addSeparator()
+		self.__trayIconMenu.addAction(self.__syncRulesAction)
+		self.__trayIconMenu.addAction(self.__restoreAction)
+		self.__trayIconMenu.addSeparator()
+		self.__trayIconMenu.addAction(self.__quitAction)
+
+	def __trayActivated(self, reason):
+		if reason == QtGui.QSystemTrayIcon.Trigger:
+			self.setVisible(not self.isVisible())
+
+	def __addStoreMenu(self, store, storeDoc, removable):
+		l = struct.DocLink(storeDoc, storeDoc)
+		type = Connector().stat(l.rev(), [storeDoc]).type()
+		executables = Registry().getExecutables(type)
+		title = struct.readTitle(l)
+		if len(title) > 20:
+			title = title[:20] + '...'
+		title += ' ['+store+']'
+
+		menu = self.__trayIconMenu.addMenu(QtGui.QIcon("icons/uti/store.png"), title)
+
+		m = menu.addMenu(QtGui.QIcon("icons/uti/store.png"), title)
+		m.aboutToShow.connect(lambda m=m, l=l: self.__fillMenu(m, l))
+		menu.addSeparator()
+
+		action = menu.addAction("Open")
+		action.triggered.connect(lambda x,l=l: showDocument(l))
+		if len(executables) > 1:
+			openMenu = menu.addMenu("Open with")
+			for e in executables:
+				action = openMenu.addAction(e)
+				action.triggered.connect(lambda x,l=l,e=e: showDocument(l, executable=e))
+		menu.addSeparator()
+		if removable:
+			action = menu.addAction(QtGui.QIcon("icons/unmount.png"), "Unmount")
+			action.triggered.connect(lambda x,s=store: self.__unmount(s))
+		action = menu.addAction("Properties")
+		action.triggered.connect(lambda x,l=l: showProperties(l))
+
+	def __fillMenu(self, menu, menuLink):
+		menu.clear()
+		c = struct.Folder(menuLink)
+		listing = []
+		for (title, link) in c.items():
+			link.update()
+			try:
+				type = Connector().stat(link.rev()).type()
+			except IOError:
+				type = None
+
+			if not type:
+				continue
+
+			if len(title) > 40:
+				title = title[:40] + '...'
+
+			listing.append((title, link, Registry().conformes(type,
+				"org.peerdrive.folder"), QtGui.QIcon(Registry().getIcon(type))))
+
+		listing = sorted(listing, cmp=Launchbox.__cmp)
+
+		for (title, link, folder, icon) in listing:
+			if folder:
+				m = menu.addMenu(icon, title)
+				m.aboutToShow.connect(lambda m=m, l=link: self.__fillMenu(m, l))
+			else:
+				a = menu.addAction(icon, title)
+				a.triggered.connect(lambda x,l=link,r=menuLink: showDocument(l, referrer=r))
+
+	@staticmethod
+	def __cmp((t1,l1,f1,i1), (t2,l2,f2,i2)):
+		ret = f2 - f1
+		if ret == 0:
+			ret = cmp(t1.lower(), t2.lower())
+		return ret
+
+	def __mount(self, store):
+		try:
+			Connector().mount(store)
+		except IOError as e:
+			QtGui.QMessageBox.warning(self, store, 'Mount opertaion failed: ' +
+				str(e))
+
+	def __unmount(self, store):
+		try:
+			Connector().unmount(store)
+		except IOError as e:
+			QtGui.QMessageBox.warning(self, store, 'Unmount opertaion failed: ' +
+				str(e))
+
+	def __progressStart(self, tag, typ, src, dst, item=None):
+		self.progressLayout.removeWidget(self.__idleMessage)
+		self.__idleMessage.hide()
+		widget = ProgressWidget(tag, typ, src, dst, item, self.__trayIcon)
 		self.progressWidgets[tag] = widget
 		self.progressLayout.addWidget(widget)
 
-	def progressStop(self, tag):
+	def __progressStop(self, tag):
 		if tag in self.progressWidgets:
 			widget = self.progressWidgets[tag]
 			del self.progressWidgets[tag]
 			widget.remove()
+			if self.progressWidgets == {}:
+				self.progressLayout.addWidget(self.__idleMessage)
+				self.__idleMessage.show()
+
+	# reimplemented
+	def setVisible(self, visible):
+		self.__restoreAction.setEnabled(not visible)
+		super(Launchbox, self).setVisible(visible)
+
+	# reimplemented
+	def closeEvent(self, event):
+		self.hide()
+		event.ignore()
 
 
 class SyncEditor(QtGui.QDialog):
@@ -249,72 +360,15 @@ class SyncRuleWidget(QtGui.QWidget):
 		self.cleanup()
 		self.deleteLater()
 
-class StoreWidget(QtGui.QWidget):
-	class StoreWatch(Watch):
-		def __init__(self, doc, callback):
-			self.__callback = callback
-			super(StoreWidget.StoreWatch, self).__init__(Watch.TYPE_DOC, doc)
-
-		def triggered(self, cause):
-			if cause == Watch.EVENT_DISAPPEARED:
-				self.__callback()
-
-	def __init__(self, mountId, parent=None):
-		super(StoreWidget, self).__init__(parent)
-		self.mountId = mountId
-		self.watch = None
-
-		self.mountBtn = QtGui.QPushButton("")
-		self.storeBtn = DocButton(withText=True)
-		self.mountBtn.clicked.connect(self.mountUnmount)
-
-		layout = QtGui.QHBoxLayout()
-		layout.setMargin(0)
-		layout.addWidget(self.storeBtn)
-		layout.addStretch()
-		layout.addWidget(self.mountBtn)
-		self.setLayout(layout)
-
-		self.update()
-
-	def update(self):
-		if self.watch:
-			Connector().unwatch(self.watch)
-			self.watch = None
-
-		enum = Connector().enum()
-		self.mountBtn.setEnabled(enum.isRemovable(self.mountId))
-		if enum.isMounted(self.mountId):
-			doc = enum.doc(self.mountId)
-			self.mountBtn.setText("Unmount")
-			self.storeBtn.setDocument(doc, doc)
-			self.watch = StoreWidget.StoreWatch(doc, self.update)
-			Connector().watch(self.watch)
-			self.mounted = True
-		else:
-			self.mountBtn.setText("Mount")
-			self.storeBtn.setText(enum.name(self.mountId))
-			self.mounted = False
-
-	def mountUnmount(self):
-		try:
-			if self.mounted:
-				Connector().unmount(self.mountId)
-			else:
-				Connector().mount(self.mountId)
-				self.update()
-		except IOError as e:
-			QtGui.QMessageBox.warning(self, 'Error', 'Mount opertaion failed: ' +
-				str(e))
-
-
 class ProgressWidget(QtGui.QFrame):
-	def __init__(self, tag, typ, fromStore, toStore, item):
+	def __init__(self, tag, typ, fromStore, toStore, item, trayIcon):
 		super(ProgressWidget, self).__init__()
 		self.tag = tag
 		self.__type = typ
 		self.__state = Connector().PROGRESS_RUNNING
-		self.__store = fromStore
+		self.__fromStore = fromStore
+		self.__toStore = toStore
+		self.__trayIcon = trayIcon
 
 		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
 
@@ -335,14 +389,17 @@ class ProgressWidget(QtGui.QFrame):
 		self.__pauseBtn = QtGui.QToolButton()
 		self.__pauseBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
 		self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
+		self.__pauseBtn.setToolTip("Pause")
 		self.__pauseBtn.clicked.connect(self.__pause)
 		self.__stopBtn = QtGui.QToolButton()
 		self.__stopBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
 		self.__stopBtn.setIcon(QtGui.QIcon("icons/progress-stop.png"))
+		self.__stopBtn.setToolTip("Abort")
 		self.__stopBtn.clicked.connect(self.__stop)
 		self.__skipBtn = QtGui.QToolButton()
 		self.__skipBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
 		self.__skipBtn.setIcon(QtGui.QIcon("icons/progress-skip.png"))
+		self.__skipBtn.setToolTip("Skip")
 		self.__skipBtn.clicked.connect(self.__skip)
 		self.__skipBtn.hide()
 		self.__errorMsg = QtGui.QLabel()
@@ -384,18 +441,34 @@ class ProgressWidget(QtGui.QFrame):
 		self.__skipBtn.setVisible(state == Connector().PROGRESS_ERROR)
 		if state == Connector().PROGRESS_RUNNING:
 			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
+			self.__pauseBtn.setToolTip("Pause")
 			if self.__type == Connector().PROGRESS_SYNC:
 				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-sync.png"))
 			else:
 				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
 		elif state == Connector().PROGRESS_PAUSED:
 			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-start.png"))
+			self.__pauseBtn.setToolTip("Resume")
 			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-pause.png"))
 		elif state == Connector().PROGRESS_ERROR:
 			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-retry.png"))
+			self.__pauseBtn.setToolTip("Retry")
 			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-error.png"))
-			self.__errorMsg.setText("Error '" + err_code[1] + "' while processing '" +
-				struct.readTitle(struct.RevLink(self.__store, err_rev), 'unknown document') + "'!")
+			doc = struct.readTitle(struct.RevLink(self.__fromStore, err_rev),
+				'unknown document')
+			self.__errorMsg.setText("Error '" + err_code[1] + "' while processing '"
+				+ doc + "'!")
+			if self.__type == Connector().PROGRESS_SYNC:
+				title = "Synchronization error"
+				message = "synchronizing"
+			else:
+				title = "Replication error"
+				message = "replicating"
+			message = "Error '" + err_code[1] + "' while " + message + " '" + doc + \
+				"' \nfrom '" + struct.readTitle(struct.DocLink(self.__fromStore, self.__fromStore), "unknown store") + \
+				"' to '" + struct.readTitle(struct.DocLink(self.__toStore, self.__toStore), "unknown store") + \
+				"'!"
+			self.__trayIcon.showMessage(title, message, QtGui.QSystemTrayIcon.Warning)
 
 	def __pause(self):
 		if self.__state == Connector().PROGRESS_RUNNING:
@@ -466,6 +539,7 @@ class SyncRules(object):
 
 
 app = QtGui.QApplication(sys.argv)
+app.setQuitOnLastWindowClosed(False)
 dialog = Launchbox()
-sys.exit(dialog.exec_())
+sys.exit(app.exec_())
 
