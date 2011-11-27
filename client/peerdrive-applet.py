@@ -40,7 +40,7 @@ class Launchbox(QtGui.QDialog):
 		self.progressLayout.addWidget(self.__idleMessage)
 		self.setLayout(self.progressLayout)
 		self.setWindowTitle("PeerDrive status")
-		self.setWindowIcon(QtGui.QIcon("icons/launch.png"))
+		self.setWindowIcon(QtGui.QIcon("icons/peerdrive.png"))
 		self.setWindowFlags(QtCore.Qt.Window
 			| QtCore.Qt.WindowCloseButtonHint
 			| QtCore.Qt.WindowMinimizeButtonHint)
@@ -57,7 +57,7 @@ class Launchbox(QtGui.QDialog):
 
 		self.__trayIcon = QtGui.QSystemTrayIcon(self)
 		self.__trayIcon.setContextMenu(self.__trayIconMenu)
-		self.__trayIcon.setIcon(QtGui.QIcon("icons/launch.png"))
+		self.__trayIcon.setIcon(QtGui.QIcon("icons/peerdrive.png"))
 		self.__trayIcon.setToolTip("PeerDrive")
 		self.__trayIcon.activated.connect(self.__trayActivated)
 		self.__trayIcon.show()

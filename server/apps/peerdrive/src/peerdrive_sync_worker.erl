@@ -117,7 +117,7 @@ handle_info({work_req, Req}, State, #state{monitor=Monitor} = S) ->
 					{next_state, working, S, 0};
 				{resume, true} ->
 					peerdrive_work:resume(Monitor),
-					{next_state, working, skip(S), 0};
+					skip(S);
 				_ ->
 					{next_state, Halted, S}
 			end
@@ -212,10 +212,18 @@ error(changed, S) ->
 
 
 skip(#state{backlog=[]} = S) ->
-	S;
+	{next_state, working, S, 0};
 
-skip(#state{backlog=[_|Backlog], numdone=Done} = S) ->
-	S#state{backlog=Backlog, numdone=Done+1}.
+skip(#state{backlog=[{_Doc, SeqNum} | Backlog], numdone=Done} = S) ->
+	case peerdrive_store:sync_set_anchor(S#state.from, S#state.tosid, SeqNum) of
+		ok ->
+			S2 = S#state{backlog=Backlog, numdone=Done+1},
+			{next_state, working, S2, 0};
+
+		{error, Reason} ->
+			peerdrive_work:error(S#state.monitor, [{code, Reason}]),
+			{next_state, error, S}
+	end.
 
 
 sync_step({Doc, SeqNum}, S) ->
