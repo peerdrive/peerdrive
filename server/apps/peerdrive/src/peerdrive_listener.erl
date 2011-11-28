@@ -48,8 +48,7 @@ init({ServletSup, Port, Options}) ->
 		_ ->
 			[]
 	end,
-	ListenOpt2 = [binary, {active, false}, {packet, 2}, {keepalive, true} |
-		ListenOpt1],
+	ListenOpt2 = [binary, {active, false}, {packet, 2} | ListenOpt1],
 	case gen_tcp:listen(Port, ListenOpt2) of
 		{ok, ListenSock} ->
 			start_servlets(ServletSup, ?START_SERVLETS, ListenSock),

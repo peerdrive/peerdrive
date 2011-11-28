@@ -33,7 +33,7 @@ server(Module, Listener, ListenSocket, Args) ->
 		{ok, Socket} ->
 			peerdrive_listener:servlet_occupied(Listener),
 			State = Module:init(Socket, Args),
-			inet:setopts(Socket, [{nodelay, true}]),
+			inet:setopts(Socket, [{nodelay, true}, {keepalive, true}]),
 			loop(Module, Socket, State);
 
 		_Other ->
