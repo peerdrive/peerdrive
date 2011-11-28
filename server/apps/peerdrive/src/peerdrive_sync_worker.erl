@@ -78,12 +78,13 @@ init({Mode, FromSId, ToSId}) ->
 	end.
 
 
-terminate(Reason, _State, #state{from=FromStore, tosid=ToSId} = S) ->
+terminate(Reason, State, #state{from=FromStore, tosid=ToSId} = S) ->
 	error_logger:info_report([{sync, stop}, {from, S#state.fromsid},
 		{to, S#state.tosid}, {reason, Reason}]),
 	peerdrive_work:delete(S#state.monitor),
 	peerdrive_vol_monitor:deregister_proc({S#state.fromsid, ToSId}),
-	FromStore == undefined orelse peerdrive_store:sync_finish(FromStore, ToSId).
+	(FromStore == undefined) or (State == waiting)
+		orelse peerdrive_store:sync_finish(FromStore, ToSId).
 
 
 handle_info({trigger_rem_store, FromSId}, _, #state{fromsid=FromSId} = S) ->
@@ -156,6 +157,7 @@ waiting(changed, S) ->
 	} = S,
 	case peerdrive_store:sync_get_changes(FromStore, ToSId) of
 		{ok, []} ->
+			peerdrive_store:sync_finish(FromStore, ToSId),
 			{next_state, waiting, S};
 		{ok, Backlog} ->
 			peerdrive_work:start(Monitor),
@@ -172,6 +174,7 @@ working(timeout, #state{backlog=[]} = S) ->
 	#state{from=FromStore, tosid=ToSId, monitor=Monitor} = S,
 	case peerdrive_store:sync_get_changes(FromStore, ToSId) of
 		{ok, []} ->
+			peerdrive_store:sync_finish(FromStore, ToSId),
 			peerdrive_work:stop(Monitor),
 			{next_state, waiting, S};
 
