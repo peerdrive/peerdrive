@@ -123,9 +123,10 @@ handle_call({watch, Type, Guid}, From, #state{watches=Watches} = S) ->
 
 		error ->
 			NewPidSet = sets:add_element(Client, sets:new()),
-			NewStoreSet =  case Type of
-				doc -> doc_population(Guid);
-				rev -> rev_population(Guid)
+			NewStoreSet = if
+				Guid == <<0:128>> -> sets:new();
+				Type == doc       -> doc_population(Guid);
+				Type == rev       -> rev_population(Guid)
 			end,
 			dict:store(Key, {NewStoreSet, NewPidSet}, Watches)
 	end,
@@ -233,6 +234,13 @@ trigger_dec(Type, Store, Uuid, Watches) ->
 
 
 trigger_add_store(StoreGuid, Watches) ->
+	Root = <<0:128>>,
+	case dict:find({doc, Root}, Watches) of
+		{ok, {_StoreSet, RootPidSet}} ->
+			fire_trigger(modified, doc, Root, RootPidSet);
+		error ->
+			ok
+	end,
 	case peerdrive_volman:store(StoreGuid) of
 		{ok, StorePid} ->
 			dict:map(
@@ -274,6 +282,13 @@ trigger_add_store(StoreGuid, Watches) ->
 
 
 trigger_rem_store(StoreGuid, Watches) ->
+	Root = <<0:128>>,
+	case dict:find({doc, Root}, Watches) of
+		{ok, {_StoreSet, RootPidSet}} ->
+			fire_trigger(modified, doc, Root, RootPidSet);
+		error ->
+			ok
+	end,
 	dict:map(
 		fun({Type, Hash}, {StoreSet, PidSet}) ->
 			case sets:is_element(StoreGuid, StoreSet) of
