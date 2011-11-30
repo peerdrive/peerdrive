@@ -655,6 +655,8 @@ class Watch(object):
 	TYPE_DOC = pb.WatchInd.doc
 	TYPE_REV = pb.WatchInd.rev
 
+	ROOT_DOC = '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0'
+
 	def __init__(self, typ, h):
 		self.__typ = typ
 		self.__h = _checkUuid(h)

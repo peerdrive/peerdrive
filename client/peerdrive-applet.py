@@ -26,6 +26,23 @@ from peerdrive.gui.widgets import DocButton, RevButton
 from peerdrive.gui.utils import showDocument, showProperties
 
 class Launchbox(QtGui.QDialog):
+
+	class RootWatch(Watch):
+		def __init__(self, trayIcon):
+			self.__trayIcon = trayIcon
+			enum = Connector().enum()
+			self.__mounted = set([s for s in enum.allStores() if enum.isMounted(s)])
+			Watch.__init__(self, Watch.TYPE_DOC, Watch.ROOT_DOC)
+
+		def triggered(self, cause):
+			enum = Connector().enum()
+			mounted = set([s for s in enum.allStores() if enum.isMounted(s)])
+			for s in (self.__mounted - mounted):
+				self.__trayIcon.showMessage("Unmount", "Store '"+s+"' has been unmounted")
+			for s in (mounted - self.__mounted):
+				self.__trayIcon.showMessage("Mount", "Store '"+s+"' has been mounted")
+			self.__mounted = mounted
+
 	def __init__(self, parent=None):
 		super(Launchbox, self).__init__(parent)
 
@@ -61,6 +78,9 @@ class Launchbox(QtGui.QDialog):
 		self.__trayIcon.setToolTip("PeerDrive")
 		self.__trayIcon.activated.connect(self.__trayActivated)
 		self.__trayIcon.show()
+
+		self.__watch = Launchbox.RootWatch(self.__trayIcon)
+		Connector().watch(self.__watch)
 
 		Connector().regProgressHandler(start=self.__progressStart,
 			stop=self.__progressStop)
