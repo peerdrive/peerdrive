@@ -538,11 +538,13 @@ check_expired(#state{known=Known}=S) ->
 
 commit_prerevs(Expired) ->
 	lists:foreach(
-		fun({Store, Doc, Rev}) -> commit_prerev(Store, Doc, Rev) end,
+		fun({Store, Doc, Rev}) ->
+			commit_prerev(Store, Doc, Rev, has_changed(Store, Doc, Rev))
+		end,
 		Expired).
 
 
-commit_prerev(Store, Doc, Rev) ->
+commit_prerev(Store, Doc, Rev, true) ->
 	case peerdrive_broker:resume(Store, Doc, Rev, undefined) of
 		{ok, Handle} ->
 			try
@@ -557,7 +559,10 @@ commit_prerev(Store, Doc, Rev) ->
 
 		{error, Reason} ->
 			error_logger:warning_msg("FUSE: Could not resume: ~w~n", [Reason])
-	end.
+	end;
+
+commit_prerev(Store, Doc, Rev, false) ->
+	peerdrive_broker:forget(Store, Doc, Rev).
 
 
 commit_prerev_loop(Store, Doc, Handle) ->
@@ -579,3 +584,29 @@ commit_prerev_loop(Store, Doc, Handle) ->
 			error_logger:warning_msg("FUSE: Could not commit: ~w~n", [Reason])
 	end.
 
+
+has_changed(Store, Doc, PreRev) ->
+	case peerdrive_broker:lookup_doc(Doc, [Store]) of
+		{[{PreRev, _}], _AllPreRevs} ->
+			false;
+
+		{[{Rev, _}], _AllPreRevs} ->
+			try
+				stat_rev(Store, Rev) =/= stat_rev(Store, PreRev)
+			catch
+				throw:_ ->
+					true % make a safe choice
+			end;
+
+		{[], []} ->
+			true % make a safe choice
+	end.
+
+
+stat_rev(Store, Rev) ->
+	case peerdrive_broker:stat(Rev, [Store]) of
+		{ok, #rev_stat{parts=Parts}} ->
+			ordsets:from_list([ {FCC, PId} || {FCC, _Size, PId} <- Parts ]);
+		{error, _Reason} ->
+			throw(error)
+	end.
