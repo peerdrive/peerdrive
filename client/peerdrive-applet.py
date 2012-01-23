@@ -117,26 +117,12 @@ class Launchbox(QtGui.QDialog):
 		title += ' ['+store+']'
 
 		menu = self.__trayIconMenu.addMenu(QtGui.QIcon("icons/uti/store.png"), title)
-
-		m = menu.addMenu(QtGui.QIcon("icons/uti/store.png"), title)
-		m.aboutToShow.connect(lambda m=m, l=l: self.__fillMenu(m, l))
-		menu.addSeparator()
-
-		action = menu.addAction("Open")
-		action.triggered.connect(lambda x,l=l: showDocument(l))
-		if len(executables) > 1:
-			openMenu = menu.addMenu("Open with")
-			for e in executables:
-				action = openMenu.addAction(e)
-				action.triggered.connect(lambda x,l=l,e=e: showDocument(l, executable=e))
-		menu.addSeparator()
 		if removable:
-			action = menu.addAction(QtGui.QIcon("icons/unmount.png"), "Unmount")
-			action.triggered.connect(lambda x,s=store: self.__unmount(s))
-		action = menu.addAction("Properties")
-		action.triggered.connect(lambda x,l=l: showProperties(l))
+			menu.aboutToShow.connect(lambda m=menu, l=l, s=store: self.__fillMenu(m, l, s))
+		else:
+			menu.aboutToShow.connect(lambda m=menu, l=l: self.__fillMenu(m, l))
 
-	def __fillMenu(self, menu, menuLink):
+	def __fillMenu(self, menu, menuLink, store=None):
 		menu.clear()
 		c = struct.Folder(menuLink)
 		listing = []
@@ -165,6 +151,26 @@ class Launchbox(QtGui.QDialog):
 			else:
 				a = menu.addAction(icon, title)
 				a.triggered.connect(lambda x,l=link,r=menuLink: showDocument(l, referrer=r))
+
+		menu.addSeparator()
+		action = menu.addAction("Open")
+		action.triggered.connect(lambda x,l=menuLink: showDocument(l))
+		try:
+			type = Connector().stat(menuLink.rev(), [menuLink.store()]).type()
+			executables = Registry().getExecutables(type)
+		except IOError:
+			executables = []
+		if len(executables) > 1:
+			openMenu = menu.addMenu("Open with")
+			for e in executables:
+				action = openMenu.addAction(e)
+				action.triggered.connect(lambda x,l=menuLink,e=e: showDocument(l, executable=e))
+		menu.addSeparator()
+		if store:
+			action = menu.addAction(QtGui.QIcon("icons/unmount.png"), "Unmount")
+			action.triggered.connect(lambda x,s=store: self.__unmount(s))
+		action = menu.addAction("Properties")
+		action.triggered.connect(lambda x,l=menuLink: showProperties(l))
 
 	@staticmethod
 	def __cmp((t1,l1,f1,i1), (t2,l2,f2,i2)):
