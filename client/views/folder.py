@@ -20,6 +20,7 @@
 import os, os.path, copy
 from PyQt4 import QtCore, QtGui
 from datetime import datetime
+import struct as pystruct
 
 from peerdrive import Connector, Registry
 from peerdrive import struct, importer, fuse
@@ -52,6 +53,29 @@ def makeProgressHelper(p):
 			raise AbortException
 
 	return progressHelper
+
+def getFileNamesFromMime(mime):
+	if mime.hasFormat("FileGroupDescriptorW"):
+		data = str(mime.data("FileGroupDescriptorW"))
+		(count,) = pystruct.unpack_from("I", data)
+		pos = pystruct.calcsize("I")
+		result = []
+		for i in xrange(count):
+			(name,) = pystruct.unpack_from("72x520s", data, pos)
+			result.append(name.decode('utf16').rstrip('\x00'))
+			pos += pystruct.calcsize("72x520s")
+		return result
+	if mime.hasFormat("FileGroupDescriptor"):
+		data = str(mime.data("FileGroupDescriptor"))
+		(count,) = pystruct.unpack_from("I", data)
+		pos = pystruct.calcsize("I")
+		result = []
+		for i in xrange(count):
+			(name,) = pystruct.unpack_from("72x260s", data, pos)
+			result.append(name.rstrip('\x00').decode('latin-1'))
+			pos += pystruct.calcsize("72x260s")
+		return result
+	return []
 
 class MetaColumnInfo(object):
 	def __init__(self, key, spec):
@@ -582,6 +606,9 @@ class FolderModel(QtCore.QAbstractTableModel):
 		types = QtCore.QStringList()
 		types << struct.LINK_MIME_TYPE
 		types << "text/uri-list"
+		types << "application/x-qt-windows-mime;value=\"FileContents\""
+		types << "application/x-qt-windows-mime;value=\"FileGroupDescriptor\""
+		types << "application/x-qt-windows-mime;value=\"FileGroupDescriptorW\""
 		return types
 
 	def mimeData(self, indexes):
@@ -612,6 +639,8 @@ class FolderModel(QtCore.QAbstractTableModel):
 			return self.__dropLinks(struct.loadMimeData(data))
 		if data.hasFormat('text/uri-list'):
 			return self.__dropFile(data, parent)
+		if data.hasFormat('FileContents'):
+			return self.__dropContents(data)
 
 		return False
 
@@ -731,6 +760,35 @@ class FolderModel(QtCore.QAbstractTableModel):
 						self.__parent.save()
 		else:
 			return False
+
+		return True
+
+	def __dropContents(self, mime):
+		# unfortunately Qt will only return the first object and nothing
+		# in case of Outlook messages
+		data = str(mime.data('FileContents'))
+		if len(data) == 0:
+			return False
+
+		name = getFileNamesFromMime(mime)[0]
+		ext  = os.path.splitext(name)[1].lower()
+		uti  = Registry().getUtiFromExtension(ext)
+		spec = [
+			('META', struct.dumps({
+				"org.peerdrive.annotation" : {
+					"title"   : name,
+					"comment" : "Import by drag-n-drop"
+				}
+			})),
+			('FILE', data)
+		]
+		handle = importer.importObject(self.__store, uti, spec, [])
+		if handle:
+			try:
+				self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
+				self.__parent.save()
+			finally:
+				handle.close()
 
 		return True
 
