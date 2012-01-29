@@ -21,7 +21,7 @@ from PyQt4 import QtCore, QtGui#, QtOpenGL
 from datetime import datetime
 import itertools, optparse, copy, pickle, os.path
 
-from peerdrive import Connector, Registry, struct, connector
+from peerdrive import Connector, Registry, struct, connector, settingsPath
 from peerdrive.gui import utils
 from peerdrive.gui.widgets import DocumentView, DocButton
 
@@ -808,9 +808,10 @@ class BrowserWindow(QtGui.QMainWindow):
 		self.__updateStoreButtons()
 
 	def __saveSettings(self):
-		if not os.path.exists('.settings'):
-			os.makedirs('.settings')
-		with open(".settings/browser-" + self.__viewHandler.getName(), 'w') as f:
+		if not os.path.exists(settingsPath()):
+			os.makedirs(settingsPath())
+		path = os.path.join(settingsPath(), "browser-" + self.__viewHandler.getName())
+		with open(path, 'w') as f:
 			settings = { }
 			settings["resx"] = self.size().width()
 			settings["resy"] = self.size().height()
@@ -819,7 +820,7 @@ class BrowserWindow(QtGui.QMainWindow):
 
 	def __loadSettings(self):
 		settings = { }
-		path = ".settings/browser-" + self.__viewHandler.getName()
+		path = os.path.join(settingsPath(), "browser-" + self.__viewHandler.getName())
 		try:
 			if os.path.isfile(path):
 				with open(path, 'r') as f:
