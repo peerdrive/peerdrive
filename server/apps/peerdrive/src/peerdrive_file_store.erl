@@ -65,7 +65,6 @@ init({Id, Path, Name}) ->
 			},
 			S2 = load_store(Id, S),
 			S3 = check_root_doc(Name, S2),
-			peerdrive_volman:reg_store(Id, S3#state.sid),
 			process_flag(trap_exit, true),
 			{ok, S3};
 

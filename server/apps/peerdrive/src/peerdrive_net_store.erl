@@ -26,7 +26,7 @@
 -include("peerdrive_netstore_pb.hrl").
 -include("utils.hrl").
 
--record(state, {socket, id, requests, guid, mps, synclocks}).
+-record(state, {socket, requests, guid, mps, synclocks}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -34,7 +34,7 @@
 
 start_link(Id, {Address, Port, Name}) ->
 	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
-	gen_server:start_link({local, RegId}, ?MODULE, {Id, Address, Port, Name}, []).
+	gen_server:start_link({local, RegId}, ?MODULE, {Address, Port, Name}, []).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -53,7 +53,7 @@ io_request(NetStore, Request, Body) ->
 %% Gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Id, Address, Port, Name}) ->
+init({Address, Port, Name}) ->
 	Options = [binary, {packet, 2}, {active, false}, {nodelay, true},
 		{keepalive, true}],
 	case gen_tcp:connect(Address, Port, Options) of
@@ -61,7 +61,6 @@ init({Id, Address, Port, Name}) ->
 			process_flag(trap_exit, true),
 			S = #state{
 				socket    = Socket,
-				id        = Id,
 				requests  = gb_trees:empty(),
 				synclocks = dict:new()
 			},
@@ -205,7 +204,7 @@ handle_cast(_Request, State) -> {noreply, State}.
 %% Request handlers
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_init(Name, #state{id=Id, socket=Socket} = S) ->
+do_init(Name, #state{socket=Socket} = S) ->
 	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=0, minor=0,
 		store=atom_to_binary(Name, utf8)}),
 	InitReq = <<0:32, ?INIT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
@@ -234,7 +233,6 @@ do_init(Name, #state{id=Id, socket=Socket} = S) ->
 		S2 = case InitCnf of
 			#initcnf{major=0, minor=0, max_packet_size=MaxPacketSize, sid=SId} ->
 				?ASSERT_GUID(SId),
-				peerdrive_volman:reg_store(Id, SId),
 				S#state{guid=SId, mps=MaxPacketSize};
 			#initcnf{} ->
 				throw({error, erpcmismatch})

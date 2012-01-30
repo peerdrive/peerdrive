@@ -18,7 +18,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0]).
--export([reg_store/2, enum/0, stores/0, store/1, mount/1, unmount/1]).
+-export([enum/0, stores/0, store/1, mount/1, unmount/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % specs:  [{Id, Descr, Disposition, Module, Args}]
@@ -39,15 +39,6 @@
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
-
-%% @doc Register a store.
-%%
-%% Must be called by each store when it was initialized. The volman will link to
-%% the process to trap its exit. No explicit unregistration is needed.
-%%
-%% @spec reg_store(Id, Guid, Interface) -> none()
-reg_store(Id, Guid) ->
-	gen_server:cast(?MODULE, {reg, {self(), Id, Guid}}).
 
 %% @doc Enumerate all known stores
 %%
@@ -96,29 +87,21 @@ unmount(StoreGuid) ->
 init([]) ->
 	process_flag(trap_exit, true),
 	Specs = get_store_specs(),
-	case start_permanent_stores(Specs) of
-		ok ->
-			case have_system_store(Specs) of
-				true ->
-					{ok, #state{specs=Specs, stores=[]}};
-				false ->
-					{stop, nosysstore}
+	case have_system_store(Specs) of
+		true ->
+			case start_permanent_stores(Specs, #state{specs=Specs, stores=[]}) of
+				{ok, S} ->
+					{ok, S};
+				{error, Reason} ->
+					{stop, Reason}
 			end;
 
-		{error, Reason} ->
-			{stop, Reason}
+		false ->
+			{stop, nosysstore}
 	end.
 
-handle_cast({reg, Info}, #state{stores=Stores, specs=Specs} = S) ->
-	{Pid, _Id, Guid} = Info,
-	link(Pid),
-	peerdrive_vol_monitor:trigger_add_store(Guid),
-	NewStores = lists:sort(
-		fun({_, IdA, _}, {_, IdB, _}) ->
-			rank(IdA, Specs) =< rank(IdB, Specs)
-		end,
-		[Info|Stores]),
-	{noreply, S#state{stores=NewStores}}.
+handle_cast({reg, Info}, S) ->
+	{noreply, add_store(Info, S)}.
 
 
 % returns [{Id, Descr, Guid, [Tag]}]
@@ -231,14 +214,17 @@ get_store_specs() ->
 	end.
 
 
-start_permanent_stores([]) ->
-	ok;
-start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs]) ->
+start_permanent_stores([], S) ->
+	{ok, S};
+
+start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs], S) ->
 	case proplists:is_defined(removable, Disposition) of
 		false ->
 			case peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args) of
-				{ok, _Pid} ->
-					start_permanent_stores(Specs);
+				{ok, Pid} ->
+					Guid = peerdrive_store:guid(Pid),
+					S2 = add_store({Pid, Id, Guid}, S),
+					start_permanent_stores(Specs, S2);
 
 				{error, Error} ->
 					{error, {{Id, Disposition, Module, Args}, Error}}
@@ -246,8 +232,8 @@ start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs]) ->
 
 		true ->
 			% try to mount the store but don't care if it failed
-			peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args),
-			start_permanent_stores(Specs)
+			spawn(fun() -> do_mount(Id, Disposition, Module, Args) end),
+			start_permanent_stores(Specs, S)
 	end.
 
 
@@ -283,10 +269,22 @@ check_store_spec(_) ->
 	false.
 
 
+add_store({Pid, _Id, Guid} = Info, #state{stores=Stores, specs=Specs} = S) ->
+	link(Pid),
+	peerdrive_vol_monitor:trigger_add_store(Guid),
+	NewStores = lists:sort(
+		fun({_, IdA, _}, {_, IdB, _}) ->
+			rank(IdA, Specs) =< rank(IdB, Specs)
+		end,
+		[Info|Stores]),
+	S#state{stores=NewStores}.
+
+
 do_mount(Id, Disposition, Module, Args) ->
 	case peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args) of
 		{ok, Pid} ->
 			Guid = peerdrive_store:guid(Pid),
+			gen_server:cast(?MODULE, {reg, {Pid, Id, Guid}}),
 			{ok, Guid};
 		Else ->
 			Else
