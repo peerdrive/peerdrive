@@ -15,25 +15,25 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_ifc_netstore).
--export([init/2, handle_packet/2, handle_info/2, terminate/1]).
+-export([init/1, handle_packet/2, handle_info/2, terminate/1]).
 
 -include("store.hrl").
 -include("netstore.hrl").
 -include("peerdrive_netstore_pb.hrl").
 -include("utils.hrl").
 
--record(state, {socket, handles, next, stores, store_pid, store_uuid}).
--record(retpath, {socket, req, ref}).
+-record(state, {handles, next, stores, store_pid, store_uuid}).
+-record(retpath, {servlet, req, ref}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Servlet callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Socket, Options) ->
+init(Options) ->
 	process_flag(trap_exit, true),
 	peerdrive_vol_monitor:register_proc(self()),
 	Stores = proplists:get_value(stores, Options, []),
-	#state{socket=Socket, handles=dict:new(), next=0, stores=Stores}.
+	#state{handles=dict:new(), next=0, stores=Stores}.
 
 
 terminate(State) ->
@@ -43,6 +43,9 @@ terminate(State) ->
 		ok,
 		State#state.handles).
 
+
+handle_info({send, Data}, S) ->
+	{reply, Data, S};
 
 handle_info({done, Handle}, S) ->
 	{ok, S#state{handles=dict:erase(Handle, S#state.handles)}};
@@ -55,8 +58,7 @@ handle_info({Event, Store, Element}, S) when (Event == trigger_add_rev) or
                                              (Event == trigger_add_doc) or
                                              (Event == trigger_rm_doc) or
                                              (Event == trigger_mod_doc) ->
-	do_trigger(Event, Store, Element, S),
-	{ok, S};
+	do_trigger(Event, Store, Element, S);
 
 handle_info({trigger_rem_store, StoreGuid}, #state{store_uuid=Uuid}=S) ->
 	case StoreGuid of
@@ -83,29 +85,25 @@ handle_info({gen_event_EXIT, _Handler, _Reason}, S) ->
 	{ok, S}.
 
 
-handle_packet(Packet, #state{socket=Socket, store_pid=Store} = S) ->
+handle_packet(Packet, #state{store_pid=Store} = S) ->
 	<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>> = Packet,
-	RetPath = #retpath{socket=Socket, req=Request, ref=Ref},
+	RetPath = #retpath{servlet=self(), req=Request, ref=Ref},
 	%io:format("[~w] Ref:~w Request:~w Body:~w~n", [self(), Ref, Request, Body]),
 	case Request of
 		?INIT_MSG ->
 			do_init(Body, RetPath, S);
 
 		?STATFS_MSG ->
-			handle(Body, RetPath, Store, fun do_statfs/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_statfs/2, S);
 
 		?LOOKUP_MSG ->
-			handle(Body, RetPath, Store, fun do_loopup/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_loopup/2, S);
 
 		?CONTAINS_MSG ->
-			handle(Body, RetPath, Store, fun do_contains/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_contains/2, S);
 
 		?STAT_MSG ->
-			handle(Body, RetPath, Store, fun do_stat/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_stat/2, S);
 
 		?PEEK_MSG ->
 			start_worker(S, Body, RetPath, fun do_peek/3, fun io_handler/3);
@@ -123,16 +121,13 @@ handle_packet(Packet, #state{socket=Socket, store_pid=Store} = S) ->
 			start_worker(S, Body, RetPath, fun do_resume/3, fun io_handler/3);
 
 		?FORGET_MSG ->
-			handle(Body, RetPath, Store, fun do_forget/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_forget/2, S);
 
 		?DELETE_DOC_MSG ->
-			handle(Body, RetPath, Store, fun do_delete_doc/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_delete_doc/2, S);
 
 		?DELETE_REV_MSG ->
-			handle(Body, RetPath, Store, fun do_delete_rev/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_delete_rev/2, S);
 
 		?PUT_DOC_START_MSG ->
 			start_worker(S, Body, RetPath, fun do_put_doc_start/3, fun put_doc_handler/3);
@@ -144,16 +139,13 @@ handle_packet(Packet, #state{socket=Socket, store_pid=Store} = S) ->
 			start_worker(S, Body, RetPath, fun do_put_rev_start/3, fun put_rev_handler/3);
 
 		?SYNC_GET_CHANGES_MSG ->
-			handle(Body, RetPath, Store, fun do_sync_get_changes/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_sync_get_changes/2, S);
 
 		?SYNC_SET_ANCHOR_MSG ->
-			handle(Body, RetPath, Store, fun do_sync_set_anchor/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_sync_set_anchor/2, S);
 
 		?SYNC_FINISH_MSG ->
-			handle(Body, RetPath, Store, fun do_sync_finish/2),
-			{ok, S};
+			handle(Body, RetPath, Store, fun do_sync_finish/2, S);
 
 		_ ->
 			{{1, Handle}, _} = protobuffs:decode(Body, uint32),
@@ -167,13 +159,13 @@ handle_packet(Packet, #state{socket=Socket, store_pid=Store} = S) ->
 %% Request handling functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_trigger(Event, SId, Element, #state{socket=Socket, store_uuid=SId}) ->
+do_trigger(Event, SId, Element, #state{store_uuid=SId} = S) ->
 	Ind = peerdrive_netstore_pb:encode_triggerind(
 		#triggerind{event=Event, element=Element}),
-	send_indication(Socket, ?TRIGGER_MSG, Ind);
+	send_indication(?TRIGGER_MSG, Ind, S);
 
-do_trigger(_Event, _SId, _Element, _S) ->
-	ok.
+do_trigger(_Event, _SId, _Element, S) ->
+	{ok, S}.
 
 
 do_init(Body, RetPath, #state{store_pid=undefined, stores=Stores} = S) ->
@@ -192,17 +184,14 @@ do_init(Body, RetPath, #state{store_pid=undefined, stores=Stores} = S) ->
 		S2 = S#state{store_pid=Pid, store_uuid=SId},
 		Cnf = peerdrive_netstore_pb:encode_initcnf(
 			#initcnf{major=0, minor=0, sid=SId}),
-		send_reply(RetPath, Cnf),
-		{ok, S2}
+		{reply, send_reply(RetPath, Cnf), S2}
 	catch
 		throw:Error ->
-			send_error(RetPath, Error),
-			{stop, S}
+			{stop, send_error(RetPath, Error), S}
 	end;
 
 do_init(_Body, RetPath, S) ->
-	send_error(RetPath, {error, ebadrpc}),
-	{stop, S}.
+	{stop, send_error(RetPath, {error, ebadrpc}), S}.
 
 
 do_statfs(_Body, Store) ->
@@ -646,12 +635,13 @@ check(Result) ->
 	Result.
 
 
-handle(Body, RetPath, Store, Fun) ->
-	try
+handle(Body, RetPath, Store, Fun, S) ->
+	Reply = try
 		send_reply(RetPath, Fun(Body, Store))
 	catch
 		throw:Error -> send_error(RetPath, Error)
-	end.
+	end,
+	{reply, Reply, S}.
 
 
 send_error(RetPath, {error, Error}) ->
@@ -663,31 +653,20 @@ send_reply(#retpath{req=Req} = RetPath, Data) ->
 	send_cnf(RetPath, (Req bsl 4) bor ?FLAG_CNF, Data).
 
 
-send_cnf(#retpath{ref=Ref, socket=Socket}, Cnf, Data) ->
+send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
 	Raw = <<Ref:32, Cnf:16, Data/binary>>,
 	%io:format("[~w] Confirm: ~w~n", [self(), Raw]),
-	case gen_tcp:send(Socket, Raw) of
-		ok ->
-			ok;
-		{error, Reason} ->
-			error_logger:warning_msg(
-				"[~w] Failed to send confirm: ~w~n",
-				[self(), Reason])
+	case self() of
+		Servlet -> Raw;
+		_       -> Servlet ! {send, Raw}, Raw
 	end.
 
 
-send_indication(Socket, Ind, Data) ->
+send_indication(Ind, Data, S) ->
 	Indication = (Ind bsl 4) bor ?FLAG_IND,
 	Raw = <<16#FFFFFFFF:32, Indication:16, Data/binary>>,
 	%io:format("[~w] Indication: ~w~n", [self(), Raw]),
-	case gen_tcp:send(Socket, Raw) of
-		ok ->
-			ok;
-		{error, Reason} ->
-			error_logger:warning_msg(
-				"[~w] Failed to send indication: ~w~n",
-				[self(), Reason])
-	end.
+	{reply, Raw, S}.
 
 
 get_store_by_id(Store) ->

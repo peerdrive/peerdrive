@@ -15,14 +15,14 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_ifc_client).
--export([init/2, handle_packet/2, handle_info/2, terminate/1]).
+-export([init/1, handle_packet/2, handle_info/2, terminate/1]).
 
 -include("store.hrl").
 -include("peerdrive_client_pb.hrl").
 -include("utils.hrl").
 
--record(state, {socket, handles, next, progreg=false}).
--record(retpath, {socket, req, ref}).
+-record(state, {handles, next, progreg=false}).
+-record(retpath, {servlet, req, ref}).
 
 -define(FLAG_REQ, 0).
 -define(FLAG_CNF, 1).
@@ -75,9 +75,9 @@
 %% Servlet callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Socket, _Options) ->
+init(_Options) ->
 	process_flag(trap_exit, true),
-	#state{socket=Socket, handles=dict:new(), next=0}.
+	#state{handles=dict:new(), next=0}.
 
 
 terminate(#state{progreg=ProgReg} = State) ->
@@ -92,6 +92,9 @@ terminate(#state{progreg=ProgReg} = State) ->
 		State#state.handles).
 
 
+handle_info({send, Data}, S) ->
+	{reply, Data, S};
+
 handle_info({work_event, Event, Tag, Info}, S) ->
 	case Event of
 		progress ->
@@ -104,30 +107,27 @@ handle_info({work_event, Event, Tag, Info}, S) ->
 				err_doc  = proplists:get_value(doc, ErrInfo, undefined),
 				err_rev  = proplists:get_value(rev, ErrInfo, undefined)
 			},
-			send_indication(S#state.socket, ?PROGRESS_MSG,
-				peerdrive_client_pb:encode_progressind(Ind));
+			send_indication(?PROGRESS_MSG,
+				peerdrive_client_pb:encode_progressind(Ind), S);
 
 		started ->
 			{_Proc, StartInfo} = Info,
 			Ind = encode_progress_start(Tag, StartInfo),
-			send_indication(S#state.socket, ?PROGRESS_START_MSG,
-				peerdrive_client_pb:encode_progressstartind(Ind));
+			send_indication(?PROGRESS_START_MSG,
+				peerdrive_client_pb:encode_progressstartind(Ind), S);
 
 		done ->
 			Ind = #progressendind{tag=Tag},
-			send_indication(S#state.socket, ?PROGRESS_END_MSG,
-				peerdrive_client_pb:encode_progressendind(Ind))
-	end,
-	{ok, S};
+			send_indication(?PROGRESS_END_MSG,
+				peerdrive_client_pb:encode_progressendind(Ind), S)
+	end;
 
 handle_info({done, Cookie}, S) ->
 	{ok, S#state{handles=dict:erase(Cookie, S#state.handles)}};
 
 handle_info({watch, Cause, Type, Uuid}, S) ->
 	Ind = #watchind{event=Cause, type=Type, element=Uuid},
-	send_indication(S#state.socket, ?WATCH_MSG,
-		peerdrive_client_pb:encode_watchind(Ind)),
-	{ok, S};
+	send_indication(?WATCH_MSG, peerdrive_client_pb:encode_watchind(Ind), S);
 
 handle_info({'EXIT', From, Reason}, S) ->
 	case Reason of
@@ -146,16 +146,14 @@ handle_info({gen_event_EXIT, _Handler, _Reason}, S) ->
 
 
 handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
-	RetPath = #retpath{socket=S#state.socket, req=Request, ref=Ref},
+	RetPath = #retpath{servlet=self(), req=Request, ref=Ref},
 	%io:format("[~w] Ref:~w Request:~w Body:~w~n", [self(), Ref, Request, Body]),
 	case Request of
 		?INIT_MSG ->
-			do_init(Body, RetPath),
-			{ok, S};
+			{reply, do_init(Body, RetPath), S};
 
 		?ENUM_MSG ->
-			do_enum(RetPath),
-			{ok, S};
+			{reply, do_enum(RetPath), S};
 
 		?LOOKUP_DOC_MSG ->
 			fork(Body, RetPath, fun do_loopup_doc/1),
@@ -185,12 +183,10 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 			start_worker(S, fun do_resume/2, RetPath, Body);
 
 		?WATCH_ADD_MSG ->
-			do_watch_add_req(RetPath, Body),
-			{ok, S};
+			{reply, do_watch_add_req(RetPath, Body), S};
 
 		?WATCH_REM_MSG ->
-			do_watch_rem_req(RetPath, Body),
-			{ok, S};
+			{reply, do_watch_rem_req(RetPath, Body), S};
 
 		?FORGET_MSG ->
 			fork(Body, RetPath, fun do_forget/1),
@@ -225,24 +221,20 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 			{ok, S};
 
 		?WATCH_PROGRESS_MSG ->
-			S2 = do_watch_progress_req(Body, RetPath, S),
-			{ok, S2};
+			do_watch_progress_req(Body, RetPath, S);
 
 		?SYS_INFO_MSG ->
 			fork(Body, RetPath, fun do_sys_info_req/1),
 			{ok, S};
 
 		?PROGRESS_START_MSG ->
-			do_progress_start(Body, RetPath),
-			{ok, S};
+			{reply, do_progress_start(Body, RetPath), S};
 
 		?PROGRESS_END_MSG ->
-			do_progress_end(Body, RetPath),
-			{ok, S};
+			{reply, do_progress_end(Body, RetPath), S};
 
 		?PROGRESS_QUERY_MSG ->
-			do_progress_query(RetPath),
-			{ok, S};
+			{reply, do_progress_query(RetPath), S};
 
 		_ ->
 			{{1, Handle}, _} = protobuffs:decode(Body, uint32),
@@ -541,8 +533,7 @@ do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->
 			peerdrive_work_monitor:deregister_proc(),
 			S#state{progreg=false}
 	end,
-	send_reply(RetPath, <<>>),
-	S2.
+	{reply, send_reply(RetPath, <<>>), S2}.
 
 
 do_sys_info_req(Body) ->
@@ -786,30 +777,20 @@ send_reply(#retpath{req=Req} = RetPath, Data) ->
 	send_cnf(RetPath, (Req bsl 4) bor ?FLAG_CNF, Data).
 
 
-send_cnf(#retpath{ref=Ref, socket=Socket}, Cnf, Data) ->
+send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
 	Raw = <<Ref:32, Cnf:16, Data/binary>>,
 	%io:format("[~w] Confirm: ~w~n", [self(), Raw]),
-	case gen_tcp:send(Socket, Raw) of
-		ok ->
-			ok;
-		{error, Reason} ->
-			error_logger:warning_msg(
-				"[~w] Failed to send confirm: ~w~n",
-				[self(), Reason])
+	case self() of
+		Servlet -> Raw;
+		_       -> Servlet ! {send, Raw}, Raw
 	end.
 
-send_indication(Socket, Ind, Data) ->
+
+send_indication(Ind, Data, S) ->
 	Indication = (Ind bsl 4) bor ?FLAG_IND,
 	Raw = <<16#FFFFFFFF:32, Indication:16, Data/binary>>,
 	%io:format("[~w] Indication: ~w~n", [self(), Raw]),
-	case gen_tcp:send(Socket, Raw) of
-		ok ->
-			ok;
-		{error, Reason} ->
-			error_logger:warning_msg(
-				"[~w] Failed to send indication: ~w~n",
-				[self(), Reason])
-	end.
+	{reply, Raw, S}.
 
 
 encode_progress_start(Tag, Info) ->

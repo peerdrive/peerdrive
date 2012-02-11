@@ -32,7 +32,7 @@ server(Module, Listener, ListenSocket, Args) ->
 	case gen_tcp:accept(ListenSocket) of
 		{ok, Socket} ->
 			peerdrive_listener:servlet_occupied(Listener),
-			State = Module:init(Socket, Args),
+			State = Module:init(Args),
 			inet:setopts(Socket, [{nodelay, true}, {keepalive, true}]),
 			loop(Module, Socket, State);
 
@@ -65,7 +65,24 @@ loop(Module, Socket, State) ->
 	case Result of
 		{ok, NewState} ->
 			loop(Module, Socket, NewState);
+		{reply, Data, NewState}->
+			case gen_tcp:send(Socket, Data) of
+				ok ->
+					loop(Module, Socket, NewState);
+				{error, Error} ->
+					error_logger:warning_msg(
+						"[~w] Failed to send message: ~w~n",
+						[self(), Error]),
+					gen_tcp:close(Socket),
+					Module:terminate(NewState),
+					{error, Error}
+			end;
 		{stop, NewState} ->
+			gen_tcp:close(Socket),
+			Module:terminate(NewState),
+			normal;
+		{stop, Data, NewState} ->
+			gen_tcp:send(Socket, Data),
 			gen_tcp:close(Socket),
 			Module:terminate(NewState),
 			normal;
