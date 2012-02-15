@@ -457,11 +457,12 @@ statfs(Ino, S) ->
 				error     -> {error, enoent}
 			end;
 		_ ->
+			% TODO: report real values
 			{ok, #fs_stat{
 				bsize  = 512,
-				blocks = 2048,
-				bfree  = 2048,
-				bavail = 2048
+				blocks = 2048000,
+				bfree  = 2048000,
+				bavail = 2048000
 			}}
 	end,
 	case Reply of

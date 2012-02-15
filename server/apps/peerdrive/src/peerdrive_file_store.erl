@@ -317,12 +317,12 @@ code_change(_, State, _) -> {ok, State}.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 do_statfs(_S) ->
-	% TODO: implement
+	% TODO: report real values
 	{ok, #fs_stat{
-		bsize  = 4096,
-		blocks = 1024,
-		bfree  = 1024,
-		bavail = 1024
+		bsize  = 512,
+		blocks = 2048000,
+		bfree  = 2048000,
+		bavail = 2048000
 	}}.
 
 
