@@ -145,7 +145,7 @@ def overwriteFile(link, path):
 	if not (doc and rev):
 		return False
 	with Connector().update(store, doc, rev) as writer:
-		meta = struct.loads(writer.readAll('META'))
+		meta = struct.loads(store, writer.readAll('META'))
 		meta["org.peerdrive.annotation"]["origin"] = path
 		meta["org.peerdrive.annotation"]["comment"] = "Overwritten from external file system"
 
@@ -156,8 +156,8 @@ def overwriteFile(link, path):
 				__merge(meta, additionalMeta)
 
 		with open(path, "rb") as file:
-			writer.write('FILE', file.read())
-		writer.write('META', struct.dumps(meta))
+			writer.writeAll('FILE', file.read())
+		writer.writeAll('META', struct.dumps(meta))
 		writer.setType(uti)
 		writer.commit()
 
