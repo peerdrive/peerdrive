@@ -25,7 +25,8 @@ start_link(Module, Args, Listener, ListenSock) ->
 
 init(Parent, Module, Listener, ListenSocket, Args) ->
 	proc_lib:init_ack(Parent, {ok, self()}),
-	server(Module, Listener, ListenSocket, Args).
+	Result = server(Module, Listener, ListenSocket, Args),
+	exit(Result).
 
 
 server(Module, Listener, ListenSocket, Args) ->
@@ -34,25 +35,34 @@ server(Module, Listener, ListenSocket, Args) ->
 			peerdrive_listener:servlet_occupied(Listener),
 			State = Module:init(Args),
 			inet:setopts(Socket, [{nodelay, true}, {keepalive, true}]),
-			loop(Module, Socket, State);
+			{Result, NewState} = loop(Module, gen_tcp, Socket, State),
+			Module:terminate(NewState),
+			Result;
 
 		_Other ->
-			%io:format("[~w] accept returned ~w - goodbye!~n", [self(), Other]),
 			shutdown
 	end.
 
 
-loop(Module, Socket, State) ->
+loop(Module, Transport, Socket, State) ->
 	Result = try
-		inet:setopts(Socket, [{active, once}]),
+		case Transport of
+			gen_tcp -> inet:setopts(Socket, [{active, once}]);
+			ssl     -> ssl:setopts(Socket, [{active, once}])
+		end,
 		receive
-			{tcp, Socket, Packet} ->
+			{tcp, _Socket, Packet} ->
 				Module:handle_packet(Packet, State);
-
+			{ssl, _Socket, Packet} ->
+				Module:handle_packet(Packet, State);
 			{tcp_closed, _Socket} ->
-				Module:terminate(State),
-				%io:format("[~w] Socket ~w closed~n", [self(), Socket]),
-				closed;
+				'$closed';
+			{ssl_closed, _Socket} ->
+				'$closed';
+			{tcp_error, Socket, TcpError} ->
+				{error, TcpError};
+			{ssl_error, Socket, SslError} ->
+				{error, SslError};
 
 			Info ->
 				Module:handle_info(Info, State)
@@ -64,35 +74,45 @@ loop(Module, Socket, State) ->
 	end,
 	case Result of
 		{ok, NewState} ->
-			loop(Module, Socket, NewState);
+			loop(Module, Transport, Socket, NewState);
 		{reply, Data, NewState}->
-			case gen_tcp:send(Socket, Data) of
+			case Transport:send(Socket, Data) of
 				ok ->
-					loop(Module, Socket, NewState);
+					loop(Module, Transport, Socket, NewState);
 				{error, Error} ->
-					error_logger:warning_msg(
-						"[~w] Failed to send message: ~w~n",
-						[self(), Error]),
-					gen_tcp:close(Socket),
-					Module:terminate(NewState),
-					{error, Error}
+					Transport:close(Socket),
+					{Error, NewState}
 			end;
+		{ssl, Data, SslOpt, NewState} when Transport == gen_tcp ->
+			ssl_upgrade(Module, Socket, Data, SslOpt, NewState);
 		{stop, NewState} ->
-			gen_tcp:close(Socket),
-			Module:terminate(NewState),
-			normal;
+			Transport:close(Socket),
+			{normal, NewState};
 		{stop, Data, NewState} ->
-			gen_tcp:send(Socket, Data),
-			gen_tcp:close(Socket),
-			Module:terminate(NewState),
-			normal;
-		closed ->
-			normal;
+			Transport:send(Socket, Data),
+			Transport:close(Socket),
+			{normal, NewState};
+		'$closed' ->
+			{normal, State};
 		{error, Error} ->
-			error_logger:error_report([{module, Module}, {state, State},
-				{error, Error}]),
+			{Error, State}
+	end.
+
+
+ssl_upgrade(Module, Socket, Data, SslOpt, State) ->
+	inet:setopts(Socket, [{active, false}]),
+	case gen_tcp:send(Socket, Data) of
+		ok ->
+			case ssl:ssl_accept(Socket, SslOpt, 5000) of
+				{ok, SslSocket} ->
+					loop(Module, ssl, SslSocket, State);
+				{error, Error} ->
+					gen_tcp:close(Socket),
+					{Error, State}
+			end;
+
+		{error, Error} ->
 			gen_tcp:close(Socket),
-			Module:terminate(State),
-			{error, Error}
+			{Error, State}
 	end.
 

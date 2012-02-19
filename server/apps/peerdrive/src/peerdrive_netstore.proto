@@ -146,16 +146,30 @@ message ErrorCnf {
 }
 
 message InitReq {
+	enum StartTls {
+		deny     = 0;
+		optional = 1;
+		required = 2;
+	}
+
 	required uint32 major = 1;
 	required uint32 minor = 2;
-	required string store = 3;
+	optional StartTls starttls = 3 [default = no];
 }
 
 message InitCnf {
 	required uint32 major = 1;
 	required uint32 minor = 2;
 	optional uint32 max_packet_size = 3 [default = 4096];
-	required bytes sid = 4;
+	optional bool starttls = 4;
+}
+
+message MountReq {
+	required string store = 1;
+}
+
+message MountCnf {
+	required bytes sid = 1;
 }
 
 message StatfsCnf {

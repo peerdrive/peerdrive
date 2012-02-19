@@ -44,6 +44,6 @@ mkdir -p vfs
 [ -f peerdrive.config ] || cp templates/peerdrive.config peerdrive.config
 
 # start erlang
-$ERL +A 4 +W w -config peerdrive -boot start_sasl -s crypto -s peerdrive \
+$ERL +A 4 +W w -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive \
 	-sname peerdrive
 

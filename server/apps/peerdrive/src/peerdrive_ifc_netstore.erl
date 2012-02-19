@@ -22,7 +22,7 @@
 -include("peerdrive_netstore_pb.hrl").
 -include("utils.hrl").
 
--record(state, {handles, next, stores, store_pid, store_uuid}).
+-record(state, {init, handles, next, stores, store_pid, store_uuid, tls}).
 -record(retpath, {servlet, req, ref}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -33,7 +33,8 @@ init(Options) ->
 	process_flag(trap_exit, true),
 	peerdrive_vol_monitor:register_proc(self()),
 	Stores = proplists:get_value(stores, Options, []),
-	#state{handles=dict:new(), next=0, stores=Stores}.
+	Tls = proplists:get_value(tls, Options, deny),
+	#state{init=false, handles=dict:new(), next=0, stores=Stores, tls=Tls}.
 
 
 terminate(State) ->
@@ -85,14 +86,10 @@ handle_info({gen_event_EXIT, _Handler, _Reason}, S) ->
 	{ok, S}.
 
 
-handle_packet(Packet, #state{store_pid=Store} = S) ->
+handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 	<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>> = Packet,
 	RetPath = #retpath{servlet=self(), req=Request, ref=Ref},
-	%io:format("[~w] Ref:~w Request:~w Body:~w~n", [self(), Ref, Request, Body]),
 	case Request of
-		?INIT_MSG ->
-			do_init(Body, RetPath, S);
-
 		?STATFS_MSG ->
 			handle(Body, RetPath, Store, fun do_statfs/2, S);
 
@@ -152,6 +149,19 @@ handle_packet(Packet, #state{store_pid=Store} = S) ->
 			Worker = dict:fetch(Handle, S#state.handles),
 			Worker ! {Request, Body, RetPath},
 			{ok, S}
+	end;
+
+handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
+	RetPath = #retpath{servlet=self(), req=Request, ref=Ref},
+	case Request of
+		?INIT_MSG when not S#state.init ->
+			do_init(Body, RetPath, S);
+
+		?MOUNT_MSG when S#state.init ->
+			do_mount(Body, RetPath, S);
+
+		_ ->
+			{stop, send_error(RetPath, {error, ebadrpc}), S}
 	end.
 
 
@@ -168,30 +178,59 @@ do_trigger(_Event, _SId, _Element, S) ->
 	{ok, S}.
 
 
-do_init(Body, RetPath, #state{store_pid=undefined, stores=Stores} = S) ->
+do_init(Body, RetPath, #state{tls=Tls} = S) ->
+	case Tls of
+		deny -> TlsReq = deny, SslOpts = [];
+		{TlsReq, SslOpts} -> ok
+	end,
 	try
 		#initreq{
 			major = Major,
-			store = Store
+			starttls = StartTls
 		} = peerdrive_netstore_pb:decode_initreq(Body),
 		case Major of
 			0 -> ok;
 			_ -> throw({error, erpcmismatch})
 		end,
+		S2 = S#state{init=true},
+		if
+			((StartTls == deny) and (TlsReq == deny)) or
+			((StartTls == deny) and (TlsReq == optional)) or
+			((StartTls == optional) and (TlsReq == deny)) ->
+				Cnf = peerdrive_netstore_pb:encode_initcnf(
+					#initcnf{major=0, minor=0, starttls=false}),
+				{reply, send_reply(RetPath, Cnf), S2};
+
+			((StartTls == optional) and (TlsReq == optional)) or
+			((StartTls == optional) and (TlsReq == required)) or
+			((StartTls == required) and (TlsReq == optional)) or
+			((StartTls == required) and (TlsReq == required)) ->
+				Cnf = peerdrive_netstore_pb:encode_initcnf(
+					#initcnf{major=0, minor=0, starttls=true}),
+				{ssl, send_reply(RetPath, Cnf), SslOpts, S2};
+
+			true ->
+				throw({error, ebade})
+		end
+	catch
+		throw:Error ->
+			{stop, send_error(RetPath, Error), S}
+	end.
+
+
+do_mount(Body, RetPath, #state{stores=Stores} = S) ->
+	try
+		#mountreq{store=Store} = peerdrive_netstore_pb:decode_mountreq(Body),
 		{Id, _Descr, SId, _Tags} = get_store_by_id(Store),
 		lists:member(Id, Stores) orelse throw({error, eacces}),
 		{ok, Pid} = check(peerdrive_volman:store(SId)),
 		S2 = S#state{store_pid=Pid, store_uuid=SId},
-		Cnf = peerdrive_netstore_pb:encode_initcnf(
-			#initcnf{major=0, minor=0, sid=SId}),
+		Cnf = peerdrive_netstore_pb:encode_mountcnf(#mountcnf{sid=SId}),
 		{reply, send_reply(RetPath, Cnf), S2}
 	catch
 		throw:Error ->
 			{stop, send_error(RetPath, Error), S}
-	end;
-
-do_init(_Body, RetPath, S) ->
-	{stop, send_error(RetPath, {error, ebadrpc}), S}.
+	end.
 
 
 do_statfs(_Body, Store) ->
@@ -655,7 +694,6 @@ send_reply(#retpath{req=Req} = RetPath, Data) ->
 
 send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
 	Raw = <<Ref:32, Cnf:16, Data/binary>>,
-	%io:format("[~w] Confirm: ~w~n", [self(), Raw]),
 	case self() of
 		Servlet -> Raw;
 		_       -> Servlet ! {send, Raw}, Raw
@@ -665,7 +703,6 @@ send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
 send_indication(Ind, Data, S) ->
 	Indication = (Ind bsl 4) bor ?FLAG_IND,
 	Raw = <<16#FFFFFFFF:32, Indication:16, Data/binary>>,
-	%io:format("[~w] Indication: ~w~n", [self(), Raw]),
 	{reply, Raw, S}.
 
 

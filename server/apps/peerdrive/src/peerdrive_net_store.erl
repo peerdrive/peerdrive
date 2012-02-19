@@ -26,15 +26,18 @@
 -include("peerdrive_netstore_pb.hrl").
 -include("utils.hrl").
 
--record(state, {socket, requests, guid, mps, synclocks}).
+-record(state, {socket, requests, guid, mps, synclocks, transport=gen_tcp}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(Id, {Address, Port, Name}) ->
+	start_link(Id, {Address, Port, Name, deny});
+
+start_link(Id, {_Address, _Port, _Name, _Tls} = Args) ->
 	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
-	gen_server:start_link({local, RegId}, ?MODULE, {Address, Port, Name}, []).
+	gen_server:start_link({local, RegId}, ?MODULE, Args, []).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -53,7 +56,7 @@ io_request(NetStore, Request, Body) ->
 %% Gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Address, Port, Name}) ->
+init({Address, Port, Name, Tls}) ->
 	Options = [binary, {packet, 2}, {active, false}, {nodelay, true},
 		{keepalive, true}],
 	case gen_tcp:connect(Address, Port, Options) of
@@ -61,17 +64,35 @@ init({Address, Port, Name}) ->
 			process_flag(trap_exit, true),
 			S = #state{
 				socket    = Socket,
+				transport = gen_tcp,
 				requests  = gb_trees:empty(),
 				synclocks = dict:new()
 			},
-			do_init(Name, S);
+			case do_init(Tls, S) of
+				{ok, S2} ->
+					case do_mount(Name, S2) of
+						{ok, S3} = Ok->
+							case S3#state.transport of
+								gen_tcp ->
+									inet:setopts(S3#state.socket, [{active, true}]);
+								ssl ->
+									ssl:setopts(S3#state.socket, [{active, true}])
+							end,
+							Ok;
+						Error1 ->
+							Error1
+					end;
+
+				Error2 ->
+					Error2
+			end;
 
 		{error, Reason} ->
 			{stop, Reason}
 	end.
 
 
-terminate(_Reason, #state{socket=Socket, requests=Requests}) ->
+terminate(_Reason, #state{socket=Socket, requests=Requests, transport=Trsp}) ->
 	lists:foreach(
 		fun
 			({From, _OkHandler, ErrHandler}) ->
@@ -82,15 +103,15 @@ terminate(_Reason, #state{socket=Socket, requests=Requests}) ->
 		gb_trees:values(Requests)),
 	case Socket of
 		undefined -> ok;
-		_Else     -> gen_tcp:close(Socket)
+		_Else     -> Trsp:close(Socket)
 	end.
 
 
 handle_info({tcp, _Socket, Packet}, S) ->
 	handle_packet(Packet, S);
 
-handle_info({tcp_closed, _Socket}, #state{} = S) ->
-	{stop, normal, S#state{socket=undefined}};
+handle_info({ssl, _Socket, Packet}, S) ->
+	handle_packet(Packet, S);
 
 handle_info({'EXIT', From, Reason}, S) ->
 	case sync_trap_exit(From, S) of
@@ -105,7 +126,19 @@ handle_info({'EXIT', From, Reason}, S) ->
 		Else ->
 			% a sync process went away
 			Else
-	end.
+	end;
+
+handle_info({tcp_closed, _Socket}, #state{} = S) ->
+	{stop, normal, S#state{socket=undefined}};
+
+handle_info({ssl_closed, _Socket}, #state{} = S) ->
+	{stop, normal, S#state{socket=undefined}};
+
+handle_info({tcp_error, _Socket, Reason}, S) ->
+	{stop, {tcp_error, Reason}, S#state{socket=undefined}};
+
+handle_info({ssl_error, _Socket, Reason}, S) ->
+	{stop, {ssl_error, Reason}, S#state{socket=undefined}}.
 
 
 handle_call({io_request, Request, Body}, From, S) ->
@@ -204,9 +237,13 @@ handle_cast(_Request, State) -> {noreply, State}.
 %% Request handlers
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_init(Name, #state{socket=Socket} = S) ->
+do_init(Tls, #state{socket=Socket} = S) ->
+	case Tls of
+		deny -> TlsReq = deny, SslOpts = [];
+		{TlsReq, SslOpts} -> ok
+	end,
 	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=0, minor=0,
-		store=atom_to_binary(Name, utf8)}),
+		starttls=TlsReq}),
 	InitReq = <<0:32, ?INIT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
 	try
 		InitCnfMsg = case gen_tcp:send(Socket, InitReq) of
@@ -218,7 +255,7 @@ do_init(Name, #state{socket=Socket} = S) ->
 			Error2 ->
 				throw(Error2)
 		end,
-		InitCnf = case InitCnfMsg of
+		#initcnf{starttls=StartTls} = InitCnf = case InitCnfMsg of
 			<<0:32, ?INIT_MSG:12, ?FLAG_CNF:4, Body/binary>> ->
 				peerdrive_netstore_pb:decode_initcnf(Body);
 
@@ -231,16 +268,60 @@ do_init(Name, #state{socket=Socket} = S) ->
 				throw({error, einval})
 		end,
 		S2 = case InitCnf of
-			#initcnf{major=0, minor=0, max_packet_size=MaxPacketSize, sid=SId} ->
-				?ASSERT_GUID(SId),
-				S#state{guid=SId, mps=MaxPacketSize};
+			#initcnf{major=0, minor=0, max_packet_size=MaxPacketSize} ->
+				S#state{mps=MaxPacketSize};
 			#initcnf{} ->
 				throw({error, erpcmismatch})
 		end,
-		inet:setopts(Socket, [{active, true}]),
-		{ok, S2}
+		if
+			StartTls and (TlsReq =/= deny) ->
+				case ssl:connect(Socket, SslOpts, 5000) of
+					{ok, SslSocket} ->
+						{ok, S2#state{transport=ssl, socket=SslSocket}};
+					Error4 ->
+						throw(fixup_ssl_err(Error4))
+				end;
+			not StartTls and (TlsReq =/= required) ->
+				{ok, S2};
+			true ->
+				throw({error, ebade})
+		end
 	catch
-		throw:Error -> gen_tcp:close(Socket), {stop, Error}
+		throw:{error, Error} -> gen_tcp:close(Socket), {stop, Error}
+	end.
+
+
+do_mount(Name, #state{transport=Trsp, socket=Socket} = S) ->
+	Req = peerdrive_netstore_pb:encode_mountreq(#mountreq{
+		store=atom_to_binary(Name, utf8)}),
+	MountReq = <<0:32, ?MOUNT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
+	try
+		MountCnfMsg = case Trsp:send(Socket, MountReq) of
+			ok ->
+				case Trsp:recv(Socket, 0, 5000) of
+					{ok, Packet} -> Packet;
+					Error1       -> throw(Error1)
+				end;
+			Error2 ->
+				throw(Error2)
+		end,
+		#mountcnf{sid=SId} = case MountCnfMsg of
+			<<0:32, ?MOUNT_MSG:12, ?FLAG_CNF:4, Body/binary>> ->
+				peerdrive_netstore_pb:decode_mountcnf(Body);
+
+			<<0:32, ?ERROR_MSG:12, ?FLAG_CNF:4, Body/binary>> ->
+				#errorcnf{error=Error3} =
+					peerdrive_netstore_pb:decode_errorcnf(Body),
+				throw({error, Error3});
+
+			_ ->
+				throw({error, einval})
+		end,
+		?ASSERT_GUID(SId),
+		{ok, S#state{guid=SId}}
+	catch
+		throw:{error, Error} ->
+			Trsp:close(Socket), {stop, fixup_ssl_err(Error)}
 	end.
 
 
@@ -481,15 +562,16 @@ send_request(From, Req, Body, OkHandler, ErrHandler, S) ->
 
 
 send_request_internal(Req, Body, Continuation, S) ->
-	#state{socket=Socket, requests=Requests} = S,
+	#state{transport=Transport, socket=Socket, requests=Requests} = S,
 	Ref = get_next_ref(S),
-	case gen_tcp:send(Socket, <<Ref:32, Req:12, ?FLAG_REQ:4, Body/binary>>) of
+	case Transport:send(Socket, <<Ref:32, Req:12, ?FLAG_REQ:4, Body/binary>>) of
 		ok ->
 			S2 = S#state{requests=gb_trees:enter(Ref, Continuation, Requests)},
 			{noreply, S2};
 
 		{error, Reason} ->
-			error_logger:warning_report([{module, ?MODULE}, {send_error, Reason}]),
+			error_logger:warning_report([{module, ?MODULE},
+				{transport, Transport}, {send_error, Reason}]),
 			{stop, normal, {error, eio}, S}
 	end.
 
@@ -593,4 +675,15 @@ sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
 				throw:Error -> Error
 			end
 	end.
+
+
+fixup_ssl_err({error, Error}) -> {error, fixup_ssl_err(Error)};
+fixup_ssl_err(closed) -> econnaborted;
+fixup_ssl_err(ecacertfile) -> einval;
+fixup_ssl_err(ecertfile) -> einval;
+fixup_ssl_err(ekeyfile) -> einval;
+fixup_ssl_err(esslaccept) -> erpcmismatch;
+fixup_ssl_err(esslconnect) -> erpcmismatch;
+fixup_ssl_err({eoptions, _}) -> einval;
+fixup_ssl_err(Posix) -> Posix.
 
