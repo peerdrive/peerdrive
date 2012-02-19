@@ -26,11 +26,11 @@ start_link(Id, Module, ServletOpt) ->
 
 init({Module, ServletOpt}) ->
 	{ok, {
-		{simple_one_for_one, 1, 10},
+		{simple_one_for_one, 1000, 1},
 		[{
 			servlet,
 			{peerdrive_gen_servlet, start_link, [Module, ServletOpt]},
-			transient,
+			temporary,
 			brutal_kill,
 			worker,
 			[]
