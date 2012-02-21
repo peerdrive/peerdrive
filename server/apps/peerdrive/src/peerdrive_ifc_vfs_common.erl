@@ -1057,14 +1057,15 @@ folder_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
 				{ok, {doc, Store, ChildDoc}} ->
 					case folder_set_title(Store, ChildDoc, NewName) of
 						ok ->
+							FinalCache = folder_invalidate_cache(NewCache),
 							% Did we replace a file?
 							case folder_find_name(NewName, Entries) of
 								{ok, Oid} ->
 									Update = fun(List) -> lists:keydelete(Oid, #fe.oid, List) end,
-									folder_update(Store, Doc, NewCache, Update);
+									folder_update(Store, Doc, FinalCache, Update);
 
 								error ->
-									{ok, NewCache}
+									{ok, FinalCache}
 							end;
 
 						{error, Reason} ->
@@ -1379,6 +1380,9 @@ folder_set_title(Store, Doc, NewTitle) ->
 			Error
 	end.
 
+
+folder_invalidate_cache({Rev, Entries, _LastUpdate}) ->
+	{Rev, Entries, {0, 0, 0}}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% All other documents
