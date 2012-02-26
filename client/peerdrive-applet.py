@@ -87,16 +87,19 @@ class Launchbox(QtGui.QDialog):
 
 	def __trayMenuShow(self):
 		self.__trayIconMenu.clear()
-		enum = Connector().enum()
-		for store in [s for s in enum.allStores() if not enum.isSystem(s)]:
-			if enum.isMounted(store):
-				try:
-					self.__addStoreMenu(store, enum.doc(store), enum.isRemovable(store))
-				except IOError:
-					pass
-			else:
-				action = self.__trayIconMenu.addAction("Mount "+store)
-				action.triggered.connect(lambda x,s=store: self.__mount(s))
+		try:
+			enum = Connector().enum()
+			for store in [s for s in enum.allStores() if not enum.isSystem(s)]:
+				if enum.isMounted(store):
+					try:
+						self.__addStoreMenu(store, enum.doc(store), enum.isRemovable(store))
+					except IOError:
+						pass
+				else:
+					action = self.__trayIconMenu.addAction("Mount "+store)
+					action.triggered.connect(lambda x,s=store: self.__mount(s))
+		except IOError:
+			pass
 		self.__trayIconMenu.addSeparator()
 		self.__trayIconMenu.addAction(self.__syncRulesAction)
 		self.__trayIconMenu.addAction(self.__restoreAction)
