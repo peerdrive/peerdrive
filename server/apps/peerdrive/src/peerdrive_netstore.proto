@@ -477,11 +477,11 @@ message SyncFinishReq {
 
 message TriggerInd {
 	enum Event {
-		trigger_add_rev = 0;
-		trigger_rm_rev = 1;
-		trigger_add_doc = 2;
-		trigger_rm_doc = 3;
-		trigger_mod_doc = 4;
+		add_rev = 0;
+		rem_rev = 1;
+		add_doc = 2;
+		rem_doc = 3;
+		mod_doc = 4;
 	}
 
 	required Event event = 1;

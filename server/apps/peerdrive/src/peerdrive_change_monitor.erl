@@ -65,11 +65,11 @@ remove() ->
 
 init([]) ->
 	process_flag(trap_exit, true),
-	peerdrive_vol_monitor:register_proc(change_monitor),
+	peerdrive_vol_monitor:register_proc(),
 	{ok, #state{watches=dict:new()}}.
 
 
-handle_info({trigger_mod_doc, _Store, Doc}, #state{watches=Watches} = State) ->
+handle_info({vol_event, mod_doc, _Store, Doc}, #state{watches=Watches} = State) ->
 	case dict:find({doc, Doc}, Watches) of
 		{ok, {_StoreSet, PidSet}} ->
 			fire_trigger(modified, doc, Doc, PidSet);
@@ -78,27 +78,27 @@ handle_info({trigger_mod_doc, _Store, Doc}, #state{watches=Watches} = State) ->
 	end,
 	{noreply, State};
 
-handle_info({trigger_add_rev, Store, Rev}, #state{watches=Watches} = State) ->
+handle_info({vol_event, add_rev, Store, Rev}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_inc(rev, Store, Rev, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
-handle_info({trigger_rm_rev, Store, Rev}, #state{watches=Watches} = State) ->
+handle_info({vol_event, rem_rev, Store, Rev}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_dec(rev, Store, Rev, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
-handle_info({trigger_add_doc, Store, Doc}, #state{watches=Watches} = State) ->
+handle_info({vol_event, add_doc, Store, Doc}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_inc(doc, Store, Doc, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
-handle_info({trigger_rm_doc, Store, Doc}, #state{watches=Watches} = State) ->
+handle_info({vol_event, rem_doc, Store, Doc}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_dec(doc, Store, Doc, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
-handle_info({trigger_add_store, Store}, #state{watches=Watches} = State) ->
+handle_info({vol_event, add_store, Store, _}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_add_store(Store, Watches),
 	{noreply, State#state{watches=NewWatches}};
 
-handle_info({trigger_rem_store, Store}, #state{watches=Watches} = State) ->
+handle_info({vol_event, rem_store, Store, _}, #state{watches=Watches} = State) ->
 	NewWatches = trigger_rem_store(Store, Watches),
 	{noreply, State#state{watches=NewWatches}};
 

@@ -623,11 +623,11 @@ handle_indication(?TRIGGER_MSG, Body, #state{guid=Guid} = S) ->
 		peerdrive_netstore_pb:decode_triggerind(Body),
 	?ASSERT_GUID(Element),
 	case Event of
-		trigger_add_rev -> peerdrive_vol_monitor:trigger_add_rev(Guid, Element);
-		trigger_rm_rev  -> peerdrive_vol_monitor:trigger_rm_rev(Guid, Element);
-		trigger_add_doc -> peerdrive_vol_monitor:trigger_add_doc(Guid, Element);
-		trigger_rm_doc  -> peerdrive_vol_monitor:trigger_rm_doc(Guid, Element);
-		trigger_mod_doc -> peerdrive_vol_monitor:trigger_mod_doc(Guid, Element)
+		add_rev -> peerdrive_vol_monitor:trigger_add_rev(Guid, Element);
+		rem_rev -> peerdrive_vol_monitor:trigger_rm_rev(Guid, Element);
+		add_doc -> peerdrive_vol_monitor:trigger_add_doc(Guid, Element);
+		rem_doc -> peerdrive_vol_monitor:trigger_rm_doc(Guid, Element);
+		mod_doc -> peerdrive_vol_monitor:trigger_mod_doc(Guid, Element)
 	end,
 	{noreply, S}.
 

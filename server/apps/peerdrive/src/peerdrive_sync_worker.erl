@@ -51,7 +51,7 @@ init({Mode, FromSId, ToSId}) ->
 			case peerdrive_volman:store(ToSId) of
 				{ok, ToPid} ->
 					{ok, Monitor} = peerdrive_work:new({sync, FromSId, ToSId}),
-					peerdrive_vol_monitor:register_proc({FromSId, ToSId}),
+					peerdrive_vol_monitor:register_proc(),
 					process_flag(trap_exit, true),
 					S = #state{
 						syncfun   = SyncFun,
@@ -82,18 +82,18 @@ terminate(Reason, State, #state{from=FromStore, tosid=ToSId} = S) ->
 	error_logger:info_report([{sync, stop}, {from, S#state.fromsid},
 		{to, S#state.tosid}, {reason, Reason}]),
 	peerdrive_work:delete(S#state.monitor),
-	peerdrive_vol_monitor:deregister_proc({S#state.fromsid, ToSId}),
+	peerdrive_vol_monitor:deregister_proc(),
 	(FromStore == undefined) or (State == waiting)
 		orelse peerdrive_store:sync_finish(FromStore, ToSId).
 
 
-handle_info({trigger_rem_store, FromSId}, _, #state{fromsid=FromSId} = S) ->
+handle_info({vol_event, rem_store, FromSId, _}, _, #state{fromsid=FromSId} = S) ->
 	{stop, normal, S#state{from=undefined}};
 
-handle_info({trigger_rem_store, ToSId}, _, #state{tosid=ToSId} = S) ->
+handle_info({vol_event, rem_store, ToSId, _}, _, #state{tosid=ToSId} = S) ->
 	{stop, normal, S};
 
-handle_info({trigger_mod_doc, FromSId, _Doc}, waiting, #state{fromsid=FromSId} = S) ->
+handle_info({vol_event, mod_doc, FromSId, _Doc}, waiting, #state{fromsid=FromSId} = S) ->
 	gen_fsm:send_event(self(), changed),
 	{next_state, waiting, S};
 

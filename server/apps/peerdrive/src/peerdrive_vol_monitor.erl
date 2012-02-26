@@ -15,68 +15,139 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_vol_monitor).
--behaviour(gen_event).
+-behaviour(gen_server).
 
--export([register_proc/1, deregister_proc/1, trigger_add_store/1,
-		 trigger_rem_store/1, trigger_add_rev/2, trigger_rm_rev/2,
-		 trigger_add_doc/2, trigger_rm_doc/2, trigger_mod_doc/2]).
+-export([register_proc/0, deregister_proc/0, add_filter/2, rem_filter/1,
+		 trigger_add_store/1, trigger_rem_store/1, trigger_add_rev/2,
+		 trigger_rm_rev/2, trigger_add_doc/2, trigger_rm_doc/2,
+		 trigger_mod_doc/2]).
 -export([start_link/0]).
--export([init/1, handle_event/2, handle_call/2, handle_info/2, terminate/2, code_change/3]).
+-export([init/1, handle_cast/2, handle_call/3, handle_info/2, terminate/2, code_change/3]).
+
+-record(state, {procs, filters}).
 
 start_link() ->
-	gen_event:start_link({local, ?MODULE}).
+	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-trigger_add_store(StoreGuid) ->
-	gen_event:notify(?MODULE, {trigger_add_store, StoreGuid}).
+register_proc() ->
+	case gen_server:call(?MODULE, {reg, self()}) of
+		ok -> ok;
+		error -> erlang:error(already_registered)
+	end.
 
-trigger_rem_store(StoreGuid) ->
-	gen_event:notify(?MODULE, {trigger_rem_store, StoreGuid}).
+deregister_proc() ->
+	case gen_server:call(?MODULE, {unreg, self()}) of
+		ok -> ok;
+		error -> erlang:error(not_registered)
+	end.
 
-trigger_add_rev(StoreGuid, Rev) ->
-	gen_event:notify(?MODULE, {trigger_add_rev, StoreGuid, Rev}).
+add_filter(Store, Fun) ->
+	case gen_server:call(?MODULE, {add_filter, self(), Store, Fun}) of
+		ok -> ok;
+		error -> erlang:error(badarg)
+	end.
 
-trigger_rm_rev(StoreGuid, Rev) ->
-	gen_event:notify(?MODULE, {trigger_rm_rev, StoreGuid, Rev}).
-
-trigger_add_doc(StoreGuid, Doc) ->
-	gen_event:notify(?MODULE, {trigger_add_doc, StoreGuid, Doc}).
-
-trigger_rm_doc(StoreGuid, Doc) ->
-	gen_event:notify(?MODULE, {trigger_rm_doc, StoreGuid, Doc}).
-
-trigger_mod_doc(StoreGuid, Doc) ->
-	gen_event:notify(?MODULE, {trigger_mod_doc, StoreGuid, Doc}).
-
-
-register_proc(Id) ->
-	gen_event:add_sup_handler(?MODULE, {?MODULE, Id}, self()).
-
-deregister_proc(Id) ->
-	Handler = {?MODULE, Id},
-	case gen_event:delete_handler(?MODULE, Handler, []) of
-		ok ->
-			receive
-				{gen_event_EXIT, Handler, normal} -> ok
-			end;
-		Error ->
-			Error
+rem_filter(Store) ->
+	case gen_server:call(?MODULE, {rem_filter, self(), Store}) of
+		ok -> ok;
+		error -> erlang:error(badarg)
 	end.
 
 
+trigger_add_store(Store) ->
+	gen_server:cast(?MODULE, {notify, add_store, Store, undefined}).
 
-init(Pid) ->
-	{ok, Pid}.
+trigger_rem_store(Store) ->
+	gen_server:cast(?MODULE, {notify, rem_store, Store, undefined}).
+
+trigger_add_rev(Store, Rev) ->
+	gen_server:cast(?MODULE, {notify, add_rev, Store, Rev}).
+
+trigger_rm_rev(Store, Rev) ->
+	gen_server:cast(?MODULE, {notify, rem_rev, Store, Rev}).
+
+trigger_add_doc(Store, Doc) ->
+	gen_server:cast(?MODULE, {notify, add_doc, Store, Doc}).
+
+trigger_rm_doc(Store, Doc) ->
+	gen_server:cast(?MODULE, {notify, rem_doc, Store, Doc}).
+
+trigger_mod_doc(Store, Doc) ->
+	gen_server:cast(?MODULE, {notify, mod_doc, Store, Doc}).
 
 
-handle_event(Event, State) ->
-	Pid = State,
-	Pid ! Event,
-	{ok, State}.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Callback handlers
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+init([]) ->
+	process_flag(trap_exit, true),
+	S = #state{
+		procs = [],
+		filters = []
+	},
+	{ok, S}.
 
 
-handle_call(_Request, State) -> {ok, badarg, State}.
-handle_info(_Info, State) -> {ok, State}.
-terminate(_Arg, _State) -> ok.
+handle_cast({notify, Event, Store, Elem}, #state{procs=Procs, filters=Filters} = S) ->
+	Msg = {vol_event, Event, Store, Elem},
+	FinalMsg = case orddict:find(Store, Filters) of
+		error -> Msg;
+		{ok, {_Pid, Fun}} -> Fun(Msg)
+	end,
+	lists:foreach(fun(Pid) -> Pid ! FinalMsg end, Procs),
+	{noreply, S}.
+
+
+handle_call({reg, Pid}, _From, #state{procs=Procs} = S) ->
+	case lists:member(Pid, Procs) of
+		false ->
+			link(Pid),
+			{reply, ok, S#state{procs=[Pid | Procs]}};
+		true ->
+			{reply, error, S}
+	end;
+
+handle_call({unreg, Pid}, _From, #state{procs=Procs} = S) ->
+	case lists:member(Pid, Procs) of
+		true ->
+			lists:any(fun({_Store, {FiltPid, _Fun}}) -> FiltPid == Pid end,
+				S#state.filters) orelse unlink(Pid),
+			{reply, ok, S#state{procs=lists:delete(Pid, Procs)}};
+		false ->
+			{reply, error, S}
+	end;
+
+handle_call({add_filter, Pid, Store, Fun}, _From, #state{filters=Filters} = S) ->
+	case orddict:is_key(Store, Filters) of
+		false ->
+			link(Pid),
+			NewFilters = orddict:store(Store, {Pid, Fun}, Filters),
+			{reply, ok, S#state{filters=NewFilters}};
+		true ->
+			{reply, error, S}
+	end;
+
+handle_call({rem_filter, Pid, Store}, _From, S) ->
+	#state{filters=Filters, procs=Procs} = S,
+	case orddict:is_key(Store, Filters) of
+		true ->
+			lists:member(Pid, Procs) orelse unlink(Pid),
+			{reply, ok, S#state{filters=orddict:erase(Store, Filters)}};
+		false ->
+			{reply, error, S}
+	end.
+
+
+handle_info({'EXIT', Pid, _Reason}, S) ->
+	Filters = orddict:filter(
+		fun(_Store, {FiltPid, _Fun}) -> FiltPid =/= Pid end,
+		S#state.filters),
+	Procs = lists:delete(Pid, S#state.procs),
+	{noreply, S#state{procs=Procs, filters=Filters}}.
+
+
+terminate(_Reason, _State) -> ok.
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 

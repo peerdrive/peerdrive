@@ -31,14 +31,14 @@
 
 init(Options) ->
 	process_flag(trap_exit, true),
-	peerdrive_vol_monitor:register_proc(self()),
+	peerdrive_vol_monitor:register_proc(),
 	Stores = proplists:get_value(stores, Options, []),
 	Tls = proplists:get_value(tls, Options, deny),
 	#state{init=false, handles=dict:new(), next=0, stores=Stores, tls=Tls}.
 
 
 terminate(State) ->
-	peerdrive_vol_monitor:deregister_proc(self()),
+	peerdrive_vol_monitor:deregister_proc(),
 	dict:fold(
 		fun(_Handle, Worker, _Acc) -> Worker ! closed end,
 		ok,
@@ -54,20 +54,19 @@ handle_info({done, Handle}, S) ->
 handle_info({'EXIT', _From, normal}, S) ->
 	{ok, S};
 
-handle_info({Event, Store, Element}, S) when (Event == trigger_add_rev) or
-                                             (Event == trigger_rm_rev) or
-                                             (Event == trigger_add_doc) or
-                                             (Event == trigger_rm_doc) or
-                                             (Event == trigger_mod_doc) ->
-	do_trigger(Event, Store, Element, S);
-
-handle_info({trigger_rem_store, StoreGuid}, #state{store_uuid=Uuid}=S) ->
-	case StoreGuid of
-		Uuid  -> {stop, S};
-		_Else -> {ok, S}
+handle_info({vol_event, Event, Store, Element}, #state{store_uuid=Store}=S) ->
+	case Event of
+		rem_store ->
+			{stop, S};
+		add_store ->
+			{ok, S};
+		_ ->
+			Ind = peerdrive_netstore_pb:encode_triggerind(
+				#triggerind{event=Event, element=Element}),
+			send_indication(?TRIGGER_MSG, Ind, S)
 	end;
 
-handle_info({trigger_add_store, _StoreGuid}, S) ->
+handle_info({vol_event, _Event, _Store, _Element}, S) ->
 	{ok, S};
 
 handle_info({'EXIT', From, Reason}, S) ->
@@ -168,15 +167,6 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Request handling functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-do_trigger(Event, SId, Element, #state{store_uuid=SId} = S) ->
-	Ind = peerdrive_netstore_pb:encode_triggerind(
-		#triggerind{event=Event, element=Element}),
-	send_indication(?TRIGGER_MSG, Ind, S);
-
-do_trigger(_Event, _SId, _Element, S) ->
-	{ok, S}.
-
 
 do_init(Body, RetPath, #state{tls=Tls} = S) ->
 	case Tls of

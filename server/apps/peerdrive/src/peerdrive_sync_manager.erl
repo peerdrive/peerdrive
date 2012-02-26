@@ -39,7 +39,7 @@ start_link() ->
 
 init([]) ->
 	{ok, SysStore, SysDoc} = find_sys_store(),
-	peerdrive_vol_monitor:register_proc(?MODULE),
+	peerdrive_vol_monitor:register_proc(),
 	case find_sync_rules(SysStore, SysDoc) of
 		{ok, Doc} ->
 			case read_sync_rules(SysStore, Doc) of
@@ -59,15 +59,15 @@ init([]) ->
 	end.
 
 
-handle_info({trigger_add_store, _Store}, monitor, S) ->
+handle_info({vol_event, add_store, _Store, _}, monitor, S) ->
 	S2 = check_workers(S),
 	{next_state, monitor, S2};
 
-handle_info({trigger_rem_store, Store}, monitor, S) ->
+handle_info({vol_event, rem_store, Store, _}, monitor, S) ->
 	S2 = remove_store(Store, S),
 	{next_state, monitor, S2};
 
-handle_info({trigger_mod_doc, Store, Doc}, State, #state{sys=Store, doc=Doc} = S)
+handle_info({vol_event, mod_doc, Store, Doc}, State, #state{sys=Store, doc=Doc} = S)
 	when
 		(State == monitor) or
 		(State == try_read) ->
@@ -80,7 +80,7 @@ handle_info({trigger_mod_doc, Store, Doc}, State, #state{sys=Store, doc=Doc} = S
 			{next_state, try_read, S}
 	end;
 
-handle_info({trigger_mod_doc, SysDoc, SysDoc}, wait, #state{sys=SysDoc} = S) ->
+handle_info({vol_event, mod_doc, SysDoc, SysDoc}, wait, #state{sys=SysDoc} = S) ->
 	case find_sync_rules(S#state.store, SysDoc) of
 		{ok, Doc} ->
 			case read_sync_rules(S#state.store, Doc) of
@@ -111,7 +111,7 @@ handle_sync_event(_Event, _From, StateName, StateData) ->
 
 
 terminate(_Reason, _StateName, _StateData) ->
-	peerdrive_vol_monitor:deregister_proc(?MODULE).
+	peerdrive_vol_monitor:deregister_proc().
 
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->
