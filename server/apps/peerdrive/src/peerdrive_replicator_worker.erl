@@ -56,7 +56,7 @@ init({Request, From, SrcStore, DstStore, Options}) ->
 	peerdrive_work:start(Monitor),
 	S = #state{
 		parent_backlog = queue:new(),
-		req_backlog    = queue:in(Request, queue:new()),
+		req_backlog    = gb_sets:singleton(Request),
 		srcstore       = SrcStore,
 		dststore       = DstStore,
 		depth          = proplists:get_value(depth, Options, 0),
@@ -161,12 +161,12 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 push_doc(Doc, #state{req_backlog=Backlog} = S) ->
-	NewBacklog = queue:in({replicate_doc, Doc, false}, Backlog),
+	NewBacklog = gb_sets:add({replicate_doc, Doc, false}, Backlog),
 	S#state{req_backlog=NewBacklog}.
 
 
 push_rev(Rev, #state{req_backlog=Backlog} = S) ->
-	NewBacklog = queue:in({replicate_rev, Rev, false}, Backlog),
+	NewBacklog = gb_sets:add({replicate_rev, Rev, false}, Backlog),
 	S#state{req_backlog=NewBacklog}.
 
 
@@ -182,9 +182,10 @@ run_queues(#state{parent_backlog=ParentBL} = S) ->
 
 		{empty, _ParentBL} ->
 			#state{req_backlog=ReqBacklog, count=OldCount, done=Done} = S,
-			case queue:out(ReqBacklog) of
-				{{value, Item}, Remaining} ->
-					PrevSize = queue:len(Remaining),
+			case gb_sets:is_empty(ReqBacklog) of
+				false ->
+					{Item, Remaining} = gb_sets:take_smallest(ReqBacklog),
+					PrevSize = gb_sets:size(Remaining),
 					S2 = S#state{req_backlog=Remaining},
 					S3 = case Item of
 						{replicate_doc, Doc, First} ->
@@ -192,10 +193,10 @@ run_queues(#state{parent_backlog=ParentBL} = S) ->
 						{replicate_rev, Rev, First} ->
 							replicate_rev(Rev, First, S2)
 					end,
-					NextSize = queue:len(S3#state.req_backlog),
+					NextSize = gb_sets:size(S3#state.req_backlog),
 					S3#state{count=OldCount+NextSize-PrevSize, done=Done+1};
 
-				{empty, _ReqBacklog} ->
+				true ->
 					throw(done)
 			end
 	end.
@@ -207,7 +208,13 @@ skip(#state{parent_backlog=ParentBL} = S) ->
 			S#state{parent_backlog=NewParentBL};
 
 		{empty, _ParentBL} ->
-			{_, NewReqBacklog} = queue:out(S#state.req_backlog),
+			ReqBacklog = S#state.req_backlog,
+			case gb_sets:is_empty(ReqBacklog) of
+				false ->
+					{_, NewReqBacklog} = gb_sets:take_smallest(ReqBacklog);
+				true ->
+					NewReqBacklog = ReqBacklog
+			end,
 			S#state{req_backlog=NewReqBacklog}
 	end.
 
