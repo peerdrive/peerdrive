@@ -283,12 +283,7 @@ merge_dict(Base, Versions) ->
 		end,
 		NewDict1,
 		gb_trees:to_list(Added)),
-	% Delete the removed keys
-	NewDict3 = sets:fold(
-		fun(Key, Acc) -> gb_trees:delete(Key, Acc) end,
-		NewDict2,
-		Removed),
-	{Res1, NewDict3}.
+	{Res1, NewDict2}.
 
 
 %%
@@ -331,8 +326,8 @@ merge_literal(Base, Versions) ->
 
 
 %%
-%% Comparing is unfortunately a bit more elaborated because we have to ignore
-%% the `Revs' field in document links.
+%% Comparing is unfortunately a bit more involved because gb_trees cannot be
+%% compared literally.
 %%
 cmp(X1, X2) when
 		is_integer(X1) or
@@ -342,16 +337,7 @@ cmp(X1, X2) when
 	X1 =:= X2;
 
 cmp(X1, X2) when is_list(X1) ->
-	L1 = length(X1),
-	case length(X2) of
-		L1 -> lists:all(fun({A, B}) -> cmp(A, B) end, lists:zip(X1, X2));
-		_  -> false
-	end;
-
-cmp(X1, X2) when ?IS_GB_TREE(X1), ?IS_GB_TREE(X2) ->
-	L1 = gb_trees:to_list(X1),
-	L2 = gb_trees:to_list(X2),
-	cmp(L1, L2);
+	cmp_list(X1, X2);
 
 cmp({rlink, R1}, {rlink, R2}) ->
 	R1 =:= R2;
@@ -359,7 +345,27 @@ cmp({rlink, R1}, {rlink, R2}) ->
 cmp({dlink, Doc1}, {dlink, Doc2}) ->
 	Doc1 =:= Doc2;
 
-cmp(_, _) ->
+cmp(X1, X2) ->
+	cmp_dict(gb_trees:to_list(X1), gb_trees:to_list(X2)).
+
+
+cmp_list([V1|Rest1], [V2|Rest2]) ->
+	cmp(V1, V2) andalso cmp_list(Rest1, Rest2);
+
+cmp_list([], []) ->
+	true;
+
+cmp_list(_, _) ->
+	false.
+
+
+cmp_dict([{K1,V1}|Rest1], [{K2,V2}|Rest2]) ->
+	K1 == K2 andalso cmp(V1, V2) andalso cmp_dict(Rest1, Rest2);
+
+cmp_dict([], []) ->
+	true;
+
+cmp_dict(_, _) ->
 	false.
 
 
