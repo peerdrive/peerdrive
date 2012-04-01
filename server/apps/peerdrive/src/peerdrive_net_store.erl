@@ -223,7 +223,10 @@ handle_call({sync_set_anchor, PeerGuid, SeqNum}, From, S) ->
 	send_request(From, ?SYNC_SET_ANCHOR_MSG, Req, S);
 
 handle_call({sync_finish, PeerGuid}, From, S) ->
-	req_sync_finish(PeerGuid, From, S).
+	req_sync_finish(PeerGuid, From, S);
+
+handle_call(sync, From, S) ->
+	send_request(From, ?SYNC_MSG, <<>>, S).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

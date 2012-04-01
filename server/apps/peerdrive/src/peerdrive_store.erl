@@ -16,7 +16,7 @@
 
 -module(peerdrive_store).
 
--export([guid/1, statfs/1, contains/2, lookup/2, stat/2]).
+-export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
 -export([put_doc/3, put_doc_commit/1, put_doc_abort/1, forward_doc_start/3, forward_doc_commit/1,
 	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
@@ -79,6 +79,12 @@ contains(Store, Rev) ->
 %%       Stat = #rev_stat{}
 stat(Store, Rev) ->
 	call_store(Store, {stat, Rev}).
+
+%% @doc Commit all dirty data to disk
+%% @spec sync(Store::pid()) -> Result
+%%       Result -> ok | {error, Reason::ecode()}
+sync(Store) ->
+	call_store(Store, sync).
 
 %% @doc Start reading a revision.
 %%

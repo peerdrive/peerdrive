@@ -62,4 +62,5 @@
 -define(SYNC_SET_ANCHOR_MSG,  16#028).
 -define(SYNC_FINISH_MSG,      16#029).
 -define(TRIGGER_MSG,          16#02a).
+-define(SYNC_MSG,             16#02b).
 

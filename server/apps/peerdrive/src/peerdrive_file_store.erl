@@ -211,6 +211,10 @@ handle_call({sync_finish, PeerSId}, {Caller, _}, S) ->
 	{Reply, S2} = do_sync_finish(PeerSId, Caller, S),
 	{reply, Reply, S2};
 
+handle_call(sync, _From, S) ->
+	save_store(dirty, S),
+	{reply, ok, S};
+
 handle_call(gc, _From, S) ->
 	do_gc(S),
 	{reply, ok, S};

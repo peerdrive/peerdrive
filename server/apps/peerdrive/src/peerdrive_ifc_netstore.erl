@@ -143,6 +143,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 		?SYNC_FINISH_MSG ->
 			handle(Body, RetPath, Store, fun do_sync_finish/2, S);
 
+		?SYNC_MSG ->
+			handle(Body, RetPath, Store, fun do_sync/2, S);
+
 		_ ->
 			{{1, Handle}, _} = protobuffs:decode(Body, uint32),
 			Worker = dict:fetch(Handle, S#state.handles),
@@ -280,6 +283,11 @@ do_stat(Body, Store) ->
 		rev_links    = RevLinks
 	},
 	peerdrive_netstore_pb:encode_statcnf(Reply).
+
+
+do_sync(<<>>, Store) ->
+	ok = check(peerdrive_store:sync(Store)),
+	<<>>.
 
 
 do_peek(Store, NetHandle, ReqData) ->
