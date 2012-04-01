@@ -34,10 +34,10 @@
 	gen,
 	wb_tmr,
 	gc_gen,
-	doc_tbl,  % ets: {Doc::DId, Rev::RId, [PreRev::RId], Generation}
-	rev_tbl,  % ets: {Rev::RId, #revision{}}
+	doc_tbl,  % dets: {Doc::DId, Rev::RId, [PreRev::RId], Generation}
+	rev_tbl,  % dets: {Rev::RId, #revision{}}
 	part_tbl, % dets: {Part::PId, Content::binary() | Size::int()}
-	peer_tbl, % ets: {Store::Sid, Generation}
+	peer_tbl, % dets: {Store::Sid, Generation}
 	objlocks, % dict: {doc, DId} | {part, PId} -> Count::int()
 	synclocks % dict: SId --> pid()
 }).
@@ -58,15 +58,20 @@ start_link(Id, {Path, Name}) ->
 init({Id, Path, Name}) ->
 	case filelib:is_dir(Path) of
 		true ->
-			S = #state{
-				path      = Path,
-				synclocks = dict:new(),
-				objlocks  = dict:new()
-			},
-			S2 = load_store(Id, S),
-			S3 = check_root_doc(Name, S2),
-			process_flag(trap_exit, true),
-			{ok, S3};
+			try
+				S = #state{
+					path      = Path,
+					synclocks = dict:new(),
+					objlocks  = dict:new()
+				},
+				S2 = load_store(Id, S),
+				S3 = check_root_doc(Name, S2),
+				process_flag(trap_exit, true),
+				{ok, S3}
+			catch
+				throw:Reason ->
+					{stop, Reason}
+			end;
 
 		false ->
 			{stop, enoent}
@@ -135,7 +140,7 @@ handle_call(statfs, _From, S) ->
 	{reply, do_statfs(S), S};
 
 handle_call({lookup, DId}, _From, S) ->
-	case ets:lookup(S#state.doc_tbl, DId) of
+	case dets:lookup(S#state.doc_tbl, DId) of
 		[{_DId, RId, PreRIds, _Gen}] ->
 			{reply, {ok, RId, PreRIds}, S};
 		[] ->
@@ -143,7 +148,7 @@ handle_call({lookup, DId}, _From, S) ->
 	end;
 
 handle_call({contains, RId}, _From, S) ->
-	Reply = ets:member(S#state.rev_tbl, RId),
+	Reply = dets:member(S#state.rev_tbl, RId),
 	{reply, Reply, S};
 
 handle_call({stat, Rev}, _From, S) ->
@@ -331,7 +336,7 @@ do_statfs(_S) ->
 
 
 do_stat(RId, #state{rev_tbl=RevTbl} = S) ->
-	case ets:lookup(RevTbl, RId) of
+	case dets:lookup(RevTbl, RId) of
 		[{_, Rev}] ->
 			Parts = [ {FourCC, part_size(PId, S), PId} ||
 				{FourCC, PId} <- Rev#revision.parts ],
@@ -352,7 +357,7 @@ do_stat(RId, #state{rev_tbl=RevTbl} = S) ->
 
 
 do_peek(RId, User, #state{rev_tbl=RevTbl} = S) ->
-	case ets:lookup(RevTbl, RId) of
+	case dets:lookup(RevTbl, RId) of
 		[{_, Rev}] ->
 			S2 = lists:foldl(
 				fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
@@ -383,7 +388,7 @@ do_create(Type, Creator, User, S) ->
 
 do_fork(StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
 	DId = crypto:rand_bytes(16),
-	case ets:lookup(RevTbl, StartRId) of
+	case dets:lookup(RevTbl, StartRId) of
 		[{_, Rev}] ->
 			NewRev = Rev#revision{
 				parents = [StartRId],
@@ -403,9 +408,9 @@ do_fork(StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
 
 do_update(DId, StartRId, Creator, User, S) ->
 	#state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S,
-	case ets:member(DocTbl, DId) of
+	case dets:member(DocTbl, DId) of
 		true ->
-			case ets:lookup(RevTbl, StartRId) of
+			case dets:lookup(RevTbl, StartRId) of
 				[{_, Rev}] ->
 					NewCreator = case Creator of
 						undefined -> Rev#revision.creator;
@@ -428,11 +433,11 @@ do_update(DId, StartRId, Creator, User, S) ->
 
 do_resume(DId, PreRId, Creator, User, S) ->
 	#state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S,
-	case ets:lookup(DocTbl, DId) of
+	case dets:lookup(DocTbl, DId) of
 		[{_, _, PreRevs, _}] ->
 			case lists:member(PreRId, PreRevs) of
 				true ->
-					case ets:lookup(RevTbl, PreRId) of
+					case dets:lookup(RevTbl, PreRId) of
 						[{_, Rev}] ->
 							NewCreator = case Creator of
 								undefined -> Rev#revision.creator;
@@ -455,13 +460,13 @@ do_resume(DId, PreRId, Creator, User, S) ->
 
 
 do_forget(DId, PreRId, #state{sid=SId, doc_tbl=DocTbl, gen=Gen} = S) ->
-	case ets:lookup(DocTbl, DId) of
+	case dets:lookup(DocTbl, DId) of
 		[{_, RId, CurPreRIds, _Gen}] ->
 			case lists:member(PreRId, CurPreRIds) of
 				true ->
 					NewPreRIds = [ R || R <- CurPreRIds, R =/= PreRId ],
 					peerdrive_vol_monitor:trigger_mod_doc(SId, DId),
-					ets:insert(DocTbl, {DId, RId, NewPreRIds, Gen}),
+					ok = dets:insert(DocTbl, {DId, RId, NewPreRIds, Gen}),
 					{ok, next_gen(S)};
 
 				false ->
@@ -474,10 +479,10 @@ do_forget(DId, PreRId, #state{sid=SId, doc_tbl=DocTbl, gen=Gen} = S) ->
 
 
 do_delete_rev(RId, #state{sid=SId, rev_tbl=RevTbl} = S) ->
-	case ets:member(RevTbl, RId) of
+	case dets:member(RevTbl, RId) of
 		true ->
 			peerdrive_vol_monitor:trigger_rm_rev(SId, RId),
-			ets:delete(RevTbl, RId),
+			ok = dets:delete(RevTbl, RId),
 			{ok, next_gen(S)};
 
 		false ->
@@ -491,10 +496,10 @@ do_delete_doc(DId, RId, #state{doc_tbl=DocTbl, sid=SId} = S) ->
 			{{error, eacces}, S};
 
 		_ ->
-			case ets:lookup(DocTbl, DId) of
+			case dets:lookup(DocTbl, DId) of
 				[{_, RId, _PreRevs, _Gen}] ->
 					peerdrive_vol_monitor:trigger_rm_doc(SId, DId),
-					ets:delete(DocTbl, DId),
+					ok = dets:delete(DocTbl, DId),
 					{ok, next_gen(S)};
 
 				[{_, _OtherRev, _PreRevs, _Gen}] ->
@@ -507,7 +512,7 @@ do_delete_doc(DId, RId, #state{doc_tbl=DocTbl, sid=SId} = S) ->
 
 
 do_put_doc(DId, RId, User, #state{doc_tbl=DocTbl} = S) ->
-	case ets:lookup(DocTbl, DId) of
+	case dets:lookup(DocTbl, DId) of
 		% document does not exist (yet)...
 		[] ->
 			S2 = do_lock({rev, RId}, S),
@@ -526,11 +531,11 @@ do_put_doc(DId, RId, User, #state{doc_tbl=DocTbl} = S) ->
 
 
 do_put_doc_commit(DId, RId, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
-	case ets:lookup(DocTbl, DId) of
+	case dets:lookup(DocTbl, DId) of
 		% document does not exist (yet)...
 		[] ->
 			peerdrive_vol_monitor:trigger_add_doc(S#state.sid, DId),
-			ets:insert(DocTbl, {DId, RId, [], Gen}),
+			ok = dets:insert(DocTbl, {DId, RId, [], Gen}),
 			{ok, next_gen(S)};
 
 		% already pointing to requested rev
@@ -545,13 +550,13 @@ do_put_doc_commit(DId, RId, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 
 do_commit(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 	RId = peerdrive_store:hash_revision(Rev),
-	case ets:lookup(DocTbl, DId) of
+	case dets:lookup(DocTbl, DId) of
 		[{_, CurrentRId, CurrentPreRIds, _Gen}] ->
 			case lists:member(CurrentRId, Rev#revision.parents) of
 				true  ->
 					NewPreRIds = [R || R <- CurrentPreRIds, R =/= OldPreRId],
-					ets:insert(S#state.rev_tbl, {RId, Rev}),
-					ets:insert(DocTbl, {DId, RId, NewPreRIds, Gen}),
+					ok = dets:insert(S#state.rev_tbl, {RId, Rev}),
+					ok = dets:insert(DocTbl, {DId, RId, NewPreRIds, Gen}),
 					peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
 					{{ok, RId}, next_gen(S)};
 
@@ -560,8 +565,8 @@ do_commit(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 			end;
 
 		[] ->
-			ets:insert(S#state.rev_tbl, {RId, Rev}),
-			ets:insert(DocTbl, {DId, RId, [], Gen}),
+			ok = dets:insert(S#state.rev_tbl, {RId, Rev}),
+			ok = dets:insert(DocTbl, {DId, RId, [], Gen}),
 			peerdrive_vol_monitor:trigger_add_doc(S#state.sid, DId),
 			{{ok, RId}, next_gen(S)}
 	end.
@@ -569,13 +574,13 @@ do_commit(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 
 do_suspend(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 	RId = peerdrive_store:hash_revision(Rev),
-	case ets:lookup(DocTbl, DId) of
+	case dets:lookup(DocTbl, DId) of
 		[{_, CurrentRId, CurrentPreRIds, _Gen}] ->
 			NewPreRIds = lists:usort(
 				[RId] ++ [R || R <- CurrentPreRIds, R =/= OldPreRId]
 			),
-			ets:insert(S#state.rev_tbl, {RId, Rev}),
-			ets:insert(DocTbl, {DId, CurrentRId, NewPreRIds, Gen}),
+			ok = dets:insert(S#state.rev_tbl, {RId, Rev}),
+			ok = dets:insert(DocTbl, {DId, CurrentRId, NewPreRIds, Gen}),
 			peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
 			{{ok, RId}, next_gen(S)};
 
@@ -621,10 +626,10 @@ do_part_get(PId, #state{part_tbl=PartTbl} = S) ->
 % ok | {ok, MissingRevs, Handle} | {error, Reason}
 do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
 	StartRId = hd(RevPath),
-	case ets:lookup(S#state.doc_tbl, DId) of
+	case dets:lookup(S#state.doc_tbl, DId) of
 		[{_, StartRId, _, _}] ->
 			RevTbl = S#state.rev_tbl,
-			case [RId || RId <- RevPath, not ets:member(RevTbl, RId)] of
+			case [RId || RId <- RevPath, not dets:member(RevTbl, RId)] of
 				[] ->
 					do_forward_doc_commit(DId, RevPath, S);
 
@@ -647,7 +652,7 @@ do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
 	end;
 
 do_forward_doc(DId, [RId], _User, S) ->
-	case ets:lookup(S#state.doc_tbl, DId) of
+	case dets:lookup(S#state.doc_tbl, DId) of
 		[{_, RId, _, _}] ->
 			{ok, S};
 		[_] ->
@@ -664,13 +669,13 @@ do_forward_doc_commit(DId, RevPath, #state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S) 
 	try
 		% check if all revisions are known
 		lists:foreach(
-			fun(RId) -> ets:member(RevTbl, RId) orelse throw(enoent) end,
+			fun(RId) -> dets:member(RevTbl, RId) orelse throw(enoent) end,
 			RevPath),
 
 		% check if the revisions are all connected to each other
 		lists:foreach(
 			fun({RId1, RId2}) ->
-				[{_, #revision{parents=Parents}}] = ets:lookup(RevTbl, RId2),
+				[{_, #revision{parents=Parents}}] = dets:lookup(RevTbl, RId2),
 				lists:member(RId1, Parents) orelse throw(einval)
 			end,
 			zip_parent_child(RevPath)),
@@ -678,14 +683,14 @@ do_forward_doc_commit(DId, RevPath, #state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S) 
 		% try to update
 		[OldRId | Path] = RevPath,
 		NewRId = lists:last(Path),
-		case ets:lookup(DocTbl, DId) of
+		case dets:lookup(DocTbl, DId) of
 			% already pointing to requested rev
 			[{_, NewRId, _, _}] ->
 				{ok, S};
 
 			% forward old version
 			[{_, OldRId, PreRIds, _}] ->
-				ets:insert(DocTbl, {DId, NewRId, PreRIds, S#state.gen}),
+				ok = dets:insert(DocTbl, {DId, NewRId, PreRIds, S#state.gen}),
 				peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
 				{ok, next_gen(S)};
 
@@ -700,7 +705,7 @@ do_forward_doc_commit(DId, RevPath, #state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S) 
 
 % ok | {ok, MissingParts, Handle} | {error, Reason}
 do_put_rev(RId, Rev, User, S) ->
-	case ets:member(S#state.rev_tbl, RId) of
+	case dets:member(S#state.rev_tbl, RId) of
 		false ->
 			Parts = Rev#revision.parts,
 			PartTbl = S#state.part_tbl,
@@ -727,7 +732,7 @@ do_put_rev(RId, Rev, User, S) ->
 
 
 do_put_rev_commit(RId, Rev, #state{sid=SId, rev_tbl=RevTbl} = S) ->
-	ets:insert(RevTbl, {RId, Rev}),
+	ok = dets:insert(RevTbl, {RId, Rev}),
 	peerdrive_vol_monitor:trigger_add_rev(SId, RId),
 	{ok, S}.
 
@@ -736,11 +741,11 @@ do_sync_get_changes(PeerSId, Caller, S) ->
 	case sync_lock(PeerSId, Caller, S) of
 		{ok, S2} ->
 			#state{doc_tbl=DocTbl, peer_tbl=PeerTbl} = S2,
-			Anchor = case ets:lookup(PeerTbl, PeerSId) of
+			Anchor = case dets:lookup(PeerTbl, PeerSId) of
 				[{_, Value}] -> Value;
 				[] -> 0
 			end,
-			Changes = ets:select(DocTbl,
+			Changes = dets:select(DocTbl,
 				[{{'$1','_','_','$2'},[{'>','$2',Anchor}],[{{'$1','$2'}}]}]),
 			Backlog = lists:sort(
 				fun({_Doc1, Seq1}, {_Doc2, Seq2}) -> Seq1 =< Seq2 end,
@@ -753,7 +758,7 @@ do_sync_get_changes(PeerSId, Caller, S) ->
 
 
 do_sync_set_anchor(PeerSId, SeqNum, #state{peer_tbl=PeerTbl}) ->
-	ets:insert(PeerTbl, {PeerSId, SeqNum}).
+	ok = dets:insert(PeerTbl, {PeerSId, SeqNum}).
 
 
 do_sync_finish(PeerSId, Caller, #state{synclocks=SLocks} = S) ->
@@ -783,13 +788,13 @@ do_unlock(ObjId, #state{objlocks=ObjLocks} = S) ->
 do_gc(S) ->
 	save_store(dirty, S),
 	{StartMS, StartS, StartUS} = now(),
-	GcObj1 = ets:foldl(
+	GcObj1 = dets:foldl(
 		fun({DId, RId, PreRIds, _}, Acc) ->
 			dict:store({doc, DId}, [{rev, R} || R <- [RId | PreRIds]], Acc)
 		end,
 		dict:new(),
 		S#state.doc_tbl),
-	GcObj2 = ets:foldl(
+	GcObj2 = dets:foldl(
 		fun({RId, Rev}, Acc) ->
 			DRefs = [{doc, D} || D <- Rev#revision.doc_links],
 			RRefs = [{rev, R} || R <- Rev#revision.parents ++ Rev#revision.rev_links],
@@ -894,47 +899,61 @@ part_size(PId, #state{part_tbl=PartTbl}) ->
 
 
 load_store(Id, #state{path=Path} = S) ->
-	IdStr = atom_to_list(Id),
-	S2 = case ets:file2tab(Path ++ "/docs.ets") of
-		{ok, DocTbl} ->
-			S#state{doc_tbl=DocTbl};
-		{error,{read_error,{file_error,_,enoent}}} ->
-			S#state{doc_tbl=ets:new(list_to_atom(IdStr ++ "_docs"), [])}
-	end,
-	S3 = case ets:file2tab(Path ++ "/revs.ets") of
-		{ok, RevTbl} ->
-			S2#state{rev_tbl=RevTbl};
-		{error,{read_error,{file_error,_,enoent}}} ->
-			S2#state{rev_tbl=ets:new(list_to_atom(IdStr ++ "_revs"), [])}
-	end,
-	PartTbl = list_to_atom(IdStr ++ "_parts"),
-	{ok, _} = dets:open_file(PartTbl, [{file, Path ++ "/parts.dets"}]),
-	S4 = S3#state{part_tbl=PartTbl},
-	S5 = case ets:file2tab(Path ++ "/peers.ets") of
-		{ok, PeerTbl} ->
-			S4#state{peer_tbl=PeerTbl};
-		{error,{read_error,{file_error,_,enoent}}} ->
-			S4#state{peer_tbl=ets:new(list_to_atom(IdStr ++ "_peers"), [])}
-	end,
-	case file:consult(Path ++ "/info") of
+	S2 = case file:consult(Path ++ "/info") of
 		{ok, Info} ->
 			{sid, Sid} = lists:keyfind(sid, 1, Info),
 			{gen, Gen} = lists:keyfind(gen, 1, Info),
-			S5#state{gen=Gen, gc_gen=Gen, sid=Sid};
+			case lists:keyfind(version, 1, Info) of
+				{version, 2} ->
+					ok;
+				{version, 1} ->
+					load_store_convert(Path);
+				_ ->
+					throw(enodev)
+			end,
+			S#state{gen=Gen, gc_gen=Gen, sid=Sid};
 
 		{error, enoent} ->
-			S5#state{gen=0, gc_gen=0, sid=crypto:rand_bytes(16)}
-	end.
+			S#state{gen=0, gc_gen=0, sid=crypto:rand_bytes(16)};
+
+		{error, _} ->
+			throw(enodev)
+	end,
+	IdStr = atom_to_list(Id),
+	DocTbl = list_to_atom(IdStr ++ "_docs"),
+	RevTbl = list_to_atom(IdStr ++ "_revs"),
+	PartTbl = list_to_atom(IdStr ++ "_parts"),
+	PeerTbl = list_to_atom(IdStr ++ "_peers"),
+	{ok, _} = check(dets:open_file(DocTbl, [{file, Path ++ "/docs.dets"}])),
+	{ok, _} = check(dets:open_file(RevTbl, [{file, Path ++ "/revs.dets"}])),
+	{ok, _} = check(dets:open_file(PartTbl, [{file, Path ++ "/parts.dets"}])),
+	{ok, _} = check(dets:open_file(PeerTbl, [{file, Path ++ "/peers.dets"}])),
+	S2#state{doc_tbl=DocTbl, rev_tbl=RevTbl, part_tbl=PartTbl, peer_tbl=PeerTbl}.
+
+
+load_store_convert(Path) ->
+	load_store_convert_tab(Path, "docs"),
+	load_store_convert_tab(Path, "revs"),
+	load_store_convert_tab(Path, "peers").
+
+
+load_store_convert_tab(Path, Tab) ->
+	TmpRef = make_ref(),
+	{ok, Tbl} = check(ets:file2tab(Path ++ "/" ++ Tab ++ ".ets")),
+	check(dets:open_file(TmpRef, [{file, Path ++ "/" ++ Tab ++ ".dets"}])),
+	check(dets:from_ets(TmpRef, Tbl)),
+	check(dets:close(TmpRef)),
+	ets:delete(Tbl).
 
 
 save_store(MountState, #state{path=Path} = S) ->
 	ok = dets:sync(S#state.part_tbl),
-	ok = ets:tab2file(S#state.doc_tbl, Path ++ "/docs.ets.new"),
-	ok = ets:tab2file(S#state.rev_tbl, Path ++ "/revs.ets.new"),
-	ok = ets:tab2file(S#state.peer_tbl, Path ++ "/peers.ets.new"),
+	ok = dets:sync(S#state.doc_tbl),
+	ok = dets:sync(S#state.rev_tbl),
+	ok = dets:sync(S#state.peer_tbl),
 	{ok, File} = file:open(Path ++ "/info.new", [write]),
 	try
-		ok = file:write(File, "{version, 1}.\n"),
+		ok = file:write(File, "{version, 2}.\n"),
 		ok = file:write(File, io_lib:print({state, MountState})),
 		ok = file:write(File, ".\n"),
 		ok = file:write(File, io_lib:print({sid, S#state.sid})),
@@ -945,21 +964,18 @@ save_store(MountState, #state{path=Path} = S) ->
 	after
 		file:close(File)
 	end,
-	ok = file:rename(Path ++ "/docs.ets.new", Path ++ "/docs.ets"),
-	ok = file:rename(Path ++ "/revs.ets.new", Path ++ "/revs.ets"),
-	ok = file:rename(Path ++ "/peers.ets.new", Path ++ "/peers.ets"),
 	ok = file:rename(Path ++ "/info.new", Path ++ "/info").
 
 
 close_store(S) ->
-	ets:delete(S#state.doc_tbl),
-	ets:delete(S#state.rev_tbl),
+	dets:close(S#state.doc_tbl),
+	dets:close(S#state.rev_tbl),
 	dets:close(S#state.part_tbl),
-	ets:delete(S#state.peer_tbl).
+	dets:close(S#state.peer_tbl).
 
 
 check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
-	case ets:member(S#state.doc_tbl, SId) of
+	case dets:member(S#state.doc_tbl, SId) of
 		true ->
 			S;
 		false ->
@@ -982,8 +998,8 @@ check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
 				rev_links = []
 			},
 			RId = peerdrive_store:hash_revision(RootRev),
-			ets:insert(S#state.rev_tbl, {RId, RootRev}),
-			ets:insert(S#state.doc_tbl, {SId, RId, [], Gen}),
+			ok = dets:insert(S#state.rev_tbl, {RId, RootRev}),
+			ok = dets:insert(S#state.doc_tbl, {SId, RId, [], Gen}),
 			S#state{gen=Gen+1}
 	end.
 
@@ -1025,10 +1041,10 @@ gc_cleanup(DelObj, S) ->
 
 
 gc_cleanup_obj({doc, DId}, #state{doc_tbl=DocTbl}) ->
-	ets:delete(DocTbl, DId);
+	ok = dets:delete(DocTbl, DId);
 
 gc_cleanup_obj({rev, RId}, #state{rev_tbl=RevTbl}) ->
-	ets:delete(RevTbl, RId);
+	ok = dets:delete(RevTbl, RId);
 
 gc_cleanup_obj({part, PId}, #state{path=Path, part_tbl=PartTbl}) ->
 	case dets:lookup(PartTbl, PId) of
@@ -1072,5 +1088,14 @@ call_store(Store, Request) ->
 		gen_server:call(Store, Request, infinity)
 	catch
 		exit:_ -> {error, enxio}
+	end.
+
+
+check(Result) ->
+	case Result of
+		{error, _} ->
+			throw(enodev);
+		Ok ->
+			Ok
 	end.
 
