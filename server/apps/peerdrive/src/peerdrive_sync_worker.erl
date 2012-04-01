@@ -26,7 +26,7 @@
 -export([working/2, waiting/2, paused/2, error/2]).
 
 -record(state, {syncfun, from, to, fromsid, tosid, monitor, numdone,
-	numremain, backlog}).
+	numremain, backlog, lastdone}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
@@ -62,7 +62,8 @@ init({Mode, FromSId, ToSId}) ->
 						monitor   = Monitor,
 						numdone   = 0,
 						numremain = 0,
-						backlog   = []
+						backlog   = [],
+						lastdone  = {clean, 0}
 					},
 					error_logger:info_report([{sync, start}, {from, FromSId},
 						{to, ToSId}]),
@@ -172,30 +173,37 @@ waiting(changed, S) ->
 
 working(timeout, #state{backlog=[]} = S) ->
 	#state{from=FromStore, tosid=ToSId, monitor=Monitor} = S,
-	case peerdrive_store:sync_get_changes(FromStore, ToSId) of
-		{ok, []} ->
-			peerdrive_store:sync_finish(FromStore, ToSId),
-			peerdrive_work:stop(Monitor),
-			{next_state, waiting, S};
+	case sync_done(S) of
+		{ok, S2} ->
+			case peerdrive_store:sync_get_changes(FromStore, ToSId) of
+				{ok, []} ->
+					peerdrive_store:sync_finish(FromStore, ToSId),
+					peerdrive_work:stop(Monitor),
+					{next_state, waiting, S2};
 
-		{ok, NewBacklog} ->
-			NewRemain = S#state.numremain + length(NewBacklog),
-			peerdrive_work:progress(Monitor, S#state.numdone * 256 div NewRemain),
-			S2 = S#state{backlog=NewBacklog, numremain=NewRemain},
-			{next_state, working, S2, 0};
+				{ok, NewBacklog} ->
+					NewRemain = S2#state.numremain + length(NewBacklog),
+					peerdrive_work:progress(Monitor, S2#state.numdone * 256 div NewRemain),
+					S3 = S2#state{backlog=NewBacklog, numremain=NewRemain},
+					{next_state, working, S3, 0};
 
-		{error, Reason} ->
-			peerdrive_work:error(Monitor, [{code, Reason}]),
+				{error, Reason} ->
+					peerdrive_work:error(Monitor, [{code, Reason}]),
+					{next_state, error, S2}
+			end;
+
+		{error, ErrInfo} ->
+			peerdrive_work:error(Monitor, ErrInfo),
 			{next_state, error, S}
 	end;
 
 working(timeout, #state{backlog=[Change|Backlog], monitor=Monitor} = S) ->
 	try
-		sync_step(Change, S),
-		NewDone = S#state.numdone + 1,
-		peerdrive_work:progress(Monitor, NewDone * 256 div S#state.numremain),
-		S2 = S#state{backlog=Backlog, numdone=NewDone},
-		{next_state, working, S2, 0}
+		S2 = sync_step(Change, S),
+		NewDone = S2#state.numdone + 1,
+		peerdrive_work:progress(Monitor, NewDone * 256 div S2#state.numremain),
+		S3 = S2#state{backlog=Backlog, numdone=NewDone},
+		{next_state, working, S3, 0}
 	catch
 		throw:ErrInfo ->
 			peerdrive_work:error(Monitor, ErrInfo),
@@ -217,16 +225,13 @@ error(changed, S) ->
 skip(#state{backlog=[]} = S) ->
 	{next_state, working, S, 0};
 
-skip(#state{backlog=[{_Doc, SeqNum} | Backlog], numdone=Done} = S) ->
-	case peerdrive_store:sync_set_anchor(S#state.from, S#state.tosid, SeqNum) of
-		ok ->
-			S2 = S#state{backlog=Backlog, numdone=Done+1},
-			{next_state, working, S2, 0};
-
-		{error, Reason} ->
-			peerdrive_work:error(S#state.monitor, [{code, Reason}]),
-			{next_state, error, S}
-	end.
+skip(#state{backlog=[{_Doc, SeqNum} | Backlog]} = S) ->
+	#state{
+		numdone=Done,
+		lastdone = {Changed, _PrevSeqNum}
+	} = S,
+	S2 = S#state{backlog=Backlog, numdone=Done+1, lastdone={Changed, SeqNum}},
+	{next_state, working, S2, 0}.
 
 
 sync_step({Doc, SeqNum}, S) ->
@@ -234,19 +239,34 @@ sync_step({Doc, SeqNum}, S) ->
 		syncfun  = SyncFun,
 		from     = FromStore,
 		to       = ToStore,
-		tosid    = ToSId
+		lastdone = {Changed, _PrevSeqNum}
 	} = S,
 	peerdrive_sync_locks:lock(Doc),
 	try
-		sync_doc(Doc, FromStore, ToStore, SyncFun)
+		case sync_doc(Doc, FromStore, ToStore, SyncFun) of
+			ok ->
+				S#state{lastdone={dirty, SeqNum}};
+			skip ->
+				S#state{lastdone={Changed, SeqNum}}
+		end
 	after
 		peerdrive_sync_locks:unlock(Doc)
-	end,
-	case peerdrive_store:sync_set_anchor(FromStore, ToSId, SeqNum) of
-		ok ->
-			ok;
-		{error, Reason} ->
-			throw([{code, Reason}])
+	end.
+
+
+sync_done(S) ->
+	#state{
+		lastdone = {State, SeqNum},
+		from     = FromStore,
+		to       = ToStore,
+		tosid    = ToSId
+	} = S,
+	try
+		State == dirty andalso check_simple(peerdrive_store:sync(ToStore)),
+		check_simple(peerdrive_store:sync_set_anchor(FromStore, ToSId, SeqNum)),
+		{ok, S#state{lastdone={clean, SeqNum}}}
+	catch
+		throw:ErrInfo -> {error, ErrInfo}
 	end.
 
 
@@ -256,16 +276,16 @@ sync_doc(Doc, From, To, SyncFun) ->
 			case peerdrive_store:lookup(From, Doc) of
 				{ok, ToRev, _} ->
 					% alread the same
-					ok;
+					skip;
 				{ok, FromRev, _} ->
 					SyncFun(Doc, From, FromRev, To, ToRev);
 				error ->
 					% deleted -> ignore
-					ok
+					skip
 			end;
 		error ->
 			% doesn't exist on destination -> ignore
-			ok
+			skip
 	end.
 
 
@@ -314,7 +334,7 @@ sync_doc_merge(Doc, From, FromRev, To, ToRev, Strategy) ->
 
 			{ok, ToRev} ->
 				% just the other side was updated -> nothing for us
-				ok;
+				skip;
 
 			error ->
 				case peerdrive_mergebase:merge_bases(Graph) of
@@ -359,7 +379,7 @@ latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
 		true ->
 			% The other revision is newer. The other directions
 			% sync_worker will pick it up.
-			ok
+			skip
 	end.
 
 
@@ -582,5 +602,14 @@ check(BrokerResult, Doc, Rev) ->
 			Result;
 		ok ->
 			ok
+	end.
+
+
+check_simple(Result) ->
+	case Result of
+		ok ->
+			ok;
+		{error, Reason} ->
+			throw([{code, Reason}])
 	end.
 
