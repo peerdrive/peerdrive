@@ -46,6 +46,14 @@ init([]) ->
 			[peerdrive_pool_sup]
 		},
 		{
+			peerdrive_registry,
+			{peerdrive_registry, start_link, []},
+			permanent,
+			1000,
+			worker,
+			[peerdrive_registry]
+		},
+		{
 			peerdrive_worker_sup,
 			{peerdrive_worker_sup, start_link, []},
 			permanent,
