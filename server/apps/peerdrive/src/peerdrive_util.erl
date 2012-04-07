@@ -16,7 +16,10 @@
 
 -module(peerdrive_util).
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
--export([read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
+-export([read_doc_struct/3, read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
+-export([walk/2]).
+
+-include("utils.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Hex conversions
@@ -71,9 +74,92 @@ gen_tmp_name(RootPath) ->
 	RootPath ++ "/_" ++ peerdrive_util:bin_to_hexstr(crypto:rand_bytes(8)).
 
 
+walk(Store, Path) ->
+	Doc = peerdrive_store:guid(Store),
+	walk_step(Store, Doc, re:split(Path, "/")).
+
+
+walk_step(_Store, Doc, []) ->
+	{ok, Doc};
+
+walk_step(Store, Doc, [File | Path]) ->
+	case read_doc_struct(Store, Doc, <<"PDSD">>) of
+		{ok, Folder} ->
+			case find_folder_entry(Store, Folder, File) of
+				{ok, Child} ->
+					walk_step(Store, Child, Path);
+				{error, _} = Error ->
+					Error
+			end;
+
+		{error, _} = Error ->
+			Error
+	end.
+
+
+find_folder_entry(_Store, [], _Name) ->
+	{error, enoent};
+
+find_folder_entry(Store, [Entry | Rest], Name) when ?IS_GB_TREE(Entry) ->
+	case gb_trees:lookup(<<"">>, Entry) of
+		{value, {dlink, Doc}} ->
+			try read_file_name(Store, Doc) of
+				Name ->
+					{ok, Doc};
+				_ ->
+					find_folder_entry(Store, Rest, Name)
+			catch
+				throw:error ->
+					find_folder_entry(Store, Rest, Name)
+			end;
+
+		_ ->
+			find_folder_entry(Store, Rest, Name)
+	end;
+
+find_folder_entry(Store, [_ | Rest], Name) ->
+	find_folder_entry(Store, Rest, Name).
+
+
+read_file_name(Store, Doc) ->
+	Meta = case read_doc_struct(Store, Doc, <<"META">>) of
+		{ok, Value1} when ?IS_GB_TREE(Value1) ->
+			Value1;
+		{ok, _} ->
+			throw(error);
+		{error, _} ->
+			throw(error)
+	end,
+	case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
+		{ok, Title} when is_binary(Title) ->
+			Title;
+		{ok, _} ->
+			throw(error);
+		error ->
+			throw(error)
+	end.
+
+
+meta_read_entry(Meta, []) ->
+	{ok, Meta};
+meta_read_entry(Meta, [Step|Path]) when ?IS_GB_TREE(Meta) ->
+	case gb_trees:lookup(Step, Meta) of
+		{value, Value} -> meta_read_entry(Value, Path);
+		none           -> error
+	end;
+meta_read_entry(_Meta, _Path) ->
+	error.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Document/Revision reading
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+read_doc_struct(Store, Doc, Part) ->
+	case peerdrive_store:lookup(Store, Doc) of
+		{ok, Rev, _} -> read_rev_struct(Store, Rev, Part);
+		error        -> {error, enoent}
+	end.
+
 
 % returns {ok, Data} | {error, Reason}
 read_rev(Store, Rev, Part) ->
