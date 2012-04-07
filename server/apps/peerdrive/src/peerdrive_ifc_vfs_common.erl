@@ -1359,13 +1359,27 @@ folder_set_title(Store, Doc, NewTitle) ->
 		{ok, _OldRev, Handle} ->
 			try
 				Meta1 = read_struct(Handle, <<"META">>),
-				Meta2 = meta_write_entry(Meta1,
+				Meta2 = case meta_read_entry(Meta1, [<<"org.peerdrive.annotation">>,
+				                                     <<"title">>])
+				of
+					{ok, OldTitle} ->
+						meta_write_entry(Meta1,
+							[<<"org.peerdrive.annotation">>, <<"comment">>],
+							<<"Renamed from \"", OldTitle/binary,  "\" to \"",
+								NewTitle/binary, "\"">>);
+					error ->
+						Meta1
+				end,
+				Meta3 = meta_write_entry(Meta2,
 					[<<"org.peerdrive.annotation">>, <<"title">>],
 					NewTitle),
-				case write_struct(Handle, <<"META">>, Meta2) of
+				case write_struct(Handle, <<"META">>, Meta3) of
 					ok    -> ok;
 					WrErr -> throw(WrErr)
 				end,
+				Uti = peerdrive_registry:get_uti_from_extension(
+					filename:extension(NewTitle)),
+				peerdrive_ifc_vfs_broker:set_type(Handle, Uti),
 				case peerdrive_ifc_vfs_broker:close(Handle) of
 					{ok, _NewRev} -> ok;
 					CloseErr      -> CloseErr
@@ -1618,7 +1632,8 @@ create_empty_file(Store, Name) ->
 				<<"Created by VFS interface">>,
 				gb_trees:empty())),
 		gb_trees:empty()),
-	case peerdrive_broker:create(Store, <<"public.data">>, ?VFS_CC) of
+	Uti = peerdrive_registry:get_uti_from_extension(filename:extension(Name)),
+	case peerdrive_broker:create(Store, Uti, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:write(Handle, <<"META">>, 0, peerdrive_struct:encode(MetaData)),
 			peerdrive_broker:write(Handle, <<"FILE">>, 0, <<>>),
