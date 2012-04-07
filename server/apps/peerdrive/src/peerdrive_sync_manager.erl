@@ -38,7 +38,7 @@ start_link() ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([]) ->
-	{ok, SysStore, SysDoc} = find_sys_store(),
+	{SysDoc, SysStore} = peerdrive_volman:sys_store(),
 	peerdrive_vol_monitor:register_proc(),
 	case find_sync_rules(SysStore, SysDoc) of
 		{ok, Doc} ->
@@ -121,22 +121,6 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% Local stuff
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-find_sys_store() ->
-	find_sys_store(peerdrive_volman:enum()).
-
-
-find_sys_store([]) ->
-	error;
-find_sys_store([{_Id, _Descr, Guid, Tags} | Remaining]) ->
-	case proplists:is_defined(system, Tags) of
-		true ->
-			{ok, Store} = peerdrive_volman:store(Guid),
-			{ok, Store, Guid};
-		false ->
-			find_sys_store(Remaining)
-	end.
-
-
 find_sync_rules(Store, Doc) ->
 	case read_doc(Store, Doc) of
 		{ok, Dir} ->
@@ -162,7 +146,7 @@ find_sync_rules_loop(Store, [Entry | Rest]) when ?IS_GB_TREE(Entry) ->
 					find_sync_rules_loop(Store, Rest)
 			end;
 
-		value ->
+		none ->
 			find_sync_rules_loop(Store, Rest)
 	end;
 
