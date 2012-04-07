@@ -18,7 +18,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0]).
--export([enum/0, stores/0, store/1, mount/1, unmount/1]).
+-export([enum/0, stores/0, store/1, sys_store/0, mount/1, unmount/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % specs:  [{Id, Descr, Disposition, Module, Args}]
@@ -64,6 +64,11 @@ stores() ->
 %%       Guid = guid()
 store(Guid) ->
 	gen_server:call(?MODULE, {store, Guid}, infinity).
+
+%% @doc Get Guids and pid 's of system store
+%% @spec sys_store() -> {guid(), pid()}
+sys_store() ->
+	gen_server:call(?MODULE, sys_store, infinity).
 
 %% @doc Mount store by ID
 %% @spec mount(StoreId) -> {ok, Guid} | {error, Reason}
@@ -128,6 +133,24 @@ handle_call({store, Guid}, _From, #state{stores=Stores} = S) ->
 	Reply = case lists:keysearch(Guid, 3, Stores) of
 		{value, {Pid, _Id, _Guid}} -> {ok, Pid};
 		false -> error
+	end,
+	{reply, Reply, S};
+
+handle_call(sys_store, _From, #state{specs=Specs, stores=Stores} = S) ->
+	Reply = try
+		lists:foreach(
+			fun({Id, _Descr, Disposition, _Module, _Args}) ->
+				case proplists:is_defined(system, Disposition) of
+					true -> throw(Id);
+					false -> ok
+				end
+			end,
+			Specs),
+		exit(badstate)
+	catch
+		throw:SysId ->
+			{Pid, SysId, Guid} = lists:keyfind(SysId, 2, Stores),
+			{Guid, Pid}
 	end,
 	{reply, Reply, S};
 
