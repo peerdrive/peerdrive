@@ -282,7 +282,7 @@ close_and_writeback(#state{parts=[{Part, Content} | RemParts]} = S) ->
 			end;
 
 		{rw, Data} when is_binary(Data) ->
-			PId = binary_part(crypto:sha(Data), 0, 16),
+			PId = crypto:sha(Data),
 			S2 = lock_part(PId, S),
 			case peerdrive_file_store:part_put(S#state.store, PId, Data) of
 				ok ->

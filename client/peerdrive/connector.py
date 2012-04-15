@@ -167,8 +167,7 @@ _errorCodes = {
 
 
 def _checkUuid(uuid):
-	valid = (uuid.__class__ == str) and (len(uuid) == 16)
-	if not valid:
+	if not (uuid.__class__ == str):
 		raise IOError('Invalid UUID: '+str(uuid.__class__)+' '+str(uuid))
 	return uuid
 

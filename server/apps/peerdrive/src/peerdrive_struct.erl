@@ -100,11 +100,11 @@ decode_bool(<<Bool:8, Rest/binary>>) ->
 	{Value, Rest}.
 
 
-decode_rlink(<<Rev:16/binary, Rest/binary>>) ->
+decode_rlink(<<Size:8, Rev:Size/binary, Rest/binary>>) ->
 	{{rlink, binary:copy(Rev)}, Rest}.
 
 
-decode_dlink(<<Doc:16/binary, Rest/binary>>) ->
+decode_dlink(<<Size:8, Doc:Size/binary, Rest/binary>>) ->
 	{{dlink, binary:copy(Doc)}, Rest}.
 
 
@@ -160,10 +160,10 @@ encode(Bool) when is_boolean(Bool) ->
 	end;
 
 encode({rlink, Rev}) ->
-	<<?RLINK, Rev/binary>>;
+	<<?RLINK, (size(Rev)):8, Rev/binary>>;
 
 encode({dlink, Doc}) ->
-	<<?DLINK, Doc/binary>>;
+	<<?DLINK, (size(Doc)):8, Doc/binary>>;
 
 encode(Float) when is_float(Float) ->
 	<<?DOUBLE, Float:64/little-float>>;

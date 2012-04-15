@@ -476,12 +476,9 @@ hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
 	BinCreator = hash_revision_string(Revision#revision.creator),
 	BinDL = hash_revision_list(Revision#revision.doc_links),
 	BinRL = hash_revision_list(Revision#revision.rev_links),
-	binary_part(
-		crypto:sha(<<Flags:32/little, BinParts/binary, BinParents/binary,
-			Mtime:64/little, BinType/binary, BinCreator/binary, BinDL/binary,
-			BinRL/binary>>),
-		0,
-		16).
+	crypto:sha(<<Flags:32/little, BinParts/binary, BinParents/binary,
+		Mtime:64/little, BinType/binary, BinCreator/binary, BinDL/binary,
+		BinRL/binary>>).
 
 hash_revision_list(List) ->
 	lists:foldl(

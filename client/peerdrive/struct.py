@@ -68,10 +68,11 @@ class RevLink(object):
 
 	def _fromStruct(self, decoder):
 		self.__store = decoder._getStore()
-		self.__rev = decoder._getStr(16)
+		length = decoder._getInt('B')
+		self.__rev = decoder._getStr(length)
 
 	def _toStruct(self):
-		return '\x40' + self.__rev
+		return struct.pack('<BB', 0x40, len(self.__rev)) + self.__rev
 
 	def _fromDict(self, dct):
 		self.__store = None
@@ -81,8 +82,9 @@ class RevLink(object):
 		return { "__rlink__" : True, "rev" : self.__rev.encode('hex') }
 
 	def _fromString(self, spec):
-		self.__store = spec[4:36].decode("hex")
-		self.__rev = spec[37:69].decode("hex")
+		(doc, store, rev) = spec.split(':')
+		self.__store = store.decode("hex")
+		self.__rev = rev.decode("hex")
 
 	def update(self, newStore=None):
 		if newStore:
@@ -130,11 +132,12 @@ class DocLink(object):
 
 	def _fromStruct(self, decoder):
 		self.__store = decoder._getStore()
-		self.__doc = decoder._getStr(16)
+		length = decoder._getInt('B')
+		self.__doc = decoder._getStr(length)
 		self.__rev = None
 
 	def _toStruct(self):
-		return struct.pack('<B16s', 0x41, self.__doc)
+		return struct.pack('<BB', 0x41, len(self.__doc)) + self.__doc
 
 	def _fromDict(self, dct):
 		self.__store = None
@@ -147,8 +150,9 @@ class DocLink(object):
 			"doc" : self.__doc.encode('hex') }
 
 	def _fromString(self, spec):
-		self.__store = spec[4:36].decode("hex")
-		self.__doc = spec[37:69].decode("hex")
+		(doc, store, doc) = spec.split(':')
+		self.__store = store.decode("hex")
+		self.__doc = doc.decode("hex")
 		self.__rev = None
 
 	def update(self, newStore=None):

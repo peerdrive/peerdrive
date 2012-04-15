@@ -220,7 +220,7 @@ hash_file_loop(File, Ctx1) ->
 			Ctx2 = crypto:sha_update(Ctx1, Data),
 			hash_file_loop(File, Ctx2);
 		eof ->
-			{ok, binary_part(crypto:sha_final(Ctx1), 0, 16)};
+			{ok, crypto:sha_final(Ctx1)};
 		Else ->
 			fixup_file(Else)
 	end.

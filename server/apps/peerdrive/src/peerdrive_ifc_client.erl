@@ -277,7 +277,6 @@ do_enum(RetPath) ->
 do_loopup_doc(Body) ->
 	#lookupdocreq{doc=Doc, stores=Stores} =
 		peerdrive_client_pb:decode_lookupdocreq(Body),
-	?ASSERT_GUID(Doc),
 	{Revs, PreRevs} = peerdrive_broker:lookup_doc(Doc, get_stores(Stores)),
 	Reply = #lookupdoccnf{
 		revs = [ #lookupdoccnf_revmap{rid=RId, stores=RS} || {RId, RS} <- Revs ],
@@ -289,7 +288,6 @@ do_loopup_doc(Body) ->
 do_loopup_rev(Body) ->
 	#lookuprevreq{rev=Rev, stores=Stores} =
 		peerdrive_client_pb:decode_lookuprevreq(Body),
-	?ASSERT_GUID(Rev),
 	Found = peerdrive_broker:lookup_rev(Rev, get_stores(Stores)),
 	Reply = #lookuprevcnf{stores=Found},
 	peerdrive_client_pb:encode_lookuprevcnf(Reply).
@@ -298,7 +296,6 @@ do_loopup_rev(Body) ->
 do_stat(Body) ->
 	#statreq{rev=Rev, stores=Stores} =
 		peerdrive_client_pb:decode_statreq(Body),
-	?ASSERT_GUID(Rev),
 	{ok, Stat} = check(peerdrive_broker:stat(Rev, get_stores(Stores))),
 	#rev_stat{
 		flags     = Flags,
@@ -323,7 +320,6 @@ do_stat(Body) ->
 do_peek(Cookie, Body) ->
 	#peekreq{store=Store, rev=Rev} =
 		peerdrive_client_pb:decode_peekreq(Body),
-	?ASSERT_GUID(Rev),
 	{ok, Handle} = check(peerdrive_broker:peek(get_store(Store), Rev)),
 	Reply = #peekcnf{handle=Cookie},
 	{Handle, peerdrive_client_pb:encode_peekcnf(Reply)}.
@@ -347,7 +343,6 @@ do_fork(Cookie, Body) ->
 		rev = Rev,
 		creator_code = Creator
 	} = peerdrive_client_pb:decode_forkreq(Body),
-	?ASSERT_GUID(Rev),
 	{ok, Doc, Handle} = check(peerdrive_broker:fork(get_store(Store), Rev,
 		unicode:characters_to_binary(Creator))),
 	Reply = #forkcnf{handle=Cookie, doc=Doc},
@@ -361,8 +356,6 @@ do_update(Cookie, Body) ->
 		rev = Rev,
 		creator_code = CreatorStr
 	} = peerdrive_client_pb:decode_updatereq(Body),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	Creator = if
 		CreatorStr == undefined -> undefined;
 		true -> unicode:characters_to_binary(CreatorStr)
@@ -379,8 +372,6 @@ do_resume(Cookie, Body) ->
 		rev = Rev,
 		creator_code = CreatorStr
 	} = peerdrive_client_pb:decode_resumereq(Body),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	Creator = if
 		CreatorStr == undefined -> undefined;
 		true -> unicode:characters_to_binary(CreatorStr)
@@ -396,8 +387,6 @@ do_forget(Body) ->
 		doc = Doc,
 		rev = Rev
 	} = peerdrive_client_pb:decode_forgetreq(Body),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	ok = check(peerdrive_broker:forget(get_store(Store), Doc, Rev)),
 	<<>>.
 
@@ -408,8 +397,6 @@ do_delete_doc(Body) ->
 		doc = Doc,
 		rev = Rev
 	} = peerdrive_client_pb:decode_deletedocreq(Body),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	ok = check(peerdrive_broker:delete_doc(get_store(Store), Doc, Rev)),
 	<<>>.
 
@@ -419,7 +406,6 @@ do_delete_rev(Body) ->
 		store = Store,
 		rev = Rev
 	} = peerdrive_client_pb:decode_deleterevreq(Body),
-	?ASSERT_GUID(Rev),
 	ok = check(peerdrive_broker:delete_rev(get_store(Store), Rev)),
 	<<>>.
 
@@ -434,9 +420,6 @@ do_forward(Body) ->
 		depth = Depth,
 		verbose = Verbose
 	} = peerdrive_client_pb:decode_forwarddocreq(Body),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(FromRev),
-	?ASSERT_GUID(ToRev),
 	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:forward_doc(get_store(Store), Doc, FromRev,
@@ -452,7 +435,6 @@ do_replicate_doc(Body) ->
 		depth = Depth,
 		verbose = Verbose
 	} = peerdrive_client_pb:decode_replicatedocreq(Body),
-	?ASSERT_GUID(Doc),
 	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:replicate_doc(get_store(SrcStore), Doc,
@@ -468,7 +450,6 @@ do_replicate_rev(Body) ->
 		depth = Depth,
 		verbose = Verbose
 	} = peerdrive_client_pb:decode_replicaterevreq(Body),
-	?ASSERT_GUID(Rev),
 	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 	ok = check(peerdrive_broker:replicate_rev(get_store(SrcStore), Rev,
@@ -500,7 +481,6 @@ do_watch_add_req(RetPath, Body) ->
 	#watchaddreq{type=Type, element=Obj} =
 		peerdrive_client_pb:decode_watchaddreq(Body),
 	try
-		?ASSERT_GUID(Obj),
 		ok = check(peerdrive_change_monitor:watch(Type, Obj)),
 		send_reply(RetPath, <<>>)
 	catch
@@ -512,7 +492,6 @@ do_watch_rem_req(RetPath, Body) ->
 	#watchremreq{type=Type, element=Obj} =
 		peerdrive_client_pb:decode_watchremreq(Body),
 	try
-		?ASSERT_GUID(Obj),
 		ok = check(peerdrive_change_monitor:unwatch(Type, Obj)),
 		send_reply(RetPath, <<>>)
 	catch
@@ -664,7 +643,6 @@ io_loop_process(Handle, Request, ReqData) ->
 		?MERGE_MSG ->
 			#mergereq{store=Store, rev=Rev, depth=Depth, verbose=Verbose} =
 				peerdrive_client_pb:decode_mergereq(ReqData),
-			?ASSERT_GUID(Rev),
 			Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 			Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 			ok = check(peerdrive_broker:merge(Handle, get_store(Store), Rev,
@@ -673,7 +651,6 @@ io_loop_process(Handle, Request, ReqData) ->
 
 		?REBASE_MSG ->
 			#rebasereq{rev=Rev} = peerdrive_client_pb:decode_rebasereq(ReqData),
-			?ASSERT_GUID(Rev),
 			ok = check(peerdrive_broker:rebase(Handle, Rev)),
 			<<>>;
 
@@ -710,7 +687,6 @@ io_loop_process(Handle, Request, ReqData) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 get_store(SId) ->
-	?ASSERT_GUID(SId),
 	case peerdrive_volman:store(SId) of
 		{ok, Store} -> Store;
 		error       -> throw({error, enxio})
@@ -725,7 +701,6 @@ get_stores(StoreList) ->
 		_ ->
 			lists:foldr(
 				fun(SId, Acc) ->
-					?ASSERT_GUID(SId),
 					case peerdrive_volman:store(SId) of
 						{ok, Store} -> [Store | Acc];
 						error       -> Acc

@@ -320,7 +320,6 @@ do_mount(Name, #state{transport=Trsp, socket=Socket} = S) ->
 			_ ->
 				throw({error, einval})
 		end,
-		?ASSERT_GUID(SId),
 		{ok, S#state{guid=SId}}
 	catch
 		throw:{error, Error} ->
@@ -343,8 +342,6 @@ cnf_statfs(Body) ->
 cnf_lookup(Body) ->
 	#lookupcnf{rev=Rev, pre_revs=PreRevs} =
 		peerdrive_netstore_pb:decode_lookupcnf(Body),
-	?ASSERT_GUID(Rev),
-	?ASSERT_GUID_LIST(PreRevs),
 	{ok, Rev, PreRevs}.
 
 
@@ -367,13 +364,10 @@ cnf_stat(Body) ->
 		doc_links = DocLinks,
 		rev_links = RevLinks
 	} = peerdrive_netstore_pb:decode_statcnf(Body),
-	?ASSERT_GUID_LIST(Parents),
-	?ASSERT_GUID_LIST(DocLinks),
-	?ASSERT_GUID_LIST(RevLinks),
 	Stat = #rev_stat{
 		flags     = Flags,
 		parts     = [ {FCC, Size, PId} || #statcnf_part{fourcc=FCC, size=Size,
-			pid=PId} <- Parts, ?ASSERT_PART(FCC), ?ASSERT_GUID(PId) ],
+			pid=PId} <- Parts, ?ASSERT_PART(FCC) ],
 		parents   = Parents,
 		mtime     = Mtime,
 		type      = unicode:characters_to_binary(TypeCode),
@@ -393,7 +387,6 @@ cnf_peek(Cnf, MaxPacketSize, User) ->
 cnf_create(Cnf, MaxPacketSize, User) ->
 	#createcnf{handle=Handle, doc=Doc} =
 		peerdrive_netstore_pb:decode_createcnf(Cnf),
-	?ASSERT_GUID(Doc),
 	{ok, IoPid} = peerdrive_net_store_io:start_link(self(), Handle,
 		MaxPacketSize, User),
 	{ok, Doc, IoPid}.
@@ -402,7 +395,6 @@ cnf_create(Cnf, MaxPacketSize, User) ->
 cnf_fork(Cnf, MaxPacketSize, User) ->
 	#forkcnf{handle=Handle, doc=Doc} =
 		peerdrive_netstore_pb:decode_forkcnf(Cnf),
-	?ASSERT_GUID(Doc),
 	{ok, IoPid} = peerdrive_net_store_io:start_link(self(), Handle,
 		MaxPacketSize, User),
 	{ok, Doc, IoPid}.
@@ -454,7 +446,6 @@ cnf_forward_doc(Body, User) ->
 		undefined ->
 			ok;
 		_ ->
-			?ASSERT_GUID_LIST(Missing),
 			{ok, Importer} = peerdrive_net_store_forwarder:start_link(self(),
 				Handle, User),
 			{ok, Missing, Importer}
@@ -521,7 +512,7 @@ cnf_sync_get_changes(Body) ->
 	#syncgetchangescnf{backlog=Backlog} =
 		peerdrive_netstore_pb:decode_syncgetchangescnf(Body),
 	{ok, [ {Doc, SeqNum} || #syncgetchangescnf_item{doc=Doc, seq_num=SeqNum} <-
-		Backlog, ?ASSERT_GUID(Doc)]}.
+		Backlog ]}.
 
 
 req_sync_finish(PeerGuid, {Caller, _} = From, #state{synclocks=SLocks} = S) ->
@@ -624,7 +615,6 @@ handle_confirm(Ref, Cnf, Body, #state{requests=Requests} = S) ->
 handle_indication(?TRIGGER_MSG, Body, #state{guid=Guid} = S) ->
 	#triggerind{event=Event, element=Element} =
 		peerdrive_netstore_pb:decode_triggerind(Body),
-	?ASSERT_GUID(Element),
 	case Event of
 		add_rev -> peerdrive_vol_monitor:trigger_add_rev(Guid, Element);
 		rem_rev -> peerdrive_vol_monitor:trigger_rm_rev(Guid, Element);

@@ -146,8 +146,7 @@ do_commit(#state{store=Store, rid=RId, rev=Rev, parts=Parts} = S) ->
 	try
 		lists:foreach(
 			fun({_, {PId, _, ShaCtx}}) ->
-				binary_part(crypto:sha_final(ShaCtx), 0, 16) == PId orelse
-					throw(einval)
+				crypto:sha_final(ShaCtx) == PId orelse throw(einval)
 			end,
 			Parts),
 		case commit_parts(Store, Parts) of

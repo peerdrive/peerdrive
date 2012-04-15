@@ -38,7 +38,7 @@ All values are encoded as little endian...
 uint32           .. Flags (0: Sticky, 1..31: Reserved [0])
 uint32           .. PartsCount
 	char[4]      .. FourCC
-	uint128      .. SHA1 hash of part content (initial 16 bytes)
+	uint128      .. SHA1 hash of part content
 uint32           .. ParentsCount
 	uint128      .. Parent object
 uint64           .. Mtime (UTC unix time in microsecons)
@@ -164,8 +164,8 @@ string = 0x20, StringLength:32/little, ?UTF-8 encoded string?
 
 bool = 0x30, (0x00 | 0x01)
 
-rev_link = 0x40, Rev:128
-doc_link = 0x41, Doc:128
+rev_link = 0x40, Length:8, Rev
+doc_link = 0x41, Length:8, Doc
 
 float  = 0x50, ?32 bit IEEE float?
 double = 0x51, ?64 bit IEEE double?

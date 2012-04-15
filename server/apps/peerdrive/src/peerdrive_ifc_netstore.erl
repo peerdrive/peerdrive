@@ -244,7 +244,6 @@ do_statfs(_Body, Store) ->
 
 do_loopup(Body, Store) ->
 	#lookupreq{doc=Doc} = peerdrive_netstore_pb:decode_lookupreq(Body),
-	?ASSERT_GUID(Doc),
 	{ok, Rev, PreRevs} = check(peerdrive_store:lookup(Store, Doc)),
 	peerdrive_netstore_pb:encode_lookupcnf(#lookupcnf{rev=Rev,
 		pre_revs=PreRevs}).
@@ -252,14 +251,12 @@ do_loopup(Body, Store) ->
 
 do_contains(Body, Store) ->
 	#containsreq{rev=Rev} = peerdrive_netstore_pb:decode_containsreq(Body),
-	?ASSERT_GUID(Rev),
 	Cnf = #containscnf{found=peerdrive_store:contains(Store, Rev)},
 	peerdrive_netstore_pb:encode_containscnf(Cnf).
 
 
 do_stat(Body, Store) ->
 	#statreq{rev=Rev} = peerdrive_netstore_pb:decode_statreq(Body),
-	?ASSERT_GUID(Rev),
 	{ok, Stat} = check(peerdrive_store:stat(Store, Rev)),
 	#rev_stat{
 		flags     = Flags,
@@ -292,7 +289,6 @@ do_sync(<<>>, Store) ->
 
 do_peek(Store, NetHandle, ReqData) ->
 	#peekreq{rev=Rev} = peerdrive_netstore_pb:decode_peekreq(ReqData),
-	?ASSERT_GUID(Rev),
 	{ok, StoreHandle} = check(peerdrive_store:peek(Store, Rev)),
 	Cnf = #peekcnf{handle=NetHandle},
 	{start, StoreHandle, peerdrive_netstore_pb:encode_peekcnf(Cnf)}.
@@ -311,7 +307,6 @@ do_create(Store, NetHandle, ReqData) ->
 do_fork(Store, NetHandle, ReqData) ->
 	#forkreq{rev=Rev, creator_code=Creator} =
 		peerdrive_netstore_pb:decode_forkreq(ReqData),
-	?ASSERT_GUID(Rev),
 	{ok, Doc, StoreHandle} = check(peerdrive_store:fork(Store, Rev,
 		unicode:characters_to_binary(Creator))),
 	Cnf = #forkcnf{handle=NetHandle, doc=Doc},
@@ -321,8 +316,6 @@ do_fork(Store, NetHandle, ReqData) ->
 do_update(Store, NetHandle, ReqData) ->
 	#updatereq{doc=Doc, rev=Rev, creator_code=CreatorStr} =
 		peerdrive_netstore_pb:decode_updatereq(ReqData),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	Creator = if
 		CreatorStr == undefined -> undefined;
 		true -> unicode:characters_to_binary(CreatorStr)
@@ -335,8 +328,6 @@ do_update(Store, NetHandle, ReqData) ->
 do_resume(Store, NetHandle, ReqData) ->
 	#resumereq{doc=Doc, rev=Rev, creator_code=CreatorStr} =
 		peerdrive_netstore_pb:decode_resumereq(ReqData),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	Creator = if
 		CreatorStr == undefined -> undefined;
 		true -> unicode:characters_to_binary(CreatorStr)
@@ -349,8 +340,6 @@ do_resume(Store, NetHandle, ReqData) ->
 do_forget(Body, Store) ->
 	#forgetreq{doc=Doc, rev=Rev} =
 		peerdrive_netstore_pb:decode_forgetreq(Body),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	ok = check(peerdrive_store:forget(Store, Doc, Rev)),
 	<<>>.
 
@@ -358,15 +347,12 @@ do_forget(Body, Store) ->
 do_delete_doc(Body, Store) ->
 	#deletedocreq{doc=Doc, rev=Rev} =
 		peerdrive_netstore_pb:decode_deletedocreq(Body),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	ok = check(peerdrive_store:delete_doc(Store, Doc, Rev)),
 	<<>>.
 
 
 do_delete_rev(Body, Store) ->
 	#deleterevreq{rev=Rev} = peerdrive_netstore_pb:decode_deleterevreq(Body),
-	?ASSERT_GUID(Rev),
 	ok = check(peerdrive_store:delete_rev(Store, Rev)),
 	<<>>.
 
@@ -374,8 +360,6 @@ do_delete_rev(Body, Store) ->
 do_put_doc_start(Store, NetHandle, ReqData) ->
 	#putdocstartreq{doc=Doc, rev=Rev} =
 		peerdrive_netstore_pb:decode_putdocstartreq(ReqData),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID(Rev),
 	case check(peerdrive_store:put_doc(Store, Doc, Rev)) of
 		ok ->
 			{stop, <<>>};
@@ -389,8 +373,6 @@ do_put_doc_start(Store, NetHandle, ReqData) ->
 do_forward_doc_start(Store, NetHandle, ReqData) ->
 	#forwarddocstartreq{doc=Doc, rev_path=RevPath} =
 		peerdrive_netstore_pb:decode_forwarddocstartreq(ReqData),
-	?ASSERT_GUID(Doc),
-	?ASSERT_GUID_LIST(RevPath),
 	case check(peerdrive_store:forward_doc_start(Store, Doc, RevPath)) of
 		ok ->
 			{stop, <<>>};
@@ -404,12 +386,10 @@ do_forward_doc_start(Store, NetHandle, ReqData) ->
 do_put_rev_start(Store, NetHandle, ReqData) ->
 	#putrevstartreq{rid=RId, revision=PbRev} =
 		peerdrive_netstore_pb:decode_putrevstartreq(ReqData),
-	?ASSERT_GUID(RId),
 	Rev = #revision{
 		flags = PbRev#putrevstartreq_revision.flags,
 		parts = [ {FCC, PId} || #putrevstartreq_revision_part{fourcc=FCC, pid=PId}
-			<- PbRev#putrevstartreq_revision.parts, ?ASSERT_PART(FCC),
-			?ASSERT_GUID(PId) ],
+			<- PbRev#putrevstartreq_revision.parts, ?ASSERT_PART(FCC) ],
 		parents = PbRev#putrevstartreq_revision.parents,
 		mtime = PbRev#putrevstartreq_revision.mtime,
 		type = unicode:characters_to_binary(PbRev#putrevstartreq_revision.type_code),
@@ -417,9 +397,6 @@ do_put_rev_start(Store, NetHandle, ReqData) ->
 		doc_links = PbRev#putrevstartreq_revision.doc_links,
 		rev_links = PbRev#putrevstartreq_revision.rev_links
 	},
-	?ASSERT_GUID_LIST(Rev#revision.parents),
-	?ASSERT_GUID_LIST(Rev#revision.doc_links),
-	?ASSERT_GUID_LIST(Rev#revision.rev_links),
 	case check(peerdrive_store:put_rev_start(Store, RId, Rev)) of
 		ok ->
 			{stop, <<>>};
@@ -433,7 +410,6 @@ do_put_rev_start(Store, NetHandle, ReqData) ->
 do_sync_get_changes(Body, Store) ->
 	#syncgetchangesreq{peer_sid=Peer} =
 		peerdrive_netstore_pb:decode_syncgetchangesreq(Body),
-	?ASSERT_GUID(Peer),
 	{ok, Backlog} = check(peerdrive_store:sync_get_changes(Store, Peer)),
 	CnfBacklog = [ #syncgetchangescnf_item{doc=Doc, seq_num=SeqNum} ||
 		{Doc, SeqNum} <- Backlog ],
@@ -444,7 +420,6 @@ do_sync_get_changes(Body, Store) ->
 do_sync_set_anchor(Body, Store) ->
 	#syncsetanchorreq{peer_sid=Peer, seq_num=SeqNum} =
 		peerdrive_netstore_pb:decode_syncsetanchorreq(Body),
-	?ASSERT_GUID(Peer),
 	ok = check(peerdrive_store:sync_set_anchor(Store, Peer, SeqNum)),
 	<<>>.
 
@@ -452,7 +427,6 @@ do_sync_set_anchor(Body, Store) ->
 do_sync_finish(Body, Store) ->
 	#syncfinishreq{peer_sid=Peer} =
 		peerdrive_netstore_pb:decode_syncfinishreq(Body),
-	?ASSERT_GUID(Peer),
 	ok = check(peerdrive_store:sync_finish(Store, Peer)),
 	<<>>.
 
@@ -544,8 +518,6 @@ io_handler(Handle, Request, ReqData) ->
 		?SET_LINKS_MSG ->
 			#setlinksreq{doc_links=DocLinks, rev_links=RevLinks} =
 				peerdrive_netstore_pb:decode_setlinksreq(ReqData),
-			?ASSERT_GUID_LIST(DocLinks),
-			?ASSERT_GUID_LIST(RevLinks),
 			ok = check(peerdrive_store:set_links(Handle, DocLinks, RevLinks)),
 			<<>>;
 
@@ -557,7 +529,6 @@ io_handler(Handle, Request, ReqData) ->
 		?SET_PARENTS_MSG ->
 			#setparentsreq{parents=Parents} =
 				peerdrive_netstore_pb:decode_setparentsreq(ReqData),
-			?ASSERT_GUID_LIST(Parents),
 			ok = check(peerdrive_store:set_parents(Handle, Parents)),
 			<<>>;
 

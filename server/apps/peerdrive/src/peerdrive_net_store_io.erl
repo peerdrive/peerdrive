@@ -194,7 +194,6 @@ do_get_parents(#state{handle=Handle, store=Store}) ->
 			try
 				#getparentscnf{parents=Parents} =
 					peerdrive_netstore_pb:decode_getparentscnf(Cnf),
-				?ASSERT_GUID_LIST(Parents),
 				{ok, Parents}
 			catch
 				throw:Error -> Error
