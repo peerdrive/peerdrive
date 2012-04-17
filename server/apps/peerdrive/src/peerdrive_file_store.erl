@@ -1006,7 +1006,7 @@ check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
 
 crd_write_part(Data, S) ->
 	BinData = peerdrive_struct:encode(Data),
-	PId = crypto:sha(BinData),
+	PId = peerdrive_util:merkle(BinData),
 	ok = dets:insert(S#state.part_tbl, {PId, BinData}),
 	PId.
 

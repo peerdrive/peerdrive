@@ -36,7 +36,7 @@ start_link(RId, Rev, Missing, User) ->
 		rid = RId,
 		rev = Rev,
 		parts = orddict:from_list(
-			[{FCC, {PId, <<>>, crypto:sha_init()}} || {FCC, PId} <- Missing]
+			[{FCC, {PId, <<>>, peerdrive_util:merkle_init()}} || {FCC, PId} <- Missing]
 		)
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
@@ -106,7 +106,7 @@ code_change(_, State, _) -> {ok, State}.
 do_write(Part, Data, #state{parts=Parts} = S) ->
 	case orddict:find(Part, Parts) of
 		{ok, {PId, PartData, Ctx1}} when is_binary(PartData) ->
-			Ctx2 = crypto:sha_update(Ctx1, Data),
+			Ctx2 = peerdrive_util:merkle_update(Ctx1, Data),
 			NewData = <<PartData/binary, Data/binary>>,
 			if
 				size(NewData) > ?THRESHOLD ->
@@ -128,7 +128,7 @@ do_write(Part, Data, #state{parts=Parts} = S) ->
 		{ok, {PId, {FileName, IoDev}, Ctx1}} ->
 			case file:write(IoDev, Data) of
 				ok ->
-					Ctx2 = crypto:sha_update(Ctx1, Data),
+					Ctx2 = peerdrive_util:merkle_update(Ctx1, Data),
 					NewParts = orddict:store(Part, {PId, {FileName, IoDev}, Ctx2},
 						Parts),
 					{ok, S#state{parts=NewParts}};
@@ -146,7 +146,7 @@ do_commit(#state{store=Store, rid=RId, rev=Rev, parts=Parts} = S) ->
 	try
 		lists:foreach(
 			fun({_, {PId, _, ShaCtx}}) ->
-				crypto:sha_final(ShaCtx) == PId orelse throw(einval)
+				peerdrive_util:merkle_final(ShaCtx) == PId orelse throw(einval)
 			end,
 			Parts),
 		case commit_parts(Store, Parts) of

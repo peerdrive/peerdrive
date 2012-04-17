@@ -38,9 +38,9 @@ All values are encoded as little endian...
 uint32           .. Flags (0: Sticky, 1..31: Reserved [0])
 uint32           .. PartsCount
 	char[4]      .. FourCC
-	uint128      .. SHA1 hash of part content
+	uint160      .. hash tree sum of part content
 uint32           .. ParentsCount
-	uint128      .. Parent object
+	uint160      .. Parent object
 uint64           .. Mtime (UTC unix time in microsecons)
 uint32           .. Type code string length
 	char[]       .. Type code
@@ -49,8 +49,17 @@ uint32           .. Creator code string length
 uint32           .. DocLinkCount
 	uint128      .. Document link
 uint32           .. RevLinkCount
-	uint128      .. Revision link
+	uint160      .. Revision link
 
+The SHA1 hash sums of the parts are computed as binary hash tree with a block
+size of 4096 bytes. This ensures that the new hash sum can be calculated
+quickly if only small areas in a very big part are changed.
+
+Each block is hashed with a 0x00 byte prepended before applying the SHA1
+function. All internal nodes of the binary hash tree prepend a 0x01 byte and
+are defined as SHA1(0x01, LeftChildSum, RightChildSum). If the number of blocks
+is not a power of two the tree will be unbalanced. In such a tree interim nodes
+that do not have a sibling are propagated upwards until a sibling is found.
 
 Well known part FourCCs
 =======================

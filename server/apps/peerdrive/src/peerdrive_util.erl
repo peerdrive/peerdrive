@@ -18,6 +18,7 @@
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
 -export([read_doc_struct/3, read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
 -export([walk/2]).
+-export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1]).
 
 -include("utils.hrl").
 
@@ -212,15 +213,15 @@ get_time() ->
 % returns {ok, Sha1} | {error, Reason}
 hash_file(File) ->
 	{ok, _} = file:position(File, 0),
-	hash_file_loop(File, crypto:sha_init()).
+	hash_file_loop(File, merkle_init()).
 
 hash_file_loop(File, Ctx1) ->
 	case file:read(File, 16#100000) of
 		{ok, Data} ->
-			Ctx2 = crypto:sha_update(Ctx1, Data),
+			Ctx2 = merkle_update(Ctx1, Data),
 			hash_file_loop(File, Ctx2);
 		eof ->
-			{ok, crypto:sha_final(Ctx1)};
+			{ok, merkle_final(Ctx1)};
 		Else ->
 			fixup_file(Else)
 	end.
@@ -236,4 +237,67 @@ fixup_file({error, Reason} = Error) ->
 
 fixup_file(Ok) ->
 	Ok.
+
+
+merkle(Data) ->
+	Ctx1 = merkle_init(),
+	Ctx2 = merkle_update(Ctx1, Data),
+	merkle_final(Ctx2).
+
+
+merkle_init() ->
+	{<<>>, []}.
+
+
+merkle_update({Buffer, HashTree}, Data) when size(Buffer) >= 4096 ->
+	<<Block:4096/binary, Rest/binary>> = Buffer,
+	% TODO: benchmark if constructing complete binary first is faster
+	Ctx1 = crypto:sha_init(),
+	Ctx2 = crypto:sha_update(Ctx1, <<0>>),
+	Ctx3 = crypto:sha_update(Ctx2, Block),
+	NewHashTree = merkle_push(crypto:sha_final(Ctx3), HashTree),
+	merkle_update({Rest, NewHashTree}, Data);
+
+merkle_update(State, <<>>) ->
+	State;
+
+merkle_update({<<>>, HashTree}, Data) ->
+	merkle_update({Data, HashTree}, <<>>);
+
+merkle_update({Buffer, HashTree}, Data) ->
+	merkle_update({<<Buffer/binary, Data/binary>>, HashTree}, <<>>).
+
+
+merkle_push(Block, []) ->
+	[Block];
+
+merkle_push(Block, [empty | Root]) ->
+	[Block | Root];
+
+merkle_push(Block, [Sibling | Root]) ->
+	[empty | merkle_push(crypto:sha(<<1, Sibling/binary, Block/binary>>), Root)].
+
+
+merkle_final({<<>>, []}) ->
+	crypto:sha(<<0>>);
+
+merkle_final({<<>>, HashTree}) ->
+	merkle_finalize(HashTree);
+
+merkle_final({Remaining, HashTree}) ->
+	FinalTree = merkle_push(crypto:sha(<<0, Remaining/binary>>), HashTree),
+	merkle_finalize(FinalTree).
+
+
+merkle_finalize([Root]) ->
+	Root;
+
+merkle_finalize([empty | Root]) ->
+	merkle_finalize(Root);
+
+merkle_finalize([Partial, empty | Root]) ->
+	merkle_finalize([Partial | Root]);
+
+merkle_finalize([Partial, Sibling | Root]) ->
+	merkle_finalize([crypto:sha(<<1, Sibling/binary, Partial/binary>>) | Root]).
 
