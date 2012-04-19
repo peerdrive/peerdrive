@@ -518,7 +518,8 @@ merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
 				check(peerdrive_broker:write(Writer, Part, 0, Data), Doc, FromRev)
 			end,
 			NewData),
-		check(peerdrive_broker:commit(Writer), Doc, FromRev)
+		check(peerdrive_broker:commit(Writer, <<"<<Synchronized by system>>">>),
+			Doc, FromRev)
 	after
 		peerdrive_broker:close(Writer)
 	end.
@@ -531,9 +532,9 @@ merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
 merge_meta(Doc, Base, From, To) ->
 	case peerdrive_struct:merge(decode(Doc, Base), [decode(Doc, From), decode(Doc, To)]) of
 		{ok, Data} ->
-			{false, peerdrive_struct:encode(merge_update_meta(Data))};
+			{false, peerdrive_struct:encode(Data)};
 		{econflict, Data} ->
-			{true, peerdrive_struct:encode(merge_update_meta(Data))};
+			{true, peerdrive_struct:encode(Data)};
 		error ->
 			throw([{code, eio}, {doc, Doc}])
 	end.
@@ -570,28 +571,6 @@ decode(Doc, Data) ->
 		error:_ ->
 			throw([{code, eio}, {doc, Doc}])
 	end.
-
-
-%% update comment
-merge_update_meta(Data) ->
-	update_meta_field(
-		[<<"org.peerdrive.annotation">>, <<"comment">>],
-		<<"<<Synchronized by system>>">>,
-		Data).
-
-
-update_meta_field([Key], Value, Meta) when ?IS_GB_TREE(Meta) ->
-	gb_trees:enter(Key, Value, Meta);
-
-update_meta_field([Key | Path], Value, Meta) when ?IS_GB_TREE(Meta) ->
-	NewValue = case gb_trees:lookup(Key, Meta) of
-		{value, OldValue} -> update_meta_field(Path, Value, OldValue);
-		none              -> update_meta_field(Path, Value, gb_trees:empty())
-	end,
-	gb_trees:enter(Key, NewValue, Meta);
-
-update_meta_field(_Path, _Value, Meta) ->
-	Meta. % Path conflicts with existing data
 
 
 check(BrokerResult, Doc, Rev) ->

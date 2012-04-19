@@ -84,8 +84,7 @@ def importFile(store, path, name="", progress=None):
 		meta = {
 			"org.peerdrive.annotation" : {
 				"title"   : name,
-				"origin"  : path,
-				"comment" : "Import from external file system"
+				"origin"  : path
 			}
 		}
 
@@ -101,7 +100,7 @@ def importFile(store, path, name="", progress=None):
 			try:
 				writer.write('FILE', file.read())
 				writer.write('META', struct.dumps(meta))
-				writer.commit()
+				writer.commit("Import from external file system")
 				return writer
 			except:
 				writer.close()
@@ -147,7 +146,6 @@ def overwriteFile(link, path):
 	with Connector().update(store, doc, rev) as writer:
 		meta = struct.loads(store, writer.readAll('META'))
 		meta["org.peerdrive.annotation"]["origin"] = path
-		meta["org.peerdrive.annotation"]["comment"] = "Overwritten from external file system"
 
 		extractor = Registry().getExtractor(uti)
 		if extractor:
@@ -159,7 +157,7 @@ def overwriteFile(link, path):
 			writer.writeAll('FILE', file.read())
 		writer.writeAll('META', struct.dumps(meta))
 		writer.setType(uti)
-		writer.commit()
+		writer.commit("Overwritten from external file system")
 
 	return True
 

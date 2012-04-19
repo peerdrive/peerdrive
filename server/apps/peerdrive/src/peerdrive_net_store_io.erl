@@ -70,11 +70,11 @@ handle_call(get_flags, _From, S) ->
 handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, do_truncate(Part, Offset, S), S};
 
-handle_call(commit, _From, S) ->
-	{reply, do_commit(S), S};
+handle_call({commit, Comment}, _From, S) ->
+	{reply, do_commit(Comment, S), S};
 
-handle_call(suspend, _From, S) ->
-	{reply, do_suspend(S), S};
+handle_call({suspend, Comment}, _From, S) ->
+	{reply, do_suspend(Comment, S), S};
 
 handle_call({set_type, Type}, _From, S) ->
 	{reply, do_set_type(Type, S), S};
@@ -236,8 +236,9 @@ do_truncate(Part, Offset, #state{handle=Handle} = S) ->
 	simple_request(?TRUNC_MSG, Req, S).
 
 
-do_commit(#state{store=Store, handle=Handle}) ->
-	Req = peerdrive_netstore_pb:encode_commitreq(#commitreq{handle=Handle}),
+do_commit(Comment, #state{store=Store, handle=Handle}) ->
+	Req = peerdrive_netstore_pb:encode_commitreq(#commitreq{handle=Handle,
+		comment=Comment}),
 	case peerdrive_net_store:io_request(Store, ?COMMIT_MSG, Req) of
 		{ok, Cnf} ->
 			#commitcnf{rev=Rev} = peerdrive_netstore_pb:decode_commitcnf(Cnf),
@@ -248,8 +249,9 @@ do_commit(#state{store=Store, handle=Handle}) ->
 	end.
 
 
-do_suspend(#state{store=Store, handle=Handle}) ->
-	Req = peerdrive_netstore_pb:encode_suspendreq(#suspendreq{handle=Handle}),
+do_suspend(Comment, #state{store=Store, handle=Handle}) ->
+	Req = peerdrive_netstore_pb:encode_suspendreq(#suspendreq{handle=Handle,
+		comment=Comment}),
 	case peerdrive_net_store:io_request(Store, ?SUSPEND_MSG, Req) of
 		{ok, Cnf} ->
 			#suspendcnf{rev=Rev} = peerdrive_netstore_pb:decode_suspendcnf(Cnf),

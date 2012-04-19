@@ -348,7 +348,8 @@ do_stat(RId, #state{rev_tbl=RevTbl} = S) ->
 				type      = Rev#revision.type,
 				creator   = Rev#revision.creator,
 				doc_links = Rev#revision.doc_links,
-				rev_links = Rev#revision.rev_links
+				rev_links = Rev#revision.rev_links,
+				comment   = Rev#revision.comment
 			}};
 
 		[] ->
@@ -392,7 +393,8 @@ do_fork(StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
 		[{_, Rev}] ->
 			NewRev = Rev#revision{
 				parents = [StartRId],
-				creator = Creator
+				creator = Creator,
+				comment = <<>>
 			},
 			case start_writer(DId, undefined, NewRev, User, S) of
 				{{ok, Handle}, S2} ->
@@ -418,7 +420,8 @@ do_update(DId, StartRId, Creator, User, S) ->
 					end,
 					NewRev = Rev#revision{
 						parents = [StartRId],
-						creator = NewCreator
+						creator = NewCreator,
+						comment = <<>>
 					},
 					start_writer(DId, undefined, NewRev, User, S);
 
@@ -983,9 +986,8 @@ check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
 			ContentPId = crd_write_part(RootContent, S),
 			Annotation1 = gb_trees:empty(),
 			Annotation2 = gb_trees:enter(<<"title">>, list_to_binary(Name), Annotation1),
-			Annotation3 = gb_trees:enter(<<"comment">>, list_to_binary("<<Initial store creation>>"), Annotation2),
 			RootMeta1 = gb_trees:empty(),
-			RootMeta2 = gb_trees:enter(<<"org.peerdrive.annotation">>, Annotation3, RootMeta1),
+			RootMeta2 = gb_trees:enter(<<"org.peerdrive.annotation">>, Annotation2, RootMeta1),
 			MetaPId = crd_write_part(RootMeta2, S),
 			RootRev = #revision{
 				flags     = ?REV_FLAG_STICKY,
@@ -995,7 +997,8 @@ check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
 				type      = <<"org.peerdrive.store">>,
 				creator   = <<"org.peerdrive.file-store">>,
 				doc_links = [],
-				rev_links = []
+				rev_links = [],
+				comment   = <<"">>
 			},
 			RId = peerdrive_store:hash_revision(RootRev),
 			ok = dets:insert(S#state.rev_tbl, {RId, RootRev}),

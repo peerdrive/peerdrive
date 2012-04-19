@@ -215,6 +215,7 @@ message StatCnf {
 	required string creator_code = 6;
 	repeated bytes doc_links = 7;
 	repeated bytes rev_links = 8;
+	optional string comment = 9 [default = ""];
 }
 
 message PeekReq {
@@ -346,6 +347,7 @@ message SetLinksReq {
 
 message CommitReq {
 	required uint32 handle = 1;
+	optional string comment = 2;
 }
 
 message CommitCnf {
@@ -354,6 +356,7 @@ message CommitCnf {
 
 message SuspendReq {
 	required uint32 handle = 1;
+	optional string comment = 2;
 }
 
 message SuspendCnf {
@@ -428,6 +431,7 @@ message PutRevStartReq {
 		required string creator_code = 6;
 		repeated bytes doc_links = 7;
 		repeated bytes rev_links = 8;
+		optional string comment = 9 [default = ""];
 	}
 
 	required bytes rid = 1;

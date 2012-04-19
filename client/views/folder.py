@@ -120,8 +120,6 @@ class MetaColumnInfo(object):
 		return self.__convert(item)
 
 	def update(self, metaData, data):
-		metaData.setdefault("org.peerdrive.annotation", {})["comment"] = \
-			"Changed " + self.__name + " from folder"
 		for step in self.__path[:-1]:
 			if step not in metaData:
 				metaData[step] = {}
@@ -262,7 +260,7 @@ class FolderEntry(Watch):
 			try:
 				with Connector().update(self.__store, self.__doc, self.__rev) as w:
 					w.writeAll('META', struct.dumps(meta))
-					w.commit()
+					w.commit("Changed " + self.__columnDefs[index].name())
 				self.__rev = w.getRev()
 				self.__metaData = meta
 				self.__columnValues[index] = data
@@ -776,8 +774,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		spec = [
 			('META', struct.dumps({
 				"org.peerdrive.annotation" : {
-					"title"   : name,
-					"comment" : "Import by drag-n-drop"
+					"title"   : name
 				}
 			})),
 			('FILE', data)
@@ -1147,9 +1144,9 @@ class FolderWidget(widgets.DocumentView):
 			rev = link.rev()
 			icon = QtGui.QIcon(Registry().getIcon(Connector().stat(rev).type()))
 			action = newMenu.addAction(icon, name)
-			action.triggered.connect(lambda x,r=rev: self.__doCreate(sysStore, r))
+			action.triggered.connect(lambda x,r=rev,n=name: self.__doCreate(sysStore, r, n))
 
-	def __doCreate(self, srcStore, srcRev):
+	def __doCreate(self, srcStore, srcRev, name):
 		info = Connector().stat(srcRev, [srcStore])
 		dstStore = self.store()
 		with Connector().create(dstStore, info.type(), info.creator()) as w:
@@ -1157,12 +1154,12 @@ class FolderWidget(widgets.DocumentView):
 				for part in info.parts():
 					w.write(part, r.readAll(part))
 				w.setFlags(r.getFlags())
-			w.commit()
+			w.commit("Created from template")
 			destDoc = w.getDoc()
 			# add link
 			self.model().insertLink(struct.DocLink(dstStore, destDoc))
 			# save immediately
-			self.save()
+			self.save("Added '"+name+"' from templates")
 
 	def __addOpenActions(self, menu, link, isDoc):
 		try:

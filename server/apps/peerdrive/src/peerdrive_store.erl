@@ -20,9 +20,9 @@
 -export([put_doc/3, put_doc_commit/1, put_doc_abort/1, forward_doc_start/3, forward_doc_commit/1,
 	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
--export([close/1, commit/1, create/3, fork/3, get_parents/1, get_type/1,
+-export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
-	write/4, suspend/1, get_links/1, set_links/3, get_flags/1, set_flags/2]).
+	write/4, suspend/1, suspend/2, get_links/1, set_links/3, get_flags/1, set_flags/2]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/2, sync_set_anchor/3, sync_finish/2]).
 -export([hash_revision/1]).
@@ -253,7 +253,10 @@ set_links(Handle, DocLinks, RevLinks) ->
 %%       Rev = guid()
 %%       Reason = ecode()
 commit(Handle) ->
-	call_store(Handle, commit).
+	call_store(Handle, {commit, undefined}).
+
+commit(Handle, Comment) ->
+	call_store(Handle, {commit, Comment}).
 
 %% @doc Suspend a handle
 %%
@@ -275,7 +278,10 @@ commit(Handle) ->
 %%       Rev = guid()
 %%       Reason = ecode()
 suspend(Handle) ->
-	call_store(Handle, suspend).
+	call_store(Handle, {suspend, undefined}).
+
+suspend(Handle, Comment) ->
+	call_store(Handle, {suspend, Comment}).
 
 %% @doc Close a handle
 %%
@@ -474,11 +480,12 @@ hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
 	BinParents = hash_revision_list(Revision#revision.parents),
 	BinType = hash_revision_string(Revision#revision.type),
 	BinCreator = hash_revision_string(Revision#revision.creator),
+	BinComment = hash_revision_string(Revision#revision.comment),
 	BinDL = hash_revision_list(Revision#revision.doc_links),
 	BinRL = hash_revision_list(Revision#revision.rev_links),
 	crypto:sha(<<Flags:32/little, BinParts/binary, BinParents/binary,
-		Mtime:64/little, BinType/binary, BinCreator/binary, BinDL/binary,
-		BinRL/binary>>).
+		Mtime:64/little, BinType/binary, BinCreator/binary, BinComment/binary,
+		BinDL/binary, BinRL/binary>>).
 
 hash_revision_list(List) ->
 	lists:foldl(

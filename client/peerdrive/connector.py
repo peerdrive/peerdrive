@@ -773,7 +773,7 @@ class Lookup(object):
 
 class Stat(object):
 	__slots__ = ['__flags', '__parts', '__parents', '__mtime', '__type',
-		'__creator', '__docLinks', '__revLinks']
+		'__creator', '__docLinks', '__revLinks', '__comment']
 
 	FLAG_STICKY = 0
 
@@ -786,6 +786,7 @@ class Stat(object):
 		self.__mtime = datetime.fromtimestamp(reply.mtime / 1000000.0)
 		self.__type = reply.type_code
 		self.__creator = reply.creator_code
+		self.__comment = reply.comment
 
 	def flags(self):
 		# lazy flags decomposition
@@ -821,6 +822,9 @@ class Stat(object):
 
 	def creator(self):
 		return self.__creator
+
+	def comment(self):
+		return self.__comment
 
 
 class Handle(object):
@@ -941,20 +945,22 @@ class Handle(object):
 		req.offset = self._getPos(part)
 		self.connector._rpc(_Connector.TRUNC_MSG, req.SerializeToString())
 
-	def commit(self):
+	def commit(self, comment=None):
 		if not self.active:
 			raise IOError('Handle expired')
 		req = pb.CommitReq()
 		req.handle = self.handle
+		if comment is not None: req.comment = comment
 		reply = self.connector._rpc(_Connector.COMMIT_MSG, req.SerializeToString())
 		cnf = pb.CommitCnf.FromString(reply)
 		self.rev = cnf.rev
 
-	def suspend(self):
+	def suspend(self, comment=None):
 		if not self.active:
 			raise IOError('Handle expired')
 		req = pb.SuspendReq()
 		req.handle = self.handle
+		if comment is not None: req.comment = comment
 		reply = self.connector._rpc(_Connector.SUSPEND_MSG, req.SerializeToString())
 		cnf = pb.SuspendCnf.FromString(reply)
 		self.rev = cnf.rev

@@ -24,6 +24,7 @@
 		mtime = 0,      % interger(): Microseconds since epoch (unix date, UTC)
 		type = <<>>,    % binary()
 		creator = <<>>, % binary()
+		comment = <<>>, % binary()
 		doc_links = [], % [Doc::guid()]
 		rev_links = []  % [Rev::guid()]
 	}).
@@ -45,6 +46,7 @@
 		mtime,
 		type,
 		creator,
+		comment,
 		doc_links,
 		rev_links
 	}).

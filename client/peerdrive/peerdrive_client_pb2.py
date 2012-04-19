@@ -10,7 +10,7 @@ from google.protobuf import descriptor_pb2
 DESCRIPTOR = descriptor.FileDescriptor(
   name='peerdrive_client.proto',
   package='',
-  serialized_pb='\n\x16peerdrive_client.proto\"%\n\x08\x45rrorCnf\x12\x19\n\x05\x65rror\x18\x01 \x02(\x0e\x32\n.ErrorCode\"\'\n\x07InitReq\x12\r\n\x05major\x18\x01 \x02(\r\x12\r\n\x05minor\x18\x02 \x02(\r\"F\n\x07InitCnf\x12\r\n\x05major\x18\x01 \x02(\r\x12\r\n\x05minor\x18\x02 \x02(\r\x12\x1d\n\x0fmax_packet_size\x18\x03 \x01(\r:\x04\x34\x30\x39\x36\"\t\n\x07\x45numReq\"\xc1\x01\n\x07\x45numCnf\x12!\n\tsys_store\x18\x01 \x02(\x0b\x32\x0e.EnumCnf.Store\x12\x1e\n\x06stores\x18\x02 \x03(\x0b\x32\x0e.EnumCnf.Store\x1as\n\x05Store\x12\x0c\n\x04guid\x18\x01 \x02(\x0c\x12\n\n\x02id\x18\x02 \x02(\t\x12\x0c\n\x04name\x18\x03 \x02(\t\x12\x12\n\nis_mounted\x18\x04 \x02(\x08\x12\x14\n\x0cis_removable\x18\x05 \x02(\x08\x12\x18\n\x10is_network_store\x18\x06 \x02(\x08\"+\n\x0cLookupDocReq\x12\x0b\n\x03\x64oc\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"\x81\x01\n\x0cLookupDocCnf\x12\"\n\x04revs\x18\x01 \x03(\x0b\x32\x14.LookupDocCnf.RevMap\x12&\n\x08pre_revs\x18\x02 \x03(\x0b\x32\x14.LookupDocCnf.RevMap\x1a%\n\x06RevMap\x12\x0b\n\x03rid\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"+\n\x0cLookupRevReq\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"\x1e\n\x0cLookupRevCnf\x12\x0e\n\x06stores\x18\x01 \x03(\x0c\"&\n\x07StatReq\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"\xb2\x01\n\x07StatCnf\x12\r\n\x05\x66lags\x18\x01 \x02(\r\x12\x1c\n\x05parts\x18\x02 \x03(\x0b\x32\r.StatCnf.Part\x12\x0f\n\x07parents\x18\x03 \x03(\x0c\x12\r\n\x05mtime\x18\x04 \x02(\x04\x12\x11\n\ttype_code\x18\x05 \x02(\t\x12\x14\n\x0c\x63reator_code\x18\x06 \x02(\t\x1a\x31\n\x04Part\x12\x0e\n\x06\x66ourcc\x18\x01 \x02(\x0c\x12\x0c\n\x04size\x18\x02 \x02(\x04\x12\x0b\n\x03pid\x18\x03 \x02(\x0c\"%\n\x07PeekReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\"\x19\n\x07PeekCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\"C\n\tCreateReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x11\n\ttype_code\x18\x02 \x02(\t\x12\x14\n\x0c\x63reator_code\x18\x03 \x02(\t\"(\n\tCreateCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\";\n\x07\x46orkReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\x12\x14\n\x0c\x63reator_code\x18\x03 \x02(\t\"&\n\x07\x46orkCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\"J\n\tUpdateReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\x12\x14\n\x0c\x63reator_code\x18\x04 \x01(\t\"\x1b\n\tUpdateCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\"J\n\tResumeReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\x12\x14\n\x0c\x63reator_code\x18\x04 \x01(\t\"\x1b\n\tResumeCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\"G\n\x07ReadReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0c\n\x04part\x18\x02 \x02(\x0c\x12\x0e\n\x06offset\x18\x03 \x02(\x04\x12\x0e\n\x06length\x18\x04 \x02(\r\"\x17\n\x07ReadCnf\x12\x0c\n\x04\x64\x61ta\x18\x01 \x02(\x0c\"8\n\x08TruncReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0c\n\x04part\x18\x02 \x02(\x0c\x12\x0e\n\x06offset\x18\x03 \x02(\x04\"\n\n\x08TruncCnf\"F\n\x08WriteReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0c\n\x04part\x18\x02 \x02(\x0c\x12\x0e\n\x06offset\x18\x03 \x02(\x04\x12\x0c\n\x04\x64\x61ta\x18\x04 \x02(\x0c\"\n\n\x08WriteCnf\"\x1d\n\x0bGetFlagsReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\x1c\n\x0bGetFlagsCnf\x12\r\n\x05\x66lags\x18\x01 \x02(\r\",\n\x0bSetFlagsReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\r\n\x05\x66lags\x18\x02 \x02(\r\"\r\n\x0bSetFlagsCnf\"\x1c\n\nGetTypeReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\x1f\n\nGetTypeCnf\x12\x11\n\ttype_code\x18\x01 \x02(\t\"/\n\nSetTypeReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x11\n\ttype_code\x18\x02 \x02(\t\"\x0c\n\nSetTypeCnf\"\x1f\n\rGetParentsReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\" \n\rGetParentsCnf\x12\x0f\n\x07parents\x18\x01 \x03(\x0c\"]\n\x08MergeReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\r\n\x05store\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\x04\x12\x16\n\x07verbose\x18\x05 \x01(\x08:\x05\x66\x61lse\"\n\n\x08MergeCnf\"(\n\tRebaseReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\"\x0b\n\tRebaseCnf\"\x1b\n\tCommitReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\x18\n\tCommitCnf\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\"\x1c\n\nSuspendReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\x19\n\nSuspendCnf\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\"\x1a\n\x08\x43loseReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\n\n\x08\x43loseCnf\"Y\n\x0bWatchAddReq\x12\x1f\n\x04type\x18\x01 \x02(\x0e\x32\x11.WatchAddReq.Type\x12\x0f\n\x07\x65lement\x18\x02 \x02(\x0c\"\x18\n\x04Type\x12\x07\n\x03\x64oc\x10\x00\x12\x07\n\x03rev\x10\x01\"\r\n\x0bWatchAddCnf\"Y\n\x0bWatchRemReq\x12\x1f\n\x04type\x18\x01 \x02(\x0e\x32\x11.WatchRemReq.Type\x12\x0f\n\x07\x65lement\x18\x02 \x02(\x0c\"\x18\n\x04Type\x12\x07\n\x03\x64oc\x10\x00\x12\x07\n\x03rev\x10\x01\"\r\n\x0bWatchRemCnf\"\"\n\x10WatchProgressReq\x12\x0e\n\x06\x65nable\x18\x01 \x02(\x08\"\x12\n\x10WatchProgressCnf\"4\n\tForgetReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\"\x0b\n\tForgetCnf\"7\n\x0c\x44\x65leteDocReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\"\x0e\n\x0c\x44\x65leteDocCnf\"*\n\x0c\x44\x65leteRevReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\"\x0e\n\x0c\x44\x65leteRevCnf\"\x87\x01\n\rForwardDocReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x10\n\x08\x66rom_rev\x18\x03 \x02(\x0c\x12\x0e\n\x06to_rev\x18\x04 \x02(\x0c\x12\x11\n\tsrc_store\x18\x05 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x06 \x01(\x04\x12\x16\n\x07verbose\x18\x07 \x01(\x08:\x05\x66\x61lse\"\x0f\n\rForwardDocCnf\"k\n\x0fReplicateDocReq\x12\x11\n\tsrc_store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x11\n\tdst_store\x18\x03 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\x04\x12\x16\n\x07verbose\x18\x05 \x01(\x08:\x05\x66\x61lse\"\x11\n\x0fReplicateDocCnf\"k\n\x0fReplicateRevReq\x12\x11\n\tsrc_store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\x12\x11\n\tdst_store\x18\x03 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\x04\x12\x16\n\x07verbose\x18\x05 \x01(\x08:\x05\x66\x61lse\"\x11\n\x0fReplicateRevCnf\"\x16\n\x08MountReq\x12\n\n\x02id\x18\x01 \x02(\t\"\n\n\x08MountCnf\"\x18\n\nUnmountReq\x12\n\n\x02id\x18\x01 \x02(\t\"\x0c\n\nUnmountCnf\"\x1b\n\nSysInfoReq\x12\r\n\x05param\x18\x01 \x02(\t\"/\n\nSysInfoCnf\x12\x11\n\tas_string\x18\x01 \x01(\t\x12\x0e\n\x06\x61s_int\x18\x02 \x01(\x03\"\xc9\x01\n\x08WatchInd\x12\x1e\n\x05\x65vent\x18\x01 \x02(\x0e\x32\x0f.WatchInd.Event\x12\x1c\n\x04type\x18\x02 \x02(\x0e\x32\x0e.WatchInd.Type\x12\x0f\n\x07\x65lement\x18\x03 \x02(\x0c\"T\n\x05\x45vent\x12\x0c\n\x08modified\x10\x00\x12\x0c\n\x08\x61ppeared\x10\x01\x12\x0e\n\nreplicated\x10\x02\x12\x0e\n\ndiminished\x10\x03\x12\x0f\n\x0b\x64isappeared\x10\x04\"\x18\n\x04Type\x12\x07\n\x03\x64oc\x10\x00\x12\x07\n\x03rev\x10\x01\"\x9d\x01\n\x10ProgressStartInd\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12$\n\x04type\x18\x02 \x02(\x0e\x32\x16.ProgressStartInd.Type\x12\x0e\n\x06source\x18\x03 \x02(\x0c\x12\x0c\n\x04\x64\x65st\x18\x04 \x02(\x0c\x12\x0c\n\x04item\x18\x05 \x01(\x0c\"*\n\x04Type\x12\x08\n\x04sync\x10\x00\x12\x0b\n\x07rep_doc\x10\x01\x12\x0b\n\x07rep_rev\x10\x02\"4\n\x10ProgressStartReq\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12\x13\n\x04skip\x18\x02 \x01(\x08:\x05\x66\x61lse\"\xbc\x01\n\x0bProgressInd\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12\x10\n\x08progress\x18\x02 \x02(\r\x12!\n\x05state\x18\x03 \x02(\x0e\x32\x12.ProgressInd.State\x12\x1c\n\x08\x65rr_code\x18\x04 \x01(\x0e\x32\n.ErrorCode\x12\x0f\n\x07\x65rr_doc\x18\x05 \x01(\x0c\x12\x0f\n\x07\x65rr_rev\x18\x06 \x01(\x0c\"+\n\x05State\x12\x0b\n\x07running\x10\x00\x12\n\n\x06paused\x10\x01\x12\t\n\x05\x65rror\x10\x02\"\x1d\n\x0eProgressEndInd\x12\x0b\n\x03tag\x18\x01 \x02(\r\",\n\x0eProgressEndReq\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12\r\n\x05pause\x18\x02 \x02(\x08\"\x7f\n\x10ProgressQueryCnf\x12%\n\x05items\x18\x01 \x03(\x0b\x32\x16.ProgressQueryCnf.Item\x1a\x44\n\x04Item\x12\x1f\n\x04item\x18\x01 \x02(\x0b\x32\x11.ProgressStartInd\x12\x1b\n\x05state\x18\x02 \x02(\x0b\x32\x0c.ProgressInd*\xdd\x0e\n\tErrorCode\x12\r\n\teconflict\x10\x00\x12\t\n\x05\x65\x32\x62ig\x10\x01\x12\n\n\x06\x65\x61\x63\x63\x65s\x10\x02\x12\x0e\n\neaddrinuse\x10\x03\x12\x11\n\readdrnotavail\x10\x04\x12\x08\n\x04\x65\x61\x64v\x10\x05\x12\x10\n\x0c\x65\x61\x66nosupport\x10\x06\x12\n\n\x06\x65\x61gain\x10\x07\x12\n\n\x06\x65\x61lign\x10\x08\x12\x0c\n\x08\x65\x61lready\x10\t\x12\t\n\x05\x65\x62\x61\x64\x65\x10\n\x12\t\n\x05\x65\x62\x61\x64\x66\x10\x0b\x12\n\n\x06\x65\x62\x61\x64\x66\x64\x10\x0c\x12\x0b\n\x07\x65\x62\x61\x64msg\x10\r\x12\t\n\x05\x65\x62\x61\x64r\x10\x0e\x12\x0b\n\x07\x65\x62\x61\x64rpc\x10\x0f\x12\x0b\n\x07\x65\x62\x61\x64rqc\x10\x10\x12\x0b\n\x07\x65\x62\x61\x64slt\x10\x11\x12\n\n\x06\x65\x62\x66ont\x10\x12\x12\t\n\x05\x65\x62usy\x10\x13\x12\n\n\x06\x65\x63hild\x10\x14\x12\n\n\x06\x65\x63hrng\x10\x15\x12\t\n\x05\x65\x63omm\x10\x16\x12\x10\n\x0c\x65\x63onnaborted\x10\x17\x12\x10\n\x0c\x65\x63onnrefused\x10\x18\x12\x0e\n\neconnreset\x10\x19\x12\x0b\n\x07\x65\x64\x65\x61\x64lk\x10\x1a\x12\r\n\tedeadlock\x10\x1b\x12\x10\n\x0c\x65\x64\x65staddrreq\x10\x1c\x12\n\n\x06\x65\x64irty\x10\x1d\x12\x08\n\x04\x65\x64om\x10\x1e\x12\x0b\n\x07\x65\x64otdot\x10\x1f\x12\n\n\x06\x65\x64quot\x10 \x12\x0b\n\x07\x65\x64uppkg\x10!\x12\n\n\x06\x65\x65xist\x10\"\x12\n\n\x06\x65\x66\x61ult\x10#\x12\t\n\x05\x65\x66\x62ig\x10$\x12\r\n\tehostdown\x10%\x12\x10\n\x0c\x65hostunreach\x10&\x12\t\n\x05\x65idrm\x10\'\x12\t\n\x05\x65init\x10(\x12\x0f\n\x0b\x65inprogress\x10)\x12\t\n\x05\x65intr\x10*\x12\n\n\x06\x65inval\x10+\x12\x07\n\x03\x65io\x10,\x12\x0b\n\x07\x65isconn\x10-\x12\n\n\x06\x65isdir\x10.\x12\n\n\x06\x65isnam\x10/\x12\t\n\x05\x65lbin\x10\x30\x12\n\n\x06\x65l2hlt\x10\x31\x12\x0c\n\x08\x65l2nsync\x10\x32\x12\n\n\x06\x65l3hlt\x10\x33\x12\n\n\x06\x65l3rst\x10\x34\x12\x0b\n\x07\x65libacc\x10\x35\x12\x0b\n\x07\x65libbad\x10\x36\x12\x0c\n\x08\x65libexec\x10\x37\x12\x0b\n\x07\x65libmax\x10\x38\x12\x0b\n\x07\x65libscn\x10\x39\x12\n\n\x06\x65lnrng\x10:\x12\t\n\x05\x65loop\x10;\x12\n\n\x06\x65mfile\x10<\x12\n\n\x06\x65mlink\x10=\x12\x0c\n\x08\x65msgsize\x10>\x12\r\n\temultihop\x10?\x12\x10\n\x0c\x65nametoolong\x10@\x12\x0b\n\x07\x65navail\x10\x41\x12\x08\n\x04\x65net\x10\x42\x12\x0c\n\x08\x65netdown\x10\x43\x12\r\n\tenetreset\x10\x44\x12\x0f\n\x0b\x65netunreach\x10\x45\x12\n\n\x06\x65nfile\x10\x46\x12\n\n\x06\x65noano\x10G\x12\x0b\n\x07\x65nobufs\x10H\x12\n\n\x06\x65nocsi\x10I\x12\x0b\n\x07\x65nodata\x10J\x12\n\n\x06\x65nodev\x10K\x12\n\n\x06\x65noent\x10L\x12\x0b\n\x07\x65noexec\x10M\x12\n\n\x06\x65nolck\x10N\x12\x0b\n\x07\x65nolink\x10O\x12\n\n\x06\x65nomem\x10P\x12\n\n\x06\x65nomsg\x10Q\x12\n\n\x06\x65nonet\x10R\x12\n\n\x06\x65nopkg\x10S\x12\x0f\n\x0b\x65noprotoopt\x10T\x12\n\n\x06\x65nospc\x10U\x12\t\n\x05\x65nosr\x10V\x12\n\n\x06\x65nosym\x10W\x12\n\n\x06\x65nosys\x10X\x12\x0b\n\x07\x65notblk\x10Y\x12\x0c\n\x08\x65notconn\x10Z\x12\x0b\n\x07\x65notdir\x10[\x12\r\n\tenotempty\x10\\\x12\x0b\n\x07\x65notnam\x10]\x12\x0c\n\x08\x65notsock\x10^\x12\x0b\n\x07\x65notsup\x10_\x12\n\n\x06\x65notty\x10`\x12\x0c\n\x08\x65notuniq\x10\x61\x12\t\n\x05\x65nxio\x10\x62\x12\x0e\n\neopnotsupp\x10\x63\x12\t\n\x05\x65perm\x10\x64\x12\x10\n\x0c\x65pfnosupport\x10\x65\x12\t\n\x05\x65pipe\x10\x66\x12\x0c\n\x08\x65proclim\x10g\x12\x10\n\x0c\x65procunavail\x10h\x12\x11\n\reprogmismatch\x10i\x12\x10\n\x0c\x65progunavail\x10j\x12\n\n\x06\x65proto\x10k\x12\x13\n\x0f\x65protonosupport\x10l\x12\x0e\n\neprototype\x10m\x12\n\n\x06\x65range\x10n\x12\x0c\n\x08\x65refused\x10o\x12\x0b\n\x07\x65remchg\x10p\x12\x0b\n\x07\x65remdev\x10q\x12\x0b\n\x07\x65remote\x10r\x12\r\n\teremoteio\x10s\x12\x12\n\x0e\x65remoterelease\x10t\x12\t\n\x05\x65rofs\x10u\x12\x10\n\x0c\x65rpcmismatch\x10v\x12\x0c\n\x08\x65rremote\x10w\x12\r\n\teshutdown\x10x\x12\x13\n\x0f\x65socktnosupport\x10y\x12\n\n\x06\x65spipe\x10z\x12\t\n\x05\x65srch\x10{\x12\n\n\x06\x65srmnt\x10|\x12\n\n\x06\x65stale\x10}\x12\x0c\n\x08\x65success\x10~\x12\t\n\x05\x65time\x10\x7f\x12\x0e\n\tetimedout\x10\x80\x01\x12\x11\n\x0c\x65toomanyrefs\x10\x81\x01\x12\x0c\n\x07\x65txtbsy\x10\x82\x01\x12\x0c\n\x07\x65uclean\x10\x83\x01\x12\x0c\n\x07\x65unatch\x10\x84\x01\x12\x0b\n\x06\x65users\x10\x85\x01\x12\r\n\x08\x65version\x10\x86\x01\x12\x10\n\x0b\x65wouldblock\x10\x87\x01\x12\n\n\x05\x65xdev\x10\x88\x01\x12\x0b\n\x06\x65xfull\x10\x89\x01\x12\r\n\x08nxdomain\x10\x8a\x01')
+  serialized_pb='\n\x16peerdrive_client.proto\"%\n\x08\x45rrorCnf\x12\x19\n\x05\x65rror\x18\x01 \x02(\x0e\x32\n.ErrorCode\"\'\n\x07InitReq\x12\r\n\x05major\x18\x01 \x02(\r\x12\r\n\x05minor\x18\x02 \x02(\r\"F\n\x07InitCnf\x12\r\n\x05major\x18\x01 \x02(\r\x12\r\n\x05minor\x18\x02 \x02(\r\x12\x1d\n\x0fmax_packet_size\x18\x03 \x01(\r:\x04\x34\x30\x39\x36\"\t\n\x07\x45numReq\"\xc1\x01\n\x07\x45numCnf\x12!\n\tsys_store\x18\x01 \x02(\x0b\x32\x0e.EnumCnf.Store\x12\x1e\n\x06stores\x18\x02 \x03(\x0b\x32\x0e.EnumCnf.Store\x1as\n\x05Store\x12\x0c\n\x04guid\x18\x01 \x02(\x0c\x12\n\n\x02id\x18\x02 \x02(\t\x12\x0c\n\x04name\x18\x03 \x02(\t\x12\x12\n\nis_mounted\x18\x04 \x02(\x08\x12\x14\n\x0cis_removable\x18\x05 \x02(\x08\x12\x18\n\x10is_network_store\x18\x06 \x02(\x08\"+\n\x0cLookupDocReq\x12\x0b\n\x03\x64oc\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"\x81\x01\n\x0cLookupDocCnf\x12\"\n\x04revs\x18\x01 \x03(\x0b\x32\x14.LookupDocCnf.RevMap\x12&\n\x08pre_revs\x18\x02 \x03(\x0b\x32\x14.LookupDocCnf.RevMap\x1a%\n\x06RevMap\x12\x0b\n\x03rid\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"+\n\x0cLookupRevReq\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"\x1e\n\x0cLookupRevCnf\x12\x0e\n\x06stores\x18\x01 \x03(\x0c\"&\n\x07StatReq\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\x12\x0e\n\x06stores\x18\x02 \x03(\x0c\"\xc5\x01\n\x07StatCnf\x12\r\n\x05\x66lags\x18\x01 \x02(\r\x12\x1c\n\x05parts\x18\x02 \x03(\x0b\x32\r.StatCnf.Part\x12\x0f\n\x07parents\x18\x03 \x03(\x0c\x12\r\n\x05mtime\x18\x04 \x02(\x04\x12\x11\n\ttype_code\x18\x05 \x02(\t\x12\x14\n\x0c\x63reator_code\x18\x06 \x02(\t\x12\x11\n\x07\x63omment\x18\x07 \x01(\t:\x00\x1a\x31\n\x04Part\x12\x0e\n\x06\x66ourcc\x18\x01 \x02(\x0c\x12\x0c\n\x04size\x18\x02 \x02(\x04\x12\x0b\n\x03pid\x18\x03 \x02(\x0c\"%\n\x07PeekReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\"\x19\n\x07PeekCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\"C\n\tCreateReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x11\n\ttype_code\x18\x02 \x02(\t\x12\x14\n\x0c\x63reator_code\x18\x03 \x02(\t\"(\n\tCreateCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\";\n\x07\x46orkReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\x12\x14\n\x0c\x63reator_code\x18\x03 \x02(\t\"&\n\x07\x46orkCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\"J\n\tUpdateReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\x12\x14\n\x0c\x63reator_code\x18\x04 \x01(\t\"\x1b\n\tUpdateCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\"J\n\tResumeReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\x12\x14\n\x0c\x63reator_code\x18\x04 \x01(\t\"\x1b\n\tResumeCnf\x12\x0e\n\x06handle\x18\x01 \x02(\r\"G\n\x07ReadReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0c\n\x04part\x18\x02 \x02(\x0c\x12\x0e\n\x06offset\x18\x03 \x02(\x04\x12\x0e\n\x06length\x18\x04 \x02(\r\"\x17\n\x07ReadCnf\x12\x0c\n\x04\x64\x61ta\x18\x01 \x02(\x0c\"8\n\x08TruncReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0c\n\x04part\x18\x02 \x02(\x0c\x12\x0e\n\x06offset\x18\x03 \x02(\x04\"\n\n\x08TruncCnf\"F\n\x08WriteReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0c\n\x04part\x18\x02 \x02(\x0c\x12\x0e\n\x06offset\x18\x03 \x02(\x04\x12\x0c\n\x04\x64\x61ta\x18\x04 \x02(\x0c\"\n\n\x08WriteCnf\"\x1d\n\x0bGetFlagsReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\x1c\n\x0bGetFlagsCnf\x12\r\n\x05\x66lags\x18\x01 \x02(\r\",\n\x0bSetFlagsReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\r\n\x05\x66lags\x18\x02 \x02(\r\"\r\n\x0bSetFlagsCnf\"\x1c\n\nGetTypeReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\x1f\n\nGetTypeCnf\x12\x11\n\ttype_code\x18\x01 \x02(\t\"/\n\nSetTypeReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x11\n\ttype_code\x18\x02 \x02(\t\"\x0c\n\nSetTypeCnf\"\x1f\n\rGetParentsReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\" \n\rGetParentsCnf\x12\x0f\n\x07parents\x18\x01 \x03(\x0c\"]\n\x08MergeReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\r\n\x05store\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\x04\x12\x16\n\x07verbose\x18\x05 \x01(\x08:\x05\x66\x61lse\"\n\n\x08MergeCnf\"(\n\tRebaseReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\"\x0b\n\tRebaseCnf\",\n\tCommitReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0f\n\x07\x63omment\x18\x02 \x01(\t\"\x18\n\tCommitCnf\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\"-\n\nSuspendReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\x12\x0f\n\x07\x63omment\x18\x02 \x01(\t\"\x19\n\nSuspendCnf\x12\x0b\n\x03rev\x18\x01 \x02(\x0c\"\x1a\n\x08\x43loseReq\x12\x0e\n\x06handle\x18\x01 \x02(\r\"\n\n\x08\x43loseCnf\"Y\n\x0bWatchAddReq\x12\x1f\n\x04type\x18\x01 \x02(\x0e\x32\x11.WatchAddReq.Type\x12\x0f\n\x07\x65lement\x18\x02 \x02(\x0c\"\x18\n\x04Type\x12\x07\n\x03\x64oc\x10\x00\x12\x07\n\x03rev\x10\x01\"\r\n\x0bWatchAddCnf\"Y\n\x0bWatchRemReq\x12\x1f\n\x04type\x18\x01 \x02(\x0e\x32\x11.WatchRemReq.Type\x12\x0f\n\x07\x65lement\x18\x02 \x02(\x0c\"\x18\n\x04Type\x12\x07\n\x03\x64oc\x10\x00\x12\x07\n\x03rev\x10\x01\"\r\n\x0bWatchRemCnf\"\"\n\x10WatchProgressReq\x12\x0e\n\x06\x65nable\x18\x01 \x02(\x08\"\x12\n\x10WatchProgressCnf\"4\n\tForgetReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\"\x0b\n\tForgetCnf\"7\n\x0c\x44\x65leteDocReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x0b\n\x03rev\x18\x03 \x02(\x0c\"\x0e\n\x0c\x44\x65leteDocCnf\"*\n\x0c\x44\x65leteRevReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\"\x0e\n\x0c\x44\x65leteRevCnf\"\x87\x01\n\rForwardDocReq\x12\r\n\x05store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x10\n\x08\x66rom_rev\x18\x03 \x02(\x0c\x12\x0e\n\x06to_rev\x18\x04 \x02(\x0c\x12\x11\n\tsrc_store\x18\x05 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x06 \x01(\x04\x12\x16\n\x07verbose\x18\x07 \x01(\x08:\x05\x66\x61lse\"\x0f\n\rForwardDocCnf\"k\n\x0fReplicateDocReq\x12\x11\n\tsrc_store\x18\x01 \x02(\x0c\x12\x0b\n\x03\x64oc\x18\x02 \x02(\x0c\x12\x11\n\tdst_store\x18\x03 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\x04\x12\x16\n\x07verbose\x18\x05 \x01(\x08:\x05\x66\x61lse\"\x11\n\x0fReplicateDocCnf\"k\n\x0fReplicateRevReq\x12\x11\n\tsrc_store\x18\x01 \x02(\x0c\x12\x0b\n\x03rev\x18\x02 \x02(\x0c\x12\x11\n\tdst_store\x18\x03 \x02(\x0c\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\x04\x12\x16\n\x07verbose\x18\x05 \x01(\x08:\x05\x66\x61lse\"\x11\n\x0fReplicateRevCnf\"\x16\n\x08MountReq\x12\n\n\x02id\x18\x01 \x02(\t\"\n\n\x08MountCnf\"\x18\n\nUnmountReq\x12\n\n\x02id\x18\x01 \x02(\t\"\x0c\n\nUnmountCnf\"\x1b\n\nSysInfoReq\x12\r\n\x05param\x18\x01 \x02(\t\"/\n\nSysInfoCnf\x12\x11\n\tas_string\x18\x01 \x01(\t\x12\x0e\n\x06\x61s_int\x18\x02 \x01(\x03\"\xc9\x01\n\x08WatchInd\x12\x1e\n\x05\x65vent\x18\x01 \x02(\x0e\x32\x0f.WatchInd.Event\x12\x1c\n\x04type\x18\x02 \x02(\x0e\x32\x0e.WatchInd.Type\x12\x0f\n\x07\x65lement\x18\x03 \x02(\x0c\"T\n\x05\x45vent\x12\x0c\n\x08modified\x10\x00\x12\x0c\n\x08\x61ppeared\x10\x01\x12\x0e\n\nreplicated\x10\x02\x12\x0e\n\ndiminished\x10\x03\x12\x0f\n\x0b\x64isappeared\x10\x04\"\x18\n\x04Type\x12\x07\n\x03\x64oc\x10\x00\x12\x07\n\x03rev\x10\x01\"\x9d\x01\n\x10ProgressStartInd\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12$\n\x04type\x18\x02 \x02(\x0e\x32\x16.ProgressStartInd.Type\x12\x0e\n\x06source\x18\x03 \x02(\x0c\x12\x0c\n\x04\x64\x65st\x18\x04 \x02(\x0c\x12\x0c\n\x04item\x18\x05 \x01(\x0c\"*\n\x04Type\x12\x08\n\x04sync\x10\x00\x12\x0b\n\x07rep_doc\x10\x01\x12\x0b\n\x07rep_rev\x10\x02\"4\n\x10ProgressStartReq\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12\x13\n\x04skip\x18\x02 \x01(\x08:\x05\x66\x61lse\"\xbc\x01\n\x0bProgressInd\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12\x10\n\x08progress\x18\x02 \x02(\r\x12!\n\x05state\x18\x03 \x02(\x0e\x32\x12.ProgressInd.State\x12\x1c\n\x08\x65rr_code\x18\x04 \x01(\x0e\x32\n.ErrorCode\x12\x0f\n\x07\x65rr_doc\x18\x05 \x01(\x0c\x12\x0f\n\x07\x65rr_rev\x18\x06 \x01(\x0c\"+\n\x05State\x12\x0b\n\x07running\x10\x00\x12\n\n\x06paused\x10\x01\x12\t\n\x05\x65rror\x10\x02\"\x1d\n\x0eProgressEndInd\x12\x0b\n\x03tag\x18\x01 \x02(\r\",\n\x0eProgressEndReq\x12\x0b\n\x03tag\x18\x01 \x02(\r\x12\r\n\x05pause\x18\x02 \x02(\x08\"\x7f\n\x10ProgressQueryCnf\x12%\n\x05items\x18\x01 \x03(\x0b\x32\x16.ProgressQueryCnf.Item\x1a\x44\n\x04Item\x12\x1f\n\x04item\x18\x01 \x02(\x0b\x32\x11.ProgressStartInd\x12\x1b\n\x05state\x18\x02 \x02(\x0b\x32\x0c.ProgressInd*\xdd\x0e\n\tErrorCode\x12\r\n\teconflict\x10\x00\x12\t\n\x05\x65\x32\x62ig\x10\x01\x12\n\n\x06\x65\x61\x63\x63\x65s\x10\x02\x12\x0e\n\neaddrinuse\x10\x03\x12\x11\n\readdrnotavail\x10\x04\x12\x08\n\x04\x65\x61\x64v\x10\x05\x12\x10\n\x0c\x65\x61\x66nosupport\x10\x06\x12\n\n\x06\x65\x61gain\x10\x07\x12\n\n\x06\x65\x61lign\x10\x08\x12\x0c\n\x08\x65\x61lready\x10\t\x12\t\n\x05\x65\x62\x61\x64\x65\x10\n\x12\t\n\x05\x65\x62\x61\x64\x66\x10\x0b\x12\n\n\x06\x65\x62\x61\x64\x66\x64\x10\x0c\x12\x0b\n\x07\x65\x62\x61\x64msg\x10\r\x12\t\n\x05\x65\x62\x61\x64r\x10\x0e\x12\x0b\n\x07\x65\x62\x61\x64rpc\x10\x0f\x12\x0b\n\x07\x65\x62\x61\x64rqc\x10\x10\x12\x0b\n\x07\x65\x62\x61\x64slt\x10\x11\x12\n\n\x06\x65\x62\x66ont\x10\x12\x12\t\n\x05\x65\x62usy\x10\x13\x12\n\n\x06\x65\x63hild\x10\x14\x12\n\n\x06\x65\x63hrng\x10\x15\x12\t\n\x05\x65\x63omm\x10\x16\x12\x10\n\x0c\x65\x63onnaborted\x10\x17\x12\x10\n\x0c\x65\x63onnrefused\x10\x18\x12\x0e\n\neconnreset\x10\x19\x12\x0b\n\x07\x65\x64\x65\x61\x64lk\x10\x1a\x12\r\n\tedeadlock\x10\x1b\x12\x10\n\x0c\x65\x64\x65staddrreq\x10\x1c\x12\n\n\x06\x65\x64irty\x10\x1d\x12\x08\n\x04\x65\x64om\x10\x1e\x12\x0b\n\x07\x65\x64otdot\x10\x1f\x12\n\n\x06\x65\x64quot\x10 \x12\x0b\n\x07\x65\x64uppkg\x10!\x12\n\n\x06\x65\x65xist\x10\"\x12\n\n\x06\x65\x66\x61ult\x10#\x12\t\n\x05\x65\x66\x62ig\x10$\x12\r\n\tehostdown\x10%\x12\x10\n\x0c\x65hostunreach\x10&\x12\t\n\x05\x65idrm\x10\'\x12\t\n\x05\x65init\x10(\x12\x0f\n\x0b\x65inprogress\x10)\x12\t\n\x05\x65intr\x10*\x12\n\n\x06\x65inval\x10+\x12\x07\n\x03\x65io\x10,\x12\x0b\n\x07\x65isconn\x10-\x12\n\n\x06\x65isdir\x10.\x12\n\n\x06\x65isnam\x10/\x12\t\n\x05\x65lbin\x10\x30\x12\n\n\x06\x65l2hlt\x10\x31\x12\x0c\n\x08\x65l2nsync\x10\x32\x12\n\n\x06\x65l3hlt\x10\x33\x12\n\n\x06\x65l3rst\x10\x34\x12\x0b\n\x07\x65libacc\x10\x35\x12\x0b\n\x07\x65libbad\x10\x36\x12\x0c\n\x08\x65libexec\x10\x37\x12\x0b\n\x07\x65libmax\x10\x38\x12\x0b\n\x07\x65libscn\x10\x39\x12\n\n\x06\x65lnrng\x10:\x12\t\n\x05\x65loop\x10;\x12\n\n\x06\x65mfile\x10<\x12\n\n\x06\x65mlink\x10=\x12\x0c\n\x08\x65msgsize\x10>\x12\r\n\temultihop\x10?\x12\x10\n\x0c\x65nametoolong\x10@\x12\x0b\n\x07\x65navail\x10\x41\x12\x08\n\x04\x65net\x10\x42\x12\x0c\n\x08\x65netdown\x10\x43\x12\r\n\tenetreset\x10\x44\x12\x0f\n\x0b\x65netunreach\x10\x45\x12\n\n\x06\x65nfile\x10\x46\x12\n\n\x06\x65noano\x10G\x12\x0b\n\x07\x65nobufs\x10H\x12\n\n\x06\x65nocsi\x10I\x12\x0b\n\x07\x65nodata\x10J\x12\n\n\x06\x65nodev\x10K\x12\n\n\x06\x65noent\x10L\x12\x0b\n\x07\x65noexec\x10M\x12\n\n\x06\x65nolck\x10N\x12\x0b\n\x07\x65nolink\x10O\x12\n\n\x06\x65nomem\x10P\x12\n\n\x06\x65nomsg\x10Q\x12\n\n\x06\x65nonet\x10R\x12\n\n\x06\x65nopkg\x10S\x12\x0f\n\x0b\x65noprotoopt\x10T\x12\n\n\x06\x65nospc\x10U\x12\t\n\x05\x65nosr\x10V\x12\n\n\x06\x65nosym\x10W\x12\n\n\x06\x65nosys\x10X\x12\x0b\n\x07\x65notblk\x10Y\x12\x0c\n\x08\x65notconn\x10Z\x12\x0b\n\x07\x65notdir\x10[\x12\r\n\tenotempty\x10\\\x12\x0b\n\x07\x65notnam\x10]\x12\x0c\n\x08\x65notsock\x10^\x12\x0b\n\x07\x65notsup\x10_\x12\n\n\x06\x65notty\x10`\x12\x0c\n\x08\x65notuniq\x10\x61\x12\t\n\x05\x65nxio\x10\x62\x12\x0e\n\neopnotsupp\x10\x63\x12\t\n\x05\x65perm\x10\x64\x12\x10\n\x0c\x65pfnosupport\x10\x65\x12\t\n\x05\x65pipe\x10\x66\x12\x0c\n\x08\x65proclim\x10g\x12\x10\n\x0c\x65procunavail\x10h\x12\x11\n\reprogmismatch\x10i\x12\x10\n\x0c\x65progunavail\x10j\x12\n\n\x06\x65proto\x10k\x12\x13\n\x0f\x65protonosupport\x10l\x12\x0e\n\neprototype\x10m\x12\n\n\x06\x65range\x10n\x12\x0c\n\x08\x65refused\x10o\x12\x0b\n\x07\x65remchg\x10p\x12\x0b\n\x07\x65remdev\x10q\x12\x0b\n\x07\x65remote\x10r\x12\r\n\teremoteio\x10s\x12\x12\n\x0e\x65remoterelease\x10t\x12\t\n\x05\x65rofs\x10u\x12\x10\n\x0c\x65rpcmismatch\x10v\x12\x0c\n\x08\x65rremote\x10w\x12\r\n\teshutdown\x10x\x12\x13\n\x0f\x65socktnosupport\x10y\x12\n\n\x06\x65spipe\x10z\x12\t\n\x05\x65srch\x10{\x12\n\n\x06\x65srmnt\x10|\x12\n\n\x06\x65stale\x10}\x12\x0c\n\x08\x65success\x10~\x12\t\n\x05\x65time\x10\x7f\x12\x0e\n\tetimedout\x10\x80\x01\x12\x11\n\x0c\x65toomanyrefs\x10\x81\x01\x12\x0c\n\x07\x65txtbsy\x10\x82\x01\x12\x0c\n\x07\x65uclean\x10\x83\x01\x12\x0c\n\x07\x65unatch\x10\x84\x01\x12\x0b\n\x06\x65users\x10\x85\x01\x12\r\n\x08\x65version\x10\x86\x01\x12\x10\n\x0b\x65wouldblock\x10\x87\x01\x12\n\n\x05\x65xdev\x10\x88\x01\x12\x0b\n\x06\x65xfull\x10\x89\x01\x12\r\n\x08nxdomain\x10\x8a\x01')
 
 _ERRORCODE = descriptor.EnumDescriptor(
   name='ErrorCode',
@@ -577,8 +577,8 @@ _ERRORCODE = descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=4078,
-  serialized_end=5963,
+  serialized_start=4131,
+  serialized_end=6016,
 )
 
 
@@ -740,8 +740,8 @@ _WATCHADDREQ_TYPE = descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=2294,
-  serialized_end=2318,
+  serialized_start=2347,
+  serialized_end=2371,
 )
 
 _WATCHREMREQ_TYPE = descriptor.EnumDescriptor(
@@ -761,8 +761,8 @@ _WATCHREMREQ_TYPE = descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=2294,
-  serialized_end=2318,
+  serialized_start=2347,
+  serialized_end=2371,
 )
 
 _WATCHIND_EVENT = descriptor.EnumDescriptor(
@@ -794,8 +794,8 @@ _WATCHIND_EVENT = descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=3354,
-  serialized_end=3438,
+  serialized_start=3407,
+  serialized_end=3491,
 )
 
 _WATCHIND_TYPE = descriptor.EnumDescriptor(
@@ -815,8 +815,8 @@ _WATCHIND_TYPE = descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=2294,
-  serialized_end=2318,
+  serialized_start=2347,
+  serialized_end=2371,
 )
 
 _PROGRESSSTARTIND_TYPE = descriptor.EnumDescriptor(
@@ -840,8 +840,8 @@ _PROGRESSSTARTIND_TYPE = descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=3582,
-  serialized_end=3624,
+  serialized_start=3635,
+  serialized_end=3677,
 )
 
 _PROGRESSIND_STATE = descriptor.EnumDescriptor(
@@ -865,8 +865,8 @@ _PROGRESSIND_STATE = descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=3826,
-  serialized_end=3869,
+  serialized_start=3879,
+  serialized_end=3922,
 )
 
 
@@ -1332,8 +1332,8 @@ _STATCNF_PART = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=809,
-  serialized_end=858,
+  serialized_start=828,
+  serialized_end=877,
 )
 
 _STATCNF = descriptor.Descriptor(
@@ -1385,6 +1385,13 @@ _STATCNF = descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    descriptor.FieldDescriptor(
+      name='comment', full_name='StatCnf.comment', index=6,
+      number=7, type=9, cpp_type=9, label=1,
+      has_default_value=True, default_value=unicode("", "utf-8"),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -1395,7 +1402,7 @@ _STATCNF = descriptor.Descriptor(
   is_extendable=False,
   extension_ranges=[],
   serialized_start=680,
-  serialized_end=858,
+  serialized_end=877,
 )
 
 
@@ -1429,8 +1436,8 @@ _PEEKREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=860,
-  serialized_end=897,
+  serialized_start=879,
+  serialized_end=916,
 )
 
 
@@ -1457,8 +1464,8 @@ _PEEKCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=899,
-  serialized_end=924,
+  serialized_start=918,
+  serialized_end=943,
 )
 
 
@@ -1499,8 +1506,8 @@ _CREATEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=926,
-  serialized_end=993,
+  serialized_start=945,
+  serialized_end=1012,
 )
 
 
@@ -1534,8 +1541,8 @@ _CREATECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=995,
-  serialized_end=1035,
+  serialized_start=1014,
+  serialized_end=1054,
 )
 
 
@@ -1576,8 +1583,8 @@ _FORKREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1037,
-  serialized_end=1096,
+  serialized_start=1056,
+  serialized_end=1115,
 )
 
 
@@ -1611,8 +1618,8 @@ _FORKCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1098,
-  serialized_end=1136,
+  serialized_start=1117,
+  serialized_end=1155,
 )
 
 
@@ -1660,8 +1667,8 @@ _UPDATEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1138,
-  serialized_end=1212,
+  serialized_start=1157,
+  serialized_end=1231,
 )
 
 
@@ -1688,8 +1695,8 @@ _UPDATECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1214,
-  serialized_end=1241,
+  serialized_start=1233,
+  serialized_end=1260,
 )
 
 
@@ -1737,8 +1744,8 @@ _RESUMEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1243,
-  serialized_end=1317,
+  serialized_start=1262,
+  serialized_end=1336,
 )
 
 
@@ -1765,8 +1772,8 @@ _RESUMECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1319,
-  serialized_end=1346,
+  serialized_start=1338,
+  serialized_end=1365,
 )
 
 
@@ -1814,8 +1821,8 @@ _READREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1348,
-  serialized_end=1419,
+  serialized_start=1367,
+  serialized_end=1438,
 )
 
 
@@ -1842,8 +1849,8 @@ _READCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1421,
-  serialized_end=1444,
+  serialized_start=1440,
+  serialized_end=1463,
 )
 
 
@@ -1884,8 +1891,8 @@ _TRUNCREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1446,
-  serialized_end=1502,
+  serialized_start=1465,
+  serialized_end=1521,
 )
 
 
@@ -1905,8 +1912,8 @@ _TRUNCCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1504,
-  serialized_end=1514,
+  serialized_start=1523,
+  serialized_end=1533,
 )
 
 
@@ -1954,8 +1961,8 @@ _WRITEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1516,
-  serialized_end=1586,
+  serialized_start=1535,
+  serialized_end=1605,
 )
 
 
@@ -1975,8 +1982,8 @@ _WRITECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1588,
-  serialized_end=1598,
+  serialized_start=1607,
+  serialized_end=1617,
 )
 
 
@@ -2003,8 +2010,8 @@ _GETFLAGSREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1600,
-  serialized_end=1629,
+  serialized_start=1619,
+  serialized_end=1648,
 )
 
 
@@ -2031,8 +2038,8 @@ _GETFLAGSCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1631,
-  serialized_end=1659,
+  serialized_start=1650,
+  serialized_end=1678,
 )
 
 
@@ -2066,8 +2073,8 @@ _SETFLAGSREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1661,
-  serialized_end=1705,
+  serialized_start=1680,
+  serialized_end=1724,
 )
 
 
@@ -2087,8 +2094,8 @@ _SETFLAGSCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1707,
-  serialized_end=1720,
+  serialized_start=1726,
+  serialized_end=1739,
 )
 
 
@@ -2115,8 +2122,8 @@ _GETTYPEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1722,
-  serialized_end=1750,
+  serialized_start=1741,
+  serialized_end=1769,
 )
 
 
@@ -2143,8 +2150,8 @@ _GETTYPECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1752,
-  serialized_end=1783,
+  serialized_start=1771,
+  serialized_end=1802,
 )
 
 
@@ -2178,8 +2185,8 @@ _SETTYPEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1785,
-  serialized_end=1832,
+  serialized_start=1804,
+  serialized_end=1851,
 )
 
 
@@ -2199,8 +2206,8 @@ _SETTYPECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1834,
-  serialized_end=1846,
+  serialized_start=1853,
+  serialized_end=1865,
 )
 
 
@@ -2227,8 +2234,8 @@ _GETPARENTSREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1848,
-  serialized_end=1879,
+  serialized_start=1867,
+  serialized_end=1898,
 )
 
 
@@ -2255,8 +2262,8 @@ _GETPARENTSCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1881,
-  serialized_end=1913,
+  serialized_start=1900,
+  serialized_end=1932,
 )
 
 
@@ -2311,8 +2318,8 @@ _MERGEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=1915,
-  serialized_end=2008,
+  serialized_start=1934,
+  serialized_end=2027,
 )
 
 
@@ -2332,8 +2339,8 @@ _MERGECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2010,
-  serialized_end=2020,
+  serialized_start=2029,
+  serialized_end=2039,
 )
 
 
@@ -2367,8 +2374,8 @@ _REBASEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2022,
-  serialized_end=2062,
+  serialized_start=2041,
+  serialized_end=2081,
 )
 
 
@@ -2388,8 +2395,8 @@ _REBASECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2064,
-  serialized_end=2075,
+  serialized_start=2083,
+  serialized_end=2094,
 )
 
 
@@ -2407,6 +2414,13 @@ _COMMITREQ = descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    descriptor.FieldDescriptor(
+      name='comment', full_name='CommitReq.comment', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=unicode("", "utf-8"),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -2416,8 +2430,8 @@ _COMMITREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2077,
-  serialized_end=2104,
+  serialized_start=2096,
+  serialized_end=2140,
 )
 
 
@@ -2444,8 +2458,8 @@ _COMMITCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2106,
-  serialized_end=2130,
+  serialized_start=2142,
+  serialized_end=2166,
 )
 
 
@@ -2463,6 +2477,13 @@ _SUSPENDREQ = descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    descriptor.FieldDescriptor(
+      name='comment', full_name='SuspendReq.comment', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=unicode("", "utf-8"),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -2472,8 +2493,8 @@ _SUSPENDREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2132,
-  serialized_end=2160,
+  serialized_start=2168,
+  serialized_end=2213,
 )
 
 
@@ -2500,8 +2521,8 @@ _SUSPENDCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2162,
-  serialized_end=2187,
+  serialized_start=2215,
+  serialized_end=2240,
 )
 
 
@@ -2528,8 +2549,8 @@ _CLOSEREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2189,
-  serialized_end=2215,
+  serialized_start=2242,
+  serialized_end=2268,
 )
 
 
@@ -2549,8 +2570,8 @@ _CLOSECNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2217,
-  serialized_end=2227,
+  serialized_start=2270,
+  serialized_end=2280,
 )
 
 
@@ -2585,8 +2606,8 @@ _WATCHADDREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2229,
-  serialized_end=2318,
+  serialized_start=2282,
+  serialized_end=2371,
 )
 
 
@@ -2606,8 +2627,8 @@ _WATCHADDCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2320,
-  serialized_end=2333,
+  serialized_start=2373,
+  serialized_end=2386,
 )
 
 
@@ -2642,8 +2663,8 @@ _WATCHREMREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2335,
-  serialized_end=2424,
+  serialized_start=2388,
+  serialized_end=2477,
 )
 
 
@@ -2663,8 +2684,8 @@ _WATCHREMCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2426,
-  serialized_end=2439,
+  serialized_start=2479,
+  serialized_end=2492,
 )
 
 
@@ -2691,8 +2712,8 @@ _WATCHPROGRESSREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2441,
-  serialized_end=2475,
+  serialized_start=2494,
+  serialized_end=2528,
 )
 
 
@@ -2712,8 +2733,8 @@ _WATCHPROGRESSCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2477,
-  serialized_end=2495,
+  serialized_start=2530,
+  serialized_end=2548,
 )
 
 
@@ -2754,8 +2775,8 @@ _FORGETREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2497,
-  serialized_end=2549,
+  serialized_start=2550,
+  serialized_end=2602,
 )
 
 
@@ -2775,8 +2796,8 @@ _FORGETCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2551,
-  serialized_end=2562,
+  serialized_start=2604,
+  serialized_end=2615,
 )
 
 
@@ -2817,8 +2838,8 @@ _DELETEDOCREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2564,
-  serialized_end=2619,
+  serialized_start=2617,
+  serialized_end=2672,
 )
 
 
@@ -2838,8 +2859,8 @@ _DELETEDOCCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2621,
-  serialized_end=2635,
+  serialized_start=2674,
+  serialized_end=2688,
 )
 
 
@@ -2873,8 +2894,8 @@ _DELETEREVREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2637,
-  serialized_end=2679,
+  serialized_start=2690,
+  serialized_end=2732,
 )
 
 
@@ -2894,8 +2915,8 @@ _DELETEREVCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2681,
-  serialized_end=2695,
+  serialized_start=2734,
+  serialized_end=2748,
 )
 
 
@@ -2964,8 +2985,8 @@ _FORWARDDOCREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2698,
-  serialized_end=2833,
+  serialized_start=2751,
+  serialized_end=2886,
 )
 
 
@@ -2985,8 +3006,8 @@ _FORWARDDOCCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2835,
-  serialized_end=2850,
+  serialized_start=2888,
+  serialized_end=2903,
 )
 
 
@@ -3041,8 +3062,8 @@ _REPLICATEDOCREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2852,
-  serialized_end=2959,
+  serialized_start=2905,
+  serialized_end=3012,
 )
 
 
@@ -3062,8 +3083,8 @@ _REPLICATEDOCCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2961,
-  serialized_end=2978,
+  serialized_start=3014,
+  serialized_end=3031,
 )
 
 
@@ -3118,8 +3139,8 @@ _REPLICATEREVREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=2980,
-  serialized_end=3087,
+  serialized_start=3033,
+  serialized_end=3140,
 )
 
 
@@ -3139,8 +3160,8 @@ _REPLICATEREVCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3089,
-  serialized_end=3106,
+  serialized_start=3142,
+  serialized_end=3159,
 )
 
 
@@ -3167,8 +3188,8 @@ _MOUNTREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3108,
-  serialized_end=3130,
+  serialized_start=3161,
+  serialized_end=3183,
 )
 
 
@@ -3188,8 +3209,8 @@ _MOUNTCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3132,
-  serialized_end=3142,
+  serialized_start=3185,
+  serialized_end=3195,
 )
 
 
@@ -3216,8 +3237,8 @@ _UNMOUNTREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3144,
-  serialized_end=3168,
+  serialized_start=3197,
+  serialized_end=3221,
 )
 
 
@@ -3237,8 +3258,8 @@ _UNMOUNTCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3170,
-  serialized_end=3182,
+  serialized_start=3223,
+  serialized_end=3235,
 )
 
 
@@ -3265,8 +3286,8 @@ _SYSINFOREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3184,
-  serialized_end=3211,
+  serialized_start=3237,
+  serialized_end=3264,
 )
 
 
@@ -3300,8 +3321,8 @@ _SYSINFOCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3213,
-  serialized_end=3260,
+  serialized_start=3266,
+  serialized_end=3313,
 )
 
 
@@ -3344,8 +3365,8 @@ _WATCHIND = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3263,
-  serialized_end=3464,
+  serialized_start=3316,
+  serialized_end=3517,
 )
 
 
@@ -3401,8 +3422,8 @@ _PROGRESSSTARTIND = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3467,
-  serialized_end=3624,
+  serialized_start=3520,
+  serialized_end=3677,
 )
 
 
@@ -3436,8 +3457,8 @@ _PROGRESSSTARTREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3626,
-  serialized_end=3678,
+  serialized_start=3679,
+  serialized_end=3731,
 )
 
 
@@ -3500,8 +3521,8 @@ _PROGRESSIND = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3681,
-  serialized_end=3869,
+  serialized_start=3734,
+  serialized_end=3922,
 )
 
 
@@ -3528,8 +3549,8 @@ _PROGRESSENDIND = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3871,
-  serialized_end=3900,
+  serialized_start=3924,
+  serialized_end=3953,
 )
 
 
@@ -3563,8 +3584,8 @@ _PROGRESSENDREQ = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3902,
-  serialized_end=3946,
+  serialized_start=3955,
+  serialized_end=3999,
 )
 
 
@@ -3598,8 +3619,8 @@ _PROGRESSQUERYCNF_ITEM = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=4007,
-  serialized_end=4075,
+  serialized_start=4060,
+  serialized_end=4128,
 )
 
 _PROGRESSQUERYCNF = descriptor.Descriptor(
@@ -3625,8 +3646,8 @@ _PROGRESSQUERYCNF = descriptor.Descriptor(
   options=None,
   is_extendable=False,
   extension_ranges=[],
-  serialized_start=3948,
-  serialized_end=4075,
+  serialized_start=4001,
+  serialized_end=4128,
 )
 
 

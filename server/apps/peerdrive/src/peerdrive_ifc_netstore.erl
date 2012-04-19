@@ -266,7 +266,8 @@ do_stat(Body, Store) ->
 		type      = TypeCode,
 		creator   = CreatorCode,
 		doc_links = DocLinks,
-		rev_links = RevLinks
+		rev_links = RevLinks,
+		comment   = Comment
 	} = Stat,
 	Reply = #statcnf{
 		flags        = Flags,
@@ -277,7 +278,8 @@ do_stat(Body, Store) ->
 		type_code    = TypeCode,
 		creator_code = CreatorCode,
 		doc_links    = DocLinks,
-		rev_links    = RevLinks
+		rev_links    = RevLinks,
+		comment      = Comment
 	},
 	peerdrive_netstore_pb:encode_statcnf(Reply).
 
@@ -395,7 +397,8 @@ do_put_rev_start(Store, NetHandle, ReqData) ->
 		type = unicode:characters_to_binary(PbRev#putrevstartreq_revision.type_code),
 		creator = unicode:characters_to_binary(PbRev#putrevstartreq_revision.creator_code),
 		doc_links = PbRev#putrevstartreq_revision.doc_links,
-		rev_links = PbRev#putrevstartreq_revision.rev_links
+		rev_links = PbRev#putrevstartreq_revision.rev_links,
+		comment = unicode:characters_to_binary(PbRev#putrevstartreq_revision.comment)
 	},
 	case check(peerdrive_store:put_rev_start(Store, RId, Rev)) of
 		ok ->
@@ -508,11 +511,23 @@ io_handler(Handle, Request, ReqData) ->
 			{stop, <<>>};
 
 		?COMMIT_MSG ->
-			{ok, Rev} = check(peerdrive_store:commit(Handle)),
+			#commitreq{comment=CommentStr} =
+				peerdrive_netstore_pb:decode_commitreq(ReqData),
+			Comment = if
+				CommentStr == undefined -> undefined;
+				true -> unicode:characters_to_binary(CommentStr)
+			end,
+			{ok, Rev} = check(peerdrive_store:commit(Handle, Comment)),
 			peerdrive_netstore_pb:encode_commitcnf(#commitcnf{rev=Rev});
 
 		?SUSPEND_MSG ->
-			{ok, Rev} = check(peerdrive_store:suspend(Handle)),
+			#suspendreq{comment=CommentStr} =
+				peerdrive_netstore_pb:decode_suspendreq(ReqData),
+			Comment = if
+				CommentStr == undefined -> undefined;
+				true -> unicode:characters_to_binary(CommentStr)
+			end,
+			{ok, Rev} = check(peerdrive_store:suspend(Handle, Comment)),
 			peerdrive_netstore_pb:encode_suspendcnf(#suspendcnf{rev=Rev});
 
 		?SET_LINKS_MSG ->

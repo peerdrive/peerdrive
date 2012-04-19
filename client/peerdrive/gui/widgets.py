@@ -208,8 +208,6 @@ class RevButton(QtGui.QToolButton):
 						metaData = metaData["org.peerdrive.annotation"]
 						if "title" in metaData:
 							title = metaData["title"]
-						if "comment" in metaData:
-							comment = metaData["comment"]
 						if "tags" in metaData:
 							tagList = metaData["tags"]
 							tagList.sort()
@@ -222,6 +220,7 @@ class RevButton(QtGui.QToolButton):
 			stat = Connector().stat(rev)
 			uti = stat.type()
 			mtime = stat.mtime()
+			comment = stat.comment()
 			revIcon = QtGui.QIcon(Registry().getIcon(uti))
 		except IOError:
 			title = ''
@@ -258,7 +257,6 @@ class RevButton(QtGui.QToolButton):
 class DocumentView(QtGui.QStackedWidget, Watch):
 	HPA_TITLE        = ["org.peerdrive.annotation", "title"]
 	HPA_TAGS         = ["org.peerdrive.annotation", "tags"]
-	HPA_COMMENT      = ["org.peerdrive.annotation", "comment"]
 	HPA_DESCRIPTION  = ["org.peerdrive.annotation", "description"]
 
 	STATE_NO_DOC = 1
@@ -310,7 +308,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		self.__mergeNeeded = False
 
 		self.__saveTimer = QtCore.QTimer(self)
-		self.__saveTimer.timeout.connect(lambda: self.__saveFile("<<Periodic checkpoint>>"))
+		self.__saveTimer.timeout.connect(lambda: self.__saveFile())
 		self.__saveTimer.setSingleShot(True)
 		self.__saveTimer.setInterval(10000)
 
@@ -352,7 +350,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			self.__open = False
 			if self.__state != DocumentView.STATE_NO_DOC:
 				if (self.__state == DocumentView.STATE_EDITING) and save:
-					self.__saveFile('<<Internal checkpoint>>')
+					self.__saveFile('<<Document closed>>')
 				self.__setState(DocumentView.STATE_NO_DOC)
 			if self.__chooseRevWidget:
 				self.removeWidget(self.__chooseRevWidget)
@@ -396,13 +394,11 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 	def store(self):
 		return self.__store
 
-	def save(self):
-		self.__saveFile("<<Periodic checkpoint>>")
+	def save(self, comment=None):
+		self.__saveFile(comment)
 
-	def checkpoint(self, comment, forceComment=False):
+	def checkpoint(self, comment=None):
 		# explicitly set comment, the user expects it's comment to be applied
-		if forceComment or self.__preliminary:
-			self.metaDataSetField(DocumentView.HPA_COMMENT, comment)
 		self.__saveFile(comment)
 		if self.__preliminary:
 			with Connector().resume(self.__store, self.__doc, self.__rev) as writer:
@@ -451,22 +447,13 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	# return conflict True/False
 	def docMergePerform(self, writer, baseReader, mergeReaders, changedParts):
-		baseMeta = struct.loads(self.__store, baseReader.readAll('META'))
 		if 'META' in changedParts:
+			baseMeta = struct.loads(self.__store, baseReader.readAll('META'))
 			mergeMeta = []
 			for mr in mergeReaders:
 				mergeMeta.append(struct.loads(self.__store, mr.readAll('META')))
 			(newMeta, conflict) = struct.merge(baseMeta, mergeMeta)
-		else:
-			newMeta = baseMeta
-
-		# FIXME: ugly, should be common code
-		comment = "<<Automatic merge>>"
-		if "org.peerdrive.annotation" in newMeta:
-			newMeta["org.peerdrive.annotation"]["comment"] = comment
-		else:
-			newMeta["org.peerdrive.annotation"] = { "comment" : comment }
-		writer.writeAll('META', struct.dumps(newMeta))
+			writer.writeAll('META', struct.dumps(newMeta))
 		return False
 
 	def metaDataSetField(self, field, value):
@@ -602,7 +589,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			info = Connector().lookupDoc(self.__doc)
 			if self.__store in (set(stores) & set(info.stores())):
 				# still there, make a preliminary commit if necessary
-				self.__saveFile('<<Internal checkpoint>>')
+				self.__saveFile()
 
 				# ok, whats up?
 				if self.__preliminary:
@@ -788,26 +775,25 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		finally:
 			QtGui.QApplication.restoreOverrideCursor()
 
-	def __saveFile(self, comment = ""):
+	def __saveFile(self, comment = None):
 		if self.__mutable and self.__saveNeeded:
 			if self.__preliminary:
 				with Connector().resume(self.__store, self.__doc, self.__rev) as writer:
-					self.__saveFileInternal(comment, writer)
-					writer.suspend()
+					self.__saveFileInternal(writer)
+					writer.suspend(comment)
 			else:
 				with Connector().update(self.__store, self.__doc, self.__rev, self.__creator) as writer:
-					self.__saveFileInternal(comment, writer)
-					writer.suspend()
+					self.__saveFileInternal(writer)
+					writer.suspend(comment)
 			self.__metaDataChanged = False
 			self.__rev = writer.getRev()
 			self.__setPreliminary(True)
 			self.__emitNewRev()
 			self.__setSaveNeeded(False)
 
-	def __saveFileInternal(self, comment, writer):
+	def __saveFileInternal(self, writer):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 		try:
-			self.metaDataSetField(DocumentView.HPA_COMMENT, comment)
 			if self.__metaDataChanged:
 				writer.writeAll('META', struct.dumps(self.__metaData))
 				writer.setFlags(self.__flags)
@@ -918,7 +904,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 						writer.rebase(mergeRev)
 					else:
 						writer.merge(mergeStore, mergeRev)
-					writer.suspend()
+					writer.suspend("<<Automatic merge>>")
 				self.__rev = writer.getRev()
 				self.__setPreliminary(True)
 		except AbortException:

@@ -20,8 +20,8 @@
 	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_flags/1,
 	get_parents/1, get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2,
 	replicate_rev/4, replicate_doc/4, resume/4, set_flags/2, set_type/2,
-	stat/2, suspend/1, forward_doc/6, update/4, close/1, commit/1, write/4,
-	truncate/3, rebase/2, merge/4]).
+	stat/2, suspend/1, suspend/2, forward_doc/6, update/4, close/1, commit/1,
+	commit/2, write/4, truncate/3, rebase/2, merge/4]).
 
 -include("store.hrl").
 
@@ -309,6 +309,9 @@ rebase(Handle, Parent) ->
 commit(Handle) ->
 	peerdrive_broker_io:commit(Handle).
 
+commit(Handle, Comment) ->
+	peerdrive_broker_io:commit(Handle, Comment).
+
 
 %% @doc Suspend a handle
 %%
@@ -332,6 +335,9 @@ commit(Handle) ->
 %%       Reason = ecode()
 suspend(Handle) ->
 	peerdrive_broker_io:suspend(Handle).
+
+suspend(Handle, Comment) ->
+	peerdrive_broker_io:suspend(Handle, Comment).
 
 
 %% @doc Close a handle

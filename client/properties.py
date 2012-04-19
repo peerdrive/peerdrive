@@ -249,18 +249,11 @@ class HistoryTab(QtGui.QWidget):
 		def __loadComment(self, rev):
 			stat = Connector().stat(rev, [self.__store])
 			mtime = str(stat.mtime())
-			comment = ""
-			if 'META' in stat.parts():
-				try:
-					with Connector().peek(self.__store, rev) as r:
-						metaData = struct.loads(self.__store, r.readAll('META'))
-						comment = extractMetaData(
-							metaData,
-							["org.peerdrive.annotation", "comment"],
-							"")
-				except IOError:
-					pass
-			return mtime + " - " + comment
+			comment = stat.comment()
+			if comment:
+				return mtime + " - " + comment
+			else:
+				return mtime
 
 		def __open(self, item):
 			row = self.row(item)

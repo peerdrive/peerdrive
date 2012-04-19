@@ -94,13 +94,13 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | {error, Reason}'
-handle_call(commit, _From, S) ->
-	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/4, S),
+handle_call({commit, Comment}, _From, S) ->
+	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/4, Comment, S),
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | {error, Reason}'
-handle_call(suspend, _From, S) ->
-	{Reply, S2} = do_commit(fun peerdrive_file_store:suspend/4, S),
+handle_call({suspend, Comment}, _From, S) ->
+	{Reply, S2} = do_commit(fun peerdrive_file_store:suspend/4, Comment, S),
 	{reply, Reply, S2};
 
 handle_call({set_flags, Flags}, _From, S) ->
@@ -222,14 +222,18 @@ do_truncate(Part, Offset, S) ->
 	end.
 
 
-do_commit(Fun, S) ->
+do_commit(Fun, Comment, S) ->
 	case close_and_writeback(S) of
 		{ok, S2} ->
-			Rev = S2#state.rev,
-			NewRev = Rev#revision{mtime=peerdrive_util:get_time()},
-			case Fun(S2#state.store, S2#state.did, S2#state.prerid, NewRev) of
+			Rev1 = S2#state.rev,
+			Rev2 = Rev1#revision{mtime=peerdrive_util:get_time()},
+			Rev3 = case Comment of
+				undefined -> Rev2;
+				_ -> Rev2#revision{comment=Comment}
+			end,
+			case Fun(S2#state.store, S2#state.did, S2#state.prerid, Rev3) of
 				{ok, _Rev} = Ok ->
-					{Ok, S2#state{rev=NewRev, readonly=true}};
+					{Ok, S2#state{rev=Rev3, readonly=true}};
 				{error, _} = Error ->
 					{Error, S2}
 			end;

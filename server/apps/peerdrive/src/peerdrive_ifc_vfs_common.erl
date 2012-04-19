@@ -1359,28 +1359,26 @@ folder_set_title(Store, Doc, NewTitle) ->
 		{ok, _OldRev, Handle} ->
 			try
 				Meta1 = read_struct(Handle, <<"META">>),
-				Meta2 = case meta_read_entry(Meta1, [<<"org.peerdrive.annotation">>,
+				Comment = case meta_read_entry(Meta1, [<<"org.peerdrive.annotation">>,
 				                                     <<"title">>])
 				of
 					{ok, OldTitle} ->
-						meta_write_entry(Meta1,
-							[<<"org.peerdrive.annotation">>, <<"comment">>],
-							<<"Renamed from \"", OldTitle/binary,  "\" to \"",
-								NewTitle/binary, "\"">>);
+						<<"Renamed from \"", OldTitle/binary,  "\" to \"",
+							NewTitle/binary, "\"">>;
 					error ->
-						Meta1
+						<<"Renamed to \"", NewTitle/binary, "\"">>
 				end,
-				Meta3 = meta_write_entry(Meta2,
+				Meta2 = meta_write_entry(Meta1,
 					[<<"org.peerdrive.annotation">>, <<"title">>],
 					NewTitle),
-				case write_struct(Handle, <<"META">>, Meta3) of
+				case write_struct(Handle, <<"META">>, Meta2) of
 					ok    -> ok;
 					WrErr -> throw(WrErr)
 				end,
 				Uti = peerdrive_registry:get_uti_from_extension(
 					filename:extension(NewTitle)),
 				peerdrive_ifc_vfs_broker:set_type(Handle, Uti),
-				case peerdrive_ifc_vfs_broker:close(Handle) of
+				case peerdrive_ifc_vfs_broker:close(Handle, Comment) of
 					{ok, _NewRev} -> ok;
 					CloseErr      -> CloseErr
 				end
@@ -1516,7 +1514,7 @@ file_write(Handle, Data, Offset) ->
 	peerdrive_ifc_vfs_broker:write(Handle, <<"FILE">>, Offset, Data).
 
 
-file_release(Handle, _Changed, _Rewritten) ->
+file_release(Handle, Changed, Rewritten) ->
 	%case Changed of
 	%	false -> ok;
 	%	true  ->
@@ -1532,7 +1530,14 @@ file_release(Handle, _Changed, _Rewritten) ->
 	%				ok
 	%		end
 	%end,
-	peerdrive_ifc_vfs_broker:close(Handle).
+	if
+		not Changed ->
+			peerdrive_ifc_vfs_broker:close(Handle);
+		Rewritten  ->
+			peerdrive_ifc_vfs_broker:close(Handle, <<"Overwritten through VFS">>);
+		true ->
+			peerdrive_ifc_vfs_broker:close(Handle, <<"Changed through VFS">>)
+	end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1627,17 +1632,14 @@ create_empty_file(Store, Name) ->
 		gb_trees:enter(
 			<<"title">>,
 			Name,
-			gb_trees:enter(
-				<<"comment">>,
-				<<"Created by VFS interface">>,
-				gb_trees:empty())),
+			gb_trees:empty()),
 		gb_trees:empty()),
 	Uti = peerdrive_registry:get_uti_from_extension(filename:extension(Name)),
 	case peerdrive_broker:create(Store, Uti, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:write(Handle, <<"META">>, 0, peerdrive_struct:encode(MetaData)),
 			peerdrive_broker:write(Handle, <<"FILE">>, 0, <<>>),
-			case peerdrive_broker:commit(Handle) of
+			case peerdrive_broker:commit(Handle, <<"Created by VFS interface">>) of
 				{ok, Rev} ->
 					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};
@@ -1657,10 +1659,7 @@ create_empty_directory(Store, Name) ->
 		gb_trees:enter(
 			<<"title">>,
 			Name,
-			gb_trees:enter(
-				<<"comment">>,
-				<<"Created by VFS interface">>,
-				gb_trees:empty())),
+			gb_trees:empty()),
 		gb_trees:empty()),
 	TypeCode = <<"org.peerdrive.folder">>,
 	Pdsd = [],
@@ -1671,7 +1670,7 @@ create_empty_directory(Store, Name) ->
 			peerdrive_broker:write(Handle, <<"PDSD">>, 0,
 				peerdrive_struct:encode(Pdsd)),
 			peerdrive_broker:set_flags(Handle, ?REV_FLAG_STICKY),
-			case peerdrive_broker:commit(Handle) of
+			case peerdrive_broker:commit(Handle, <<"Created by VFS interface">>) of
 				{ok, Rev} ->
 					% leave handle open, the caller has to close it
 					{ok, Handle, Doc, Rev};

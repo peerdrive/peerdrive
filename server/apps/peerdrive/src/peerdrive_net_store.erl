@@ -362,7 +362,8 @@ cnf_stat(Body) ->
 		type_code = TypeCode,
 		creator_code = CreatorCode,
 		doc_links = DocLinks,
-		rev_links = RevLinks
+		rev_links = RevLinks,
+		comment = Comment
 	} = peerdrive_netstore_pb:decode_statcnf(Body),
 	Stat = #rev_stat{
 		flags     = Flags,
@@ -373,7 +374,8 @@ cnf_stat(Body) ->
 		type      = unicode:characters_to_binary(TypeCode),
 		creator   = unicode:characters_to_binary(CreatorCode),
 		doc_links = DocLinks,
-		rev_links = RevLinks
+		rev_links = RevLinks,
+		comment   = unicode:characters_to_binary(Comment)
 	},
 	{ok, Stat}.
 
@@ -462,7 +464,8 @@ req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
 		type      = TypeCode,
 		creator   = CreatorCode,
 		doc_links = DocLinks,
-		rev_links = RevLinks
+		rev_links = RevLinks,
+		comment   = Comment
 	} = Revision,
 	Req = peerdrive_netstore_pb:encode_putrevstartreq(#putrevstartreq{
 		rid = Rev,
@@ -475,7 +478,8 @@ req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
 			type_code = TypeCode,
 			creator_code = CreatorCode,
 			doc_links = DocLinks,
-			rev_links = RevLinks
+			rev_links = RevLinks,
+			comment = Comment
 		}
 	}),
 	Handler = fun(B) -> cnf_put_rev(B, MPS, User) end,

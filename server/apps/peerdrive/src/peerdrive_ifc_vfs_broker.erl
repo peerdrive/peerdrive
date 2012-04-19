@@ -21,7 +21,7 @@
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
-	abort/1, close/1, get_type/1, set_type/2]).
+	abort/1, close/1, close/2, get_type/1, set_type/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
 	terminate/2]).
 
@@ -72,7 +72,10 @@ set_type(Handle, Uti) ->
 	gen_server:call(?MODULE, {set_type, Handle, Uti}, infinity).
 
 close(Handle) ->
-	gen_server:call(?MODULE, {close, Handle}, infinity).
+	gen_server:call(?MODULE, {close, Handle, undefined}, infinity).
+
+close(Handle, Comment) ->
+	gen_server:call(?MODULE, {close, Handle, Comment}, infinity).
 
 abort(Handle) ->
 	gen_server:call(?MODULE, {abort, Handle}, infinity).
@@ -114,8 +117,8 @@ handle_call(Request, _From, S) ->
 			do_open_rev(Store, Rev, S);
 		{open_doc, Store, Doc, Write} ->
 			do_open_doc(Store, Doc, Write, S);
-		{close, Handle} ->
-			do_close(Handle, S);
+		{close, Handle, Comment} ->
+			do_close(Handle, Comment, S);
 		{abort, Handle} ->
 			do_abort(Handle, S)
 	end,
@@ -259,10 +262,10 @@ do_write(FuseHandle, Part, Offset, Data, S) ->
 	end.
 
 
-do_close({rw, Store, Doc}=FuseHandle, S) ->
+do_close({rw, Store, Doc}=FuseHandle, Comment, S) ->
 	case close_handle(FuseHandle, S) of
 		{State, Handle, S2} ->
-			Result = peerdrive_broker:suspend(Handle),
+			Result = peerdrive_broker:suspend(Handle, Comment),
 			peerdrive_broker:close(Handle),
 			case Result of
 				{ok, Rev} ->
@@ -297,7 +300,7 @@ do_close({rw, Store, Doc}=FuseHandle, S) ->
 			{{error, ebadf}, S}
 	end;
 
-do_close({ro, _Store, Rev}=FuseHandle, S) ->
+do_close({ro, _Store, Rev}=FuseHandle, _Comment, S) ->
 	case close_handle(FuseHandle, S) of
 		{closed, Handle, S2} ->
 			peerdrive_broker:close(Handle),

@@ -146,7 +146,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.fileToolBar.addAction(self._annotationDock.toggleViewAction())
 
 		# save comment popup
-		self.__commentPopup = CommentPopup(self, lambda c,f: self.__view.checkpoint(c, f))
+		self.__commentPopup = CommentPopup(self, lambda c: self.__view.checkpoint(c))
 
 		# disable for now
 		self.delAct.setEnabled(True)
@@ -311,7 +311,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		self.__updateStoreButtons()
 
 	def __checkpointFile(self):
-		self.__commentPopup.popup(self.__view.metaDataGetField(DocumentView.HPA_COMMENT, "Enter comment"))
+		self.__commentPopup.popup()
 
 	def __revertFile(self):
 		choice = QtGui.QMessageBox.question(self, 'Revert',
@@ -505,5 +505,5 @@ class CommentPopup(object):
 		self.__commentEdit.setFocus(QtCore.Qt.OtherFocusReason)
 
 	def __returnPressed(self):
-		self.__action(str(self.__commentEdit.text()), True)
+		self.__action(str(self.__commentEdit.text()))
 

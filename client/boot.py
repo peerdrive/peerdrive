@@ -32,8 +32,7 @@ importObjectByPath(
 		("PDSD", peerdrive.struct.dumps(registry)),
 		("META", peerdrive.struct.dumps({
 			"org.peerdrive.annotation" : {
-				"title"   : "registry",
-				"comment" : "Import by boot.py"
+				"title"   : "registry"
 			}
 		}))
 	],
@@ -61,8 +60,7 @@ importObjectByPath(
 		("FILE", "Empty document"),
 		("META", peerdrive.struct.dumps({
 			"org.peerdrive.annotation" : {
-				"title" : "Text document",
-				"comment" : "Created from template"
+				"title" : "Text document"
 			}
 		}))
 	])
@@ -73,8 +71,7 @@ importObjectByPath(
 		("PDSD", peerdrive.struct.dumps( [] )),
 		("META", peerdrive.struct.dumps({
 			"org.peerdrive.annotation" : {
-				"title" : "Folder",
-				"comment" : "Created from template"
+				"title" : "Folder"
 			}
 		}))
 	],

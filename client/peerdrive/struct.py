@@ -562,7 +562,6 @@ class Folder(object):
 
 	def save(self):
 		if self.__rev and self.__doc and self.__store:
-			self.__meta["org.peerdrive.annotation"]["comment"] = "<<Changed by import>>"
 			content = [ item for (descr, item) in self.__content ]
 			with connector.Connector().update(self.__store, self.__doc, self.__rev) as w:
 				w.writeAll('META', dumps(self.__meta))
@@ -736,14 +735,13 @@ def copyDoc(src, dstStore):
 				annotation = {}
 				meta["org.peerdrive.annotation"] = annotation
 
-			annotation["comment"] = "<<Copy document>>"
 			if "title" in annotation:
 				annotation["title"] = 'Copy of ' + annotation["title"]
 			else:
 				annotation["title"] = 'Copy of unnamed document'
 
 			handle.writeAll('META', dumps(meta))
-			handle.commit()
+			handle.commit("<<Copy document>>")
 			return handle
 		except:
 			handle.close()

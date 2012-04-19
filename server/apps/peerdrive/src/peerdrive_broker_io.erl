@@ -18,8 +18,8 @@
 
 -export([peek/2, create/3, fork/3, update/4, resume/4]).
 -export([read/4, write/4, truncate/3, get_parents/1, merge/4, rebase/2,
-	get_type/1, set_type/2, commit/1, suspend/1, close/1, get_flags/1,
-	set_flags/2]).
+	get_type/1, set_type/2, commit/1, commit/2, suspend/1, suspend/2, close/1,
+	get_flags/1, set_flags/2]).
 
 -include("utils.hrl").
 
@@ -108,10 +108,16 @@ set_type({_, Handle}, Type) ->
 	peerdrive_store:set_type(Handle, Type).
 
 commit({_, Handle}) ->
-	do_commit(Handle, fun peerdrive_store:commit/1).
+	do_commit(Handle, fun() -> peerdrive_store:commit(Handle) end).
+
+commit({_, Handle}, Comment) ->
+	do_commit(Handle, fun() -> peerdrive_store:commit(Handle, Comment) end).
 
 suspend({_, Handle}) ->
-	do_commit(Handle, fun peerdrive_store:suspend/1).
+	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle) end).
+
+suspend({_, Handle}, Comment) ->
+	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle, Comment) end).
 
 close({_, Handle}) ->
 	peerdrive_store:close(Handle).
@@ -154,7 +160,7 @@ do_rebase(Handle, Rev) ->
 
 do_commit(Handle, Fun) ->
 	case do_commit_prepare(Handle) of
-		ok    -> Fun(Handle);
+		ok    -> Fun();
 		Error -> Error
 	end.
 

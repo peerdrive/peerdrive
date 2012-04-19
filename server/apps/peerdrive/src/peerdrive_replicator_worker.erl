@@ -341,7 +341,8 @@ put_rev(SourceStore, DestStore, Rev) ->
 				type      = Stat#rev_stat.type,
 				creator   = Stat#rev_stat.creator,
 				doc_links = Stat#rev_stat.doc_links,
-				rev_links = Stat#rev_stat.rev_links
+				rev_links = Stat#rev_stat.rev_links,
+				comment   = Stat#rev_stat.comment
 			},
 			case peerdrive_store:put_rev_start(DestStore, Rev, Revision) of
 				ok ->

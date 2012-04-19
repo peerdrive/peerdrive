@@ -17,6 +17,7 @@ At the basic level each revision consists of the following:
 	- a creator code, denoting the application which created the revision
 	  (encoded as a reverse-DNS string)
 	- the modification time (microseconds since epoch, UTC)
+	- an optional user comment describing the revision
 	- a list of it's preceding revision(s) (parents),
 	- all document/revision links, extracted from all parts
 		- list of document links
@@ -46,6 +47,8 @@ uint32           .. Type code string length
 	char[]       .. Type code
 uint32           .. Creator code string length
 	char[]       .. Creator code
+uint32           .. Comment string length
+	char[]       .. Comment
 uint32           .. DocLinkCount
 	uint128      .. Document link
 uint32           .. RevLinkCount

@@ -303,7 +303,8 @@ do_stat(Body) ->
 		parents   = Parents,
 		mtime     = Mtime,
 		type      = TypeCode,
-		creator   = CreatorCode
+		creator   = CreatorCode,
+		comment   = Comment
 	} = Stat,
 	Reply = #statcnf{
 		flags        = Flags,
@@ -312,7 +313,8 @@ do_stat(Body) ->
 		parents      = Parents,
 		mtime        = Mtime,
 		type_code    = TypeCode,
-		creator_code = CreatorCode
+		creator_code = CreatorCode,
+		comment      = Comment
 	},
 	peerdrive_client_pb:encode_statcnf(Reply).
 
@@ -633,11 +635,23 @@ io_loop_process(Handle, Request, ReqData) ->
 			{stop, <<>>};
 
 		?COMMIT_MSG ->
-			{ok, Rev} = check(peerdrive_broker:commit(Handle)),
+			#commitreq{comment=CommentStr} =
+				peerdrive_client_pb:decode_commitreq(ReqData),
+			Comment = if
+				CommentStr == undefined -> undefined;
+				true -> unicode:characters_to_binary(CommentStr)
+			end,
+			{ok, Rev} = check(peerdrive_broker:commit(Handle, Comment)),
 			peerdrive_client_pb:encode_commitcnf(#commitcnf{rev=Rev});
 
 		?SUSPEND_MSG ->
-			{ok, Rev} = check(peerdrive_broker:suspend(Handle)),
+			#suspendreq{comment=CommentStr} =
+				peerdrive_client_pb:decode_suspendreq(ReqData),
+			Comment = if
+				CommentStr == undefined -> undefined;
+				true -> unicode:characters_to_binary(CommentStr)
+			end,
+			{ok, Rev} = check(peerdrive_broker:suspend(Handle, Comment)),
 			peerdrive_client_pb:encode_suspendcnf(#suspendcnf{rev=Rev});
 
 		?MERGE_MSG ->
