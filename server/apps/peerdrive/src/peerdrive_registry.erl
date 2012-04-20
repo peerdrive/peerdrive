@@ -76,7 +76,7 @@ handle_call({uti_from_ext, Ext, Default}, _From, S) ->
 handle_info({vol_event, mod_doc, _Store, Doc}, #state{doc=Doc} = S) ->
 	case read_registry(S#state.store, Doc) of
 		{ok, Registry} ->
-			{noreply, monitor, S#state{reg=Registry}};
+			{noreply, S#state{reg=Registry}};
 
 		{error, Reason} ->
 			{stop, Reason, S}
