@@ -64,6 +64,7 @@ class FolderWindow(main.MainWindow):
 		self.__columnsShowAddEntry(self.__colMenu, columns, ":mtime", "Modification time")
 		self.__columnsShowAddEntry(self.__colMenu, columns, ":type", "Type code")
 		self.__columnsShowAddEntry(self.__colMenu, columns, ":creator", "Creator code")
+		self.__columnsShowAddEntry(self.__colMenu, columns, ":comment", "Comment")
 		self.__colMenu.addSeparator()
 		# add meta columns
 		metaSpecs = {}

@@ -166,6 +166,9 @@ class StatColumnInfo(object):
 		elif key == ":creator":
 			self.__name = "Creator code"
 			self.__extractor = lambda s: s.creator()
+		elif key == ":comment":
+			self.__name = "Comment"
+			self.__extractor = lambda s: s.comment()
 		else:
 			raise KeyError("Invalid StatColumnInfo key")
 

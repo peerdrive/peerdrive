@@ -15,11 +15,6 @@
 				"display" : "Description"
 			},
 			{
-				"key"     : ["org.peerdrive.annotation", "comment"],
-				"type"    : "string",
-				"display" : "Comment"
-			},
-			{
 				"key"     : ["org.peerdrive.annotation", "tags"],
 				"type"    : "list of string",
 				"display" : "Tags"
