@@ -19,7 +19,7 @@
 
 -export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
--export([io_request/3]).
+-export([io_request/3, io_request_async/4]).
 
 -include("store.hrl").
 -include("netstore.hrl").
@@ -47,6 +47,14 @@ start_link(Id, {_Address, _Port, _Name, _Tls} = Args) ->
 io_request(NetStore, Request, Body) ->
 	try
 		gen_server:call(NetStore, {io_request, Request, Body}, infinity)
+	catch
+		exit:_ -> {error, enxio}
+	end.
+
+
+io_request_async(NetStore, Request, Body, Finish) ->
+	try
+		gen_server:call(NetStore, {io_request_async, Request, Body, Finish}, infinity)
 	catch
 		exit:_ -> {error, enxio}
 	end.
@@ -143,6 +151,9 @@ handle_info({ssl_error, _Socket, Reason}, S) ->
 
 handle_call({io_request, Request, Body}, From, S) ->
 	req_io_op(From, Request, Body, S);
+
+handle_call({io_request_async, Request, Body, Finish}, _From, S) ->
+	req_io_op_async(Request, Body, Finish, S);
 
 handle_call(guid, _From, S) ->
 	{reply, S#state.guid, S};
@@ -547,6 +558,10 @@ cnf_io_op(Body) ->
 	{ok, Body}.
 
 
+req_io_op_async(Request, Body, Finish, S) ->
+	send_request_internal(Request, Body, {Request, Finish}, true, S).
+
+
 send_request(From, Req, Body, S) ->
 	send_request_internal(Req, Body, {From, Req, fun(<<>>) -> ok end, fun(E) -> E end}, S).
 
@@ -560,12 +575,20 @@ send_request(From, Req, Body, OkHandler, ErrHandler, S) ->
 
 
 send_request_internal(Req, Body, Continuation, S) ->
+	send_request_internal(Req, Body, Continuation, false, S).
+
+send_request_internal(Req, Body, Continuation, Asyc, S) ->
 	#state{transport=Transport, socket=Socket, requests=Requests} = S,
 	Ref = get_next_ref(S),
 	case Transport:send(Socket, <<Ref:32, Req:12, ?FLAG_REQ:4, Body/binary>>) of
 		ok ->
 			S2 = S#state{requests=gb_trees:enter(Ref, Continuation, Requests)},
-			{noreply, S2};
+			case Asyc of
+				false ->
+					{noreply, S2};
+				true ->
+					{reply, ok, S2}
+			end;
 
 		{error, Reason} ->
 			error_logger:warning_report([{module, ?MODULE},
@@ -609,6 +632,17 @@ handle_confirm(Ref, Cnf, Body, #state{requests=Requests} = S) ->
 				throw:Err -> Err
 			end,
 			gen_server:reply(From, Reply),
+			{noreply, S2};
+
+		{Req, Handler} ->
+			case Cnf of
+				Req ->
+					Handler({ok, Body});
+				?ERROR_MSG ->
+					#errorcnf{error=Error} =
+						peerdrive_netstore_pb:decode_errorcnf(Body),
+					Handler({error, Error})
+			end,
 			{noreply, S2};
 
 		ignore ->

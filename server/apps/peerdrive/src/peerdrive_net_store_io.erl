@@ -46,7 +46,7 @@ init({State, User}) ->
 
 
 handle_call({read, Part, Offset, Length}, _From, S) ->
-	{reply, do_read(Part, Offset, Length, S), S};
+	do_read(Part, Offset, Length, S);
 
 handle_call({write, Part, Offset, Data}, _From, S) ->
 	{reply, do_write(Part, Offset, Data, S), S};
@@ -96,7 +96,10 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 		_User ->
 			do_close(S),
 			{stop, normal, S}
-	end.
+	end;
+
+handle_info({read, _Ref, _Result}, S) ->
+	{noreply, S}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -111,42 +114,57 @@ code_change(_, State, _) -> {ok, State}.
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_read(Part, Offset, Length, #state{mps=MaxPS} = S) when Length =< MaxPS ->
-	#state{handle=Handle, store=Store} = S,
+do_read(Part, Offset, Length, S) ->
+	try
+		Data = do_read_loop(Part, Offset, Length, S, 0, [], make_ref()),
+		{reply, {ok, iolist_to_binary(lists:reverse(Data))}, S}
+	catch
+		throw:{error, _} = Error -> {reply, Error, S};
+		throw:{stop, Reason} -> {stop, Reason, {error, enxio}, S}
+	end.
+
+
+do_read_loop(_Part, _Offset, 0, _S, 0, Acc, _Ref) ->
+	Acc;
+
+do_read_loop(Part, Offset, Length, S, Pending, Acc, Ref) when (Length > 0) and
+                                                              (Pending < 2) ->
+	#state{mps=MaxPS, handle=Handle, store=Store} = S,
+	Actual = if Length > MaxPS -> MaxPS; true -> Length end,
 	Req = peerdrive_netstore_pb:encode_readreq(#readreq{
-		handle=Handle, part=Part, offset=Offset, length=Length}),
-	case peerdrive_net_store:io_request(Store, ?READ_MSG, Req) of
-		{ok, Cnf} ->
+		handle=Handle, part=Part, offset=Offset, length=Actual}),
+	Self = self(),
+	Finish = fun
+		({ok, Cnf}) ->
 			#readcnf{data=Data} = peerdrive_netstore_pb:decode_readcnf(Cnf),
-			{ok, Data};
+			Self ! {read, Ref, Data};
+		({error, _} = Error) ->
+			Self ! {read, Ref, Error}
+	end,
+	case peerdrive_net_store:io_request_async(Store, ?READ_MSG, Req, Finish) of
+		ok ->
+			do_read_loop(Part, Offset+Actual, Length-Actual, S, Pending+1, Acc, Ref);
 		{error, _} = Error ->
-			Error
+			throw(Error)
 	end;
 
-do_read(Part, Offset, Length, S) ->
-	do_read_loop(Part, Offset, Length, S, <<>>).
+do_read_loop(Part, Offset, Length, S, Pending, Acc, Ref) ->
+	receive
+		{read, Ref, <<>>} ->
+			Acc;
 
+		{read, Ref, Data} when is_binary(Data) ->
+			do_read_loop(Part, Offset, Length, S, Pending-1, [Data | Acc], Ref);
 
-do_read_loop(_Part, _Offset, 0, _S, Acc) ->
-	{ok, Acc};
+		{read, Ref, Error} ->
+			throw(Error);
 
-do_read_loop(Part, Offset, Length, #state{mps=MaxPS} = S, Acc) ->
-	Size = if
-		Length > MaxPS -> MaxPS;
-		true           -> Length
-	end,
-	case do_read(Part, Offset, Size, S) of
-		{ok, Data} ->
-			NewAcc = <<Acc/binary, Data/binary>>,
-			if
-				size(Data) < Size ->
-					{ok, NewAcc};
-				true ->
-					do_read_loop(Part, Offset+Size, Length-Size, S, NewAcc)
-			end;
+		{'EXIT', Store, Reason} when S#state.store == Store ->
+			throw({stop, Reason});
 
-		Error ->
-			Error
+		{'EXIT', _User, _Reason} ->
+			do_close(S),
+			throw({stop, normal})
 	end.
 
 
