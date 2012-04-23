@@ -275,7 +275,8 @@ check_store_spec({Id, Descr, Disposition, Module, _Args}) when
 		is_atom(Id) and
 		is_list(Disposition) and
 		is_list(Descr) ->
-	lists:member(Module, [peerdrive_file_store, peerdrive_net_store]) and
+	lists:member(Module, [peerdrive_file_store, peerdrive_net_store,
+		peerdrive_crypt_store]) and
 	lists:foldl(
 		fun(Tag, Acc) ->
 			Acc and case Tag of

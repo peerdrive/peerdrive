@@ -18,7 +18,7 @@
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
 -export([read_doc_struct/3, read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
 -export([walk/2]).
--export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1]).
+-export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1, make_bin_16/1]).
 
 -include("utils.hrl").
 
@@ -300,4 +300,14 @@ merkle_finalize([Partial, empty | Root]) ->
 
 merkle_finalize([Partial, Sibling | Root]) ->
 	merkle_finalize([crypto:sha(<<1, Sibling/binary, Partial/binary>>) | Root]).
+
+
+make_bin_16(Bin) when size(Bin) == 16 ->
+	Bin;
+
+make_bin_16(Bin) when size(Bin) > 16 ->
+	binary_part(Bin, 0, 16);
+
+make_bin_16(Bin) ->
+	<<Bin/binary, 0:((16-size(Bin))*8)>>.
 

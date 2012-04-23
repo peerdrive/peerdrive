@@ -72,7 +72,8 @@ read({_, Handle}, Part, Offset, Length) ->
 
 write({_, Handle}, Part, Offset, Data) when Part == <<"FILE">>;
                                             Part == <<"META">>;
-                                            Part == <<"PDSD">> ->
+                                            Part == <<"PDSD">>;
+                                            Part == <<"ENCR">> ->
 	peerdrive_store:write(Handle, Part, Offset, Data);
 
 write(_, _, _, _) ->
@@ -80,7 +81,8 @@ write(_, _, _, _) ->
 
 truncate({_, Handle}, Part, Offset) when Part == <<"FILE">>;
                                          Part == <<"META">>;
-                                         Part == <<"PDSD">> ->
+                                         Part == <<"PDSD">>;
+                                         Part == <<"ENCR">> ->
 	peerdrive_store:truncate(Handle, Part, Offset);
 
 truncate(_, _, _) ->
@@ -183,7 +185,7 @@ read_rev_refs(Handle) ->
 				{sets:union(NewDR, AccDocRefs), sets:union(NewRR, AccRevRefs)}
 			end,
 			{sets:new(), sets:new()},
-			[<<"PDSD">>, <<"META">>]),
+			[<<"PDSD">>, <<"META">>, <<"ENCR">>]),
 		{ok, sets:to_list(DocSet), sets:to_list(RevSet)}
 	catch
 		throw:Term -> Term
