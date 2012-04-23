@@ -19,7 +19,7 @@
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
 -export([put_doc/3, put_doc_commit/1, put_doc_close/1, forward_doc_start/4, forward_doc_commit/1,
 	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
-	put_rev_commit/1]).
+	put_rev_commit/1, remember_rev/4, remember_rev_commit/1, remember_rev_abort/1]).
 -export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
 	write/4, suspend/1, suspend/2, get_links/1, set_links/3, get_flags/1, set_flags/2]).
@@ -404,6 +404,32 @@ forward_doc_commit(Handle) ->
 %%       Handle = pid()
 forward_doc_abort(Handle) ->
 	call_store(Handle, abort, ok).
+
+
+%% @doc Add a preliminary revision to a document
+%%
+%% Add PreRev to the current list of pending preliminary revisions of Doc. The
+%% function returns a handle which gives the caller the chance to actually
+%% upload the revision. After committing the handle PreRev is added as
+%% preliminary revision, optionally replacing OldPreRev atomically.
+%%
+%% @spec remember_rev(Store, Doc, PreRev, OldPreRev) -> Result
+%%       Store = pid()
+%%       Doc = Rev = guid()
+%%       OldPreRev = undefined | guid()
+%%       Result = ok | {ok, Handle} | {error, Reason}
+%%       Handle = pid()
+%%       Reason = ecode()
+remember_rev(Store, Doc, PreRev, OldPreRev) ->
+	call_store(Store, {remember_rev, Doc, PreRev, OldPreRev}).
+
+
+remember_rev_commit(Handle) ->
+	call_store(Handle, commit).
+
+
+remember_rev_abort(Handle) ->
+	call_store(Handle, abort).
 
 
 %% @doc Put/import a revision into the store.

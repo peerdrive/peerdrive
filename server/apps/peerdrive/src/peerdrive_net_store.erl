@@ -225,6 +225,9 @@ handle_call({forward_doc, Doc, RevPath, OldPreRev}, From, S) ->
 handle_call({put_rev, Rev, Revision}, From, S) ->
 	req_put_rev(Rev, Revision, From, S);
 
+handle_call({remember_rev, DId, PreRId, OldPreRId}, From, S) ->
+	req_remember_rev(DId, PreRId, OldPreRId, From, S);
+
 handle_call({sync_get_changes, PeerGuid}, From, S) ->
 	req_sync_get_changes(PeerGuid, From, S);
 
@@ -508,6 +511,25 @@ cnf_put_rev(Body, MaxPacketSize, User) ->
 			{ok, Importer} = peerdrive_net_store_importer:start_link(self(), Handle,
 				MaxPacketSize, User),
 			{ok, Missing, Importer}
+	end.
+
+
+req_remember_rev(DId, PreRId, OldPreRId, From, S) ->
+	{User, _Tag} = From,
+	Req = peerdrive_netstore_pb:encode_rememberrevstartreq(#rememberrevstartreq{
+		doc=DId, pre_rev=PreRId, old_pre_rev=OldPreRId}),
+	Handler = fun(B) -> cnf_remember_rev(B, User) end,
+	send_request(From, ?RMBR_REV_START_MSG, Req, Handler, S).
+
+
+cnf_remember_rev(Body, User) ->
+	#rememberrevstartcnf{handle=Handle} =
+		peerdrive_netstore_pb:decode_rememberrevstartcnf(Body),
+	case Handle of
+		undefined ->
+			ok;
+		_ ->
+			{ok, _} = peerdrive_net_store_rem:start_link(Handle, User)
 	end.
 
 

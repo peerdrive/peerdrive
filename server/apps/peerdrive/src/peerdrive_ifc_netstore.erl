@@ -146,6 +146,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 		?SYNC_MSG ->
 			handle(Body, RetPath, Store, fun do_sync/2, S);
 
+		?RMBR_REV_START_MSG ->
+			start_worker(S, Body, RetPath, fun do_remember_rev_start/3, fun remember_handler/3);
+
 		_ ->
 			{{1, Handle}, _} = protobuffs:decode(Body, uint32),
 			Worker = dict:fetch(Handle, S#state.handles),
@@ -385,6 +388,19 @@ do_forward_doc_start(Store, NetHandle, ReqData) ->
 	end.
 
 
+do_remember_rev_start(Store, NetHandle, ReqData) ->
+	#rememberrevstartreq{doc=Doc, pre_rev=PreRev, old_pre_rev=OldPreRev} =
+		peerdrive_netstore_pb:decode_rememberrevstartreq(ReqData),
+	case check(peerdrive_store:remember_rev(Store, Doc, PreRev, OldPreRev)) of
+		ok ->
+			{stop, <<>>};
+
+		{ok, StoreHandle} ->
+			Cnf = #rememberrevstartcnf{handle=NetHandle},
+			{start, StoreHandle, peerdrive_netstore_pb:encode_rememberrevstartcnf(Cnf)}
+	end.
+
+
 do_put_rev_start(Store, NetHandle, ReqData) ->
 	#putrevstartreq{rid=RId, revision=PbRev} =
 		peerdrive_netstore_pb:decode_putrevstartreq(ReqData),
@@ -596,6 +612,25 @@ forward_handler(Handle, Request, _ReqData) ->
 
 		closed ->
 			ok = peerdrive_store:forward_doc_abort(Handle)
+	end.
+
+
+remember_handler(Handle, Request, _ReqData) ->
+	case Request of
+		?RMBR_REV_COMMIT_MSG ->
+			case peerdrive_store:remember_rev_commit(Handle) of
+				ok ->
+					{stop, <<>>};
+				{error, _} = Error ->
+					{abort, Error}
+			end;
+
+		?RMBR_REV_ABORT_MSG ->
+			ok = peerdrive_store:remember_rev_abort(Handle),
+			{stop, <<>>};
+
+		closed ->
+			ok = peerdrive_store:remember_rev_abort(Handle)
 	end.
 
 

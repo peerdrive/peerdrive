@@ -493,3 +493,21 @@ message TriggerInd {
 	required bytes element = 2;
 }
 
+message RememberRevStartReq {
+	required bytes doc = 1;
+	required bytes pre_rev = 2;
+	optional bytes old_pre_rev = 3;
+}
+
+message RememberRevStartCnf {
+	optional uint32 handle = 1;
+}
+
+message RememberRevCommitReq {
+	required uint32 handle = 1;
+}
+
+message RememberRevAbortReq {
+	required uint32 handle = 1;
+}
+

@@ -63,4 +63,7 @@
 -define(SYNC_FINISH_MSG,      16#029).
 -define(TRIGGER_MSG,          16#02a).
 -define(SYNC_MSG,             16#02b).
+-define(RMBR_REV_START_MSG,   16#02c).
+-define(RMBR_REV_COMMIT_MSG,  16#02d).
+-define(RMBR_REV_ABORT_MSG,   16#02e).
 

@@ -23,7 +23,7 @@
 % Functions used by helper processes (io/forwarder/importer)
 -export([commit/4, doc_unlock/2, forward_commit/4, part_get/2, part_lock/2,
 	part_put/3, part_unlock/2, put_doc_commit/3, put_rev_commit/3,
-	rev_unlock/2, suspend/4, tmp_name/1, rev_lock/2]).
+	remember_commit/4, rev_unlock/2, suspend/4, tmp_name/1, rev_lock/2]).
 
 -include("store.hrl").
 -include_lib("kernel/include/file.hrl").
@@ -129,6 +129,9 @@ put_doc_commit(Store, DId, RId) ->
 put_rev_commit(Store, RId, Rev) ->
 	call_store(Store, {put_rev_commit, RId, Rev}).
 
+remember_commit(Store, DId, NewPreRId, OldPreRId) ->
+	call_store(Store, {remember_rev_commit, DId, NewPreRId, OldPreRId}).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -204,6 +207,10 @@ handle_call({put_rev, RId, Rev}, {User, _}, S) ->
 	{Reply, S2} = do_put_rev(RId, Rev, User, S),
 	{reply, Reply, S2};
 
+handle_call({remember_rev, DId, PreRId, OldPreRId}, {User, _}, S) ->
+	{Reply, S2} = do_remember_rev(DId, PreRId, OldPreRId, User, S),
+	{reply, Reply, S2};
+
 handle_call({sync_get_changes, PeerSId}, {Caller, _}, S) ->
 	{Reply, S2} = do_sync_get_changes(PeerSId, Caller, S),
 	{reply, Reply, S2};
@@ -266,7 +273,11 @@ handle_call({part_put, PId, Content}, _From, S) ->
 % internal: get part
 handle_call({part_get, PId}, _From, S) ->
 	Reply = do_part_get(PId, S),
-	{reply, Reply, S}.
+	{reply, Reply, S};
+
+handle_call({remember_rev_commit, DId, NewPreRId, OldPreRId}, _From, S) ->
+	{Reply, S2} = do_remember_rev_commit(DId, NewPreRId, OldPreRId, S),
+	{reply, Reply, S2}.
 
 
 % internal: unlock a part
@@ -756,6 +767,41 @@ do_put_rev_commit(RId, Rev, #state{sid=SId, rev_tbl=RevTbl} = S) ->
 	ok = dets:insert(RevTbl, {RId, Rev}),
 	peerdrive_vol_monitor:trigger_add_rev(SId, RId),
 	{ok, S}.
+
+
+do_remember_rev(DId, NewPreRId, OldPreRId, User, S) ->
+	#state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S,
+	case dets:member(DocTbl, DId) of
+		true ->
+			case dets:member(RevTbl, NewPreRId) of
+				true ->
+					do_remember_rev_commit(DId, NewPreRId, OldPreRId, S);
+
+				false ->
+					S2 = do_lock({rev, NewPreRId}, S),
+					Ok = {ok, _} = peerdrive_file_store_rem:start_link(DId,
+						NewPreRId, OldPreRId, User),
+					{Ok, S2}
+			end;
+
+		false ->
+			{{error, enoent}, S}
+	end.
+
+
+do_remember_rev_commit(DId, NewPreRId, OldPreRId, #state{doc_tbl=DocTbl} = S) ->
+	case dets:lookup(DocTbl, DId) of
+		[{_, RId, PreRIds, _Gen}] ->
+			NewPreRIds = lists:usort(
+				[NewPreRId] ++ [R || R <- PreRIds, R =/= OldPreRId]
+			),
+			ok = dets:insert(DocTbl, {DId, RId, NewPreRIds, S#state.gen}),
+			peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
+			{ok, next_gen(S)};
+
+		[] ->
+			{{error, enoent}, S}
+	end.
 
 
 do_sync_get_changes(PeerSId, Caller, S) ->
