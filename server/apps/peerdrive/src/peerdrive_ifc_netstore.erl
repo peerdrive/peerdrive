@@ -302,9 +302,7 @@ do_peek(Store, NetHandle, ReqData) ->
 do_create(Store, NetHandle, ReqData) ->
 	#createreq{type_code=Type, creator_code=Creator} =
 		peerdrive_netstore_pb:decode_createreq(ReqData),
-	{ok, Doc, StoreHandle} = check(peerdrive_store:create(Store,
-		unicode:characters_to_binary(Type),
-		unicode:characters_to_binary(Creator))),
+	{ok, Doc, StoreHandle} = check(peerdrive_store:create(Store, Type, Creator)),
 	Cnf = #createcnf{handle=NetHandle, doc=Doc},
 	{start, StoreHandle, peerdrive_netstore_pb:encode_createcnf(Cnf)}.
 
@@ -312,31 +310,22 @@ do_create(Store, NetHandle, ReqData) ->
 do_fork(Store, NetHandle, ReqData) ->
 	#forkreq{rev=Rev, creator_code=Creator} =
 		peerdrive_netstore_pb:decode_forkreq(ReqData),
-	{ok, Doc, StoreHandle} = check(peerdrive_store:fork(Store, Rev,
-		unicode:characters_to_binary(Creator))),
+	{ok, Doc, StoreHandle} = check(peerdrive_store:fork(Store, Rev, Creator)),
 	Cnf = #forkcnf{handle=NetHandle, doc=Doc},
 	{start, StoreHandle, peerdrive_netstore_pb:encode_forkcnf(Cnf)}.
 
 
 do_update(Store, NetHandle, ReqData) ->
-	#updatereq{doc=Doc, rev=Rev, creator_code=CreatorStr} =
+	#updatereq{doc=Doc, rev=Rev, creator_code=Creator} =
 		peerdrive_netstore_pb:decode_updatereq(ReqData),
-	Creator = if
-		CreatorStr == undefined -> undefined;
-		true -> unicode:characters_to_binary(CreatorStr)
-	end,
 	{ok, StoreHandle} = check(peerdrive_store:update(Store, Doc, Rev, Creator)),
 	Cnf = #updatecnf{handle=NetHandle},
 	{start, StoreHandle, peerdrive_netstore_pb:encode_updatecnf(Cnf)}.
 
 
 do_resume(Store, NetHandle, ReqData) ->
-	#resumereq{doc=Doc, rev=Rev, creator_code=CreatorStr} =
+	#resumereq{doc=Doc, rev=Rev, creator_code=Creator} =
 		peerdrive_netstore_pb:decode_resumereq(ReqData),
-	Creator = if
-		CreatorStr == undefined -> undefined;
-		true -> unicode:characters_to_binary(CreatorStr)
-	end,
 	{ok, StoreHandle} = check(peerdrive_store:resume(Store, Doc, Rev, Creator)),
 	Cnf = #resumecnf{handle=NetHandle},
 	{start, StoreHandle, peerdrive_netstore_pb:encode_resumecnf(Cnf)}.
@@ -410,11 +399,11 @@ do_put_rev_start(Store, NetHandle, ReqData) ->
 			<- PbRev#putrevstartreq_revision.parts, ?ASSERT_PART(FCC) ],
 		parents = PbRev#putrevstartreq_revision.parents,
 		mtime = PbRev#putrevstartreq_revision.mtime,
-		type = unicode:characters_to_binary(PbRev#putrevstartreq_revision.type_code),
-		creator = unicode:characters_to_binary(PbRev#putrevstartreq_revision.creator_code),
+		type = PbRev#putrevstartreq_revision.type_code,
+		creator = PbRev#putrevstartreq_revision.creator_code,
 		doc_links = PbRev#putrevstartreq_revision.doc_links,
 		rev_links = PbRev#putrevstartreq_revision.rev_links,
-		comment = unicode:characters_to_binary(PbRev#putrevstartreq_revision.comment)
+		comment = PbRev#putrevstartreq_revision.comment
 	},
 	case check(peerdrive_store:put_rev_start(Store, RId, Rev)) of
 		ok ->
@@ -582,8 +571,7 @@ io_handler(Handle, Request, ReqData) ->
 		?SET_TYPE_MSG ->
 			#settypereq{type_code=Type} =
 				peerdrive_netstore_pb:decode_settypereq(ReqData),
-			ok = check(peerdrive_store:set_type(Handle,
-				unicode:characters_to_binary(Type))),
+			ok = check(peerdrive_store:set_type(Handle, Type)),
 			<<>>;
 
 		?GET_TYPE_MSG ->

@@ -385,11 +385,11 @@ cnf_stat(Body) ->
 			pid=PId} <- Parts, ?ASSERT_PART(FCC) ],
 		parents   = Parents,
 		mtime     = Mtime,
-		type      = unicode:characters_to_binary(TypeCode),
-		creator   = unicode:characters_to_binary(CreatorCode),
+		type      = TypeCode,
+		creator   = CreatorCode,
 		doc_links = DocLinks,
 		rev_links = RevLinks,
-		comment   = unicode:characters_to_binary(Comment)
+		comment   = Comment
 	},
 	{ok, Stat}.
 

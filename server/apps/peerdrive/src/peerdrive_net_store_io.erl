@@ -198,7 +198,7 @@ do_get_type(#state{handle=Handle, store=Store}) ->
 		{ok, Cnf} ->
 			#gettypecnf{type_code=Type} =
 				peerdrive_netstore_pb:decode_gettypecnf(Cnf),
-			{ok, unicode:characters_to_binary(Type)};
+			{ok, Type};
 
 		Error ->
 			Error

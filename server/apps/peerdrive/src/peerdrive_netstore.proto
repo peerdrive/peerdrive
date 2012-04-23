@@ -211,11 +211,11 @@ message StatCnf {
 	repeated Part parts = 2;
 	repeated bytes parents = 3;
 	required uint64 mtime = 4;
-	required string type_code = 5;
-	required string creator_code = 6;
+	required bytes type_code = 5;
+	required bytes creator_code = 6;
 	repeated bytes doc_links = 7;
 	repeated bytes rev_links = 8;
-	optional string comment = 9 [default = ""];
+	required bytes comment = 9;
 }
 
 message PeekReq {
@@ -227,8 +227,8 @@ message PeekCnf {
 }
 
 message CreateReq {
-	required string type_code = 1;
-	required string creator_code = 2;
+	required bytes type_code = 1;
+	required bytes creator_code = 2;
 }
 
 message CreateCnf {
@@ -238,7 +238,7 @@ message CreateCnf {
 
 message ForkReq {
 	required bytes rev = 1;
-	required string creator_code = 2;
+	required bytes creator_code = 2;
 }
 
 message ForkCnf {
@@ -249,7 +249,7 @@ message ForkCnf {
 message UpdateReq {
 	required bytes doc = 1;
 	required bytes rev = 2;
-	optional string creator_code = 3;
+	optional bytes creator_code = 3;
 }
 
 message UpdateCnf {
@@ -259,7 +259,7 @@ message UpdateCnf {
 message ResumeReq {
 	required bytes doc = 1;
 	required bytes rev = 2;
-	optional string creator_code = 3;
+	optional bytes creator_code = 3;
 }
 
 message ResumeCnf {
@@ -309,12 +309,12 @@ message GetTypeReq {
 }
 
 message GetTypeCnf {
-	required string type_code = 1;
+	required bytes type_code = 1;
 }
 
 message SetTypeReq {
 	required uint32 handle = 1;
-	required string type_code = 2;
+	required bytes type_code = 2;
 }
 
 message GetParentsReq {
@@ -428,11 +428,11 @@ message PutRevStartReq {
 		repeated Part parts = 2;
 		repeated bytes parents = 3;
 		required uint64 mtime = 4;
-		required string type_code = 5;
-		required string creator_code = 6;
+		required bytes type_code = 5;
+		required bytes creator_code = 6;
 		repeated bytes doc_links = 7;
 		repeated bytes rev_links = 8;
-		optional string comment = 9 [default = ""];
+		required bytes comment = 9;
 	}
 
 	required bytes rid = 1;
