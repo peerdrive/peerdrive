@@ -21,7 +21,7 @@
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % Functions used by helper processes (io/forwarder/importer)
--export([commit/4, doc_unlock/2, forward_commit/3, part_get/2, part_lock/2,
+-export([commit/4, doc_unlock/2, forward_commit/4, part_get/2, part_lock/2,
 	part_put/3, part_unlock/2, put_doc_commit/3, put_rev_commit/3,
 	rev_unlock/2, suspend/4, tmp_name/1, rev_lock/2]).
 
@@ -120,8 +120,8 @@ commit(Store, Doc, PreRev, Revision) ->
 suspend(Store, Doc, PreRev, Revision) ->
 	call_store(Store, {suspend, Doc, PreRev, Revision}).
 
-forward_commit(Store, Doc, RevPath) ->
-	call_store(Store, {forward_commit, Doc, RevPath}).
+forward_commit(Store, Doc, RevPath, OldPreRId) ->
+	call_store(Store, {forward_commit, Doc, RevPath, OldPreRId}).
 
 put_doc_commit(Store, DId, RId) ->
 	call_store(Store, {put_doc_commit, DId, RId}).
@@ -196,8 +196,8 @@ handle_call({put_doc, DId, RId}, {User, _}, S) ->
 	{Reply, S2} = do_put_doc(DId, RId, User, S),
 	{reply, Reply, S2};
 
-handle_call({forward_doc, DId, RevPath}, {User, _}, S) ->
-	{Reply, S2} = do_forward_doc(DId, RevPath, User, S),
+handle_call({forward_doc, DId, RevPath, OldPreRev}, {User, _}, S) ->
+	{Reply, S2} = do_forward_doc(DId, RevPath, OldPreRev, User, S),
 	{reply, Reply, S2};
 
 handle_call({put_rev, RId, Rev}, {User, _}, S) ->
@@ -244,8 +244,8 @@ handle_call({suspend, DId, PreRId, Rev}, _From, S) ->
 	{reply, Reply, S2};
 
 % internal: ok | {error, Reason}
-handle_call({forward_commit, DId, RevPath}, _From, S) ->
-	{Reply, S2} = do_forward_doc_commit(DId, RevPath, S),
+handle_call({forward_commit, DId, RevPath, OldPreRId}, _From, S) ->
+	{Reply, S2} = do_forward_doc_commit(DId, RevPath, OldPreRId, S),
 	{reply, Reply, S2};
 
 % internal: ok | {error, Reason}
@@ -627,14 +627,14 @@ do_part_get(PId, #state{part_tbl=PartTbl} = S) ->
 
 
 % ok | {ok, MissingRevs, Handle} | {error, Reason}
-do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
+do_forward_doc(DId, RevPath, OldPreRId, User, S) when length(RevPath) >= 2 ->
 	StartRId = hd(RevPath),
 	case dets:lookup(S#state.doc_tbl, DId) of
 		[{_, StartRId, _, _}] ->
 			RevTbl = S#state.rev_tbl,
 			case [RId || RId <- RevPath, not dets:member(RevTbl, RId)] of
 				[] ->
-					do_forward_doc_commit(DId, RevPath, S);
+					do_forward_doc_commit(DId, RevPath, OldPreRId, S);
 
 				Missing ->
 					% Some Revs are missing and need to be uploaded. Make sure
@@ -644,7 +644,7 @@ do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
 						S,
 						RevPath),
 					{ok, Handle} = peerdrive_file_store_fwd:start_link(DId,
-						RevPath, User),
+						RevPath, OldPreRId, User),
 					{{ok, lists:reverse(Missing), Handle}, S2}
 			end;
 
@@ -654,21 +654,30 @@ do_forward_doc(DId, RevPath, User, S) when length(RevPath) >= 2 ->
 			{{error, enoent}, S}
 	end;
 
-do_forward_doc(DId, [RId], _User, S) ->
-	case dets:lookup(S#state.doc_tbl, DId) of
-		[{_, RId, _, _}] ->
-			{ok, S};
+do_forward_doc(DId, [RId], OldPreRId, _User, #state{doc_tbl=DocTbl} = S) ->
+	case dets:lookup(DocTbl, DId) of
+		[{_, RId, PreRIds, _}] ->
+			case lists:member(OldPreRId, PreRIds) of
+				false ->
+					{ok, S};
+				true ->
+					NewPreRIds = lists:delete(OldPreRId, PreRIds),
+					ok = dets:insert(DocTbl, {DId, RId, NewPreRIds, S#state.gen}),
+					peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
+					{ok, next_gen(S)}
+			end;
 		[_] ->
 			{{error, econflict}, S};
 		[] ->
 			{{error, enoent}, S}
 	end;
 
-do_forward_doc(_DId, _RevPath, _User, S) ->
+do_forward_doc(_DId, _RevPath, _OldPreRId, _User, S) ->
 	{{error, einval}, S}.
 
 
-do_forward_doc_commit(DId, RevPath, #state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S) ->
+do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
+	#state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S,
 	try
 		% check if all revisions are known
 		lists:foreach(
@@ -688,12 +697,21 @@ do_forward_doc_commit(DId, RevPath, #state{doc_tbl=DocTbl, rev_tbl=RevTbl} = S) 
 		NewRId = lists:last(Path),
 		case dets:lookup(DocTbl, DId) of
 			% already pointing to requested rev
-			[{_, NewRId, _, _}] ->
-				{ok, S};
+			[{_, NewRId, PreRIds, _}] ->
+				case lists:member(OldPreRId, PreRIds) of
+					false ->
+						{ok, S};
+					true ->
+						NewPreRIds = lists:delete(OldPreRId, PreRIds),
+						ok = dets:insert(DocTbl, {DId, NewRId, NewPreRIds, S#state.gen}),
+						peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
+						{ok, next_gen(S)}
+				end;
 
 			% forward old version
 			[{_, OldRId, PreRIds, _}] ->
-				ok = dets:insert(DocTbl, {DId, NewRId, PreRIds, S#state.gen}),
+				NewPreRIds = lists:delete(OldPreRId, PreRIds),
+				ok = dets:insert(DocTbl, {DId, NewRId, NewPreRIds, S#state.gen}),
 				peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
 				{ok, next_gen(S)};
 

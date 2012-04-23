@@ -373,9 +373,9 @@ do_put_doc_start(Store, NetHandle, ReqData) ->
 
 
 do_forward_doc_start(Store, NetHandle, ReqData) ->
-	#forwarddocstartreq{doc=Doc, rev_path=RevPath} =
+	#forwarddocstartreq{doc=Doc, rev_path=RevPath, old_pre_rev=OldPreRev} =
 		peerdrive_netstore_pb:decode_forwarddocstartreq(ReqData),
-	case check(peerdrive_store:forward_doc_start(Store, Doc, RevPath)) of
+	case check(peerdrive_store:forward_doc_start(Store, Doc, RevPath, OldPreRev)) of
 		ok ->
 			{stop, <<>>};
 

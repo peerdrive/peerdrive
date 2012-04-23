@@ -401,6 +401,7 @@ message PutDocCloseReq {
 message ForwardDocStartReq {
 	required bytes doc = 1;
 	repeated bytes rev_path = 2;
+	optional bytes old_pre_rev = 3;
 }
 
 message ForwardDocStartCnf {

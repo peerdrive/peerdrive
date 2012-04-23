@@ -17,7 +17,7 @@
 -module(peerdrive_store).
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
--export([put_doc/3, put_doc_commit/1, put_doc_close/1, forward_doc_start/3, forward_doc_commit/1,
+-export([put_doc/3, put_doc_commit/1, put_doc_close/1, forward_doc_start/4, forward_doc_commit/1,
 	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
 -export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
@@ -363,18 +363,22 @@ put_doc_close(Handle) ->
 %%
 %% If the store has already all involved revisions then the Doc is forwarded
 %% and the function just returns `ok'. Otherwise a list of missing revisions is
-%% returned which have to be uploaded in the correct order via put_rev_start/3
-%% before the forward can be committed by forward_doc_commit/1.
+%% returned which have to be uploaded in any order with put_rev_start/3 before
+%% the forward can be committed by forward_doc_commit/1.
 %%
-%% @spec forward_doc_start(Store, Doc, RevPath) -> Result
+%% If the document is successfully forwarded OldPreRev is atomically removed
+%% from the list of preliminary revisions (if given).
+%%
+%% @spec forward_doc_start(Store, Doc, RevPath, OldPreRev) -> Result
 %%       Store = pid()
 %%       Doc = guid()
 %%       RevPath = MissingRevs = [guid()]
+%%       OldPreRev = undefined | guid()
 %%       Result = ok | {ok, MissingRevs, Handle} | {error, Reason}
 %%       Handle = pid()
 %%       Reason = ecode()
-forward_doc_start(Store, Doc, RevPath) ->
-	call_store(Store, {forward_doc, Doc, RevPath}).
+forward_doc_start(Store, Doc, RevPath, OldPreRev) ->
+	call_store(Store, {forward_doc, Doc, RevPath, OldPreRev}).
 
 
 %% @doc Commit a fast-forward operation

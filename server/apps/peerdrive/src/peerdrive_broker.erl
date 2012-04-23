@@ -471,7 +471,7 @@ search_path(Stores, FromRev, ToRev, Path) ->
 
 
 do_forward_doc(DstStore, Doc, SrcStore, RevPath, ToRev, Options) ->
-	case peerdrive_store:forward_doc_start(DstStore, Doc, RevPath) of
+	case peerdrive_store:forward_doc_start(DstStore, Doc, RevPath, undefined) of
 		ok ->
 			% Do an explicit asynchronous replication if verbose operation
 			% requested

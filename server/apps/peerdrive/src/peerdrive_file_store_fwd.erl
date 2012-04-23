@@ -17,20 +17,21 @@
 -module(peerdrive_file_store_fwd).
 -behaviour(gen_server).
 
--export([start_link/3]).
+-export([start_link/4]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, did, revpath}).
+-record(state, {store, did, revpath, oldprerid}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(DId, RevPath, User) ->
+start_link(DId, RevPath, OldPreRid, User) ->
 	State = #state{
-		store   = self(),
-		did     = DId,
-		revpath = RevPath
+		store     = self(),
+		did       = DId,
+		revpath   = RevPath,
+		oldprerid = OldPreRid
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -80,6 +81,6 @@ code_change(_, State, _) -> {ok, State}.
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_commit(#state{store=Store, did=DId, revpath=RevPath}) ->
-	peerdrive_file_store:forward_commit(Store, DId, RevPath).
+do_commit(#state{store=Store, did=DId, revpath=RevPath, oldprerid=OldPreRid}) ->
+	peerdrive_file_store:forward_commit(Store, DId, RevPath, OldPreRid).
 

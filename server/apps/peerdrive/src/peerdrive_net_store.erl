@@ -219,8 +219,8 @@ handle_call({delete_doc, Doc, Rev}, From, S) ->
 handle_call({put_doc, Doc, Rev}, From, S) ->
 	req_put_doc(Doc, Rev, From, S);
 
-handle_call({forward_doc, Doc, RevPath}, From, S) ->
-	req_forward_doc(Doc, RevPath, From, S);
+handle_call({forward_doc, Doc, RevPath, OldPreRev}, From, S) ->
+	req_forward_doc(Doc, RevPath, OldPreRev, From, S);
 
 handle_call({put_rev, Rev, Revision}, From, S) ->
 	req_put_rev(Rev, Revision, From, S);
@@ -444,10 +444,10 @@ cnf_put_doc(Body, User) ->
 	end.
 
 
-req_forward_doc(Doc, RevPath, From, S) ->
+req_forward_doc(Doc, RevPath, OldPreRev, From, S) ->
 	{User, _Tag} = From,
 	Req = peerdrive_netstore_pb:encode_forwarddocstartreq(#forwarddocstartreq{
-		doc=Doc, rev_path=RevPath}),
+		doc=Doc, rev_path=RevPath, old_pre_rev=OldPreRev}),
 	Handler = fun(B) -> cnf_forward_doc(B, User) end,
 	send_request(From, ?FF_DOC_START_MSG, Req, Handler, S).
 
