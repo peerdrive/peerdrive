@@ -20,7 +20,7 @@
 -export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, did, rid}).
+-record(state, {store, did, rid, done}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -30,7 +30,8 @@ start_link(DId, RId, User) ->
 	State = #state{
 		store = self(),
 		did   = DId,
-		rid   = RId
+		rid   = RId,
+		done  = false
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -45,23 +46,31 @@ init({State, User}) ->
 
 
 % returns `ok | {error, Reason}'
+handle_call(commit, _From, #state{done=false} = S) ->
+	case do_commit(S) of
+		ok ->
+			{reply, ok, S#state{done=true}};
+		Error ->
+			{reply, Error, S}
+	end;
+
 handle_call(commit, _From, S) ->
-	Reply = do_commit(S),
-	{stop, normal, Reply, S};
+	{reply, {error, ebadf}, S};
 
 % returns nothing
-handle_call(abort, _From, S) ->
+handle_call(close, _From, S) ->
 	{stop, normal, ok, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 	case From of
-		Store -> {stop, {orphaned, Reason}, S};
+		Store -> {stop, Reason, S};
 		_User -> {stop, normal, S}
 	end.
 
 
-terminate(_Reason, #state{store=Store, rid=RId}) ->
+terminate(_Reason, #state{store=Store, did=DId, rid=RId}) ->
+	peerdrive_file_store:doc_unlock(Store, DId),
 	peerdrive_file_store:rev_unlock(Store, RId).
 
 

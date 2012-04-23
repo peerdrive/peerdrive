@@ -236,23 +236,21 @@ replicate_doc(Doc, First, S) ->
 
 				{ok, Handle} ->
 					% replicate corresponding rev
-					S2 = try
-						replicate_rev(Rev, First, S)
-					catch
-						throw:RepError ->
-							peerdrive_store:put_doc_abort(Handle),
-							throw(RepError)
-					end,
-					case peerdrive_store:put_doc_commit(Handle) of
-						ok ->
-							S2;
-						{error, econflict} when not First ->
-							% Not treated as an error but deliberately
-							% drop new state
-							S;
-						{error, Reason} ->
-							ErrInfo = [{code, Reason}, {doc, Doc}, {rev, Rev}],
-							throw({error, ErrInfo})
+					try
+						S2 = replicate_rev(Rev, First, S),
+						case peerdrive_store:put_doc_commit(Handle) of
+							ok ->
+								S2;
+							{error, econflict} when not First ->
+								% Not treated as an error but deliberately
+								% drop new state
+								S;
+							{error, Reason} ->
+								ErrInfo = [{code, Reason}, {doc, Doc}, {rev, Rev}],
+								throw({error, ErrInfo})
+						end
+					after
+						peerdrive_store:put_doc_close(Handle)
 					end;
 
 				{error, econflict} when not First ->

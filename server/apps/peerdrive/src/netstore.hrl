@@ -50,7 +50,7 @@
 -define(DELETE_REV_MSG,       16#01c).
 -define(PUT_DOC_START_MSG,    16#01d).
 -define(PUT_DOC_COMMIT_MSG,   16#01e).
--define(PUT_DOC_ABORT_MSG,    16#01f).
+-define(PUT_DOC_CLOSE_MSG,    16#01f).
 -define(FF_DOC_START_MSG,     16#020).
 -define(FF_DOC_COMMIT_MSG,    16#021).
 -define(FF_DOC_ABORT_MSG,     16#022).

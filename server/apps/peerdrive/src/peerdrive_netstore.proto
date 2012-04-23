@@ -394,7 +394,7 @@ message PutDocCommitReq {
 	required uint32 handle = 1;
 }
 
-message PutDocAbortReq {
+message PutDocCloseReq {
 	required uint32 handle = 1;
 }
 

@@ -17,7 +17,7 @@
 -module(peerdrive_store).
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
--export([put_doc/3, put_doc_commit/1, put_doc_abort/1, forward_doc_start/3, forward_doc_commit/1,
+-export([put_doc/3, put_doc_commit/1, put_doc_close/1, forward_doc_start/3, forward_doc_commit/1,
 	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
 	put_rev_commit/1]).
 -export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
@@ -329,12 +329,16 @@ delete_rev(Store, Rev) ->
 
 %% @doc Put a document in the store
 %%
-%% If the Doc does not exist yet then it is created and points to Rev. If the
-%% Doc exits it must point to Rev, otherwise the call will fail.
+%% If the Doc does not exist yet then the function will return a Handle and the
+%% caller has the chance to upload the revision before committing. After the
+%% commit the Doc it is created and points to Rev. If the Doc exits it must
+%% point to Rev, causing the function to return `ok', otherwise the call will
+%% fail.
 %%
-%% @spec put_doc(Store, Doc, Rev) -> {ok, Handle} | {error, Reason}
+%% @spec put_doc(Store, Doc, Rev) -> Result
 %%       Store = pid()
 %%       Doc = Rev = guid()
+%%       Result = ok | {ok, Handle} | {error, Reason}
 %%       Handle = pid()
 %%       Reason = ecode()
 put_doc(Store, Doc, Rev) ->
@@ -345,8 +349,8 @@ put_doc_commit(Handle) ->
 	call_store(Handle, commit).
 
 
-put_doc_abort(Handle) ->
-	call_store(Handle, abort).
+put_doc_close(Handle) ->
+	call_store(Handle, close).
 
 
 %% @doc Fast-forward a document

@@ -518,7 +518,7 @@ do_put_doc(DId, RId, User, #state{doc_tbl=DocTbl} = S) ->
 	case dets:lookup(DocTbl, DId) of
 		% document does not exist (yet)...
 		[] ->
-			S2 = do_lock({rev, RId}, S),
+			S2 = do_lock({rev, RId}, do_lock({doc, DId}, S)),
 			{ok, Handle} = peerdrive_file_store_put:start_link(DId,
 				RId, User),
 			{{ok, Handle}, S2};

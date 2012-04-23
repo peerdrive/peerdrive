@@ -602,19 +602,15 @@ forward_handler(Handle, Request, _ReqData) ->
 put_doc_handler(Handle, Request, _ReqData) ->
 	case Request of
 		?PUT_DOC_COMMIT_MSG ->
-			case peerdrive_store:put_doc_commit(Handle) of
-				ok ->
-					{stop, <<>>};
-				{error, _} = Error ->
-					{abort, Error}
-			end;
+			ok = check(peerdrive_store:put_doc_commit(Handle)),
+			<<>>;
 
-		?PUT_DOC_ABORT_MSG ->
-			ok = peerdrive_store:put_doc_abort(Handle),
+		?PUT_DOC_CLOSE_MSG ->
+			ok = peerdrive_store:put_doc_close(Handle),
 			{stop, <<>>};
 
 		closed ->
-			ok = peerdrive_store:put_doc_abort(Handle)
+			ok = peerdrive_store:put_doc_close(Handle)
 	end.
 
 
