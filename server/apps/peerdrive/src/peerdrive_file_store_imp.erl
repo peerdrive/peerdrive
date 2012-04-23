@@ -17,27 +17,28 @@
 -module(peerdrive_file_store_imp).
 -behaviour(gen_server).
 
--export([start_link/4]).
+-export([start_link/5]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
 
 -define(THRESHOLD, 1024).
 
--record(state, {store, rid, rev, parts}).
+-record(state, {store, rid, rev, parts, noverify}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(RId, Rev, Missing, User) ->
+start_link(RId, Rev, Missing, User, NoVerify) ->
 	State = #state{
 		store = self(),
 		rid = RId,
 		rev = Rev,
 		parts = orddict:from_list(
 			[{FCC, {PId, <<>>, peerdrive_util:merkle_init()}} || {FCC, PId} <- Missing]
-		)
+		),
+		noverify = NoVerify
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -142,9 +143,9 @@ do_write(Part, Data, #state{parts=Parts} = S) ->
 	end.
 
 
-do_commit(#state{store=Store, rid=RId, rev=Rev, parts=Parts} = S) ->
+do_commit(#state{store=Store, rid=RId, rev=Rev, parts=Parts, noverify=NoVerify} = S) ->
 	try
-		lists:foreach(
+		NoVerify orelse lists:foreach(
 			fun({_, {PId, _, ShaCtx}}) ->
 				peerdrive_util:merkle_final(ShaCtx) == PId orelse throw(einval)
 			end,

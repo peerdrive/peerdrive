@@ -282,6 +282,7 @@ check_store_spec({Id, Descr, Disposition, Module, _Args}) when
 				system    -> true;
 				removable -> true;
 				net       -> true;
+				noverify  -> true;
 				_Else     -> false
 			end
 		end,

@@ -166,6 +166,7 @@ message InitCnf {
 
 message MountReq {
 	required string store = 1;
+	optional bool no_verify = 2 [default = false];
 }
 
 message MountCnf {

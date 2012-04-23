@@ -17,7 +17,7 @@
 -module(peerdrive_net_store).
 -behaviour(gen_server).
 
--export([start_link/2]).
+-export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 -export([io_request/3, io_request_async/4]).
 
@@ -32,12 +32,12 @@
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Id, {Address, Port, Name}) ->
-	start_link(Id, {Address, Port, Name, deny});
+start_link(Id, NoVerify, {Address, Port, Name}) ->
+	start_link(Id, NoVerify, {Address, Port, Name, deny});
 
-start_link(Id, {_Address, _Port, _Name, _Tls} = Args) ->
+start_link(Id, NoVerify, {_Address, _Port, _Name, _Tls} = Args) ->
 	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
-	gen_server:start_link({local, RegId}, ?MODULE, Args, []).
+	gen_server:start_link({local, RegId}, ?MODULE, [NoVerify, Args], []).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -64,7 +64,7 @@ io_request_async(NetStore, Request, Body, Finish) ->
 %% Gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Address, Port, Name, Tls}) ->
+init([NoVerify, {Address, Port, Name, Tls}]) ->
 	Options = [binary, {packet, 2}, {active, false}, {nodelay, true},
 		{keepalive, true}],
 	case gen_tcp:connect(Address, Port, Options) of
@@ -78,7 +78,7 @@ init({Address, Port, Name, Tls}) ->
 			},
 			case do_init(Tls, S) of
 				{ok, S2} ->
-					case do_mount(Name, S2) of
+					case do_mount(Name, NoVerify, S2) of
 						{ok, S3} = Ok->
 							case S3#state.transport of
 								gen_tcp ->
@@ -308,9 +308,9 @@ do_init(Tls, #state{socket=Socket} = S) ->
 	end.
 
 
-do_mount(Name, #state{transport=Trsp, socket=Socket} = S) ->
+do_mount(Name, NoVerify, #state{transport=Trsp, socket=Socket} = S) ->
 	Req = peerdrive_netstore_pb:encode_mountreq(#mountreq{
-		store=atom_to_binary(Name, utf8)}),
+		store=atom_to_binary(Name, utf8), no_verify=NoVerify}),
 	MountReq = <<0:32, ?MOUNT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
 	try
 		MountCnfMsg = case Trsp:send(Socket, MountReq) of

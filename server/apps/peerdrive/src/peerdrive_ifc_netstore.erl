@@ -216,9 +216,12 @@ do_init(Body, RetPath, #state{tls=Tls} = S) ->
 
 do_mount(Body, RetPath, #state{stores=Stores} = S) ->
 	try
-		#mountreq{store=Store} = peerdrive_netstore_pb:decode_mountreq(Body),
-		{Id, _Descr, SId, _Tags} = get_store_by_id(Store),
+		#mountreq{store=Store, no_verify=NoVerify} =
+			peerdrive_netstore_pb:decode_mountreq(Body),
+		{Id, _Descr, SId, Tags} = get_store_by_id(Store),
 		lists:member(Id, Stores) orelse throw({error, eacces}),
+		(not NoVerify or proplists:get_bool(noverify, Tags)) orelse
+			throw({error, einval}),
 		{ok, Pid} = check(peerdrive_volman:store(SId)),
 		S2 = S#state{store_pid=Pid, store_uuid=SId},
 		Cnf = peerdrive_netstore_pb:encode_mountcnf(#mountcnf{sid=SId}),

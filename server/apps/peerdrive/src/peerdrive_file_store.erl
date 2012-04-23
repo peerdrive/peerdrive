@@ -17,7 +17,7 @@
 -module(peerdrive_file_store).
 -behaviour(gen_server).
 
--export([start_link/2, stop/1, fsck/1, gc/1]).
+-export([start_link/3, stop/1, fsck/1, gc/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % Functions used by helper processes (io/forwarder/importer)
@@ -31,6 +31,7 @@
 -record(state, {
 	path,
 	sid,
+	noverify,
 	gen,
 	wb_tmr,
 	gc_gen,
@@ -50,19 +51,20 @@
 %% Server state management...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Id, {Path, Name}) ->
+start_link(Id, NoVerify, {Path, Name}) ->
 	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
-	gen_server:start_link({local, RegId}, ?MODULE, {Id, Path, Name}, []).
+	gen_server:start_link({local, RegId}, ?MODULE, {Id, NoVerify, Path, Name}, []).
 
 
-init({Id, Path, Name}) ->
+init({Id, NoVerify, Path, Name}) ->
 	case filelib:is_dir(Path) of
 		true ->
 			try
 				S = #state{
 					path      = Path,
 					synclocks = dict:new(),
-					objlocks  = dict:new()
+					objlocks  = dict:new(),
+					noverify  = NoVerify
 				},
 				S2 = load_store(Id, S),
 				S3 = check_root_doc(Name, S2),
@@ -737,8 +739,10 @@ do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
 
 % ok | {ok, MissingParts, Handle} | {error, Reason}
 do_put_rev(RId, Rev, User, S) ->
+	NoVerify = S#state.noverify,
+	ValidRev = NoVerify orelse RId == peerdrive_store:hash_revision(Rev),
 	case dets:member(S#state.rev_tbl, RId) of
-		false ->
+		false when ValidRev ->
 			Parts = Rev#revision.parts,
 			PartTbl = S#state.part_tbl,
 			case [P || {_, PId} = P <- Parts, not dets:member(PartTbl, PId)] of
@@ -753,10 +757,13 @@ do_put_rev(RId, Rev, User, S) ->
 						S,
 						Parts),
 					{ok, Handle} = peerdrive_file_store_imp:start_link(RId,
-						Rev, Missing, User),
+						Rev, Missing, User, NoVerify),
 					NeededFourCCs = [FCC || {FCC, _} <- Missing],
 					{{ok, NeededFourCCs, Handle}, S2}
 			end;
+
+		false ->
+			{{error, einval}, S};
 
 		true ->
 			{ok, S}

@@ -34,7 +34,7 @@ spawn_store(Id, Disposition, Module, Arg) ->
 	end,
 	ChildSpec = {
 		Id,
-		{Module, start_link, [Id, Arg]},
+		{Module, start_link, [Id, proplists:get_bool(noverify, Disposition), Arg]},
 		Restart,
 		30000,
 		worker,
