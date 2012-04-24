@@ -64,7 +64,7 @@
 -define(REPLICATE_REV_MSG,   16#020).
 -define(MOUNT_MSG,           16#021).
 -define(UNMOUNT_MSG,         16#022).
--define(SYS_INFO_MSG,        16#023).
+-define(GET_PATH_MSG,        16#023).
 -define(WATCH_MSG,           16#024).
 -define(PROGRESS_START_MSG,  16#025).
 -define(PROGRESS_MSG,        16#026).
@@ -223,8 +223,8 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 		?WATCH_PROGRESS_MSG ->
 			do_watch_progress_req(Body, RetPath, S);
 
-		?SYS_INFO_MSG ->
-			fork(Body, RetPath, fun do_sys_info_req/1),
+		?GET_PATH_MSG ->
+			fork(Body, RetPath, fun do_get_path_req/1),
 			{ok, S};
 
 		?PROGRESS_START_MSG ->
@@ -517,15 +517,19 @@ do_watch_progress_req(Body, RetPath, #state{progreg=ProgReg} = S) ->
 	{reply, send_reply(RetPath, <<>>), S2}.
 
 
-do_sys_info_req(Body) ->
-	#sysinforeq{param=Param} = peerdrive_client_pb:decode_sysinforeq(Body),
-	{ok, Result} = check(peerdrive_sys_info:lookup(
-		unicode:characters_to_binary(Param))),
-	Reply = case Result of
-		Str when is_binary(Str)  -> #sysinfocnf{as_string=Str};
-		Int when is_integer(Int) -> #sysinfocnf{as_int=Int}
+do_get_path_req(Body) ->
+	#getpathreq{store=Store, object=DId, is_rev=IsRev} =
+		peerdrive_client_pb:decode_getpathreq(Body),
+	not IsRev orelse throw({error, enoent}), % only documents so far
+	{ok, BasePath} = check(peerdrive_sys_info:lookup(<<"vfs.mountpath">>)),
+	{ok, Title} = check(peerdrive_util:read_doc_file_name(get_store(Store), DId)),
+	StoreName = case lists:keyfind(Store, 3, peerdrive_volman:enum()) of
+		{Found, _Descr, _Store, _Tags} -> erlang:atom_to_binary(Found, utf8);
+		false -> throw({error, enoent})
 	end,
-	peerdrive_client_pb:encode_sysinfocnf(Reply).
+	Path = filename:nativename(filename:join([BasePath, StoreName, <<".docs">>,
+		peerdrive_util:bin_to_hexstr(DId), Title])),
+	peerdrive_client_pb:encode_getpathcnf(#getpathcnf{path=Path}).
 
 
 do_progress_start(Body, RetPath) ->

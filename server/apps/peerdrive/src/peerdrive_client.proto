@@ -495,13 +495,14 @@ message UnmountReq {
 message UnmountCnf {
 }
 
-message SysInfoReq {
-	required string param = 1;
+message GetPathReq {
+	required bytes store = 1;
+	required bytes object = 2;
+	required bool is_rev = 3;
 }
 
-message SysInfoCnf {
-	optional string as_string = 1;
-	optional int64 as_int = 2;
+message GetPathCnf {
+	required string path = 1;
 }
 
 message WatchInd {

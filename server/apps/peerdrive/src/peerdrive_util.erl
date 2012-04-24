@@ -17,7 +17,7 @@
 -module(peerdrive_util).
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
 -export([read_doc_struct/3, read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
--export([walk/2]).
+-export([walk/2, read_doc_file_name/2]).
 -export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1, make_bin_16/1]).
 
 -include("utils.hrl").
@@ -110,7 +110,7 @@ find_folder_entry(Store, [Entry | Rest], Name) when ?IS_GB_TREE(Entry) ->
 				_ ->
 					find_folder_entry(Store, Rest, Name)
 			catch
-				throw:error ->
+				throw:{error, _} ->
 					find_folder_entry(Store, Rest, Name)
 			end;
 
@@ -127,17 +127,17 @@ read_file_name(Store, Doc) ->
 		{ok, Value1} when ?IS_GB_TREE(Value1) ->
 			Value1;
 		{ok, _} ->
-			throw(error);
-		{error, _} ->
-			throw(error)
+			throw({error, eio});
+		{error, _} = ReadError ->
+			throw(ReadError)
 	end,
 	case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
 		{ok, Title} when is_binary(Title) ->
 			Title;
 		{ok, _} ->
-			throw(error);
+			throw({error, eio});
 		error ->
-			throw(error)
+			throw({error, eio})
 	end.
 
 
@@ -150,6 +150,14 @@ meta_read_entry(Meta, [Step|Path]) when ?IS_GB_TREE(Meta) ->
 	end;
 meta_read_entry(_Meta, _Path) ->
 	error.
+
+
+read_doc_file_name(Store, Doc) ->
+	try
+		{ok, read_file_name(Store, Doc)}
+	catch
+		throw:Error -> Error
+	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Document/Revision reading

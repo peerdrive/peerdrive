@@ -23,29 +23,14 @@ from . import struct
 from .connector import Connector
 
 def findFuseFile(link):
-	global _root
-
-	if '_root' not in globals():
-		try:
-			_root = Connector().sysInfo("vfs.mountpath")
-		except IOError:
-			_root = None
-
-	if _root is None:
+	try:
+		if isinstance(link, struct.DocLink):
+			path = Connector().getDocPath(link.store(), link.doc())
+		else:
+			path = Connector().getRevPath(link.store(), link.rev())
+		if os.path.exists(path):
+			return path
 		return None
-
-	fn = struct.readTitle(link)
-	if not fn:
+	except IOError:
 		return None
-	if isinstance(link, struct.DocLink):
-		uuid = link.doc()
-		dir = ".docs"
-	else:
-		uuid = link.rev()
-		dir = ".revs"
-	enum = Connector().enum()
-	path = os.path.join(_root, enum.store(link.store()), dir, uuid.encode("hex"), fn)
-	if os.path.exists(path):
-		return path
-	return None
 

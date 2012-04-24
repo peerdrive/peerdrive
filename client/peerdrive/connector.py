@@ -215,7 +215,7 @@ class _Connector(QtCore.QObject):
 	REPLICATE_REV_MSG   = 0x0020
 	MOUNT_MSG           = 0x0021
 	UNMOUNT_MSG         = 0x0022
-	SYS_INFO_MSG        = 0x0023
+	GET_PATH_MSG        = 0x0023
 	WATCH_MSG           = 0x0024
 	PROGRESS_START_MSG  = 0x0025
 	PROGRESS_MSG        = 0x0026
@@ -446,17 +446,23 @@ class _Connector(QtCore.QObject):
 		req.id = store
 		self._rpc(_Connector.UNMOUNT_MSG, req.SerializeToString())
 
-	def sysInfo(self, param):
-		req = pb.SysInfoReq()
-		req.param = param
-		reply = self._rpc(_Connector.SYS_INFO_MSG, req.SerializeToString())
-		cnf = pb.SysInfoCnf.FromString(reply)
-		if cnf.HasField("as_string"):
-			return cnf.as_string
-		elif cnf.HasField("as_int"):
-			return cnf.as_int
-		else:
-			return None
+	def getDocPath(self, store, doc):
+		req = pb.GetPathReq()
+		req.store = _checkUuid(store)
+		req.object = _checkUuid(doc)
+		req.is_rev = False
+		reply = self._rpc(_Connector.GET_PATH_MSG, req.SerializeToString())
+		cnf = pb.GetPathCnf.FromString(reply)
+		return cnf.path
+
+	def getRevPath(self, store, rev):
+		req = pb.GetPathReq()
+		req.store = _checkUuid(store)
+		req.object = _checkUuid(rev)
+		req.is_rev = True
+		reply = self._rpc(_Connector.GET_PATH_MSG, req.SerializeToString())
+		cnf = pb.GetPathCnf.FromString(reply)
+		return cnf.path
 
 	def flush(self):
 		while self.socket.flush():
