@@ -914,8 +914,8 @@ class FolderWidget(widgets.DocumentView):
 		self.listView.activated.connect(self.__doubleClicked)
 		self.setCentralWidget(self.listView)
 
-	def docClose(self):
-		super(FolderWidget, self).docClose()
+	def docClose(self, save=True):
+		super(FolderWidget, self).docClose(save)
 		self.__setModel(None)
 
 	def docRead(self, readWrite, handle):
