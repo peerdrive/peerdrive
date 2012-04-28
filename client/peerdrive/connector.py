@@ -416,7 +416,7 @@ class _Connector(QtCore.QObject):
 		if verbose: req.verbose = verbose
 		self._rpc(_Connector.FORWARD_DOC_MSG, req.SerializeToString())
 
-	def replicateDoc(self, srcStore, doc, dstStore, depth=None, verbose=False):
+	def replicateDoc(self, srcStore, doc, dstStore, depth=None, verbose=False, async=None):
 		req = pb.ReplicateDocReq()
 		req.src_store = _checkUuid(srcStore)
 		req.doc = _checkUuid(doc)
@@ -424,9 +424,9 @@ class _Connector(QtCore.QObject):
 		if depth is not None:
 			req.depth = depth
 		if verbose: req.verbose = verbose
-		self._rpc(_Connector.REPLICATE_DOC_MSG, req.SerializeToString())
+		self._rpc(_Connector.REPLICATE_DOC_MSG, req.SerializeToString(), async)
 
-	def replicateRev(self, srcStore, rev, dstStore, depth=None, verbose=False):
+	def replicateRev(self, srcStore, rev, dstStore, depth=None, verbose=False, async=None):
 		req = pb.ReplicateRevReq()
 		req.src_store = _checkUuid(srcStore)
 		req.rev = _checkUuid(rev)
@@ -434,7 +434,7 @@ class _Connector(QtCore.QObject):
 		if depth is not None:
 			req.depth = depth
 		if verbose: req.verbose = verbose
-		self._rpc(_Connector.REPLICATE_REV_MSG, req.SerializeToString())
+		self._rpc(_Connector.REPLICATE_REV_MSG, req.SerializeToString(), async)
 
 	def mount(self, store):
 		req = pb.MountReq()
@@ -530,18 +530,49 @@ class _Connector(QtCore.QObject):
 
 	# protected functions
 
-	def _rpc(self, msg, request = ''):
+	class _PollCompletion(object):
+		__slots__ = ['pending', 'cnf', 'reply']
+		def __init__(self):
+			self.pending = True
+			self.cnf = None
+			self.reply = None
+
+		def setResult(self, cnf, reply):
+			self.cnf = cnf
+			self.reply = reply
+			self.pending = False
+
+	class _AsyncCompletion(object):
+		__slots__ = ['__callback', '__msg']
+		def __init__(self, msg, callback):
+			self.__msg = msg
+			self.__callback = callback
+
+		def setResult(self, cnf, reply):
+			if cnf == self.__msg:
+				self.__callback(None)
+			elif cnf == _Connector.ERROR_MSG:
+				error_cnf = pb.ErrorCnf.FromString(reply)
+				self.__callback(IOError(_errorCodes[error_cnf.error]))
+
+	def _rpc(self, msg, request = '', async=None):
 		ref = self.__make_ref()
 		req_msg = (msg << 4) | _Connector.FLAG_REQ
-		self.__send(struct.pack('>LH', ref, req_msg) + request)
-		(cnf, reply) = self.__poll(ref)
-		if cnf == msg:
-			return reply
-		elif cnf == _Connector.ERROR_MSG:
-			error_cnf = pb.ErrorCnf.FromString(reply)
-			_raiseError(error_cnf.error)
+		if async:
+			completion = _Connector._AsyncCompletion(msg, async)
 		else:
-			raise IOError("Invalid server reply!")
+			completion = _Connector._PollCompletion()
+		self.confirmations[ref] = completion
+		self.__send(struct.pack('>LH', ref, req_msg) + request)
+		if not async:
+			self.__poll(completion)
+			if completion.cnf == msg:
+				return completion.reply
+			elif completion.cnf == _Connector.ERROR_MSG:
+				error_cnf = pb.ErrorCnf.FromString(completion.reply)
+				_raiseError(error_cnf.error)
+			else:
+				raise IOError("Invalid server reply!")
 
 	# private functions
 
@@ -560,7 +591,6 @@ class _Connector(QtCore.QObject):
 			if expect <= len(self.buf):
 				packet = self.buf[2:expect]
 				self.buf = self.buf[expect:]
-				# TODO: discard invalid packets
 
 				# immediately remove indications
 				(ref, msg) = struct.unpack_from('>LH', packet, 0)
@@ -570,7 +600,8 @@ class _Connector(QtCore.QObject):
 					indications = True
 					self.indications.append((msg, packet[6:]))
 				elif typ == _Connector.FLAG_CNF:
-					self.confirmations[ref] = (msg, packet[6:])
+					self.confirmations[ref].setResult(msg, packet[6:])
+					del self.confirmations[ref]
 			else:
 				break
 
@@ -627,22 +658,20 @@ class _Connector(QtCore.QObject):
 		for handler in handlers:
 			handler(ind.tag, ind.state, ind.progress, **kwargs)
 
-	def __poll(self, ref):
+	def __poll(self, completion):
 		self.recursion += 1
 		try:
 			# loop until we've received the answer
-			while True:
-				if ref in self.confirmations:
-					cnf = self.confirmations[ref]
-					del self.confirmations[ref]
-					return cnf
-
+			while completion.pending:
 				if not self.socket.waitForReadyRead(-1):
 					raise IOError("Error while waiting for data from server: "
 						+ str(self.socket.errorString()))
 				self.__readReady()
 		finally:
 			self.recursion -= 1
+
+		if self.indications:
+			self.__dispatchIndications()
 
 	def __make_ref(self):
 		ref = self.next
