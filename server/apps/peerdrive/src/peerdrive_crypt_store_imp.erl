@@ -33,7 +33,8 @@ start_link(Store, Key, Handle, Parts, User) ->
 	State = #state{store=Store, handle=Handle, user=User,
 		parts=orddict:from_list(
 			[{FCC, {PId, peerdrive_util:merkle_init(),
-				crypto:aes_ctr_stream_init(Key, PId)}} || {FCC, PId} <- Parts]
+				crypto:aes_ctr_stream_init(Key, peerdrive_util:make_bin_16(PId))}
+				} || {FCC, PId} <- Parts]
 		)},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
