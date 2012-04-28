@@ -744,17 +744,24 @@ class FolderModel(QtCore.QAbstractTableModel):
 				if self.validateDragEnter(link):
 					self.insertLink(link)
 					self.__parent.save()
+				self.__parent.copyStart.emit(link.store(), self.__store, link.doc())
+				async = lambda err,src=link.store(),dst=self.__store,item=link.doc(): self.__dropDone(err, src, dst, item)
 				if isinstance(link, struct.DocLink):
-					Connector().replicateDoc(link.store(), link.doc(), self.__store, verbose=True)
+					Connector().replicateDoc(link.store(), link.doc(), self.__store,
+						verbose=True, async=async)
 				else:
-					Connector().replicateRev(link.store(), link.rev(), self.__store, verbose=True)
+					Connector().replicateRev(link.store(), link.rev(), self.__store,
+						verbose=True, async=async)
 		elif action is copyAct:
 			for link in links:
 				if isinstance(link, struct.RevLink):
 					if self.validateDragEnter(link):
 						self.insertLink(link)
 						self.__parent.save()
-					Connector().replicateRev(link.store(), link.rev(), self.__store)
+					self.__parent.copyStart.emit(link.store(), self.__store, link.rev())
+					async = lambda err,src=link.store(),dst=self.__store,item=link.rev(): self.__dropDone(err, src, dst, item)
+					Connector().replicateRev(link.store(), link.rev(), self.__store,
+						async=async)
 				else:
 					with struct.copyDoc(link, self.__store) as handle:
 						self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
@@ -763,6 +770,12 @@ class FolderModel(QtCore.QAbstractTableModel):
 			return False
 
 		return True
+
+	def __dropDone(self, err, src, dst, item):
+		self.__parent.copyStop.emit(src, dst, item)
+		if err is not None:
+			QtGui.QMessageBox.warning(self.__parent, 'Replicate', 'Opertaion failed: ' +
+				str(err))
 
 	def __dropContents(self, mime):
 		# unfortunately Qt will only return the first object and nothing
@@ -874,6 +887,10 @@ class FolderWidget(widgets.DocumentView):
 
 	# itemOpen(link, executable, browseHint)
 	itemOpen = QtCore.pyqtSignal(object, object, bool)
+
+	# copyStart(from, to, item)
+	copyStart = QtCore.pyqtSignal(object, object, object)
+	copyStop = QtCore.pyqtSignal(object, object, object)
 
 	selectionChanged = QtCore.pyqtSignal()
 
