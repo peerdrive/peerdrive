@@ -23,7 +23,7 @@ from peerdrive import struct, Registry, Connector
 from peerdrive.gui import main, utils
 from peerdrive.gui.widgets import DocButton, RevButton
 
-from views.folder import FolderWidget, FolderModel
+from views.folder import FolderWidget, FolderModel, FolderProgressWidget
 
 class FolderWindow(main.MainWindow):
 
@@ -123,7 +123,7 @@ class FolderWindow(main.MainWindow):
 
 	def __progressStart(self, tag, typ, src, dst, item=None):
 		if (src, dst, item) in self.__copyPending:
-			widget = ProgressWidget(tag, typ, src, dst, item)
+			widget = FolderProgressWidget(tag, typ, src, dst, item)
 			self.__progressWidgets[tag] = widget
 			self.statusBar().addWidget(widget)
 
@@ -131,116 +131,8 @@ class FolderWindow(main.MainWindow):
 		if tag in self.__progressWidgets:
 			widget = self.__progressWidgets[tag]
 			del self.__progressWidgets[tag]
-			#widget.remove()
+			widget.remove()
 			self.statusBar().removeWidget(widget)
-
-
-class ProgressWidget(QtGui.QFrame):
-	def __init__(self, tag, typ, fromStore, toStore, item):
-		super(ProgressWidget, self).__init__()
-		self.tag = tag
-		self.__type = typ
-		self.__state = Connector().PROGRESS_RUNNING
-		self.__fromStore = fromStore
-		self.__toStore = toStore
-
-		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
-
-		self.__progressInd = QtGui.QLabel()
-		self.__progressInd.setMargin(4)
-		if typ == Connector().PROGRESS_SYNC:
-			self.fromBtn = DocButton(fromStore, fromStore, True)
-			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-sync.png"))
-		elif typ == Connector().PROGRESS_REP_DOC:
-			self.fromBtn = DocButton(fromStore, item, True)
-			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
-		elif typ == Connector().PROGRESS_REP_REV:
-			self.fromBtn = RevButton(fromStore, item, True)
-			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
-		self.progressBar = QtGui.QProgressBar()
-		self.progressBar.setMaximum(255)
-		self.__pauseBtn = QtGui.QToolButton()
-		self.__pauseBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-		self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
-		self.__pauseBtn.setToolTip("Pause")
-		self.__pauseBtn.clicked.connect(self.__pause)
-		self.__stopBtn = QtGui.QToolButton()
-		self.__stopBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-		self.__stopBtn.setIcon(QtGui.QIcon("icons/progress-stop.png"))
-		self.__stopBtn.setToolTip("Abort")
-		self.__stopBtn.clicked.connect(self.__stop)
-		self.__skipBtn = QtGui.QToolButton()
-		self.__skipBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-		self.__skipBtn.setIcon(QtGui.QIcon("icons/progress-skip.png"))
-		self.__skipBtn.setToolTip("Skip")
-		self.__skipBtn.clicked.connect(self.__skip)
-		self.__skipBtn.hide()
-		self.__errorMsg = QtGui.QLabel()
-		self.__errorMsg.setWordWrap(True)
-		self.__errorMsg.hide()
-
-		layout = QtGui.QHBoxLayout()
-		layout.setMargin(0)
-		layout.addWidget(self.__progressInd)
-		layout.addWidget(self.fromBtn)
-		layout.addWidget(self.progressBar)
-		layout.addWidget(self.__errorMsg)
-		layout.addWidget(self.__pauseBtn)
-		layout.addWidget(self.__skipBtn)
-		if typ != Connector().PROGRESS_SYNC:
-			layout.addWidget(self.__stopBtn)
-		self.setLayout(layout)
-
-		Connector().regProgressHandler(progress=self.progress)
-
-	def remove(self):
-		Connector().unregProgressHandler(progress=self.progress)
-		self.fromBtn.cleanup()
-		self.deleteLater()
-
-	def progress(self, tag, state, value, err_code=None, err_doc=None, err_rev=None):
-		if self.tag != tag:
-			return
-
-		self.progressBar.setValue(value)
-		if self.__state == state:
-			return
-
-		self.__state = state
-		self.progressBar.setVisible(state != Connector().PROGRESS_ERROR)
-		self.__errorMsg.setVisible(state == Connector().PROGRESS_ERROR)
-		self.__skipBtn.setVisible(state == Connector().PROGRESS_ERROR)
-		if state == Connector().PROGRESS_RUNNING:
-			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
-			self.__pauseBtn.setToolTip("Pause")
-			if self.__type == Connector().PROGRESS_SYNC:
-				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-sync.png"))
-			else:
-				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
-		elif state == Connector().PROGRESS_PAUSED:
-			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-start.png"))
-			self.__pauseBtn.setToolTip("Resume")
-			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-pause.png"))
-		elif state == Connector().PROGRESS_ERROR:
-			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-retry.png"))
-			self.__pauseBtn.setToolTip("Retry")
-			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-error.png"))
-			doc = struct.readTitle(struct.RevLink(self.__fromStore, err_rev),
-				'unknown document')
-			self.__errorMsg.setText("Error '" + err_code[1] + "' while processing '"
-				+ doc + "'!")
-
-	def __pause(self):
-		if self.__state == Connector().PROGRESS_RUNNING:
-			Connector().progressPause(self.tag)
-		else:
-			Connector().progressResume(self.tag)
-
-	def __stop(self):
-		Connector().progressStop(self.tag)
-
-	def __skip(self):
-		Connector().progressResume(self.tag, True)
 
 
 if __name__ == '__main__':

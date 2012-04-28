@@ -745,13 +745,12 @@ class FolderModel(QtCore.QAbstractTableModel):
 					self.insertLink(link)
 					self.__parent.save()
 				self.__parent.copyStart.emit(link.store(), self.__store, link.doc())
-				async = lambda err,src=link.store(),dst=self.__store,item=link.doc(): self.__dropDone(err, src, dst, item)
 				if isinstance(link, struct.DocLink):
 					Connector().replicateDoc(link.store(), link.doc(), self.__store,
-						verbose=True, async=async)
+						verbose=True, async=self.__makeAsync(link))
 				else:
 					Connector().replicateRev(link.store(), link.rev(), self.__store,
-						verbose=True, async=async)
+						verbose=True, async=self.__makeAsync(link))
 		elif action is copyAct:
 			for link in links:
 				if isinstance(link, struct.RevLink):
@@ -759,9 +758,8 @@ class FolderModel(QtCore.QAbstractTableModel):
 						self.insertLink(link)
 						self.__parent.save()
 					self.__parent.copyStart.emit(link.store(), self.__store, link.rev())
-					async = lambda err,src=link.store(),dst=self.__store,item=link.rev(): self.__dropDone(err, src, dst, item)
 					Connector().replicateRev(link.store(), link.rev(), self.__store,
-						async=async)
+						async=self.__makeAsync(link))
 				else:
 					with struct.copyDoc(link, self.__store) as handle:
 						self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
@@ -771,11 +769,21 @@ class FolderModel(QtCore.QAbstractTableModel):
 
 		return True
 
-	def __dropDone(self, err, src, dst, item):
-		self.__parent.copyStop.emit(src, dst, item)
-		if err is not None:
-			QtGui.QMessageBox.warning(self.__parent, 'Replicate', 'Opertaion failed: ' +
-				str(err))
+	def __makeAsync(self, link):
+		parent = self.__parent
+		src = link.store()
+		dst = self.__store
+		if isinstance(link, struct.RevLink):
+			item = link.rev()
+		else:
+			item = link.doc()
+		return lambda result: self.__dropDone(result, parent, src, dst, item)
+
+	def __dropDone(self, res, parent, src, dst, item):
+		parent.copyStop.emit(src, dst, item)
+		if isinstance(res, IOError):
+			QtGui.QMessageBox.warning(parent, 'Replicate', 'Opertaion failed: ' +
+				str(res))
 
 	def __dropContents(self, mime):
 		# unfortunately Qt will only return the first object and nothing
@@ -1217,4 +1225,112 @@ class FolderWidget(widgets.DocumentView):
 			for e in executables:
 				action = openWith.addAction(e)
 				action.triggered.connect(lambda x,l=link,e=e: self.itemOpen.emit(l, e, False))
+
+
+class FolderProgressWidget(QtGui.QFrame):
+	def __init__(self, tag, typ, fromStore, toStore, item):
+		super(FolderProgressWidget, self).__init__()
+		self.tag = tag
+		self.__type = typ
+		self.__state = Connector().PROGRESS_RUNNING
+		self.__fromStore = fromStore
+		self.__toStore = toStore
+
+		self.setFrameStyle(QtGui.QFrame.StyledPanel | QtGui.QFrame.Sunken)
+
+		self.__progressInd = QtGui.QLabel()
+		self.__progressInd.setMargin(4)
+		if typ == Connector().PROGRESS_SYNC:
+			self.fromBtn = widgets.DocButton(fromStore, fromStore, True)
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-sync.png"))
+		elif typ == Connector().PROGRESS_REP_DOC:
+			self.fromBtn = widgets.DocButton(fromStore, item, True)
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
+		elif typ == Connector().PROGRESS_REP_REV:
+			self.fromBtn = widgets.RevButton(fromStore, item, True)
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
+		self.progressBar = QtGui.QProgressBar()
+		self.progressBar.setMaximum(255)
+		self.__pauseBtn = QtGui.QToolButton()
+		self.__pauseBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+		self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
+		self.__pauseBtn.setToolTip("Pause")
+		self.__pauseBtn.clicked.connect(self.__pause)
+		self.__stopBtn = QtGui.QToolButton()
+		self.__stopBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+		self.__stopBtn.setIcon(QtGui.QIcon("icons/progress-stop.png"))
+		self.__stopBtn.setToolTip("Abort")
+		self.__stopBtn.clicked.connect(self.__stop)
+		self.__skipBtn = QtGui.QToolButton()
+		self.__skipBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+		self.__skipBtn.setIcon(QtGui.QIcon("icons/progress-skip.png"))
+		self.__skipBtn.setToolTip("Skip")
+		self.__skipBtn.clicked.connect(self.__skip)
+		self.__skipBtn.hide()
+		self.__errorMsg = QtGui.QLabel()
+		self.__errorMsg.setWordWrap(True)
+		self.__errorMsg.hide()
+
+		layout = QtGui.QHBoxLayout()
+		layout.setMargin(0)
+		layout.addWidget(self.__progressInd)
+		layout.addWidget(self.fromBtn)
+		layout.addWidget(self.progressBar)
+		layout.addWidget(self.__errorMsg)
+		layout.addWidget(self.__pauseBtn)
+		layout.addWidget(self.__skipBtn)
+		if typ != Connector().PROGRESS_SYNC:
+			layout.addWidget(self.__stopBtn)
+		self.setLayout(layout)
+
+		Connector().regProgressHandler(progress=self.progress)
+
+	def remove(self):
+		Connector().unregProgressHandler(progress=self.progress)
+		self.fromBtn.cleanup()
+		self.deleteLater()
+
+	def progress(self, tag, state, value, err_code=None, err_doc=None, err_rev=None):
+		if self.tag != tag:
+			return
+
+		self.progressBar.setValue(value)
+		if self.__state == state:
+			return
+
+		self.__state = state
+		self.progressBar.setVisible(state != Connector().PROGRESS_ERROR)
+		self.__errorMsg.setVisible(state == Connector().PROGRESS_ERROR)
+		self.__skipBtn.setVisible(state == Connector().PROGRESS_ERROR)
+		if state == Connector().PROGRESS_RUNNING:
+			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
+			self.__pauseBtn.setToolTip("Pause")
+			if self.__type == Connector().PROGRESS_SYNC:
+				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-sync.png"))
+			else:
+				self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
+		elif state == Connector().PROGRESS_PAUSED:
+			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-start.png"))
+			self.__pauseBtn.setToolTip("Resume")
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-pause.png"))
+		elif state == Connector().PROGRESS_ERROR:
+			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-retry.png"))
+			self.__pauseBtn.setToolTip("Retry")
+			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-error.png"))
+			doc = struct.readTitle(struct.RevLink(self.__fromStore, err_rev),
+				'unknown document')
+			self.__errorMsg.setText("Error '" + err_code[1] + "' while processing '"
+				+ doc + "'!")
+
+	def __pause(self):
+		if self.__state == Connector().PROGRESS_RUNNING:
+			Connector().progressPause(self.tag)
+		else:
+			Connector().progressResume(self.tag)
+
+	def __stop(self):
+		Connector().progressStop(self.tag)
+
+	def __skip(self):
+		Connector().progressResume(self.tag, True)
 
