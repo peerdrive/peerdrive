@@ -61,7 +61,7 @@ init({Id, NoVerify, Path, Name}) ->
 		true ->
 			try
 				S = #state{
-					path      = Path,
+					path      = filename:absname(Path),
 					synclocks = dict:new(),
 					objlocks  = dict:new(),
 					noverify  = NoVerify
