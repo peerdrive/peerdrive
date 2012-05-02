@@ -170,20 +170,21 @@ do_read_loop(Part, Offset, Length, S, Pending, Acc, Ref) ->
 
 do_write(Part, Offset, Data, #state{mps=MaxPS} = S) when size(Data) =< MaxPS ->
 	#state{handle=Handle, store=Store} = S,
-	Req = peerdrive_netstore_pb:encode_writereq(#writereq{
+	Req = peerdrive_netstore_pb:encode_writecommitreq(#writecommitreq{
 		handle=Handle, part=Part, offset=Offset, data=Data}),
-	case peerdrive_net_store:io_request(Store, ?WRITE_MSG, Req) of
+	case peerdrive_net_store:io_request(Store, ?WRITE_COMMIT_MSG, Req) of
 		{ok, <<>>} -> ok;
 		Error      -> Error
 	end;
 
-do_write(Part, Offset, Data, #state{mps=MaxPS} = S) ->
-	<<Chunk1:MaxPS/binary, Chunk2/binary>> = Data,
-	case do_write(Part, Offset, Chunk1, S) of
-		ok ->
-			do_write(Part, Offset+MaxPS, Chunk2, S);
-		Error ->
-			Error
+do_write(Part, Offset, BigData, S) ->
+	#state{handle=Handle, store=Store, mps=MaxPS} = S,
+	<<Data:MaxPS/binary, Rest/binary>> = BigData,
+	Req = peerdrive_netstore_pb:encode_writebufferreq(#writebufferreq{
+		handle=Handle, part=Part, data=Data}),
+	case peerdrive_net_store:io_request(Store, ?WRITE_BUFFER_MSG, Req) of
+		{ok, <<>>} -> do_write(Part, Offset, Rest, S);
+		Error      -> Error
 	end.
 
 

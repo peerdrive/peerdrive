@@ -299,7 +299,7 @@ do_peek(Store, NetHandle, ReqData) ->
 	#peekreq{rev=Rev} = peerdrive_netstore_pb:decode_peekreq(ReqData),
 	{ok, StoreHandle} = check(peerdrive_store:peek(Store, Rev)),
 	Cnf = #peekcnf{handle=NetHandle},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_peekcnf(Cnf)}.
+	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_peekcnf(Cnf)}.
 
 
 do_create(Store, NetHandle, ReqData) ->
@@ -307,7 +307,7 @@ do_create(Store, NetHandle, ReqData) ->
 		peerdrive_netstore_pb:decode_createreq(ReqData),
 	{ok, Doc, StoreHandle} = check(peerdrive_store:create(Store, Type, Creator)),
 	Cnf = #createcnf{handle=NetHandle, doc=Doc},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_createcnf(Cnf)}.
+	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_createcnf(Cnf)}.
 
 
 do_fork(Store, NetHandle, ReqData) ->
@@ -315,7 +315,7 @@ do_fork(Store, NetHandle, ReqData) ->
 		peerdrive_netstore_pb:decode_forkreq(ReqData),
 	{ok, Doc, StoreHandle} = check(peerdrive_store:fork(Store, Rev, Creator)),
 	Cnf = #forkcnf{handle=NetHandle, doc=Doc},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_forkcnf(Cnf)}.
+	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_forkcnf(Cnf)}.
 
 
 do_update(Store, NetHandle, ReqData) ->
@@ -323,7 +323,7 @@ do_update(Store, NetHandle, ReqData) ->
 		peerdrive_netstore_pb:decode_updatereq(ReqData),
 	{ok, StoreHandle} = check(peerdrive_store:update(Store, Doc, Rev, Creator)),
 	Cnf = #updatecnf{handle=NetHandle},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_updatecnf(Cnf)}.
+	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_updatecnf(Cnf)}.
 
 
 do_resume(Store, NetHandle, ReqData) ->
@@ -331,7 +331,7 @@ do_resume(Store, NetHandle, ReqData) ->
 		peerdrive_netstore_pb:decode_resumereq(ReqData),
 	{ok, StoreHandle} = check(peerdrive_store:resume(Store, Doc, Rev, Creator)),
 	Cnf = #resumecnf{handle=NetHandle},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_resumecnf(Cnf)}.
+	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_resumecnf(Cnf)}.
 
 
 do_forget(Body, Store) ->
@@ -476,10 +476,16 @@ worker_loop(ReqFun, State) ->
 				Reply when is_binary(Reply) ->
 					send_reply(RetPath, Reply),
 					worker_loop(ReqFun, State);
+				{Reply, NewState} when is_binary(Reply) ->
+					send_reply(RetPath, Reply),
+					worker_loop(ReqFun, NewState);
 				{stop, Reply} ->
 					send_reply(RetPath, Reply);
 				{abort, Error} ->
-					send_error(RetPath, Error)
+					send_error(RetPath, Error);
+				{error, Error, NewState} ->
+					send_error(RetPath, Error),
+					worker_loop(ReqFun, NewState)
 			catch
 				throw:Error ->
 					send_error(RetPath, Error),
@@ -491,7 +497,7 @@ worker_loop(ReqFun, State) ->
 	end.
 
 
-io_handler(Handle, Request, ReqData) ->
+io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 	case Request of
 		?READ_MSG ->
 			#readreq{part=Part, offset=Offset, length=Length} =
@@ -500,12 +506,32 @@ io_handler(Handle, Request, ReqData) ->
 			{ok, Data} = check(peerdrive_store:read(Handle, Part, Offset, Length)),
 			peerdrive_netstore_pb:encode_readcnf(#readcnf{data=Data});
 
-		?WRITE_MSG ->
-			#writereq{part=Part, offset=Offset, data=Data} =
-				peerdrive_netstore_pb:decode_writereq(ReqData),
+		?WRITE_BUFFER_MSG ->
+			#writebufferreq{part=Part, data=Data} =
+				peerdrive_netstore_pb:decode_writebufferreq(ReqData),
 			?ASSERT_PART(Part),
-			ok = check(peerdrive_store:write(Handle, Part, Offset, Data)),
-			<<>>;
+			NewWrBuf = orddict:update(Part, fun(Old) -> [Data | Old] end,
+				[Data], WriteBuffer),
+			{<<>>, {Handle, NewWrBuf}};
+
+		?WRITE_COMMIT_MSG ->
+			#writecommitreq{part=Part, offset=Offset, data=Data} =
+				peerdrive_netstore_pb:decode_writecommitreq(ReqData),
+			?ASSERT_PART(Part),
+			case orddict:find(Part, WriteBuffer) of
+				error ->
+					ok = check(peerdrive_store:write(Handle, Part, Offset, Data)),
+					<<>>;
+
+				{ok, BufData} ->
+					AllData = iolist_to_binary(lists:reverse([Data | BufData])),
+					case peerdrive_store:write(Handle, Part, Offset, AllData) of
+						ok ->
+							{<<>>, {Handle, orddict:erase(Part, WriteBuffer)}};
+						{error, _} = Error ->
+							{error, Error, {Handle, orddict:erase(Part, WriteBuffer)}}
+					end
+			end;
 
 		?TRUNC_MSG ->
 			#truncreq{part=Part, offset=Offset} =
