@@ -193,34 +193,35 @@ class _Connector(QtCore.QObject):
 	RESUME_MSG          = 0x000a
 	READ_MSG            = 0x000b
 	TRUNC_MSG           = 0x000c
-	WRITE_MSG           = 0x000d
-	GET_FLAGS_MSG       = 0x000e
-	SET_FLAGS_MSG       = 0x000f
-	GET_TYPE_MSG        = 0x0010
-	SET_TYPE_MSG        = 0x0011
-	GET_PARENTS_MSG     = 0x0012
-	MERGE_MSG           = 0x0013
-	REBASE_MSG          = 0x0014
-	COMMIT_MSG          = 0x0015
-	SUSPEND_MSG         = 0x0016
-	CLOSE_MSG           = 0x0017
-	WATCH_ADD_MSG       = 0x0018
-	WATCH_REM_MSG       = 0x0019
-	WATCH_PROGRESS_MSG  = 0x001a
-	FORGET_MSG          = 0x001b
-	DELETE_DOC_MSG      = 0x001c
-	DELETE_REV_MSG      = 0x001d
-	FORWARD_DOC_MSG     = 0x001e
-	REPLICATE_DOC_MSG   = 0x001f
-	REPLICATE_REV_MSG   = 0x0020
-	MOUNT_MSG           = 0x0021
-	UNMOUNT_MSG         = 0x0022
-	GET_PATH_MSG        = 0x0023
-	WATCH_MSG           = 0x0024
-	PROGRESS_START_MSG  = 0x0025
-	PROGRESS_MSG        = 0x0026
-	PROGRESS_END_MSG    = 0x0027
-	PROGRESS_QUERY_MSG  = 0x0028
+	WRITE_BUFFER_MSG    = 0x000d
+	WRITE_COMMIT_MSG    = 0x000e
+	GET_FLAGS_MSG       = 0x000f
+	SET_FLAGS_MSG       = 0x0010
+	GET_TYPE_MSG        = 0x0011
+	SET_TYPE_MSG        = 0x0012
+	GET_PARENTS_MSG     = 0x0013
+	MERGE_MSG           = 0x0014
+	REBASE_MSG          = 0x0015
+	COMMIT_MSG          = 0x0016
+	SUSPEND_MSG         = 0x0017
+	CLOSE_MSG           = 0x0018
+	WATCH_ADD_MSG       = 0x0019
+	WATCH_REM_MSG       = 0x001a
+	WATCH_PROGRESS_MSG  = 0x001b
+	FORGET_MSG          = 0x001c
+	DELETE_DOC_MSG      = 0x001d
+	DELETE_REV_MSG      = 0x001e
+	FORWARD_DOC_MSG     = 0x001f
+	REPLICATE_DOC_MSG   = 0x0020
+	REPLICATE_REV_MSG   = 0x0021
+	MOUNT_MSG           = 0x0022
+	UNMOUNT_MSG         = 0x0023
+	GET_PATH_MSG        = 0x0024
+	WATCH_MSG           = 0x0025
+	PROGRESS_START_MSG  = 0x0026
+	PROGRESS_MSG        = 0x0027
+	PROGRESS_END_MSG    = 0x0028
+	PROGRESS_QUERY_MSG  = 0x0029
 
 	FLAG_REQ = 0
 	FLAG_CNF = 1
@@ -953,18 +954,22 @@ class Handle(object):
 		i = 0
 		length = len(data)
 		packetSize = self.connector.maxPacketSize
-		while length > i:
-			reqData = data[i:i+packetSize]
-			reqSize = len(reqData)
-			req = pb.WriteReq()
+		while length > i+packetSize:
+			req = pb.WriteBufferReq()
 			req.handle = self.handle
 			req.part = part
-			req.offset = pos + i
-			req.data = reqData
-			self.connector._rpc(_Connector.WRITE_MSG, req.SerializeToString())
-			i += reqSize
-			self._setPos(part, pos+i)
+			req.data = data[i:i+packetSize]
+			self.connector._rpc(_Connector.WRITE_BUFFER_MSG, req.SerializeToString())
+			i += packetSize
 
+		req = pb.WriteCommitReq()
+		req.handle = self.handle
+		req.part = part
+		req.offset = pos
+		req.data = data[i:i+packetSize]
+		self.connector._rpc(_Connector.WRITE_COMMIT_MSG, req.SerializeToString())
+
+		self._setPos(part, pos+length)
 
 	def writeAll(self, part, data):
 		self._setPos(part, 0)

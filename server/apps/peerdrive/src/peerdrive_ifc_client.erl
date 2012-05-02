@@ -42,34 +42,35 @@
 -define(RESUME_MSG,          16#00a).
 -define(READ_MSG,            16#00b).
 -define(TRUNC_MSG,           16#00c).
--define(WRITE_MSG,           16#00d).
--define(GET_FLAGS_MSG,       16#00e).
--define(SET_FLAGS_MSG,       16#00f).
--define(GET_TYPE_MSG,        16#010).
--define(SET_TYPE_MSG,        16#011).
--define(GET_PARENTS_MSG,     16#012).
--define(MERGE_MSG,           16#013).
--define(REBASE_MSG,          16#014).
--define(COMMIT_MSG,          16#015).
--define(SUSPEND_MSG,         16#016).
--define(CLOSE_MSG,           16#017).
--define(WATCH_ADD_MSG,       16#018).
--define(WATCH_REM_MSG,       16#019).
--define(WATCH_PROGRESS_MSG,  16#01a).
--define(FORGET_MSG,          16#01b).
--define(DELETE_DOC_MSG,      16#01c).
--define(DELETE_REV_MSG,      16#01d).
--define(FORWARD_DOC_MSG,     16#01e).
--define(REPLICATE_DOC_MSG,   16#01f).
--define(REPLICATE_REV_MSG,   16#020).
--define(MOUNT_MSG,           16#021).
--define(UNMOUNT_MSG,         16#022).
--define(GET_PATH_MSG,        16#023).
--define(WATCH_MSG,           16#024).
--define(PROGRESS_START_MSG,  16#025).
--define(PROGRESS_MSG,        16#026).
--define(PROGRESS_END_MSG,    16#027).
--define(PROGRESS_QUERY_MSG,  16#028).
+-define(WRITE_BUFFER_MSG,    16#00d).
+-define(WRITE_COMMIT_MSG,    16#00e).
+-define(GET_FLAGS_MSG,       16#00f).
+-define(SET_FLAGS_MSG,       16#010).
+-define(GET_TYPE_MSG,        16#011).
+-define(SET_TYPE_MSG,        16#012).
+-define(GET_PARENTS_MSG,     16#013).
+-define(MERGE_MSG,           16#014).
+-define(REBASE_MSG,          16#015).
+-define(COMMIT_MSG,          16#016).
+-define(SUSPEND_MSG,         16#017).
+-define(CLOSE_MSG,           16#018).
+-define(WATCH_ADD_MSG,       16#019).
+-define(WATCH_REM_MSG,       16#01a).
+-define(WATCH_PROGRESS_MSG,  16#01b).
+-define(FORGET_MSG,          16#01c).
+-define(DELETE_DOC_MSG,      16#01d).
+-define(DELETE_REV_MSG,      16#01e).
+-define(FORWARD_DOC_MSG,     16#01f).
+-define(REPLICATE_DOC_MSG,   16#020).
+-define(REPLICATE_REV_MSG,   16#021).
+-define(MOUNT_MSG,           16#022).
+-define(UNMOUNT_MSG,         16#023).
+-define(GET_PATH_MSG,        16#024).
+-define(WATCH_MSG,           16#025).
+-define(PROGRESS_START_MSG,  16#026).
+-define(PROGRESS_MSG,        16#027).
+-define(PROGRESS_END_MSG,    16#028).
+-define(PROGRESS_QUERY_MSG,  16#029).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Servlet callbacks
@@ -324,7 +325,7 @@ do_peek(Cookie, Body) ->
 		peerdrive_client_pb:decode_peekreq(Body),
 	{ok, Handle} = check(peerdrive_broker:peek(get_store(Store), Rev)),
 	Reply = #peekcnf{handle=Cookie},
-	{Handle, peerdrive_client_pb:encode_peekcnf(Reply)}.
+	{Handle, [], peerdrive_client_pb:encode_peekcnf(Reply)}.
 
 
 do_create(Cookie, Body) ->
@@ -336,7 +337,7 @@ do_create(Cookie, Body) ->
 	{ok, Doc, Handle} = check(peerdrive_broker:create(get_store(Store),
 		unicode:characters_to_binary(Type), unicode:characters_to_binary(Creator))),
 	Reply = #createcnf{handle=Cookie, doc=Doc},
-	{Handle, peerdrive_client_pb:encode_createcnf(Reply)}.
+	{Handle, [], peerdrive_client_pb:encode_createcnf(Reply)}.
 
 
 do_fork(Cookie, Body) ->
@@ -348,7 +349,7 @@ do_fork(Cookie, Body) ->
 	{ok, Doc, Handle} = check(peerdrive_broker:fork(get_store(Store), Rev,
 		unicode:characters_to_binary(Creator))),
 	Reply = #forkcnf{handle=Cookie, doc=Doc},
-	{Handle, peerdrive_client_pb:encode_forkcnf(Reply)}.
+	{Handle, [], peerdrive_client_pb:encode_forkcnf(Reply)}.
 
 
 do_update(Cookie, Body) ->
@@ -364,7 +365,7 @@ do_update(Cookie, Body) ->
 	end,
 	{ok, Handle} = check(peerdrive_broker:update(get_store(Store), Doc, Rev, Creator)),
 	Reply = #updatecnf{handle=Cookie},
-	{Handle, peerdrive_client_pb:encode_updatecnf(Reply)}.
+	{Handle, [], peerdrive_client_pb:encode_updatecnf(Reply)}.
 
 
 do_resume(Cookie, Body) ->
@@ -380,7 +381,7 @@ do_resume(Cookie, Body) ->
 	end,
 	{ok, Handle} = check(peerdrive_broker:resume(get_store(Store), Doc, Rev, Creator)),
 	Reply = #resumecnf{handle=Cookie},
-	{Handle, peerdrive_client_pb:encode_resumecnf(Reply)}.
+	{Handle, [], peerdrive_client_pb:encode_resumecnf(Reply)}.
 
 
 do_forget(Body) ->
@@ -578,9 +579,9 @@ start_worker(S, Fun, RetPath, Body) ->
 	Worker = spawn_link(
 		fun() ->
 			try
-				{Handle, Reply} = Fun(Cookie, Body),
+				{Handle, State, Reply} = Fun(Cookie, Body),
 				send_reply(RetPath, Reply),
-				io_loop(Handle),
+				io_loop(Handle, State),
 				Server ! {done, Cookie}
 			catch
 				throw:Error -> send_error(RetPath, Error)
@@ -591,19 +592,25 @@ start_worker(S, Fun, RetPath, Body) ->
 		next    = Cookie + 1}}.
 
 
-io_loop(Handle) ->
+io_loop(Handle, State) ->
 	receive
 		{Req, Body, RetPath} ->
-			try io_loop_process(Handle, Req, Body) of
+			try io_loop_process(Handle, State, Req, Body) of
 				Reply when is_binary(Reply) ->
 					send_reply(RetPath, Reply),
-					io_loop(Handle);
+					io_loop(Handle, State);
+				{Reply, NewState} when is_binary(Reply) ->
+					send_reply(RetPath, Reply),
+					io_loop(Handle, NewState);
 				{stop, Reply} ->
-					send_reply(RetPath, Reply)
+					send_reply(RetPath, Reply);
+				{error, Error, NewState} ->
+					send_error(RetPath, Error),
+					io_loop(Handle, NewState)
 			catch
 				throw:Error ->
 					send_error(RetPath, Error),
-					io_loop(Handle)
+					io_loop(Handle, State)
 			end;
 
 		closed ->
@@ -611,7 +618,7 @@ io_loop(Handle) ->
 	end.
 
 
-io_loop_process(Handle, Request, ReqData) ->
+io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 	case Request of
 		?READ_MSG ->
 			#readreq{part=Part, offset=Offset, length=Length} =
@@ -620,12 +627,32 @@ io_loop_process(Handle, Request, ReqData) ->
 			{ok, Data} = check(peerdrive_broker:read(Handle, Part, Offset, Length)),
 			peerdrive_client_pb:encode_readcnf(#readcnf{data=Data});
 
-		?WRITE_MSG ->
-			#writereq{part=Part, offset=Offset, data=Data} =
-				peerdrive_client_pb:decode_writereq(ReqData),
+		?WRITE_BUFFER_MSG ->
+			#writebufferreq{part=Part, data=Data} =
+				peerdrive_client_pb:decode_writebufferreq(ReqData),
 			?ASSERT_PART(Part),
-			ok = check(peerdrive_broker:write(Handle, Part, Offset, Data)),
-			<<>>;
+			NewWrBuf = orddict:update(Part, fun(Old) -> [Data | Old] end,
+				[Data], WriteBuffer),
+			{<<>>, NewWrBuf};
+
+		?WRITE_COMMIT_MSG ->
+			#writecommitreq{part=Part, offset=Offset, data=Data} =
+				peerdrive_client_pb:decode_writecommitreq(ReqData),
+			?ASSERT_PART(Part),
+			case orddict:find(Part, WriteBuffer) of
+				error ->
+					ok = check(peerdrive_broker:write(Handle, Part, Offset, Data)),
+					<<>>;
+
+				{ok, BufData} ->
+					AllData = iolist_to_binary(lists:reverse([Data | BufData])),
+					case peerdrive_broker:write(Handle, Part, Offset, AllData) of
+						ok ->
+							{<<>>, orddict:erase(Part, WriteBuffer)};
+						{error, _} = Error ->
+							{error, Error, orddict:erase(Part, WriteBuffer)}
+					end
+			end;
 
 		?TRUNC_MSG ->
 			#truncreq{part=Part, offset=Offset} =

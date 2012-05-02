@@ -292,7 +292,13 @@ message TruncReq {
 message TruncCnf {
 }
 
-message WriteReq {
+message WriteBufferReq {
+	required uint32 handle = 1;
+	required bytes part = 2;
+	required bytes data = 3;
+}
+
+message WriteCommitReq {
 	required uint32 handle = 1;
 	required bytes part = 2;
 	required uint64 offset = 3;
