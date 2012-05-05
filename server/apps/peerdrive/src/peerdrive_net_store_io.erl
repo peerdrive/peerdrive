@@ -49,7 +49,7 @@ handle_call({read, Part, Offset, Length}, _From, S) ->
 	do_read(Part, Offset, Length, S);
 
 handle_call({write, Part, Offset, Data}, _From, S) ->
-	{reply, do_write(Part, Offset, Data, S), S};
+	do_write(Part, Offset, Data, S);
 
 handle_call(close, _From, S) ->
 	do_close(S),
@@ -168,23 +168,64 @@ do_read_loop(Part, Offset, Length, S, Pending, Acc, Ref) ->
 	end.
 
 
-do_write(Part, Offset, Data, #state{mps=MaxPS} = S) when size(Data) =< MaxPS ->
-	#state{handle=Handle, store=Store} = S,
-	Req = peerdrive_netstore_pb:encode_writecommitreq(#writecommitreq{
-		handle=Handle, part=Part, offset=Offset, data=Data}),
-	case peerdrive_net_store:io_request(Store, ?WRITE_COMMIT_MSG, Req) of
-		{ok, <<>>} -> ok;
-		Error      -> Error
+do_write(Part, Offset, Data, S) ->
+	case do_write_loop(Part, Offset, Data, S, 0, make_ref()) of
+		ok ->
+			{reply, ok, S};
+		{error, _} = Error ->
+			{reply, Error, S};
+		{stop, Reason} ->
+			{stop, Reason, {error, enxio}, S}
+	end.
+
+
+do_write_loop(_Part, _Offset, <<>>, _S, 0, _Ref) ->
+	ok;
+
+do_write_loop(Part, Offset, Data, S, Pending, Ref) when (size(Data) > 0) and
+                                                        (Pending < 2) ->
+	#state{store=Store, handle=Handle, mps=MaxPS} = S,
+	if
+		size(Data) > MaxPS ->
+			<<SendData:MaxPS/binary, Rest/binary>> = Data,
+			ReqMsg = peerdrive_netstore_pb:encode_writebufferreq(
+				#writebufferreq{handle=Handle, part=Part, data=SendData}),
+			ReqCode = ?WRITE_BUFFER_MSG;
+		true ->
+			Rest = <<>>,
+			ReqMsg = peerdrive_netstore_pb:encode_writecommitreq(
+				#writecommitreq{handle=Handle, part=Part, offset=Offset,
+				data=Data}),
+			ReqCode = ?WRITE_COMMIT_MSG
+	end,
+	Self = self(),
+	Finish = fun
+		({ok, <<>>}) ->
+			Self ! {write, Ref, ok};
+		({error, _} = Error) ->
+			Self ! {write, Ref, Error}
+	end,
+	case peerdrive_net_store:io_request_async(Store, ReqCode, ReqMsg, Finish) of
+		ok ->
+			do_write_loop(Part, Offset, Rest, S, Pending+1, Ref);
+		{error, _} = Error ->
+			Error
 	end;
 
-do_write(Part, Offset, BigData, S) ->
-	#state{handle=Handle, store=Store, mps=MaxPS} = S,
-	<<Data:MaxPS/binary, Rest/binary>> = BigData,
-	Req = peerdrive_netstore_pb:encode_writebufferreq(#writebufferreq{
-		handle=Handle, part=Part, data=Data}),
-	case peerdrive_net_store:io_request(Store, ?WRITE_BUFFER_MSG, Req) of
-		{ok, <<>>} -> do_write(Part, Offset, Rest, S);
-		Error      -> Error
+do_write_loop(Part, Offset, Data, S, Pending, Ref) ->
+	receive
+		{write, Ref, ok} ->
+			do_write_loop(Part, Offset, Data, S, Pending-1, Ref);
+
+		{write, Ref, Error} ->
+			Error;
+
+		{'EXIT', Store, Reason} when S#state.store == Store ->
+			{stop, Reason};
+
+		{'EXIT', _User, _Reason} ->
+			do_close(S),
+			{stop, normal}
 	end.
 
 
