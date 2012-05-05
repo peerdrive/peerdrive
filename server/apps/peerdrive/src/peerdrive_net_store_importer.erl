@@ -45,8 +45,7 @@ init({State, User}) ->
 
 
 handle_call({put_part, Part, Data}, _From, S) ->
-	Reply = do_put_part(Part, Data, S),
-	{reply, Reply, S};
+	do_put_part(Part, Data, S);
 
 handle_call(commit, _From, S) ->
 	Reply = do_commit(S),
@@ -80,18 +79,60 @@ terminate(_, _)          -> ok.
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_put_part(Part, Data, #state{handle=Handle, mps=MaxPS} = S) when size(Data) =< MaxPS ->
-	Req = peerdrive_netstore_pb:encode_putrevpartreq(
-		#putrevpartreq{handle=Handle, part=Part, data=Data}),
-	relay_request(?PUT_REV_PART_MSG, Req, S);
-
-do_put_part(Part, Data, #state{mps=MaxPS} = S) ->
-	<<Chunk1:MaxPS/binary, Chunk2/binary>> = Data,
-	case do_put_part(Part, Chunk1, S) of
+do_put_part(Part, Data, S) ->
+	case do_put_part_loop(Part, Data, S, 0, make_ref()) of
 		ok ->
-			do_put_part(Part, Chunk2, S);
-		Error ->
+			{reply, ok, S};
+		{error, _} = Error ->
+			{reply, Error, S};
+		{stop, Reason} ->
+			{stop, Reason, {error, enxio}, S}
+	end.
+
+
+do_put_part_loop(_Part, <<>>, _S, 0, _Ref) ->
+	ok;
+
+do_put_part_loop(Part, Data, S, Pending, Ref) when (size(Data) > 0) and
+                                                   (Pending < 2) ->
+	#state{store=Store, handle=Handle, mps=MaxPS} = S,
+	if
+		size(Data) > MaxPS ->
+			<<SendData:MaxPS/binary, Rest/binary>> = Data;
+		true ->
+			SendData = Data,
+			Rest = <<>>
+	end,
+	Req = peerdrive_netstore_pb:encode_putrevpartreq(
+		#putrevpartreq{handle=Handle, part=Part, data=SendData}),
+	Self = self(),
+	Finish = fun
+		({ok, <<>>}) ->
+			Self ! {put_part, Ref, ok};
+		({error, _} = Error) ->
+			Self ! {put_part, Ref, Error}
+	end,
+	case peerdrive_net_store:io_request_async(Store, ?PUT_REV_PART_MSG, Req, Finish) of
+		ok ->
+			do_put_part_loop(Part, Rest, S, Pending+1, Ref);
+		{error, _} = Error ->
 			Error
+	end;
+
+do_put_part_loop(Part, Data, S, Pending, Ref) ->
+	receive
+		{put_part, Ref, ok} ->
+			do_put_part_loop(Part, Data, S, Pending-1, Ref);
+
+		{put_part, Ref, Error} ->
+			Error;
+
+		{'EXIT', Store, Reason} when S#state.store == Store ->
+			{stop, Reason};
+
+		{'EXIT', _User, _Reason} ->
+			do_abort(S),
+			{stop, normal}
 	end.
 
 
