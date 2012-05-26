@@ -402,7 +402,8 @@ latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
 				check(peerdrive_broker:commit(Handle), Doc, FromRev)
 			after
 				peerdrive_broker:close(Handle)
-			end;
+			end,
+			ok;
 
 		true ->
 			% The other revision is newer. The other directions
@@ -484,7 +485,8 @@ merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers) ->
 		false, []),
 
 	% TODO: set a 'conflict' flag in the future?
-	merge_write(Doc, From, FromRev, To, ToRev, NewData).
+	merge_write(Doc, From, FromRev, To, ToRev, NewData),
+	ok.
 
 
 merge_read(Doc, Rev, _Parts, []) ->
