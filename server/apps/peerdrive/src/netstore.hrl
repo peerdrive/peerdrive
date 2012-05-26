@@ -60,11 +60,12 @@
 -define(PUT_REV_ABORT_MSG,    16#026).
 -define(PUT_REV_COMMIT_MSG,   16#027).
 -define(SYNC_GET_CHANGES_MSG, 16#028).
--define(SYNC_SET_ANCHOR_MSG,  16#029).
--define(SYNC_FINISH_MSG,      16#02a).
--define(TRIGGER_MSG,          16#02b).
--define(SYNC_MSG,             16#02c).
--define(RMBR_REV_START_MSG,   16#02d).
--define(RMBR_REV_COMMIT_MSG,  16#02e).
--define(RMBR_REV_ABORT_MSG,   16#02f).
+-define(SYNC_GET_ANCHOR_MSG,  16#029).
+-define(SYNC_SET_ANCHOR_MSG,  16#02a).
+-define(SYNC_FINISH_MSG,      16#02b).
+-define(TRIGGER_MSG,          16#02c).
+-define(SYNC_MSG,             16#02d).
+-define(RMBR_REV_START_MSG,   16#02e).
+-define(RMBR_REV_COMMIT_MSG,  16#02f).
+-define(RMBR_REV_ABORT_MSG,   16#030).
 

@@ -213,12 +213,15 @@ handle_call({remember_rev, DId, PreRId, OldPreRId}, {User, _}, S) ->
 	{Reply, S2} = do_remember_rev(DId, PreRId, OldPreRId, User, S),
 	{reply, Reply, S2};
 
-handle_call({sync_get_changes, PeerSId}, {Caller, _}, S) ->
-	{Reply, S2} = do_sync_get_changes(PeerSId, Caller, S),
+handle_call({sync_get_changes, PeerSId, Anchor}, {Caller, _}, S) ->
+	{Reply, S2} = do_sync_get_changes(PeerSId, Anchor, Caller, S),
 	{reply, Reply, S2};
 
-handle_call({sync_set_anchor, PeerSId, SeqNum}, _From, S) ->
-	do_sync_set_anchor(PeerSId, SeqNum, S),
+handle_call({sync_get_anchor, FromSId, ToSId}, _From, S) ->
+	{reply, do_sync_get_anchor(FromSId, ToSId, S), S};
+
+handle_call({sync_set_anchor, FromSId, ToSId, SeqNum}, _From, S) ->
+	do_sync_set_anchor(FromSId, ToSId, SeqNum, S),
 	{reply, ok, S};
 
 handle_call({sync_finish, PeerSId}, {Caller, _}, S) ->
@@ -811,14 +814,10 @@ do_remember_rev_commit(DId, NewPreRId, OldPreRId, #state{doc_tbl=DocTbl} = S) ->
 	end.
 
 
-do_sync_get_changes(PeerSId, Caller, S) ->
+do_sync_get_changes(PeerSId, Anchor, Caller, S) ->
 	case sync_lock(PeerSId, Caller, S) of
 		{ok, S2} ->
-			#state{doc_tbl=DocTbl, peer_tbl=PeerTbl} = S2,
-			Anchor = case dets:lookup(PeerTbl, PeerSId) of
-				[{_, Value}] -> Value;
-				[] -> 0
-			end,
+			#state{doc_tbl=DocTbl} = S2,
 			Changes = dets:select(DocTbl,
 				[{{'$1','_','_','$2'},[{'>','$2',Anchor}],[{{'$1','$2'}}]}]),
 			Backlog = lists:sort(
@@ -831,8 +830,15 @@ do_sync_get_changes(PeerSId, Caller, S) ->
 	end.
 
 
-do_sync_set_anchor(PeerSId, SeqNum, #state{peer_tbl=PeerTbl}) ->
-	ok = dets:insert(PeerTbl, {PeerSId, SeqNum}).
+do_sync_get_anchor(FromSId, ToSId, #state{peer_tbl=PeerTbl}) ->
+	case dets:lookup(PeerTbl, {FromSId, ToSId}) of
+		[{_, Value}] -> {ok, Value};
+		[] -> {error, enoent}
+	end.
+
+
+do_sync_set_anchor(FromSId, ToSId, SeqNum, #state{peer_tbl=PeerTbl}) ->
+	ok = dets:insert(PeerTbl, {{FromSId, ToSId}, SeqNum}).
 
 
 do_sync_finish(PeerSId, Caller, #state{synclocks=SLocks} = S) ->

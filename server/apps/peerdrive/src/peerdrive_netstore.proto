@@ -467,6 +467,7 @@ message PutRevAbortReq {
 
 message SyncGetChangesReq {
 	required bytes peer_sid = 1;
+	required uint64 anchor = 2;
 }
 
 message SyncGetChangesCnf {
@@ -478,9 +479,19 @@ message SyncGetChangesCnf {
 	repeated Item backlog = 1;
 }
 
+message SyncGetAnchorReq {
+	required bytes from_sid = 1;
+	required bytes to_sid = 2;
+}
+
+message SyncGetAnchorCnf {
+	required uint64 anchor = 1;
+}
+
 message SyncSetAnchorReq {
-	required bytes peer_sid = 1;
-	required uint64 seq_num = 2;
+	required bytes from_sid = 1;
+	required bytes to_sid = 2;
+	required uint64 seq_num = 3;
 }
 
 message SyncFinishReq {

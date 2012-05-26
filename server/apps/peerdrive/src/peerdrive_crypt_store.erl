@@ -155,11 +155,14 @@ handle_call({put_rev, Rev, Revision}, {User, _Tag}, S) ->
 handle_call({remember_rev, DId, PreRId, OldPreRId}, {User, _}, S) ->
 	{reply, do_remember_rev(DId, PreRId, OldPreRId, User, S), S};
 
-handle_call({sync_get_changes, PeerGuid}, {From, _Tag}, S) ->
-	do_sync_get_changes(PeerGuid, From, S);
+handle_call({sync_get_changes, PeerGuid, Anchor}, {From, _Tag}, S) ->
+	do_sync_get_changes(PeerGuid, Anchor, From, S);
 
-handle_call({sync_set_anchor, PeerGuid, SeqNum}, {From, _Tag}, S) ->
-	do_sync_set_anchor(PeerGuid, SeqNum, From, S);
+handle_call({sync_get_anchor, FromSId, ToSId}, _From, S) ->
+	{reply, do_sync_get_anchor(FromSId, ToSId, S), S};
+
+handle_call({sync_set_anchor, FromSId, ToSId, SeqNum}, _From, S) ->
+	{reply, do_sync_set_anchor(FromSId, ToSId, SeqNum, S), S};
 
 handle_call({sync_finish, PeerGuid}, {From, _Tag}, S) ->
 	do_sync_finish(PeerGuid, From, S).
@@ -598,10 +601,10 @@ do_remember_rev(DId, NewPreRId, OldPreRId, User, #state{store=Store, key=Key}) -
 	end.
 
 
-do_sync_get_changes(Peer, Caller, #state{store=Store, key=Key} = S) ->
+do_sync_get_changes(Peer, Anchor, Caller, #state{store=Store, key=Key} = S) ->
 	case sync_lock(Peer, Caller, S) of
 		{ok, S2} ->
-			case peerdrive_store:sync_get_changes(Store, enc_xid(Key, Peer)) of
+			case peerdrive_store:sync_get_changes(Store, enc_xid(Key, Peer), Anchor) of
 				{ok, EncBacklog} ->
 					link(Caller),
 					Backlog = [ {dec_xid(Key, DId), Seq} || {DId, Seq} <-
@@ -616,17 +619,14 @@ do_sync_get_changes(Peer, Caller, #state{store=Store, key=Key} = S) ->
 	end.
 
 
-do_sync_set_anchor(Peer, Seq, Caller, S) ->
-	#state{store=Store, synclocks=SLocks, key=Key} = S,
-	case orddict:find(Peer, SLocks) of
-		{ok, Caller} ->
-			Reply = peerdrive_store:sync_set_anchor(Store, enc_xid(Key, Peer), Seq),
-			{reply, Reply, S};
-		{ok, _Other} ->
-			{reply, {error, eacces}, S};
-		error ->
-			{reply, {error, einval}, S}
-	end.
+do_sync_get_anchor(FromSId, ToSId, #state{store=Store, key=Key}) ->
+	peerdrive_store:sync_get_anchor(Store, enc_xid(Key, FromSId),
+		enc_xid(Key, ToSId)).
+
+
+do_sync_set_anchor(FromSId, ToSId, Seq, #state{store=Store, key=Key}) ->
+	peerdrive_store:sync_set_anchor(Store, enc_xid(Key, FromSId),
+		enc_xid(Key, ToSId), Seq).
 
 
 do_sync_finish(Peer, Caller, S) ->
@@ -658,7 +658,9 @@ sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
 	case lists:keytake(From, 2, SLocks) of
 		false ->
 			error;
-		{value, _, NewSLocks} ->
+		{value, {Peer, _From}, NewSLocks} ->
+			#state{store=Store, key=Key} = S,
+			peerdrive_store:sync_finish(Store, enc_xid(Key, Peer)),
 			{ok, S#state{synclocks=NewSLocks}}
 	end.
 

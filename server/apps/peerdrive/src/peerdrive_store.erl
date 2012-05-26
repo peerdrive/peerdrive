@@ -24,7 +24,7 @@
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
 	write/4, suspend/1, suspend/2, get_links/1, set_links/3, get_flags/1, set_flags/2]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
--export([sync_get_changes/2, sync_set_anchor/3, sync_finish/2]).
+-export([sync_get_changes/3, sync_get_anchor/3, sync_set_anchor/4, sync_finish/2]).
 -export([hash_revision/1]).
 
 -include("store.hrl").
@@ -478,29 +478,39 @@ put_rev_commit(Importer) ->
 %% process is allowed per peer store. The store will trap the exit of the
 %% caller but the caller may also release the lock by calling sync_finish/2.
 %%
-%% @spec sync_get_changes(Store, PeerGuid) -> Result
+%% @spec sync_get_changes(Store, PeerGuid, Anchor) -> Result
 %%       Store = pid()
 %%       PeerGuid = guid()
+%%       Anchor = integer()
 %%       Result = {ok, Backlog} | {error, Reason}
 %%       Backlog = [{Doc::guid(), SeqNum::integer()}]
-sync_get_changes(Store, PeerGuid) ->
-	call_store(Store, {sync_get_changes, PeerGuid}).
-
-
-%% @doc Set sync point of peer store to new generation
-%% @spec sync_set_anchor(Store, PeerGuid, SeqNum) -> Result
-%%       Store = pid()
-%%       PeerGuid = guid()
-%%       SeqNum = integer()
-%%       Result = ok | {error, Reason}
-sync_set_anchor(Store, PeerGuid, SeqNum) ->
-	call_store(Store, {sync_set_anchor, PeerGuid, SeqNum}).
+sync_get_changes(Store, PeerGuid, Anchor) ->
+	call_store(Store, {sync_get_changes, PeerGuid, Anchor}).
 
 
 %% @doc Release the lock for the peer store synchronizing process.
 %% @spec sync_finish(Store, PeerGuid) -> ok | {error, Reason}
 sync_finish(Store, PeerGuid) ->
 	call_store(Store, {sync_finish, PeerGuid}).
+
+
+%% @doc Get last sync point between two stores
+%% @spec sync_get_anchor(Store, FromSId, ToSId) -> Result
+%%       Store = pid()
+%%       FromSId = ToSId = guid()
+%%       Result = {ok, SeqNum::integer()} | {error, Reason}
+sync_get_anchor(Store, FromSId, ToSId) ->
+	call_store(Store, {sync_get_anchor, FromSId, ToSId}).
+
+
+%% @doc Set sync point of two stores to new generation
+%% @spec sync_set_anchor(Store, FromSId, ToSId, SeqNum) -> Result
+%%       Store = pid()
+%%       FromSId = ToSId = guid()
+%%       SeqNum = integer()
+%%       Result = ok | {error, Reason}
+sync_set_anchor(Store, FromSId, ToSId, SeqNum) ->
+	call_store(Store, {sync_set_anchor, FromSId, ToSId, SeqNum}).
 
 
 hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->

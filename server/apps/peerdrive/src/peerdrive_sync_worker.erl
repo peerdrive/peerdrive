@@ -50,6 +50,7 @@ init({Mode, FromSId, ToSId}) ->
 		{ok, FromPid} ->
 			case peerdrive_volman:store(ToSId) of
 				{ok, ToPid} ->
+					SeqNum = init_get_anchor(FromPid, FromSId, ToPid, ToSId),
 					{ok, Monitor} = peerdrive_work:new({sync, FromSId, ToSId}),
 					peerdrive_vol_monitor:register_proc(),
 					process_flag(trap_exit, true),
@@ -63,7 +64,7 @@ init({Mode, FromSId, ToSId}) ->
 						numdone   = 0,
 						numremain = 0,
 						backlog   = [],
-						lastdone  = {clean, 0}
+						lastdone  = {clean, SeqNum}
 					},
 					error_logger:info_report([{sync, start}, {from, FromSId},
 						{to, ToSId}]),
@@ -76,6 +77,25 @@ init({Mode, FromSId, ToSId}) ->
 
 		error ->
 			{stop, enxio}
+	end.
+
+
+init_get_anchor(FromPid, FromSId, ToPid, ToSId) ->
+	case peerdrive_store:sync_get_anchor(ToPid, FromSId, ToSId) of
+		{ok, SN1} ->
+			case peerdrive_store:sync_get_anchor(FromPid, FromSId, ToSId) of
+				{ok, SN2} ->
+					if SN1 < SN2 -> SN1; true -> SN2 end;
+				_ ->
+					% source store is not authorative -> ignore errors
+					SN1
+			end;
+
+		{error, enoent} ->
+			0;
+
+		{error, Reason} ->
+			throw(Reason)
 	end.
 
 
@@ -152,11 +172,12 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 
 waiting(changed, S) ->
 	#state{
+		lastdone = {_, Anchor},
 		from=FromStore,
 		tosid=ToSId,
 		monitor=Monitor
 	} = S,
-	case peerdrive_store:sync_get_changes(FromStore, ToSId) of
+	case peerdrive_store:sync_get_changes(FromStore, ToSId, Anchor) of
 		{ok, []} ->
 			peerdrive_store:sync_finish(FromStore, ToSId),
 			{next_state, waiting, S};
@@ -172,10 +193,15 @@ waiting(changed, S) ->
 
 
 working(timeout, #state{backlog=[]} = S) ->
-	#state{from=FromStore, tosid=ToSId, monitor=Monitor} = S,
+	#state{
+		lastdone = {_, Anchor},
+		from=FromStore,
+		tosid=ToSId,
+		monitor=Monitor
+	} = S,
 	case sync_done(S) of
 		{ok, S2} ->
-			case peerdrive_store:sync_get_changes(FromStore, ToSId) of
+			case peerdrive_store:sync_get_changes(FromStore, ToSId, Anchor) of
 				{ok, []} ->
 					peerdrive_store:sync_finish(FromStore, ToSId),
 					peerdrive_work:stop(Monitor),
@@ -258,12 +284,14 @@ sync_done(S) ->
 	#state{
 		lastdone = {State, SeqNum},
 		from     = FromStore,
+		fromsid  = FromSId,
 		to       = ToStore,
 		tosid    = ToSId
 	} = S,
 	try
 		State == dirty andalso check_simple(peerdrive_store:sync(ToStore)),
-		check_simple(peerdrive_store:sync_set_anchor(FromStore, ToSId, SeqNum)),
+		check_simple(peerdrive_store:sync_set_anchor(ToStore, FromSId, ToSId, SeqNum)),
+		peerdrive_store:sync_set_anchor(FromStore, FromSId, ToSId, SeqNum),
 		{ok, S#state{lastdone={clean, SeqNum}}}
 	catch
 		throw:ErrInfo -> {error, ErrInfo}

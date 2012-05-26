@@ -137,6 +137,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 		?SYNC_GET_CHANGES_MSG ->
 			handle(Body, RetPath, Store, fun do_sync_get_changes/2, S);
 
+		?SYNC_GET_ANCHOR_MSG ->
+			handle(Body, RetPath, Store, fun do_sync_get_anchor/2, S);
+
 		?SYNC_SET_ANCHOR_MSG ->
 			handle(Body, RetPath, Store, fun do_sync_set_anchor/2, S);
 
@@ -419,19 +422,27 @@ do_put_rev_start(Store, NetHandle, ReqData) ->
 
 
 do_sync_get_changes(Body, Store) ->
-	#syncgetchangesreq{peer_sid=Peer} =
+	#syncgetchangesreq{peer_sid=Peer, anchor=Anchor} =
 		peerdrive_netstore_pb:decode_syncgetchangesreq(Body),
-	{ok, Backlog} = check(peerdrive_store:sync_get_changes(Store, Peer)),
+	{ok, Backlog} = check(peerdrive_store:sync_get_changes(Store, Peer, Anchor)),
 	CnfBacklog = [ #syncgetchangescnf_item{doc=Doc, seq_num=SeqNum} ||
 		{Doc, SeqNum} <- Backlog ],
 	Cnf = #syncgetchangescnf{backlog=CnfBacklog},
 	peerdrive_netstore_pb:encode_syncgetchangescnf(Cnf).
 
 
+do_sync_get_anchor(Body, Store) ->
+	#syncgetanchorreq{from_sid=FromSId, to_sid=ToSId} =
+		peerdrive_netstore_pb:decode_syncgetanchorreq(Body),
+	{ok, Anchor} = check(peerdrive_store:sync_get_anchor(Store, FromSId, ToSId)),
+	Cnf = #syncgetanchorcnf{anchor=Anchor},
+	peerdrive_netstore_pb:encode_syncgetanchorcnf(Cnf).
+
+
 do_sync_set_anchor(Body, Store) ->
-	#syncsetanchorreq{peer_sid=Peer, seq_num=SeqNum} =
+	#syncsetanchorreq{from_sid=FromSId, to_sid=ToSId, seq_num=SeqNum} =
 		peerdrive_netstore_pb:decode_syncsetanchorreq(Body),
-	ok = check(peerdrive_store:sync_set_anchor(Store, Peer, SeqNum)),
+	ok = check(peerdrive_store:sync_set_anchor(Store, FromSId, ToSId, SeqNum)),
 	<<>>.
 
 

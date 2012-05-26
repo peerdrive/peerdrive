@@ -228,12 +228,15 @@ handle_call({put_rev, Rev, Revision}, From, S) ->
 handle_call({remember_rev, DId, PreRId, OldPreRId}, From, S) ->
 	req_remember_rev(DId, PreRId, OldPreRId, From, S);
 
-handle_call({sync_get_changes, PeerGuid}, From, S) ->
-	req_sync_get_changes(PeerGuid, From, S);
+handle_call({sync_get_changes, PeerGuid, Anchor}, From, S) ->
+	req_sync_get_changes(PeerGuid, Anchor, From, S);
 
-handle_call({sync_set_anchor, PeerGuid, SeqNum}, From, S) ->
+handle_call({sync_get_anchor, FromSId, ToSId}, From, S) ->
+	req_sync_get_anchor(FromSId, ToSId, From, S);
+
+handle_call({sync_set_anchor, FromSId, ToSId, SeqNum}, From, S) ->
 	Req = peerdrive_netstore_pb:encode_syncsetanchorreq(#syncsetanchorreq{
-		peer_sid=PeerGuid, seq_num=SeqNum}),
+		from_sid=FromSId, to_sid=ToSId, seq_num=SeqNum}),
 	send_request(From, ?SYNC_SET_ANCHOR_MSG, Req, S);
 
 handle_call({sync_finish, PeerGuid}, From, S) ->
@@ -533,11 +536,11 @@ cnf_remember_rev(Body, User) ->
 	end.
 
 
-req_sync_get_changes(PeerGuid, {Caller, _} = From, S) ->
+req_sync_get_changes(PeerGuid, Anchor, {Caller, _} = From, S) ->
 	case sync_lock(PeerGuid, Caller, S) of
 		{ok, S2} ->
 			Req = peerdrive_netstore_pb:encode_syncgetchangesreq(
-				#syncgetchangesreq{peer_sid=PeerGuid}),
+				#syncgetchangesreq{peer_sid=PeerGuid, anchor=Anchor}),
 			send_request(From, ?SYNC_GET_CHANGES_MSG, Req,
 				fun cnf_sync_get_changes/1, S2);
 		error ->
@@ -550,6 +553,19 @@ cnf_sync_get_changes(Body) ->
 		peerdrive_netstore_pb:decode_syncgetchangescnf(Body),
 	{ok, [ {Doc, SeqNum} || #syncgetchangescnf_item{doc=Doc, seq_num=SeqNum} <-
 		Backlog ]}.
+
+
+req_sync_get_anchor(FromSId, ToSId, From, S) ->
+	Req = peerdrive_netstore_pb:encode_syncgetanchorreq(
+		#syncgetanchorreq{from_sid=FromSId, to_sid=ToSId}),
+	send_request(From, ?SYNC_GET_ANCHOR_MSG, Req,
+		fun cnf_sync_get_anchor/1, S).
+
+
+cnf_sync_get_anchor(Body) ->
+	#syncgetanchorcnf{anchor=Anchor} =
+		peerdrive_netstore_pb:decode_syncgetanchorcnf(Body),
+	{ok, Anchor}.
 
 
 req_sync_finish(PeerGuid, {Caller, _} = From, #state{synclocks=SLocks} = S) ->
