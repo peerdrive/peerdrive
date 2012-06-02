@@ -20,6 +20,7 @@
 -include("store.hrl").
 -include("peerdrive_client_pb.hrl").
 -include("utils.hrl").
+-include("volman.hrl").
 
 -record(state, {handles, next, progreg=false}).
 -record(retpath, {servlet, req, ref}).
@@ -261,18 +262,24 @@ do_init(Body, RetPath) ->
 
 
 do_enum(RetPath) ->
-	Stores = [
-		{proplists:get_bool(system, Properties), #enumcnf_store{
-			guid = Store,
-			id = atom_to_binary(Id, utf8),
-			name = Descr,
-			is_mounted = proplists:get_bool(mounted, Properties),
-			is_removable = proplists:get_bool(removable, Properties),
-			is_network_store = proplists:get_bool(net, Properties)
-		}} || {Id, Descr, Store, Properties} <- peerdrive_volman:enum() ],
-	{value, {true, SysStore}, AllStores} = lists:keytake(true, 1, Stores),
-	Reply = #enumcnf{sys_store=SysStore, stores=[S || {false,S} <- AllStores]},
+	Stores = [ do_enum_convert(Store) || Store <- peerdrive_volman:enum() ],
+	SysStore = do_enum_convert(peerdrive_volman:sys_store()),
+	Reply = #enumcnf{sys_store=SysStore, stores=Stores},
 	send_reply(RetPath, peerdrive_client_pb:encode_enumcnf(Reply)).
+
+
+do_enum_convert(Store) ->
+	#peerdrive_store{sid=SId, src=Src, type=Type, label=Label, options=Opts} = Store,
+	OptsString = string:join(
+		[ case Opt of
+			{Key, true} ->
+				unicode:characters_to_list(Key);
+			{Key, Value} ->
+				unicode:characters_to_list(Key) ++ "=" ++
+					unicode:characters_to_list(Value)
+		  end || Opt <- Opts ],
+		","),
+	#enumcnf_store{sid=SId, src=Src, type=Type, label=Label, options=OptsString}.
 
 
 do_loopup_doc(Body) ->
@@ -461,22 +468,15 @@ do_replicate_rev(Body) ->
 
 
 do_mount(Body) ->
-	#mountreq{id=IdStr} = peerdrive_client_pb:decode_mountreq(Body),
-	{Id, _Descr, _Guid, Tags} = get_store_by_id(IdStr),
-	case proplists:is_defined(removable, Tags) of
-		true  -> {ok, _} = check(peerdrive_volman:mount(Id));
-		false -> throw({error, einval})
-	end,
-	<<>>.
+	#mountreq{src=Src, type=Type, label=Label, options=Options,
+		credentials=Creds} = peerdrive_client_pb:decode_mountreq(Body),
+	{ok, SId} = check(peerdrive_volman:mount(Src, Options, Creds, Type, Label)),
+	peerdrive_client_pb:encode_mountcnf(#mountcnf{sid=SId}).
 
 
 do_unmount(Body) ->
-	#unmountreq{id=IdStr} = peerdrive_client_pb:decode_unmountreq(Body),
-	{Id, _Descr, _Guid, Tags} = get_store_by_id(IdStr),
-	case proplists:is_defined(removable, Tags) of
-		true  -> ok = check(peerdrive_volman:unmount(Id));
-		false -> throw({error, einval})
-	end,
+	#unmountreq{sid=SId} = peerdrive_client_pb:decode_unmountreq(Body),
+	ok = check(peerdrive_volman:unmount(SId)),
 	<<>>.
 
 
@@ -524,8 +524,8 @@ do_get_path_req(Body) ->
 	not IsRev orelse throw({error, enoent}), % only documents so far
 	{ok, BasePath} = check(peerdrive_sys_info:lookup(<<"vfs.mountpath">>)),
 	{ok, Title} = check(peerdrive_util:read_doc_file_name(get_store(Store), DId)),
-	StoreName = case lists:keyfind(Store, 3, peerdrive_volman:enum()) of
-		{Found, _Descr, _Store, _Tags} -> erlang:atom_to_binary(Found, utf8);
+	StoreName = case lists:keyfind(Store, #peerdrive_store.sid, peerdrive_volman:enum_all()) of
+		#peerdrive_store{label=Found} -> Found;
 		false -> throw({error, enoent})
 	end,
 	Path = filename:nativename(filename:join([BasePath, StoreName, <<".docs">>,
@@ -741,7 +741,7 @@ get_store(SId) ->
 get_stores(StoreList) ->
 	case StoreList of
 		[] ->
-			[Store || {_SId, Store} <- peerdrive_volman:stores()];
+			[Store || #peerdrive_store{pid=Store} <- peerdrive_volman:enum_all()];
 
 		_ ->
 			lists:foldr(
@@ -753,20 +753,6 @@ get_stores(StoreList) ->
 				end,
 				[],
 				StoreList)
-	end.
-
-
-get_store_by_id(Store) ->
-	try
-		Id = list_to_existing_atom(Store),
-		case lists:keysearch(Id, 1, peerdrive_volman:enum()) of
-			{value, StoreSpec} ->
-				StoreSpec;
-			false ->
-				throw({error, enoent})
-		end
-	catch
-		error:badarg -> throw({error, enoent})
 	end.
 
 

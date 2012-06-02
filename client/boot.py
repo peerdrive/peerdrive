@@ -38,6 +38,22 @@ importObjectByPath(
 	],
 	True)
 
+with open("fstab.json") as file:
+	fstab = json.load(file)
+
+importObjectByPath(
+	"sys/fstab",
+	"org.peerdrive.fstab",
+	[
+		("PDSD", peerdrive.struct.dumps(fstab)),
+		("META", peerdrive.struct.dumps({
+			"org.peerdrive.annotation" : {
+				"title"   : "fstab"
+			}
+		}))
+	],
+	True)
+
 # set default sync rules
 importObjectByPath(
 	"sys/syncrules",

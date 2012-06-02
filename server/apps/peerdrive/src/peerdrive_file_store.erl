@@ -51,12 +51,11 @@
 %% Server state management...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Id, NoVerify, {Path, Name}) ->
-	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
-	gen_server:start_link({local, RegId}, ?MODULE, {Id, NoVerify, Path, Name}, []).
+start_link(Path, Options, _Credentials) ->
+	gen_server:start_link(?MODULE, {Path, Options}, []).
 
 
-init({Id, NoVerify, Path, Name}) ->
+init({Path, Options}) ->
 	case filelib:is_dir(Path) of
 		true ->
 			try
@@ -64,10 +63,10 @@ init({Id, NoVerify, Path, Name}) ->
 					path      = filename:absname(Path),
 					synclocks = dict:new(),
 					objlocks  = dict:new(),
-					noverify  = NoVerify
+					noverify  = proplists:get_bool(<<"noverify">>, Options)
 				},
-				S2 = load_store(Id, S),
-				S3 = check_root_doc(Name, S2),
+				S2 = load_store(S),
+				S3 = check_root_doc(S2),
 				process_flag(trap_exit, true),
 				{ok, S3}
 			catch
@@ -978,7 +977,7 @@ part_size(PId, #state{part_tbl=PartTbl}) ->
 	end.
 
 
-load_store(Id, #state{path=Path} = S) ->
+load_store(#state{path=Path} = S) ->
 	S2 = case file:consult(Path ++ "/info") of
 		{ok, Info} ->
 			{sid, Sid} = lists:keyfind(sid, 1, Info),
@@ -999,11 +998,10 @@ load_store(Id, #state{path=Path} = S) ->
 		{error, _} ->
 			throw(enodev)
 	end,
-	IdStr = atom_to_list(Id),
-	DocTbl = list_to_atom(IdStr ++ "_docs"),
-	RevTbl = list_to_atom(IdStr ++ "_revs"),
-	PartTbl = list_to_atom(IdStr ++ "_parts"),
-	PeerTbl = list_to_atom(IdStr ++ "_peers"),
+	DocTbl = make_ref(),
+	RevTbl = make_ref(),
+	PartTbl = make_ref(),
+	PeerTbl = make_ref(),
 	{ok, _} = check(dets:open_file(DocTbl, [{file, Path ++ "/docs.dets"}])),
 	{ok, _} = check(dets:open_file(RevTbl, [{file, Path ++ "/revs.dets"}])),
 	{ok, _} = check(dets:open_file(PartTbl, [{file, Path ++ "/parts.dets"}])),
@@ -1054,11 +1052,12 @@ close_store(S) ->
 	dets:close(S#state.peer_tbl).
 
 
-check_root_doc(Name, #state{sid=SId, gen=Gen} = S) ->
+check_root_doc(#state{sid=SId, gen=Gen} = S) ->
 	case dets:member(S#state.doc_tbl, SId) of
 		true ->
 			S;
 		false ->
+			Name = "file_store on '" ++ S#state.path ++ "'",
 			RootContent = [],
 			ContentPId = crd_write_part(RootContent, S),
 			Annotation1 = gb_trees:empty(),

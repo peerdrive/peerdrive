@@ -23,6 +23,7 @@
 -include("store.hrl").
 -include("vfs.hrl").
 -include("utils.hrl").
+-include("volman.hrl").
 
 -define(VFS_CC, <<"org.peerdrive.vfs">>).  % creator code
 
@@ -595,25 +596,27 @@ root_make_node() ->
 
 
 stores_lookup(stores, Name, Cache) ->
-	case find_entry(
-		fun({Id, _Descr, Guid, _Tags}) ->
-			BinId = atom_to_binary(Id, utf8),
-			if
-				BinId == Name ->
-					case peerdrive_volman:store(Guid) of
-						{ok, Pid} ->
+	case Name of
+		<<".sys">> ->
+			#peerdrive_store{sid=Guid, pid=Pid} = peerdrive_volman:sys_store(),
+			{entry, {doc, Pid, Guid}, Cache};
+
+		_ ->
+			case find_entry(
+				fun(#peerdrive_store{label=Id, sid=Guid, pid=Pid}) ->
+					BinId = unicode:characters_to_binary(Id),
+					if
+						BinId == Name ->
 							{ok, {doc, Pid, Guid}};
-						error ->
+						true ->
 							error
-					end;
-				true ->
-					error
+					end
+				end,
+				peerdrive_volman:enum())
+			of
+				{value, Oid} -> {entry, Oid, Cache};
+				none         -> {error, enoent}
 			end
-		end,
-		peerdrive_volman:enum())
-	of
-		{value, Oid} -> {entry, Oid, Cache};
-		none         -> {error, enoent}
 	end.
 
 
@@ -641,15 +644,12 @@ stores_getnode(Oid) ->
 
 stores_readdir(stores, Cache) ->
 	Stores = lists:map(
-		fun({Id, _Descr, _Guid, _Tags}) ->
-			#vfs_direntry{name=atom_to_binary(Id, utf8), attr=#vfs_attr{dir=true}}
+		fun(#peerdrive_store{label=Id}) ->
+			#vfs_direntry{name=unicode:characters_to_binary(Id), attr=#vfs_attr{dir=true}}
 		end,
-		lists:filter(
-			fun({_Id, _Descr, _Guid, Tags}) ->
-				proplists:is_defined(mounted, Tags)
-			end,
-			peerdrive_volman:enum())),
-	{ok, Stores, Cache}.
+		peerdrive_volman:enum()),
+	Sys = #vfs_direntry{name = <<".sys">>, attr=#vfs_attr{dir=true}},
+	{ok, [Sys | Stores], Cache}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

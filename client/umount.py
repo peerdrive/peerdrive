@@ -22,12 +22,13 @@ from peerdrive import Connector
 
 if len(sys.argv) == 2:
 	try:
-		Connector().unmount(sys.argv[1])
+		sid = Connector().enum().fromLabel(sys.argv[1]).sid
+		Connector().unmount(sid)
 	except IOError as error:
 		print "Unmount failed: " + str(error)
 		sys.exit(2)
 else:
-	print "Usage: hp-umount.py <id>"
+	print "Usage: umount.py <label>"
 	sys.exit(1)
 
 

@@ -156,18 +156,13 @@ message InitCnf {
 	optional uint32 max_packet_size = 3 [default = 4096];
 }
 
-message EnumReq {
-}
-
 message EnumCnf {
 	message Store {
-		required bytes guid = 1;
-		required string id = 2;
-		required string name = 3;
-
-		required bool is_mounted = 4;
-		required bool is_removable = 5;
-		required bool is_network_store = 6;
+		required bytes sid = 1;
+		required string src = 2;
+		required string type = 3;
+		required string label = 4;
+		optional string options = 5 [default = ""];
 	}
 
 	required Store sys_store = 1;
@@ -488,14 +483,19 @@ message ReplicateRevCnf {
 }
 
 message MountReq {
-	required string id = 1;
+	required string src = 1;
+	required string type = 2;
+	required string label = 3;
+	optional string options = 4 [default = ""];
+	optional string credentials = 5 [default = ""];
 }
 
 message MountCnf {
+	required bytes sid = 1;
 }
 
 message UnmountReq {
-	required string id = 1;
+	required bytes sid = 1;
 }
 
 message UnmountCnf {

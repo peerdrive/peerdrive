@@ -18,20 +18,13 @@
 -behaviour(gen_server).
 
 -export([start_link/0]).
--export([enum/0, stores/0, store/1, sys_store/0, mount/1, unmount/1]).
+-export([enum/0, enum_all/0, store/1, sys_store/0, mount/5, unmount/1]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
-% specs:  [{Id, Descr, Disposition, Module, Args}]
-%           Id = atom()
-%           Descr = string()
-%           Disposition = [system | removable | net]
-%           Module = atom()
-%           Args = [term()]
-% stores: [{Pid, Id, Guid}]
-%           Pid = pid()
-%           Id = atom()
-%           Guid = guid()
--record(state, {specs, stores}).
+-record(store, {ref, pid, spec}).
+-record(state, {sys_store, stores}).
+
+-include("volman.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface
@@ -40,49 +33,58 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-%% @doc Enumerate all known stores
+%% @doc Enumerate all known stores, excluding the system store.
 %%
-%% Returns information about all known stores in the system, even unmounted
-%% ones.
+%% Returns information about all mounted stores in the system.
 %%
 %% @spec enum() -> Result
-%%       Result = [{Id, Descr, Guid, [Tag]}]
-%%       Id = atom()
-%%       Descr = string()
-%%       Guid = guid() | unknown
-%%       Tag = mounted | removable | system | net
+%%       Result = [#peerdrive_store{}]
 enum() ->
 	gen_server:call(?MODULE, enum, infinity).
 
-%% @doc Get Guids/pid's of all currently mounted stores
-%% @spec stores() -> [{guid(), pid()}]
-stores() ->
-	gen_server:call(?MODULE, stores, infinity).
+%% @doc Enumerate all known stores, including the system store.
+%%
+%% @spec enum_all() -> Result
+%%       Result = [#peerdrive_store{}]
+enum_all() ->
+	gen_server:call(?MODULE, enum_all, infinity).
 
 %% @doc Get pid of a specific store
 %% @spec store(Guid) -> {ok, pid()} | error
 %%       Guid = guid()
-store(Guid) ->
-	gen_server:call(?MODULE, {store, Guid}, infinity).
+store(SId) ->
+	Enum = gen_server:call(?MODULE, enum_all, infinity),
+	case lists:keyfind(SId, #peerdrive_store.sid, Enum) of
+		#peerdrive_store{pid=Pid} ->
+			{ok, Pid};
+		false ->
+			error
+	end.
 
 %% @doc Get Guids and pid 's of system store
-%% @spec sys_store() -> {guid(), pid()}
+%% @spec sys_store() -> #peerdrive_store{}
 sys_store() ->
 	gen_server:call(?MODULE, sys_store, infinity).
 
-%% @doc Mount store by ID
-%% @spec mount(StoreId) -> {ok, Guid} | {error, Reason}
-%%       StoreId = atom()
-%%       Guid = guid()
+%% @doc Mount a store
+%% @spec mount(Src, Options, Type, Label) -> Result
+%%       Result = {ok, SId} | {error, Reason}
+%%       Src, Options, Type, Label = string()
+%%       SId = guid()
 %%       Reason = ecode()
-mount(StoreId) ->
-	gen_server:call(?MODULE, {mount, StoreId}, infinity).
+mount(Src, Options, Credentials, Type, Label) when is_list(Src),
+                                                   is_list(Options),
+												   is_list(Credentials),
+                                                   is_list(Type),
+												   is_list(Label) ->
+	gen_server:call(?MODULE, {mount, Src, Options, Credentials, Type, Label},
+		infinity).
 
-%% @doc Unmount store by ID
-%% @spec unmount(StoreId) -> ok | {error, Reason}
-%%       StoreId = atom()
-unmount(StoreGuid) ->
-	gen_server:call(?MODULE, {unmount, StoreGuid}, infinity).
+%% @doc Unmount a store
+%% @spec unmount(SId) -> ok | {error, Reason}
+%%       SId = guid()
+unmount(SId) ->
+	gen_server:call(?MODULE, {unmount, SId}, infinity).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -91,111 +93,57 @@ unmount(StoreGuid) ->
 
 init([]) ->
 	process_flag(trap_exit, true),
-	Specs = get_store_specs(),
-	case have_system_store(Specs) of
-		true ->
-			case start_permanent_stores(Specs, #state{specs=Specs, stores=[]}) of
-				{ok, S} ->
-					{ok, S};
-				{error, Reason} ->
-					{stop, Reason}
-			end;
+	try
+		{Src, Options, Type} = get_sys_store_spec(),
+		SysStore = case mount_internal(Src, Options, "", Type, "sys") of
+			{ok, Store} ->
+				link(Store#store.pid),
+				Store;
 
-		false ->
-			{stop, nosysstore}
+			{error, Error} ->
+				throw(Error)
+		end,
+		{ok, #state{sys_store=SysStore, stores=[]}}
+	catch
+		throw:Reason ->
+			{stop, Reason}
 	end.
 
-handle_cast({reg, Info}, S) ->
-	{noreply, add_store(Info, S)}.
 
-
-% returns [{Id, Descr, Guid, [Tag]}]
-handle_call(enum, _From, #state{specs=Specs, stores=Stores} = S) ->
-	Reply = lists:map(
-		fun({Id, Descr, Disposition, _Module, _Args}) ->
-			case lists:keysearch(Id, 2, Stores) of
-				{value, {_Pid, _Id, Guid}} ->
-					{Id, Descr, Guid, [mounted|Disposition]};
-				false ->
-					{Id, Descr, <<0:128>>, Disposition}
-			end
-		end,
-		Specs),
+handle_call(enum, _From, #state{stores=Stores} = S) ->
+	Reply = [ Spec || #store{spec=Spec} <- Stores ],
 	{reply, Reply, S};
 
-handle_call(stores, _From, #state{stores=Stores} = S) ->
-	Reply = lists:map(
-		fun({Pid, _Id, Guid}) -> {Guid, Pid} end,
-		Stores),
+handle_call(enum_all, _From, #state{sys_store=SysStore, stores=Stores} = S) ->
+	Reply = [ Spec || #store{spec=Spec} <- [SysStore | Stores] ],
 	{reply, Reply, S};
 
-handle_call({store, Guid}, _From, #state{stores=Stores} = S) ->
-	Reply = case lists:keysearch(Guid, 3, Stores) of
-		{value, {Pid, _Id, _Guid}} -> {ok, Pid};
-		false -> error
-	end,
-	{reply, Reply, S};
+handle_call(sys_store, _From, #state{sys_store=SysStore} = S) ->
+	{reply, SysStore#store.spec, S};
 
-handle_call(sys_store, _From, #state{specs=Specs, stores=Stores} = S) ->
-	Reply = try
-		lists:foreach(
-			fun({Id, _Descr, Disposition, _Module, _Args}) ->
-				case proplists:is_defined(system, Disposition) of
-					true -> throw(Id);
-					false -> ok
-				end
-			end,
-			Specs),
-		exit(badstate)
-	catch
-		throw:SysId ->
-			{Pid, SysId, Guid} = lists:keyfind(SysId, 2, Stores),
-			{Guid, Pid}
-	end,
-	{reply, Reply, S};
+handle_call({mount, Src, Options, Credentials, Type, Label}, From, S) ->
+	do_mount(From, Src, Options, Credentials, Type, Label, S);
 
-handle_call({mount, StoreId}, From, #state{specs=Specs} = S) ->
-	case lists:keysearch(StoreId, 1, Specs) of
-		{value, {Id, _Descr, Disposition, Module, Args}} ->
-			spawn_link(fun() ->
-				Reply = do_mount(Id, Disposition, Module, Args),
-				gen_server:reply(From, Reply)
-			end),
-			{noreply, S};
-		false ->
-			{reply, {error, enoent}, S}
-	end;
+handle_call({reg, Store}, _From, S) ->
+	do_reg(Store, S);
 
-handle_call({unmount, StoreId}, _From, #state{stores=Stores} = S) ->
-	Reply = case lists:keysearch(StoreId, 2, Stores) of
-		{value, {_Pid, Id, _Guid}} ->
-			peerdrive_store_sup:stop_store(Id);
-		false ->
-			{error, enoent}
-	end,
-	{reply, Reply, S}.
+handle_call({unmount, SId}, _From, S) ->
+	do_unmount(SId, S).
 
 
-handle_info({'EXIT', Pid, Reason}, #state{specs=Specs, stores=Stores1} = S) ->
-	case lists:keytake(Pid, 1, Stores1) of
-		{value, {_Pid, StoreId, Guid}, Stores2} ->
-			peerdrive_vol_monitor:trigger_rem_store(Guid),
-			% restart stores if they terminated by themselves, e.g. the network
-			% store when the connection was interrupted
-			case Reason of
-				normal ->
-					{Id, _Descr, Disposition, Module, Args} =
-						lists:keyfind(StoreId, 1, Specs),
-					spawn(fun() -> do_mount(Id, Disposition, Module, Args) end);
-				_ ->
-					ok
-			end,
-			{noreply, S#state{stores=Stores2}};
+handle_info({'EXIT', Pid, _Reason}, #state{stores=Stores} = S) ->
+	case lists:keytake(Pid, #store.pid, Stores) of
+		{value, #store{ref=Ref, spec=#peerdrive_store{sid=SId}}, Remaining} ->
+			peerdrive_vol_monitor:trigger_rem_store(SId),
+			peerdrive_store_sup:reap_store(Ref),
+			{noreply, S#state{stores=Remaining}};
+
 		false ->
 			{noreply, S}
 	end.
 
 
+handle_cast(_Request, S)            -> {noreply, S}.
 terminate(_Reason, _State)          -> ok.
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
@@ -203,115 +151,120 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% local functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-rank(Id, Specs) ->
-	rank_loop(Id, Specs, 0).
+do_mount(From, Src, Options, Credentials, Type, Label, S) ->
+	spawn_link(fun() ->
+		Reply = case mount_internal(Src, Options, Credentials, Type, Label) of
+			{ok, Store} ->
+				case gen_server:call(?MODULE, {reg, Store}, infinity) of
+					ok ->
+						{ok, (Store#store.spec)#peerdrive_store.sid};
+					{error, _} = Error ->
+						peerdrive_store_sup:reap_store(Store#store.ref),
+						Error
+				end;
 
-rank_loop(Id, [{SpecId, _, _, _, _} | Remaining], Rank) ->
-	if
-		Id == SpecId -> Rank;
-		true         -> rank_loop(Id, Remaining, Rank+1)
+			{error, _} = Error ->
+				Error
+		end,
+		gen_server:reply(From, Reply)
+	end),
+	{noreply, S}.
+
+
+do_unmount(WhichSId, #state{stores=Stores} = S) ->
+	Victim = [ Ref || #store{ref=Ref, spec=#peerdrive_store{sid=SId}} <- Stores,
+		SId == WhichSId ],
+	case Victim of
+		[Ref] ->
+			peerdrive_store_sup:reap_store(Ref),
+			{reply, ok, S};
+		[] ->
+			{reply, {error, einval}, S}
 	end.
 
-get_store_specs() ->
-	case application:get_env(peerdrive, stores) of
-		{ok, SysSpecs} ->
-			StoreSpecs = case application:get_env(peerdrive, platform_stores) of
-				{ok, PlatformSpecs} -> SysSpecs ++ PlatformSpecs;
-				undefined           -> SysSpecs
-			end,
-			lists:filter(
-				fun(Spec) ->
-					case check_store_spec(Spec) of
-						true ->
-							true;
-						false ->
-							error_logger:warning_msg("Dropping invalid store spec: ~p~n", [Spec]),
-							false
-					end
-				end,
-				StoreSpecs);
+
+mount_internal(Src, Options, Creds, Type, Label) ->
+	try
+		ParsedOpt = parse_options(Options),
+		ParsedCreds = parse_options(Creds),
+		Module = get_module_for_type(Type),
+		Store = case peerdrive_store_sup:spawn_store(Module, Src, ParsedOpt, ParsedCreds) of
+			{ok, Ref, Pid} ->
+				#store{
+					ref  = Ref,
+					pid  = Pid,
+					spec = #peerdrive_store{
+						pid     = Pid,
+						label   = Label,
+						sid     = peerdrive_store:guid(Pid),
+						src     = Src,
+						options = ParsedOpt,
+						type    = Type
+					}
+				};
+			{error, Reason} ->
+				throw(Reason)
+		end,
+		{ok, Store}
+	catch
+		throw:Error ->
+			{error, Error}
+	end.
+
+
+do_reg(#store{pid=Pid, spec=#peerdrive_store{sid=SId, label=Label}} = Store, S) ->
+	#state{stores=Stores} = S,
+	try
+		[ throw(eexist) ||
+			#store{spec=#peerdrive_store{sid=OtherSId, label=OtherLabel}} <- Stores,
+			(OtherSId == SId) or (OtherLabel == Label) ],
+		link(Pid),
+		peerdrive_vol_monitor:trigger_add_store(SId),
+		S2 = S#state{stores=[Store|Stores]},
+		{reply, ok, S2}
+	catch
+		throw:Error ->
+			{reply, {error, Error}, S}
+	end.
+
+
+get_sys_store_spec() ->
+	case application:get_env(peerdrive, sys_store) of
+		{ok, {Src, Options, Type} = Spec} when is_list(Src), is_list(Options),
+		                                       is_list(Type) ->
+			Spec;
+
+		{ok, Else} ->
+			error_logger:error_msg("Invalid syste store spec: ~p~n", [Else]),
+			throw(einval);
 
 		undefined ->
-			error_logger:warning_msg("No store specs found!~n"),
-			[]
+			error_logger:error_msg("No system store spec found!~n"),
+			throw(enoent)
 	end.
 
 
-start_permanent_stores([], S) ->
-	{ok, S};
-
-start_permanent_stores([{Id, _Descr, Disposition, Module, Args} | Specs], S) ->
-	case proplists:is_defined(removable, Disposition) of
-		false ->
-			case peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args) of
-				{ok, Pid} ->
-					Guid = peerdrive_store:guid(Pid),
-					S2 = add_store({Pid, Id, Guid}, S),
-					start_permanent_stores(Specs, S2);
-
-				{error, Error} ->
-					{error, {{Id, Disposition, Module, Args}, Error}}
-			end;
-
-		true ->
-			% try to mount the store but don't care if it failed
-			spawn(fun() -> do_mount(Id, Disposition, Module, Args) end),
-			start_permanent_stores(Specs, S)
-	end.
+% todo: add escaping of ',' and '='
+parse_options("") ->
+	[];
+parse_options(Options) ->
+	List = [
+		case re:split(Opt, "=") of
+			[Opt] -> {Opt, true};
+			[Key, Value] -> {Key, Value};
+			_ -> throw(einval)
+		end
+		|| Opt <- re:split(Options, ",")
+	],
+	proplists:compact(List).
 
 
-have_system_store(Specs) ->
-	lists:foldl(
-		fun({_Id, _Descr, Disposition, _Module, _Args}, Acc) ->
-			Found = proplists:is_defined(system, Disposition) andalso
-			not proplists:is_defined(removable, Disposition),
-			if Found -> Acc+1; true -> Acc end
-		end,
-		0,
-		Specs) == 1.
-
-
-check_store_spec({Id, Descr, Disposition, Module, _Args}) when
-		is_atom(Id) and
-		is_list(Disposition) and
-		is_list(Descr) ->
-	lists:member(Module, [peerdrive_file_store, peerdrive_net_store,
-		peerdrive_crypt_store]) and
-	lists:foldl(
-		fun(Tag, Acc) ->
-			Acc and case Tag of
-				system    -> true;
-				removable -> true;
-				net       -> true;
-				noverify  -> true;
-				_Else     -> false
-			end
-		end,
-		true,
-		Disposition);
-
-check_store_spec(_) ->
-	false.
-
-
-add_store({Pid, _Id, Guid} = Info, #state{stores=Stores, specs=Specs} = S) ->
-	link(Pid),
-	peerdrive_vol_monitor:trigger_add_store(Guid),
-	NewStores = lists:sort(
-		fun({_, IdA, _}, {_, IdB, _}) ->
-			rank(IdA, Specs) =< rank(IdB, Specs)
-		end,
-		[Info|Stores]),
-	S#state{stores=NewStores}.
-
-
-do_mount(Id, Disposition, Module, Args) ->
-	case peerdrive_store_sup:spawn_store(Id, Disposition, Module, Args) of
-		{ok, Pid} ->
-			Guid = peerdrive_store:guid(Pid),
-			gen_server:cast(?MODULE, {reg, {Pid, Id, Guid}}),
-			{ok, Guid};
-		Else ->
-			Else
-	end.
+get_module_for_type("file") ->
+	peerdrive_file_store;
+get_module_for_type("net") ->
+	peerdrive_net_store;
+get_module_for_type("crypt") ->
+	peerdrive_crypt_store;
+get_module_for_type(_) ->
+	throw(einval).
 

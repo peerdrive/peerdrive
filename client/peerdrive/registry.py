@@ -26,7 +26,7 @@ class _Registry(connector.Watch):
 	def __init__(self):
 		self.connection = connector.Connector()
 
-		sysDoc = self.connection.enum().sysStore()
+		sysDoc = self.connection.enum().sysStore().sid
 		root = struct.Folder(struct.DocLink(sysDoc, sysDoc))
 		self.__regLink = root["registry"]
 

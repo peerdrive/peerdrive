@@ -68,6 +68,14 @@ init([]) ->
 			60000,
 			worker,
 			[peerdrive_change_monitor]
+		},
+		{
+			peerdrive_auto_mounter,
+			{peerdrive_auto_mounter, start_link, []},
+			permanent,
+			1000,
+			worker,
+			[peerdrive_auto_mounter]
 		}
 	],
 

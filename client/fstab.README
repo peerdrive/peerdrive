@@ -1,0 +1,62 @@
+
+The file 'fstab.json' is imported into PeerDrive by boot.py and specifies the
+initially known store mounts. Each store has a unique label, a source and optionally
+various other fields.
+
+File stores
+===========
+
+File stores take only one argument: the path to the directory where the content
+is stored.
+
+ "label" : {
+	"type" : "file",			-- file store, may be omitted as its the default
+	"src" : "/path/to/store"	-- path to store directory
+ }
+
+Network stores
+==============
+
+Network stores mount remote stores through the network which are shared by
+other PeerDrive instances. The store needs at least the source argument which
+specifies the remote address and store.
+
+ "label" : {
+	"type" : "net",                -- network store
+	"src" : "store@1.2.3.4:port"   -- remote store address (port is optional)
+	"options" : "tls=required,..." -- TLS options
+ }
+
+For TLS the following options may also be given. Most options are directly
+passed to the Erlang SSL application:
+
+ tls=deny     |             -- No TLS (default)
+     optional |             -- Use TLS if available on peer
+     required               -- Always use TLS, fail if server does not support TLS
+
+ cacertfile=cacert.pem      -- Root certificate(s)
+ certfile=my-cert.pem       -- Client certificate
+ keyfile=my-private-key.pem -- Client private key
+ verify_peer=true           -- Verify server certificate
+
+Encrypted stores
+================
+
+Encrypted stores are just a frontend to other stores. They don't store the data
+themselves but transparently encrypt and decrypt them before passing it to the
+backing store. The backing store must have been mounted with the 'noverify'
+option, otherwise any writes of the encrypted store will fail.
+
+ "label" : {
+	"type" : "crypt",
+	"src": "urn:peerdrive:store:000102030405060708090a0b0c0d0e0f" -- backing store SId
+	"credentials" : "pwd=secret" -- password
+ }
+
+Misc
+====
+
+The following additional fields are also defined:
+
+ - "auto" (boolean): If set to 'true' the store will be mounted at startup.
+

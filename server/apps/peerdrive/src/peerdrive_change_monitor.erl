@@ -24,6 +24,7 @@
 % watches:  dict: {Type, Uuid} --> {set(Store), set(pid())}
 -record(state, {watches}).
 
+-include("volman.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -175,30 +176,28 @@ terminate(_, _)          -> ok.
 
 % check all stores if they contain a certain document
 doc_population(Doc) ->
-	Stores = peerdrive_volman:stores(),
 	lists:foldl(
-		fun({StoreGuid, StorePid}, Acc) ->
+		fun(#peerdrive_store{sid=StoreGuid, pid=StorePid}, Acc) ->
 			case peerdrive_store:lookup(StorePid, Doc) of
 				{ok, _Rev, _PreRevs} -> sets:add_element(StoreGuid, Acc);
 				error -> Acc
 			end
 		end,
 		sets:new(),
-		Stores).
+		peerdrive_volman:enum_all()).
 
 
 % check all stores if they contain a certain revision
 rev_population(Rev) ->
-	Stores = peerdrive_volman:stores(),
 	lists:foldl(
-		fun({StoreGuid, StorePid}, Acc) ->
+		fun(#peerdrive_store{sid=StoreGuid, pid=StorePid}, Acc) ->
 			case peerdrive_store:contains(StorePid, Rev) of
 				true  -> sets:add_element(StoreGuid, Acc);
 				false -> Acc
 			end
 		end,
 		sets:new(),
-		Stores).
+		peerdrive_volman:enum_all()).
 
 
 trigger_inc(Type, Store, Uuid, Watches) ->

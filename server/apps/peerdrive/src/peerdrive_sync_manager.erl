@@ -22,6 +22,7 @@
 	terminate/3, code_change/4]).
 
 -include("utils.hrl").
+-include("volman.hrl").
 
 -record(state, {store, sys, doc, rules=sets:new(), workers=sets:new()}).
 
@@ -38,7 +39,7 @@ start_link() ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([]) ->
-	{SysDoc, SysStore} = peerdrive_volman:sys_store(),
+	#peerdrive_store{sid=SysDoc, pid=SysStore} = peerdrive_volman:sys_store(),
 	peerdrive_vol_monitor:register_proc(),
 	case find_sync_rules(SysStore, SysDoc) of
 		{ok, Doc} ->

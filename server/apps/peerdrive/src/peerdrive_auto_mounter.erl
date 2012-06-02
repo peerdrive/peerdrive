@@ -14,17 +14,16 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(peerdrive_registry).
+-module(peerdrive_auto_mounter).
 -behaviour(gen_server).
 
 -export([start_link/0]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
--export([get_uti_from_extension/1, get_uti_from_extension/2]).
 
 -include("utils.hrl").
 -include("volman.hrl").
 
--record(state, {store, doc, reg}).
+-record(state, {store, doc, fstab}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -34,14 +33,6 @@ start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-get_uti_from_extension(Ext) ->
-	get_uti_from_extension(Ext, <<"public.data">>).
-
-
-get_uti_from_extension(Ext, Default) ->
-	gen_server:call(?MODULE, {uti_from_ext, Ext, Default}).
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -49,11 +40,12 @@ get_uti_from_extension(Ext, Default) ->
 init([]) ->
 	#peerdrive_store{pid=SysStore} = peerdrive_volman:sys_store(),
 	peerdrive_vol_monitor:register_proc(),
-	case peerdrive_util:walk(SysStore, <<"registry">>) of
+	case peerdrive_util:walk(SysStore, <<"fstab">>) of
 		{ok, Doc} ->
-			case read_registry(SysStore, Doc) of
-				{ok, Registry} ->
-					S = #state{store=SysStore, doc=Doc, reg=Registry},
+			case read_fstab(SysStore, Doc) of
+				{ok, FsTab} ->
+					S = #state{store=SysStore, doc=Doc, fstab=FsTab},
+					auto_mount(S),
 					{ok, S};
 
 				{error, Reason} ->
@@ -61,7 +53,7 @@ init([]) ->
 			end;
 
 		{error, enoent} ->
-			S = #state{store=SysStore, reg=gb_trees:empty()},
+			S = #state{store=SysStore, fstab=gb_trees:empty()},
 			{ok, S};
 
 		{error, Reason} ->
@@ -69,28 +61,12 @@ init([]) ->
 	end.
 
 
-handle_call({uti_from_ext, Ext, Default}, _From, S) ->
-	Reply = uti_from_ext(Ext, Default, S#state.reg),
-	{reply, Reply, S}.
-
-
-handle_info({vol_event, mod_doc, _Store, Doc}, #state{doc=Doc} = S) ->
-	case read_registry(S#state.store, Doc) of
-		{ok, Registry} ->
-			{noreply, S#state{reg=Registry}};
-
-		{error, Reason} ->
-			{stop, Reason, S}
-	end;
-
-handle_info(_, S) ->
-	{noreply, S}.
-
-
 terminate(_Reason, _State) ->
 	peerdrive_vol_monitor:deregister_proc().
 
 
+handle_call(_Request, _From, S) -> {reply, badarg, S}.
+handle_info(_, S) -> {noreply, S}.
 handle_cast(_Request, State) -> {noreply, State}.
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
@@ -98,10 +74,10 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% Local stuff
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-read_registry(Store, Doc) ->
+read_fstab(Store, Doc) ->
 	case peerdrive_util:read_doc_struct(Store, Doc, <<"PDSD">>) of
-		{ok, Registry} when ?IS_GB_TREE(Registry) ->
-			{ok, Registry};
+		{ok, FsTab} when ?IS_GB_TREE(FsTab) ->
+			{ok, FsTab};
 		{ok, _} ->
 			{error, eio};
 		{error, _} = Error ->
@@ -109,23 +85,46 @@ read_registry(Store, Doc) ->
 	end.
 
 
-uti_from_ext(Ext, Default, Reg) when is_list(Ext) ->
-	uti_from_ext(unicode:characters_to_binary(Ext), Default, Reg);
+auto_mount(#state{fstab=FsTab}) ->
+	lists:foreach(fun auto_mount_store/1, gb_trees:to_list(FsTab)).
 
-uti_from_ext(Ext, Default, Reg) ->
+
+auto_mount_store({Label, Spec}) when ?IS_GB_TREE(Spec) ->
 	try
-		lists:foreach(
-			fun({Uti, Spec}) ->
-				case gb_trees:lookup(<<"extensions">>, Spec) of
-					{value, Extensions} ->
-						lists:member(Ext, Extensions) andalso throw(Uti);
-					none ->
-						ok
-				end
-			end,
-			gb_trees:to_list(Reg)),
-		Default
+		case gb_trees:lookup(<<"auto">>, Spec) of
+			{value, true} ->
+				Src = unicode:characters_to_list(get_value(<<"src">>, Spec)),
+				Type = unicode:characters_to_list(get_value(<<"type">>,
+					<<"file">>, Spec)),
+				Options = unicode:characters_to_list(get_value(<<"options">>,
+					<<"">>, Spec)),
+				Credentials = unicode:characters_to_list(get_value(
+					<<"credentials">>, <<"">>, Spec)),
+				peerdrive_volman:mount(Src, Options, Credentials, Type,
+					unicode:characters_to_list(Label));
+			_ ->
+				ok
+		end
 	catch
-		throw:Result -> Result
+		throw:Error ->
+			error_logger:error_report([{module, ?MODULE},
+				{function, auto_mount_store}, {error, Error}])
+	end;
+
+auto_mount_store(_) ->
+	ok.
+
+
+get_value(Key, Tree) ->
+	case gb_trees:lookup(Key, Tree) of
+		{value, Value} -> Value;
+		none -> throw(einval)
+	end.
+
+
+get_value(Key, Default, Tree) ->
+	case gb_trees:lookup(Key, Tree) of
+		{value, Value} -> Value;
+		none -> Default
 	end.
 

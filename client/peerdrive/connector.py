@@ -437,14 +437,20 @@ class _Connector(QtCore.QObject):
 		if verbose: req.verbose = verbose
 		self._rpc(_Connector.REPLICATE_REV_MSG, req.SerializeToString(), async)
 
-	def mount(self, store):
+	def mount(self, src, label, type, options=None, credentials=None):
 		req = pb.MountReq()
-		req.id = store
-		self._rpc(_Connector.MOUNT_MSG, req.SerializeToString())
+		req.src = src
+		req.label = label
+		req.type = type
+		if options is not None: req.options = options
+		if credentials is not None: req.credentials = credentials
+		reply = self._rpc(_Connector.MOUNT_MSG, req.SerializeToString())
+		cnf = pb.MountCnf.FromString(reply)
+		return cnf.sid
 
-	def unmount(self, store):
+	def unmount(self, sid):
 		req = pb.UnmountReq()
-		req.id = store
+		req.sid = sid
 		self._rpc(_Connector.UNMOUNT_MSG, req.SerializeToString())
 
 	def getDocPath(self, store, doc):
@@ -719,50 +725,37 @@ class Enum(object):
 
 	class Store(object):
 		def __init__(self, store, isSystem):
-			self.doc = store.guid
-			self.name = store.name
-			self.isMounted = store.is_mounted
-			self.isRemovable = store.is_removable
+			self.sid = store.sid
+			self.src = store.src
+			self.type = store.type
+			self.label = store.label
+			self.options = store.options
 			self.isSystem = isSystem
-			self.isNet = store.is_network_store
 
 	def __init__(self, reply):
-		self.__stores = { }
-		sys = Enum.Store(reply.sys_store, True)
-		self.__stores[reply.sys_store.id] = Enum.Store(reply.sys_store, True)
-		self.__sysStore = reply.sys_store.guid
-		for s in reply.stores:
-			self.__stores[s.id] = Enum.Store(s, False)
+		self.__sysStore = Enum.Store(reply.sys_store, True)
+		self.__stores = [ Enum.Store(s, False) for s in reply.stores ]
 
 	def sysStore(self):
 		return self.__sysStore
 
+	def regularStores(self):
+		return self.__stores
+
 	def allStores(self):
-		return self.__stores.keys()
+		stores = self.__stores[:]
+		stores.append(self.__sysStore)
+		return stores
 
-	def isMounted(self, store):
-		return self.__stores[store].isMounted
+	def fromLabel(self, label):
+		if label == self.__sysStore.label:
+			return self.__sysStore
 
-	def isSystem(self, store):
-		return self.__stores[store].isSystem
-
-	def isRemovable(self, store):
-		return self.__stores[store].isRemovable
-
-	def isNet(self, store):
-		return self.__stores[store].isNet
-
-	def store(self, doc):
-		for (store, info) in self.__stores.items():
-			if info.doc == doc:
+		for store in self.__stores:
+			if store.label == label:
 				return store
+
 		return None
-
-	def doc(self, store):
-		return self.__stores[store].doc
-
-	def name(self, store):
-		return self.__stores[store].name
 
 
 class Lookup(object):

@@ -31,12 +31,12 @@ class Launchbox(QtGui.QDialog):
 		def __init__(self, trayIcon):
 			self.__trayIcon = trayIcon
 			enum = Connector().enum()
-			self.__mounted = set([s for s in enum.allStores() if enum.isMounted(s)])
+			self.__mounted = set([s.label for s in enum.regularStores()])
 			Watch.__init__(self, Watch.TYPE_DOC, Watch.ROOT_DOC)
 
 		def triggered(self, cause):
 			enum = Connector().enum()
-			mounted = set([s for s in enum.allStores() if enum.isMounted(s)])
+			mounted = set([s.label for s in enum.regularStores()])
 			for s in (self.__mounted - mounted):
 				self.__trayIcon.showMessage("Unmount", "Store '"+s+"' has been unmounted")
 			for s in (mounted - self.__mounted):
@@ -79,6 +79,8 @@ class Launchbox(QtGui.QDialog):
 		self.__trayIcon.activated.connect(self.__trayActivated)
 		self.__trayIcon.show()
 
+		self.__fstab = FSTab()
+
 		self.__watch = Launchbox.RootWatch(self.__trayIcon)
 		Connector().watch(self.__watch)
 
@@ -88,16 +90,18 @@ class Launchbox(QtGui.QDialog):
 	def __trayMenuShow(self):
 		self.__trayIconMenu.clear()
 		try:
-			enum = Connector().enum()
-			for store in [s for s in enum.allStores() if not enum.isSystem(s)]:
-				if enum.isMounted(store):
-					try:
-						self.__addStoreMenu(store, enum.doc(store), enum.isRemovable(store))
-					except IOError:
-						pass
-				else:
-					action = self.__trayIconMenu.addAction("Mount "+store)
-					action.triggered.connect(lambda x,s=store: self.__mount(s))
+			stores = Connector().enum().regularStores()
+			for store in stores:
+				try:
+					self.__addStoreMenu(store, True)
+				except IOError:
+					pass
+
+			unmounted = (set(self.__fstab.knownLabels()) -
+				set([ s.label for s in stores ]))
+			for label in unmounted:
+				action = self.__trayIconMenu.addAction("Mount "+label)
+				action.triggered.connect(lambda x,l=label: self.__fstab.mount(l))
 		except IOError:
 			pass
 		self.__trayIconMenu.addSeparator()
@@ -110,14 +114,14 @@ class Launchbox(QtGui.QDialog):
 		if reason == QtGui.QSystemTrayIcon.Trigger:
 			self.setVisible(not self.isVisible())
 
-	def __addStoreMenu(self, store, storeDoc, removable):
-		l = struct.DocLink(storeDoc, storeDoc)
-		type = Connector().stat(l.rev(), [storeDoc]).type()
+	def __addStoreMenu(self, store, removable):
+		l = struct.DocLink(store.sid, store.sid)
+		type = Connector().stat(l.rev(), [store.sid]).type()
 		executables = Registry().getExecutables(type)
 		title = struct.readTitle(l)
 		if len(title) > 20:
 			title = title[:20] + '...'
-		title += ' ['+store+']'
+		title += ' ['+store.label+']'
 
 		menu = self.__trayIconMenu.addMenu(QtGui.QIcon("icons/uti/store.png"), title)
 		if removable:
@@ -182,18 +186,11 @@ class Launchbox(QtGui.QDialog):
 			ret = cmp(t1.lower(), t2.lower())
 		return ret
 
-	def __mount(self, store):
-		try:
-			Connector().mount(store)
-		except IOError as e:
-			QtGui.QMessageBox.warning(self, store, 'Mount opertaion failed: ' +
-				str(e))
-
 	def __unmount(self, store):
 		try:
-			Connector().unmount(store)
+			Connector().unmount(store.sid)
 		except IOError as e:
-			QtGui.QMessageBox.warning(self, store, 'Unmount opertaion failed: ' +
+			QtGui.QMessageBox.warning(self, store.label, 'Unmount opertaion failed: ' +
 				str(e))
 
 	def __progressStart(self, tag, typ, src, dst, item=None):
@@ -297,10 +294,8 @@ class SyncEditor(QtGui.QDialog):
 		self.__addChooser.clear()
 		self.__addItems = []
 
-		enum = Connector().enum()
 		rules = self.__rules.rules()
-		stores = [enum.doc(s) for s in enum.allStores()
-			if not enum.isSystem(s) and enum.isMounted(s)]
+		stores = [s.sid for s in Connector().enum().regularStores()]
 		self.__addItems = [(s, p) for s in stores for p in stores
 			if s < p and (s,p) not in rules and (p,s) not in rules ]
 
@@ -514,7 +509,7 @@ class ProgressWidget(QtGui.QFrame):
 
 class SyncRules(object):
 	def __init__(self):
-		self.sysStore = Connector().enum().sysStore()
+		self.sysStore = Connector().enum().sysStore().sid
 		self.syncDoc = struct.Folder(struct.DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
 		self.syncRev = Connector().lookupDoc(self.syncDoc).rev(self.sysStore)
 		with Connector().peek(self.sysStore, self.syncRev) as r:
@@ -565,6 +560,44 @@ class SyncRules(object):
 	def setDescr(self, store, peer, descr):
 		self.__rules[(store, peer)]['descr'] = descr
 		self.__changed = True
+
+
+class FSTab(object):
+	def __init__(self):
+		self.__changed = False
+		self.__store = Connector().enum().sysStore().sid
+		self.__doc = struct.Folder(struct.DocLink(self.__store, self.__store))["fstab"].doc()
+		self.__rev = Connector().lookupDoc(self.__doc).rev(self.__store)
+		with Connector().peek(self.__store, self.__rev) as r:
+			self.__fstab = struct.loads(self.__store, r.readAll('PDSD'))
+
+	def save(self):
+		if not self.__changed:
+			return
+
+		with Connector().update(self.__store, self.__doc, self.__rev) as w:
+			w.writeAll('PDSD', struct.dumps(self.__fstab))
+			w.commit()
+			self.__rev = w.getRev()
+
+	def knownLabels(self):
+		return self.__fstab.keys()
+
+	def mount(self, label):
+		src = self.__fstab[label]["src"]
+		type = self.__fstab[label].get("type", "file")
+		options = self.__fstab[label].get("options", "")
+		credentials = self.__fstab[label].get("credentials", "")
+		Connector().mount(src, label, type, options, credentials)
+
+	def get(self, label):
+		return self.__fstab[label]
+
+	def set(self, label, mount):
+		self.__fstab[label] = mount
+
+	def remove(self, label):
+		del self.__fstab[label]
 
 
 app = QtGui.QApplication(sys.argv)

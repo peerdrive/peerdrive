@@ -21,6 +21,7 @@
 -include("netstore.hrl").
 -include("peerdrive_netstore_pb.hrl").
 -include("utils.hrl").
+-include("volman.hrl").
 
 -record(state, {init, handles, next, stores, store_pid, store_uuid, tls}).
 -record(retpath, {servlet, req, ref}).
@@ -221,9 +222,9 @@ do_mount(Body, RetPath, #state{stores=Stores} = S) ->
 	try
 		#mountreq{store=Store, no_verify=NoVerify} =
 			peerdrive_netstore_pb:decode_mountreq(Body),
-		{Id, _Descr, SId, Tags} = get_store_by_id(Store),
+		#peerdrive_store{label=Id, sid=SId, options=Options} = get_store_by_id(Store),
 		lists:member(Id, Stores) orelse throw({error, eacces}),
-		(not NoVerify or proplists:get_bool(noverify, Tags)) orelse
+		(not NoVerify or proplists:get_bool(<<"noverify">>, Options)) orelse
 			throw({error, einval}),
 		{ok, Pid} = check(peerdrive_volman:store(SId)),
 		S2 = S#state{store_pid=Pid, store_uuid=SId},
@@ -751,8 +752,7 @@ send_indication(Ind, Data, S) ->
 
 get_store_by_id(Store) ->
 	try
-		Id = list_to_existing_atom(Store),
-		case lists:keysearch(Id, 1, peerdrive_volman:enum()) of
+		case lists:keysearch(Store, #peerdrive_store.label, peerdrive_volman:enum()) of
 			{value, StoreSpec} ->
 				StoreSpec;
 			false ->

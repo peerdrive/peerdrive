@@ -668,10 +668,8 @@ def walkPath(path, create=False):
 	enum = connector.Connector().enum()
 	storeDoc = None
 	for mount in enum.allStores():
-		if not enum.isMounted(mount):
-			continue
-		mountDoc = enum.doc(mount)
-		if (mount == storeName) or (mountDoc.encode("hex").startswith(storeName)):
+		mountDoc = mount.sid
+		if (mount.label == storeName) or (mountDoc.encode("hex").startswith(storeName)):
 			storeDoc = mountDoc
 			break
 	if not storeDoc:
@@ -706,10 +704,10 @@ def resolvePath(path):
 			raise IOError("Path not found")
 		return folder[docName]
 	else:
-		enum = connector.Connector().enum()
-		if path not in enum.allStores():
+		store = connector.Connector().enum().fromLabel(path)
+		if store is None:
 			raise IOError("Path not found")
-		return DocLink(enum.doc(path), enum.doc(path), False)
+		return DocLink(store.sid, store.sid, False)
 
 
 def copyDoc(src, dstStore):

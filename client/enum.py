@@ -17,40 +17,25 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import sys, optparse
 from peerdrive import Connector, struct
+
+def printStore(store, verbose):
+	line = "'%s' as '%s' type '%s'" % (store.src, store.label, store.type)
+	if store.options:
+		line += " (" + store.options + ")"
+	if verbose:
+		line += " [" + store.sid.encode("hex") + "]"
+	print line
+
+parser = optparse.OptionParser()
+parser.add_option("-v", "--verbose", action="store_true", help="Verbose output")
+
+(options, args) = parser.parse_args()
 
 # enumerate all stores
 enum = Connector().enum()
-for store in enum.allStores():
-	mountName = enum.name(store)
-
-	state = ""
-	if enum.isMounted(store):
-		state += 'M'
-	else:
-		state += '-'
-	if enum.isSystem(store):
-		state += 'S'
-	else:
-		state += '-'
-	if enum.isRemovable(store):
-		state += 'R'
-	else:
-		state += '-'
-	if enum.isNet(store):
-		state += 'N'
-	else:
-		state += '-'
-
-	if enum.isMounted(store):
-		sid = enum.doc(store)
-		try:
-			rev = Connector().lookupDoc(sid, [sid]).rev(sid)
-			with Connector().peek(sid, rev) as r:
-				metaData = struct.loads(sid, r.readAll('META'))
-				realName = metaData["org.peerdrive.annotation"]["title"]
-		except IOError as err:
-			realName = "unknwown (" + str(err) + ")"
-		print "%s  %s %s  %s [%s]" % (state, store.ljust(8), sid.encode("hex"), realName, mountName)
-	else:
-		print "%s  %s [%s]" % (state, store.ljust(8), mountName)
+if options.verbose:
+	printStore(enum.sysStore(), True)
+for store in enum.regularStores():
+	printStore(store, options.verbose)

@@ -1163,7 +1163,7 @@ class FolderWidget(widgets.DocumentView):
 
 	def __addCreateActions(self, menu):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
-		sysStore = Connector().enum().sysStore()
+		sysStore = Connector().enum().sysStore().sid
 		sysDict = struct.Folder(struct.DocLink(sysStore, sysStore))
 		templatesDict = struct.Folder(sysDict.get("templates").update(sysStore))
 		items = templatesDict.items()

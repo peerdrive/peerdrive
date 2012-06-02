@@ -18,45 +18,42 @@
 -behaviour(supervisor).
 
 -export([start_link/0]).
--export([spawn_store/4, stop_store/1]).
+-export([spawn_store/4, reap_store/1]).
 -export([init/1]).
 
 start_link() ->
-	supervisor:start_link({local, peerdrive_store_sup}, ?MODULE, []).
+	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-%% @doc Spawn a store
-%%
-%% Returns the interface instad of the pid.
-spawn_store(Id, Disposition, Module, Arg) ->
-	Restart = case proplists:is_defined(removable, Disposition) of
-		false -> permanent;
-		true  -> transient
-	end,
+
+spawn_store(Module, Src, ParsedOpt, ParsedCreds) ->
+	Ref = make_ref(),
 	ChildSpec = {
-		Id,
-		{Module, start_link, [Id, proplists:get_bool(noverify, Disposition), Arg]},
-		Restart,
+		Ref,
+		{Module, start_link, [Src, ParsedOpt, ParsedCreds]},
+		transient,
 		30000,
 		worker,
 		[Module]
 	},
-	case supervisor:start_child(peerdrive_store_sup, ChildSpec) of
-		{error, already_present} ->
-			supervisor:restart_child(peerdrive_store_sup, Id);
-		{error, {already_started, PId}} ->
-			{ok, PId};
+	case supervisor:start_child(?MODULE, ChildSpec) of
+		{ok, Pid} ->
+			{ok, Ref, Pid};
 		{error, {Reason, _ChildSpec}} ->
 			{error, Reason};
-		Else ->
-			Else
+		{error, Reason} ->
+			{error, Reason}
 	end.
 
-stop_store(Id) ->
-	case supervisor:terminate_child(peerdrive_store_sup, Id) of
-		ok                 -> ok;
-		{error, not_found} -> ok;
-		Error              -> Error
+
+reap_store(Ref) ->
+	case supervisor:terminate_child(?MODULE, Ref) of
+		ok ->
+			supervisor:delete_child(?MODULE, Ref),
+			ok;
+		{error, not_found} ->
+			ok
 	end.
+
 
 init([]) ->
 	RestartStrategy    = one_for_one,

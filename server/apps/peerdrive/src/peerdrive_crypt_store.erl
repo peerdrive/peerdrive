@@ -24,15 +24,14 @@
 -include("store.hrl").
 -include("cryptstore.hrl").
 
--record(state, {regid, store, sid, key, synclocks=[]}).
+-record(state, {store, sid, key, synclocks=[]}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Id, _NoVerify, {Module, ModArg, Pwd}) ->
-	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
-	gen_server:start_link({local, RegId}, ?MODULE, {Id, RegId, Module, ModArg, Pwd}, []).
+start_link(Address, Options, Credentials) ->
+	gen_server:start_link(?MODULE, {Address, Options, Credentials}, []).
 
 % The length of the Data is unknown. We cannot use stream cipher modes because
 % they require unique IVec's for each message. This leaves us with CBC which typically
@@ -41,7 +40,10 @@ start_link(Id, _NoVerify, {Module, ModArg, Pwd}) ->
 dec_xid(Key, CipherData) ->
 	<<Len:8, Data/binary>> = crypto:aes_cbc_128_decrypt(Key,
 		<<"PeerDrivePeerDri">>, CipherData),
-	binary_part(Data, 0, Len).
+	if
+		Len =< size(Data) -> binary_part(Data, 0, Len);
+		true -> CipherData
+	end.
 
 
 enc_xid(Key, Data) ->
@@ -55,39 +57,25 @@ enc_xid(Key, Data) ->
 %% Gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Id, RegId, Module, ModArg, Pwd}) when is_list(Pwd) ->
-	init({Id, RegId, Module, ModArg, unicode:characters_to_binary(Pwd)});
-
-init({Id, RegId, Module, ModArg, Pwd}) ->
-	ChildId = list_to_atom("real_" ++ atom_to_list(Id)),
+% address: "urn:peerdrive:store:000102030405060708090a0b0c0d0e0f"
+% credentials: "pwd=my sectet password"
+init({Address, _Options, Credentials}) ->
 	process_flag(trap_exit, true),
-	case Module:start_link(ChildId, true, ModArg) of
-		{ok, Store} ->
-			SId = peerdrive_store:guid(Store),
-			S = #state{regid=RegId, store=Store, sid=SId},
-			case init_decrypt(Pwd, S) of
-				{ok, S2} ->
-					init_install_filter(S2),
-					{ok, S2};
+	try
+		Pwd = parse_credentials(Credentials),
+		SId = parse_address(Address),
+		{ok, Store} = check(peerdrive_volman:store(SId)),
+		S = #state{store=Store, sid=SId},
+		S2 = case init_decrypt(Pwd, S) of
+			{ok, OpenState} -> OpenState;
+			unencrypted     -> init_create_crypt(Pwd, S)
+		end,
+		init_install_filter(S2),
+		link(Store),
+		{ok, S2}
 
-				unencrypted ->
-					case init_create_crypt(Pwd, S) of
-						{ok, S2} ->
-							init_install_filter(S2),
-							{ok, S2};
-						{error, Error} ->
-							shutdown(Store),
-							{stop, Error}
-					end;
-
-				{error, Error} ->
-					shutdown(Store),
-					{stop, Error}
-			end;
-
-		ignore ->
-			{stop, ignore};
-		{error, Error} ->
+	catch
+		throw:{error, Error} ->
 			{stop, Error}
 	end.
 
@@ -191,25 +179,11 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 	end.
 
 
-terminate(_Reason, #state{store=undefined}) ->
-	ok;
-
-%% We are terminating but our underlying store is still alive. As we're playing
-%% supervisor we also have to try to shut down our child.
-terminate(_Reason, #state{regid=RegId, store=Store}) ->
-	case shutdown(Store) of
-		ok ->
-			ok;
-		{error, Reason} ->
-			error_logger:error_report([{peerdrive_crypt_store, RegId},
-				{reason, shutdown_error}, {exit_status, Reason}])
-	end.
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+terminate(_Reason, _State) -> ok.
 code_change(_, State, _) -> {ok, State}.
 handle_cast(_Request, State) -> {noreply, State}.
 
@@ -217,7 +191,11 @@ handle_cast(_Request, State) -> {noreply, State}.
 %% Request handlers
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Uses a scheme like LUKS...
+% Uses a scheme like LUKS. The master key is stored encrypted in every slot. To
+% derive the decryption key from the user password pbkdf2 is used. After the
+% master key was decrypted it is checked agains the master-key-digest, again
+% using pbkdf2. If the digest matches the right master key was found, otherwise
+% try again with the next slot.
 %
 % ENCR spec structure:
 %   "version"   -> 1
@@ -235,19 +213,21 @@ handle_cast(_Request, State) -> {noreply, State}.
 %   "enc-key" -> binary()
 
 init_decrypt(Pwd, S) ->
-	try
-		Spec = read_encr_spec(S#state.store, S#state.sid),
-		dict_get(<<"version">>, Spec) == 1 orelse throw({error, enodev}),
-		dict_get(<<"cipher">>, Spec) == <<"aes">> orelse throw({error, enodev}),
-		dict_get(<<"hash">>, Spec) == <<"sha1">> orelse throw({error, enodev}),
-		MkDigest = dict_get(<<"mk-digest">>, Spec),
-		MkSalt = dict_get(<<"mk-salt">>, Spec),
-		MkIter = dict_get(<<"mk-iter">>, Spec),
-		Verify = fun(Key) -> pbkdf2(Key, MkSalt, MkIter) == MkDigest end,
-		Key = open_slot(Pwd, Verify, dict_get(<<"slots">>, Spec)),
-		{ok, S#state{key=Key}}
-	catch
-		throw:Error -> Error
+	case read_encr_spec(S#state.store, S#state.sid) of
+		{ok, Spec} ->
+			dict_get(<<"version">>, Spec) == 1 orelse throw({error, enodev}),
+			dict_get(<<"cipher">>, Spec) == <<"aes">> orelse throw({error, enodev}),
+			dict_get(<<"hash">>, Spec) == <<"sha1">> orelse throw({error, enodev}),
+			MkDigest = dict_get(<<"mk-digest">>, Spec),
+			MkSalt = dict_get(<<"mk-salt">>, Spec),
+			MkIter = dict_get(<<"mk-iter">>, Spec),
+			{dlink, EncSId} = dict_get(<<"root">>, Spec),
+			Verify = fun(Key) -> pbkdf2(Key, MkSalt, MkIter) == MkDigest end,
+			Key = open_slot(Pwd, Verify, dict_get(<<"slots">>, Spec)),
+			{ok, S#state{key=Key, sid=dec_xid(Key, EncSId)}};
+
+		unencrypted ->
+			unencrypted
 	end.
 
 
@@ -261,11 +241,11 @@ read_encr_spec(Store, Doc) ->
 					{'EXIT', _Reason} ->
 						throw({error, eio});
 					Struct ->
-						Struct
+						{ok, Struct}
 				end;
 
 			{error, enoent} ->
-				throw(unencrypted);
+				unencrypted;
 			{error, _} = Error ->
 				throw(Error)
 		end
@@ -290,60 +270,57 @@ open_slot(Pwd, Verify, [Slot | Rest]) ->
 
 
 init_create_crypt(Pwd, #state{store=Store, sid=Doc} = S) ->
+	{ok, Rev, _PreRevs} = check(peerdrive_store:lookup(Store, Doc)),
+	% use the broker to update to keep ref's intact
+	{ok, Handle} = check(peerdrive_broker:update(Store, Doc, Rev,
+		<<"org.peerdrive.crypt-store">>)),
 	try
-		{ok, Rev, _PreRevs} = check(peerdrive_store:lookup(Store, Doc)),
-		% use the broker to update to keep ref's intact
-		{ok, Handle} = peerdrive_broker:update(Store, Doc, Rev,
-			<<"org.peerdrive.crypt-store">>),
+		Key = crypto:strong_rand_bytes(16),
+		SlotSalt = crypto:rand_bytes(32),
+		SlotIter = crypto:rand_uniform(2048, 8192),
+		SlotKey = pbkdf2(Pwd, SlotSalt, SlotIter, 16),
+		SlotEncKey = crypto:aes_cbc_128_encrypt(SlotKey, <<0:128>>, Key),
+		MkSalt = crypto:rand_bytes(32),
+		MkIter = crypto:rand_uniform(2048, 8192),
+		MkDigest = pbkdf2(Key, MkSalt, MkIter),
+		SId = crypto:rand_bytes(16),
+		EncSId = enc_xid(Key, SId),
+
+		Slot = gb_trees:from_orddict(orddict:from_list([ {<<"iter">>, SlotIter},
+			{<<"salt">>, SlotSalt}, {<<"enc-key">>, SlotEncKey} ])),
+		Spec = gb_trees:from_orddict(orddict:from_list([ {<<"version">>, 1},
+			{<<"cipher">>, <<"aes">>}, {<<"hash">>, <<"sha1">>},
+			{<<"mk-digest">>, MkDigest}, {<<"mk-salt">>, MkSalt},
+			{<<"mk-iter">>, MkIter}, {<<"slots">>, [Slot]},
+			{<<"root">>, {dlink, EncSId}} ])),
+
+		check(peerdrive_broker:write(Handle, <<"ENCR">>, 0,
+			peerdrive_struct:encode(Spec))),
+		EncRootHandle = init_create_crypt_root(Store, EncSId, Key),
 		try
-			Key = crypto:strong_rand_bytes(16),
-			SlotSalt = crypto:rand_bytes(32),
-			SlotIter = crypto:rand_uniform(2048, 8192),
-			SlotKey = pbkdf2(Pwd, SlotSalt, SlotIter, 16),
-			SlotEncKey = crypto:aes_cbc_128_encrypt(SlotKey, <<0:128>>, Key),
-			MkSalt = crypto:rand_bytes(32),
-			MkIter = crypto:rand_uniform(2048, 8192),
-			MkDigest = pbkdf2(Key, MkSalt, MkIter),
-			EncSId = enc_xid(Key, Doc),
+			Annotation1 = gb_trees:empty(),
+			Annotation2 = gb_trees:enter(<<"title">>,
+				<<"New encrypted store">>, Annotation1), % TODO: get from unencrypted root
+			Annotation3 = gb_trees:enter(<<"comment">>,
+				<<"<<Initial store creation>>">>, Annotation2),
+			RootMeta1 = gb_trees:empty(),
+			RootMeta2 = gb_trees:enter(<<"org.peerdrive.annotation">>,
+				Annotation3, RootMeta1),
 
-			Slot = gb_trees:from_orddict(orddict:from_list([ {<<"iter">>, SlotIter},
-				{<<"salt">>, SlotSalt}, {<<"enc-key">>, SlotEncKey} ])),
-			Spec = gb_trees:from_orddict(orddict:from_list([ {<<"version">>, 1},
-				{<<"cipher">>, <<"aes">>}, {<<"hash">>, <<"sha1">>},
-				{<<"mk-digest">>, MkDigest}, {<<"mk-salt">>, MkSalt},
-				{<<"mk-iter">>, MkIter}, {<<"slots">>, [Slot]},
-				{<<"root">>, {dlink, EncSId}} ])),
+			check(peerdrive_store:write(EncRootHandle, <<"PDSD">>, 0,
+				peerdrive_struct:encode([]))),
+			check(peerdrive_store:write(EncRootHandle, <<"META">>, 0,
+				peerdrive_struct:encode(RootMeta2))),
+			check(peerdrive_store:set_flags(EncRootHandle, ?REV_FLAG_STICKY)),
 
-			check(peerdrive_broker:write(Handle, <<"ENCR">>, 0,
-				peerdrive_struct:encode(Spec))),
-			EncRootHandle = init_create_crypt_root(Store, EncSId, Key),
-			try
-				Annotation1 = gb_trees:empty(),
-				Annotation2 = gb_trees:enter(<<"title">>,
-					<<"New encrypted store">>, Annotation1), % TODO: get from unencrypted root
-				Annotation3 = gb_trees:enter(<<"comment">>,
-					<<"<<Initial store creation>>">>, Annotation2),
-				RootMeta1 = gb_trees:empty(),
-				RootMeta2 = gb_trees:enter(<<"org.peerdrive.annotation">>,
-					Annotation3, RootMeta1),
-
-				check(peerdrive_store:write(EncRootHandle, <<"PDSD">>, 0,
-					peerdrive_struct:encode([]))),
-				check(peerdrive_store:write(EncRootHandle, <<"META">>, 0,
-					peerdrive_struct:encode(RootMeta2))),
-				check(peerdrive_store:set_flags(EncRootHandle, ?REV_FLAG_STICKY)),
-
-				check(peerdrive_store:commit(EncRootHandle)),
-				check(peerdrive_broker:commit(Handle)),
-				{ok, S#state{key=Key}}
-			after
-				peerdrive_store:close(EncRootHandle)
-			end
+			check(peerdrive_store:commit(EncRootHandle)),
+			check(peerdrive_broker:commit(Handle)),
+			S#state{key=Key, sid=SId}
 		after
-			peerdrive_broker:close(Handle)
+			peerdrive_store:close(EncRootHandle)
 		end
-	catch
-		throw:Error -> Error
+	after
+		peerdrive_broker:close(Handle)
 	end.
 
 
@@ -359,16 +336,9 @@ init_create_crypt_root(Store, EncDId, Key) ->
 
 init_install_filter(#state{sid=SId, key=Key}) ->
 	Fun = fun
-		({vol_event, mod_doc, Store, Doc}) ->
-			{vol_event, mod_doc, Store, dec_xid(Key, Doc)};
-		({vol_event, add_rev, Store, Rev}) ->
-			{vol_event, add_rev, Store, dec_xid(Key, Rev)};
-		({vol_event, rem_rev, Store, Rev}) ->
-			{vol_event, rem_rev, Store, dec_xid(Key, Rev)};
-		({vol_event, add_doc, Store, Doc}) ->
-			{vol_event, add_doc, Store, dec_xid(Key, Doc)};
-		({vol_event, rem_doc, Store, Doc}) ->
-			{vol_event, rem_doc, Store, dec_xid(Key, Doc)};
+		({vol_event, Event, Store, EncId}) when is_atom(Event), is_binary(EncId),
+		                                        size(EncId) rem 16 == 0 ->
+			{vol_event, Event, Store, dec_xid(Key, EncId)};
 		(Default) ->
 			Default
 	end,
@@ -665,23 +635,6 @@ sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
 	end.
 
 
-shutdown(Store) ->
-    erlang:monitor(process, Store),
-	exit(Store, shutdown),
-	receive
-		{'DOWN', _Ref, process, Store, shutdown} ->
-			ok;
-		{'DOWN', _Ref, process, Store, Reason} ->
-			{error, Reason}
-		after 29000 ->
-			exit(Store, kill),
-			receive
-				{'DOWN', _Ref, process, Store, Reason} ->
-					{error, Reason}
-			end
-	end.
-
-
 check({error, _} = Error) ->
 	throw(Error);
 check(error) ->
@@ -759,4 +712,22 @@ pbkdf2_block_loop(_Pwd, 0, _Prev, Acc) ->
 pbkdf2_block_loop(Pwd, Iterations, Prev, Acc) ->
     Next = crypto:sha_mac(Pwd, Prev),
 	pbkdf2_block_loop(Pwd, Iterations-1, Next, crypto:exor(Next, Acc)).
+
+
+parse_credentials(Credentials) ->
+	case proplists:get_value(<<"pwd">>, Credentials) of
+		Pwd when is_binary(Pwd) -> Pwd;
+		undefined -> throw({error, einval})
+	end.
+
+
+% address: "urn:peerdrive:store:000102030405060708090a0b0c0d0e0f"
+parse_address(Address) ->
+	ReOpts = [{capture, all_but_first, list}],
+	case re:run(Address, "^urn:peerdrive:store:([a-fA-F0-9]+)$", ReOpts) of
+		{match,[RawSId]} ->
+			peerdrive_util:hexstr_to_bin(RawSId);
+		nomatch ->
+			throw({error, einval})
+	end.
 

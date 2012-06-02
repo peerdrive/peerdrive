@@ -17,26 +17,34 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys
+import sys, optparse
 from peerdrive import Connector, struct
 
-if len(sys.argv) == 2:
-	try:
-		Connector().mount(sys.argv[1])
-	except IOError as error:
-		print "Mount failed: " + str(error)
-		sys.exit(2)
+parser = optparse.OptionParser(usage="usage: %prog [options] <src> <label>")
+parser.add_option("-o", "--options",
+	help="Comma separated string of mount options")
+parser.add_option("-t", "--type", default="file",
+	help="Store type (default: %default)")
+parser.add_option("-c", "--credentials", default="",
+	help="Credentials to mount store")
 
-	sid = Connector().enum().doc(sys.argv[1])
-	try:
-		rev = Connector().lookupDoc(sid, [sid]).rev(sid)
-		with Connector().peek(sid, rev) as r:
-			metaData = struct.loads(sid, r.readAll('META'))
-			name = metaData["org.peerdrive.annotation"]["title"]
-	except IOError:
-		name = "Unnamed store"
-	print "Mounted '%s'" % name
-else:
-	print "Usage: hp-mount.py <id>"
-	sys.exit(1)
+(options, args) = parser.parse_args()
+if len(args) != 2:
+	parser.error("incorrect number of arguments")
+
+try:
+	sid = Connector().mount(args[0], args[1], type=options.type,
+		options=options.options, credentials=options.credentials)
+except IOError as error:
+	print >>sys.stderr, "Mount failed: " + str(error)
+	sys.exit(2)
+
+try:
+	rev = Connector().lookupDoc(sid, [sid]).rev(sid)
+	with Connector().peek(sid, rev) as r:
+		metaData = struct.loads(sid, r.readAll('META'))
+		name = metaData["org.peerdrive.annotation"]["title"]
+except IOError:
+	name = "Unnamed store"
+print "Mounted '%s'" % name
 

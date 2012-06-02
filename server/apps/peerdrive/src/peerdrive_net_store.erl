@@ -32,12 +32,8 @@
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Id, NoVerify, {Address, Port, Name}) ->
-	start_link(Id, NoVerify, {Address, Port, Name, deny});
-
-start_link(Id, NoVerify, {_Address, _Port, _Name, _Tls} = Args) ->
-	RegId = list_to_atom(atom_to_list(Id) ++ "_store"),
-	gen_server:start_link({local, RegId}, ?MODULE, [NoVerify, Args], []).
+start_link(Address, Options, _Credentials) ->
+	gen_server:start_link(?MODULE, {Address, Options}, []).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -64,38 +60,36 @@ io_request_async(NetStore, Request, Body, Finish) ->
 %% Gen_server callbacks...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init([NoVerify, {Address, Port, Name, Tls}]) ->
-	Options = [binary, {packet, 2}, {active, false}, {nodelay, true},
-		{keepalive, true}],
-	case gen_tcp:connect(Address, Port, Options) of
-		{ok, Socket} ->
-			process_flag(trap_exit, true),
-			S = #state{
-				socket    = Socket,
-				transport = gen_tcp,
-				requests  = gb_trees:empty(),
-				synclocks = dict:new()
-			},
-			case do_init(Tls, S) of
-				{ok, S2} ->
-					case do_mount(Name, NoVerify, S2) of
-						{ok, S3} = Ok->
-							case S3#state.transport of
-								gen_tcp ->
-									inet:setopts(S3#state.socket, [{active, true}]);
-								ssl ->
-									ssl:setopts(S3#state.socket, [{active, true}])
-							end,
-							Ok;
-						Error1 ->
-							Error1
-					end;
+init({Address, Options}) ->
+	try
+		{IpAddress, Port, Name} = parse_address(Address),
+		Tls = parse_tls(Options),
+		TcpOptions = [binary, {packet, 2}, {active, false}, {nodelay, true},
+			{keepalive, true}],
+		case gen_tcp:connect(IpAddress, Port, TcpOptions) of
+			{ok, Socket} ->
+				process_flag(trap_exit, true),
+				S = #state{
+					socket    = Socket,
+					transport = gen_tcp,
+					requests  = gb_trees:empty(),
+					synclocks = dict:new()
+				},
+				S2 = do_init(Tls, S),
+				S3 = do_mount(Name, proplists:get_bool(<<"noverify">>, Options), S2),
+				case S3#state.transport of
+					gen_tcp ->
+						inet:setopts(S3#state.socket, [{active, true}]);
+					ssl ->
+						ssl:setopts(S3#state.socket, [{active, true}])
+				end,
+				{ok, S3};
 
-				Error2 ->
-					Error2
-			end;
-
-		{error, Reason} ->
+			{error, TcpErr} ->
+				{stop, TcpErr}
+		end
+	catch
+		throw:Reason ->
 			{stop, Reason}
 	end.
 
@@ -297,23 +291,23 @@ do_init(Tls, #state{socket=Socket} = S) ->
 			StartTls and (TlsReq =/= deny) ->
 				case ssl:connect(Socket, SslOpts, 5000) of
 					{ok, SslSocket} ->
-						{ok, S2#state{transport=ssl, socket=SslSocket}};
+						S2#state{transport=ssl, socket=SslSocket};
 					Error4 ->
 						throw(fixup_ssl_err(Error4))
 				end;
 			not StartTls and (TlsReq =/= required) ->
-				{ok, S2};
+				S2;
 			true ->
 				throw({error, ebade})
 		end
 	catch
-		throw:{error, Error} -> gen_tcp:close(Socket), {stop, Error}
+		throw:{error, Error} -> gen_tcp:close(Socket), throw(Error)
 	end.
 
 
 do_mount(Name, NoVerify, #state{transport=Trsp, socket=Socket} = S) ->
 	Req = peerdrive_netstore_pb:encode_mountreq(#mountreq{
-		store=atom_to_binary(Name, utf8), no_verify=NoVerify}),
+		store=Name, no_verify=NoVerify}),
 	MountReq = <<0:32, ?MOUNT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
 	try
 		MountCnfMsg = case Trsp:send(Socket, MountReq) of
@@ -337,10 +331,10 @@ do_mount(Name, NoVerify, #state{transport=Trsp, socket=Socket} = S) ->
 			_ ->
 				throw({error, einval})
 		end,
-		{ok, S#state{guid=SId}}
+		S#state{guid=SId}
 	catch
 		throw:{error, Error} ->
-			Trsp:close(Socket), {stop, fixup_ssl_err(Error)}
+			Trsp:close(Socket), throw(fixup_ssl_err(Error))
 	end.
 
 
@@ -755,4 +749,61 @@ fixup_ssl_err(esslaccept) -> erpcmismatch;
 fixup_ssl_err(esslconnect) -> erpcmismatch;
 fixup_ssl_err({eoptions, _}) -> einval;
 fixup_ssl_err(Posix) -> Posix.
+
+
+% {IpAddress, Port, Name} = "name@xxx.xxx.xxx.xxx:port"
+parse_address(Address) ->
+	Res = re:run(Address, "^(.+)@([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)(:[0-9]+)?$",
+		[{capture, all_but_first, list}]),
+	case Res of
+		{match, [Name, Ip]} ->
+			{Ip, 4568, Name};
+		{match, [Name, Ip, [_|PortStr]]} ->
+			Port = try
+				list_to_integer(PortStr)
+			catch
+				error:badarg -> throw(einval)
+			end,
+			{Ip, Port, Name};
+		_ ->
+			throw(einval)
+	end.
+
+
+% deny | {optional, SslOpts} | {required, SslOpts}
+parse_tls(Options) ->
+	case proplists:get_value(<<"tls">>, Options, <<"deny">>) of
+		<<"deny">> ->
+			deny;
+		<<"optional">> ->
+			{optional, parse_ssl_opts(Options)};
+		<<"required">> ->
+			{required, parse_ssl_opts(Options)};
+		_ ->
+			throw(einval)
+	end.
+
+
+parse_ssl_opts(Options) ->
+	Verify = case proplists:get_value(<<"verify_peer">>, Options, <<"true">>) of
+		<<"true">> ->
+			[{verify, verify_peer}, {fail_if_no_peer_cert, true}];
+		<<"false">> ->
+			[{verify, verify_none}];
+		_ ->
+			throw(einval)
+	end,
+	lists:foldl(
+		fun
+			({<<"cacertfile">>, CaCert}, Acc) ->
+				[{cacertfile, unicode:characters_to_list(CaCert)} | Acc];
+			({<<"certfile">>, Cert}, Acc) ->
+				[{certfile, unicode:characters_to_list(Cert)} | Acc];
+			({<<"keyfile">>, Key}, Acc) ->
+				[{keyfile, unicode:characters_to_list(Key)} | Acc];
+			(_, Acc) ->
+				Acc
+		end,
+		Verify,
+		Options).
 
