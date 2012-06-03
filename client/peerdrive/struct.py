@@ -653,6 +653,48 @@ def readTitle(link, default=None):
 	return default
 
 
+class FSTab(object):
+	def __init__(self):
+		self.__changed = False
+		self.__store = connector.Connector().enum().sysStore().sid
+		self.__doc = Folder(DocLink(self.__store, self.__store))["fstab"].doc()
+		self.__rev = connector.Connector().lookupDoc(self.__doc).rev(self.__store)
+		with connector.Connector().peek(self.__store, self.__rev) as r:
+			self.__fstab = loads(self.__store, r.readAll('PDSD'))
+
+	def save(self):
+		if not self.__changed:
+			return
+
+		with connector.Connector().update(self.__store, self.__doc, self.__rev) as w:
+			w.writeAll('PDSD', dumps(self.__fstab))
+			w.commit()
+			self.__rev = w.getRev()
+
+		self.__changed = False
+
+	def knownLabels(self):
+		return self.__fstab.keys()
+
+	def mount(self, label):
+		src = self.__fstab[label]["src"]
+		type = self.__fstab[label].get("type", "file")
+		options = self.__fstab[label].get("options", "")
+		credentials = self.__fstab[label].get("credentials", "")
+		return connector.Connector().mount(src, label, type, options, credentials)
+
+	def get(self, label):
+		return copy.deepcopy(self.__fstab[label])
+
+	def set(self, label, mount):
+		self.__fstab[label] = mount
+		self.__changed = True
+
+	def remove(self, label):
+		del self.__fstab[label]
+		self.__changed = True
+
+
 ###############################################################################
 # Path resolving
 ###############################################################################

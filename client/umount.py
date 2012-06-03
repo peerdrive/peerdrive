@@ -2,7 +2,7 @@
 # vim: set fileencoding=utf-8 :
 #
 # PeerDrive
-# Copyright (C) 2011  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
+# Copyright (C) 2012  Jan Klötzke <jan DOT kloetzke AT freenet DOT de>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,18 +17,47 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys
-from peerdrive import Connector
+import sys, optparse
+from peerdrive import Connector, struct
 
-if len(sys.argv) == 2:
-	try:
-		sid = Connector().enum().fromLabel(sys.argv[1]).sid
-		Connector().unmount(sid)
-	except IOError as error:
-		print "Unmount failed: " + str(error)
-		sys.exit(2)
-else:
-	print "Usage: umount.py <label>"
+parser = optparse.OptionParser(usage="usage: %prog [options] <label>")
+parser.add_option("-r", "--remove", action="store_true",
+	help="Remove mount label from fstab")
+parser.add_option("-s", "--server", help="PeerDrive server address (host[:port])")
+
+(options, args) = parser.parse_args()
+if len(args) != 1:
+	parser.error("incorrect number of arguments")
+
+# make connection to server
+try:
+	Connector(options.server)
+except IOError as e:
+	print >>sys.stderr, str(e)
 	sys.exit(1)
 
+label = args[0]
+try:
+	store = Connector().enum().fromLabel(label)
+	if store is None:
+		print >>sys.stderr, "Label '%s' not mounted" % label
+		if not options.remove:
+			sys.exit(2)
+	else:
+		Connector().unmount(store.sid)
+except IOError as error:
+	print "Unmount failed: " + str(error)
+	sys.exit(2)
+
+if options.remove:
+	fstab = struct.FSTab()
+	if label in fstab.knownLabels():
+		try:
+			fstab.remove(label)
+			fstab.save()
+		except IOError as error:
+			print "Remove failed: " + str(error)
+			sys.exit(2)
+	else:
+		print >>sys.stderr, "Remove failed: label '%s' not found in fstab" % label
 

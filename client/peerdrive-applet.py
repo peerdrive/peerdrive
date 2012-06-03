@@ -79,7 +79,7 @@ class Launchbox(QtGui.QDialog):
 		self.__trayIcon.activated.connect(self.__trayActivated)
 		self.__trayIcon.show()
 
-		self.__fstab = FSTab()
+		self.__fstab = struct.FSTab()
 
 		self.__watch = Launchbox.RootWatch(self.__trayIcon)
 		Connector().watch(self.__watch)
@@ -560,44 +560,6 @@ class SyncRules(object):
 	def setDescr(self, store, peer, descr):
 		self.__rules[(store, peer)]['descr'] = descr
 		self.__changed = True
-
-
-class FSTab(object):
-	def __init__(self):
-		self.__changed = False
-		self.__store = Connector().enum().sysStore().sid
-		self.__doc = struct.Folder(struct.DocLink(self.__store, self.__store))["fstab"].doc()
-		self.__rev = Connector().lookupDoc(self.__doc).rev(self.__store)
-		with Connector().peek(self.__store, self.__rev) as r:
-			self.__fstab = struct.loads(self.__store, r.readAll('PDSD'))
-
-	def save(self):
-		if not self.__changed:
-			return
-
-		with Connector().update(self.__store, self.__doc, self.__rev) as w:
-			w.writeAll('PDSD', struct.dumps(self.__fstab))
-			w.commit()
-			self.__rev = w.getRev()
-
-	def knownLabels(self):
-		return self.__fstab.keys()
-
-	def mount(self, label):
-		src = self.__fstab[label]["src"]
-		type = self.__fstab[label].get("type", "file")
-		options = self.__fstab[label].get("options", "")
-		credentials = self.__fstab[label].get("credentials", "")
-		Connector().mount(src, label, type, options, credentials)
-
-	def get(self, label):
-		return self.__fstab[label]
-
-	def set(self, label, mount):
-		self.__fstab[label] = mount
-
-	def remove(self, label):
-		del self.__fstab[label]
 
 
 app = QtGui.QApplication(sys.argv)

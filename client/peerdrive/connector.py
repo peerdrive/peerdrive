@@ -237,8 +237,18 @@ class _Connector(QtCore.QObject):
 
 	watchReady = QtCore.pyqtSignal()
 
-	def __init__(self, host = '127.0.0.1', port = 4567):
+	def __init__(self, address=None):
 		super(_Connector, self).__init__()
+
+		host = '127.0.0.1'
+		port = 4567
+		if address:
+			if ':' in address:
+				(host, port) = address.split(':')
+				port = int(port)
+			else:
+				host = address
+
 		self.socket = QtNetwork.QTcpSocket()
 		self.socket.readyRead.connect(self.__readReady)
 		self.socket.connectToHost(host, port)
@@ -1092,10 +1102,10 @@ def __FlushConnection():
 	if _connection:
 		_connection.flush()
 
-def Connector():
+def Connector(address=None):
 	global _connection
 	if not _connection:
-		_connection = _Connector()
+		_connection = _Connector(address)
 		atexit.register(__FlushConnection)
 	return _connection
 
