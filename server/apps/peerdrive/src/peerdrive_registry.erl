@@ -19,7 +19,7 @@
 
 -export([start_link/0]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
--export([get_uti_from_extension/1, get_uti_from_extension/2]).
+-export([get_uti_from_extension/1, get_uti_from_extension/2, conformes/2]).
 
 -include("utils.hrl").
 -include("volman.hrl").
@@ -38,8 +38,19 @@ get_uti_from_extension(Ext) ->
 	get_uti_from_extension(Ext, <<"public.data">>).
 
 
+get_uti_from_extension(Ext, Default) when is_list(Ext) ->
+	get_uti_from_extension(unicode:characters_to_binary(Ext), Default);
+
 get_uti_from_extension(Ext, Default) ->
 	gen_server:call(?MODULE, {uti_from_ext, Ext, Default}).
+
+
+conformes(Uti, Uti) ->
+	true;
+
+conformes(Uti, SuperClass) ->
+	gen_server:call(?MODULE, {conformes, unicode:characters_to_binary(Uti),
+		unicode:characters_to_binary(SuperClass)}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -71,6 +82,10 @@ init([]) ->
 
 handle_call({uti_from_ext, Ext, Default}, _From, S) ->
 	Reply = uti_from_ext(Ext, Default, S#state.reg),
+	{reply, Reply, S};
+
+handle_call({conformes, Uti, SuperClass}, _From, S) ->
+	Reply = conformes(Uti, SuperClass, S#state.reg),
 	{reply, Reply, S}.
 
 
@@ -109,9 +124,6 @@ read_registry(Store, Doc) ->
 	end.
 
 
-uti_from_ext(Ext, Default, Reg) when is_list(Ext) ->
-	uti_from_ext(unicode:characters_to_binary(Ext), Default, Reg);
-
 uti_from_ext(Ext, Default, Reg) ->
 	try
 		lists:foreach(
@@ -127,5 +139,24 @@ uti_from_ext(Ext, Default, Reg) ->
 		Default
 	catch
 		throw:Result -> Result
+	end.
+
+
+conformes(Uti, Uti, _Reg) ->
+	true;
+
+conformes(Uti, SuperClass, Reg) ->
+	case gb_trees:lookup(Uti, Reg) of
+		{value, Spec} ->
+			case gb_trees:lookup(<<"conforming">>, Spec) of
+				{value, Parents} ->
+					lists:any(fun(Super) -> conformes(Super, SuperClass, Reg) end,
+						Parents);
+				none ->
+					false
+			end;
+
+		none ->
+			false
 	end.
 

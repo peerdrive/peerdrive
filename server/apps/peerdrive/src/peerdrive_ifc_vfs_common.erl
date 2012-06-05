@@ -1376,9 +1376,19 @@ folder_set_title(Store, Doc, NewTitle) ->
 					ok    -> ok;
 					WrErr -> throw(WrErr)
 				end,
-				Uti = peerdrive_registry:get_uti_from_extension(
-					filename:extension(NewTitle)),
-				peerdrive_ifc_vfs_broker:set_type(Handle, Uti),
+				case peerdrive_ifc_vfs_broker:get_type(Handle) of
+					{ok, OrigUti} ->
+						case peerdrive_registry:conformes(OrigUti, <<"org.peerdrive.folder">>) of
+							false ->
+								NewUti = peerdrive_registry:get_uti_from_extension(
+									filename:extension(NewTitle)),
+								peerdrive_ifc_vfs_broker:set_type(Handle, NewUti);
+							true ->
+								ok
+						end;
+					_ ->
+						ok % ignore this error
+				end,
 				case peerdrive_ifc_vfs_broker:close(Handle, Comment) of
 					{ok, _NewRev} -> ok;
 					CloseErr      -> CloseErr
