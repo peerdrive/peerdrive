@@ -1246,7 +1246,8 @@ folder_read_title(Store, Rev) ->
 		{ok, Meta} ->
 			case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
 				{ok, Title} when is_binary(Title) ->
-					unicode:characters_to_binary(sanitize(binary_to_list(Title)));
+					unicode:characters_to_binary(sanitize(
+						unicode:characters_to_list(Title)));
 				{ok, _} ->
 					<<"">>;
 				error ->
