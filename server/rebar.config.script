@@ -1,0 +1,34 @@
+
+Apps = lists:foldl(
+	fun(Path, Acc) ->
+		case lists:reverse(filename:split(Path)) of
+			["ebin", Lib | _] ->
+				Lib ++ ":" ++ Acc;
+			_ ->
+				Acc
+		end
+	end,
+	"",
+	code:get_path()),
+
+Script = filename:basename(SCRIPT),
+
+{erl_opts, Opts1} = lists:keyfind(erl_opts, 1, CONFIG),
+Opts2 = case re:run(Apps, "fuserl-", [{capture, none}]) of
+	match ->
+		io:format("~s: fuserl: enabled~n", [Script]),
+		[{d, have_fuserl} | Opts1];
+	nomatch ->
+		io:format("~s: fuserl: disabled~n", [Script]),
+		Opts1
+end,
+Opts3 = case re:run(Apps, "erldokan-", [{capture, none}]) of
+	match ->
+		io:format("~s: erldokan: enabled~n", [Script]),
+		[{d, have_dokan} | Opts2];
+	nomatch ->
+		io:format("~s: erldokan: disabled~n", [Script]),
+		Opts2
+end,
+lists:keystore(erl_opts, 1, CONFIG, {erl_opts, Opts3}).
+

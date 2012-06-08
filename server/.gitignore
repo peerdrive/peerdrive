@@ -2,7 +2,6 @@
 /apps/peerdrive/include/peerdrive_netstore_pb.hrl
 /deps/
 /peerdrive.config
-/rebar.config
 /rel/peerdrive/
 /snapshots/
 /stores/

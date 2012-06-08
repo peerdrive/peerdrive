@@ -48,7 +48,6 @@ out. It is assumed that Erlang, Rebar and Python are all in your path.
 2. Open two terminals
 3. Type in the 1st terminal:
     * `cd server`
-    * `./configure`
     * `rebar get-deps`
     * `rebar compile`
     * `./peerdrive.sh` or on Windows: `peerdrive.bat`
@@ -59,7 +58,7 @@ out. It is assumed that Erlang, Rebar and Python are all in your path.
 4. In the 2nd terminal type:
     * `cd client`
     * `./boot.py`
-    * `./launchbox.py`
+    * `./peerdrive-applet.py`
 
 The stores place their files under "stores/". Initially all stores start empty.
 When executing "boot.py" some necessary documents are created in the system
