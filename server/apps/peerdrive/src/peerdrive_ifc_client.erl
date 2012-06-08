@@ -238,12 +238,82 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 		?PROGRESS_QUERY_MSG ->
 			{reply, do_progress_query(RetPath), S};
 
-		_ ->
-			{{1, Handle}, _} = protobuffs:decode(Body, uint32),
-			Worker = dict:fetch(Handle, S#state.handles),
-			Worker ! {Request, Body, RetPath},
-			{ok, S}
+		?READ_MSG ->
+			ReqData = #readreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_readreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?WRITE_BUFFER_MSG ->
+			ReqData = #writebufferreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_writebufferreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?WRITE_COMMIT_MSG ->
+			ReqData = #writecommitreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_writecommitreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?TRUNC_MSG ->
+			ReqData = #truncreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_truncreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?CLOSE_MSG ->
+			ReqData = #closereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_closereq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?COMMIT_MSG ->
+			ReqData = #commitreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_commitreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?SUSPEND_MSG ->
+			ReqData = #suspendreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_suspendreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?MERGE_MSG ->
+			ReqData = #mergereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_mergereq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?REBASE_MSG ->
+			ReqData = #rebasereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_rebasereq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?GET_PARENTS_MSG ->
+			ReqData = #getparentsreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_getparentsreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?SET_TYPE_MSG ->
+			ReqData = #settypereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_settypereq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?GET_TYPE_MSG ->
+			ReqData = #gettypereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_gettypereq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?SET_FLAGS_MSG ->
+			ReqData = #setflagsreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_setflagsreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?GET_FLAGS_MSG ->
+			ReqData = #getflagsreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_getflagsreq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S)
 	end.
+
+
+handle_packet_forward(Request, Handle, ReqData, RetPath, S) ->
+	Worker = dict:fetch(Handle, S#state.handles),
+	Worker ! {Request, ReqData, RetPath},
+	{ok, S}.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -594,8 +664,8 @@ start_worker(S, Fun, RetPath, Body) ->
 
 io_loop(Handle, State) ->
 	receive
-		{Req, Body, RetPath} ->
-			try io_loop_process(Handle, State, Req, Body) of
+		{Req, ReqData, RetPath} ->
+			try io_loop_process(Handle, State, Req, ReqData) of
 				Reply when is_binary(Reply) ->
 					send_reply(RetPath, Reply),
 					io_loop(Handle, State);
@@ -621,23 +691,20 @@ io_loop(Handle, State) ->
 io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 	case Request of
 		?READ_MSG ->
-			#readreq{part=Part, offset=Offset, length=Length} =
-				peerdrive_client_pb:decode_readreq(ReqData),
+			#readreq{part=Part, offset=Offset, length=Length} = ReqData,
 			?ASSERT_PART(Part),
 			{ok, Data} = check(peerdrive_broker:read(Handle, Part, Offset, Length)),
 			peerdrive_client_pb:encode_readcnf(#readcnf{data=Data});
 
 		?WRITE_BUFFER_MSG ->
-			#writebufferreq{part=Part, data=Data} =
-				peerdrive_client_pb:decode_writebufferreq(ReqData),
+			#writebufferreq{part=Part, data=Data} = ReqData,
 			?ASSERT_PART(Part),
 			NewWrBuf = orddict:update(Part, fun(Old) -> [Data | Old] end,
 				[Data], WriteBuffer),
 			{<<>>, NewWrBuf};
 
 		?WRITE_COMMIT_MSG ->
-			#writecommitreq{part=Part, offset=Offset, data=Data} =
-				peerdrive_client_pb:decode_writecommitreq(ReqData),
+			#writecommitreq{part=Part, offset=Offset, data=Data} = ReqData,
 			?ASSERT_PART(Part),
 			case orddict:find(Part, WriteBuffer) of
 				error ->
@@ -655,8 +722,7 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 			end;
 
 		?TRUNC_MSG ->
-			#truncreq{part=Part, offset=Offset} =
-				peerdrive_client_pb:decode_truncreq(ReqData),
+			#truncreq{part=Part, offset=Offset} = ReqData,
 			?ASSERT_PART(Part),
 			ok = check(peerdrive_broker:truncate(Handle, Part, Offset)),
 			<<>>;
@@ -666,8 +732,7 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 			{stop, <<>>};
 
 		?COMMIT_MSG ->
-			#commitreq{comment=CommentStr} =
-				peerdrive_client_pb:decode_commitreq(ReqData),
+			#commitreq{comment=CommentStr} = ReqData,
 			Comment = if
 				CommentStr == undefined -> undefined;
 				true -> unicode:characters_to_binary(CommentStr)
@@ -676,8 +741,7 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 			peerdrive_client_pb:encode_commitcnf(#commitcnf{rev=Rev});
 
 		?SUSPEND_MSG ->
-			#suspendreq{comment=CommentStr} =
-				peerdrive_client_pb:decode_suspendreq(ReqData),
+			#suspendreq{comment=CommentStr} = ReqData,
 			Comment = if
 				CommentStr == undefined -> undefined;
 				true -> unicode:characters_to_binary(CommentStr)
@@ -686,8 +750,7 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 			peerdrive_client_pb:encode_suspendcnf(#suspendcnf{rev=Rev});
 
 		?MERGE_MSG ->
-			#mergereq{store=Store, rev=Rev, depth=Depth, verbose=Verbose} =
-				peerdrive_client_pb:decode_mergereq(ReqData),
+			#mergereq{store=Store, rev=Rev, depth=Depth, verbose=Verbose} = ReqData,
 			Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 			Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
 			ok = check(peerdrive_broker:merge(Handle, get_store(Store), Rev,
@@ -695,7 +758,7 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 			<<>>;
 
 		?REBASE_MSG ->
-			#rebasereq{rev=Rev} = peerdrive_client_pb:decode_rebasereq(ReqData),
+			#rebasereq{rev=Rev} = ReqData,
 			ok = check(peerdrive_broker:rebase(Handle, Rev)),
 			<<>>;
 
@@ -705,8 +768,7 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 				#getparentscnf{parents=Parents});
 
 		?SET_TYPE_MSG ->
-			#settypereq{type_code=Type} =
-				peerdrive_client_pb:decode_settypereq(ReqData),
+			#settypereq{type_code=Type} = ReqData,
 			ok = check(peerdrive_broker:set_type(Handle,
 				unicode:characters_to_binary(Type))),
 			<<>>;
@@ -716,8 +778,7 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 			peerdrive_client_pb:encode_gettypecnf(#gettypecnf{type_code=Type});
 
 		?SET_FLAGS_MSG ->
-			#setflagsreq{flags=Flags} =
-				peerdrive_client_pb:decode_setflagsreq(ReqData),
+			#setflagsreq{flags=Flags} = ReqData,
 			ok = check(peerdrive_broker:set_flags(Handle, Flags)),
 			<<>>;
 
