@@ -61,37 +61,41 @@ class DocButton(QtGui.QToolButton, Watch):
 			Watch.__init__(self, Watch.TYPE_DOC, doc)
 			Connector().watch(self)
 			self.__watching = True
-		self.triggered(0)
+		self.triggered(Watch.EVENT_APPEARED)
 
 	def triggered(self, cause):
-		if cause == Watch.EVENT_DISAPPEARED:
-			self.setDocument(self.__store, None)
+		try:
+			if cause == Watch.EVENT_REPLICATED:
+				return
+			elif cause == Watch.EVENT_DIMINISHED:
+				return
+			elif cause == Watch.EVENT_DISAPPEARED:
+				raise IOError()
+			elif self.__doc is None:
+				raise IOError()
 
-		if self.__doc:
 			self.setEnabled(True)
-			try:
-				l = Connector().lookupDoc(self.__doc, [self.__store])
-				if self.__store not in l.stores():
-					raise IOError()
-				rev = l.rev(self.__store)
-				docIcon = None
-				with Connector().peek(self.__store, rev) as r:
-					try:
-						metaData = struct.loads(self.__store, r.readAll('META'))
-						docName = metaData["org.peerdrive.annotation"]["title"]
-						# TODO: individual store icon...
-					except:
-						docName = "Unnamed"
-				if not docIcon:
-					uti = Connector().stat(rev, [self.__store]).type()
-					docIcon = QtGui.QIcon(Registry().getIcon(uti))
-			except IOError:
-				docName = ''
-				docIcon = QtGui.QIcon("icons/uti/file_broken.png")
-				self.setEnabled(False)
-		else:
+			l = Connector().lookupDoc(self.__doc, [self.__store])
+			if self.__store not in l.stores():
+				raise IOError()
+			rev = l.rev(self.__store)
+			docIcon = None
+			with Connector().peek(self.__store, rev) as r:
+				try:
+					metaData = struct.loads(self.__store, r.readAll('META'))
+					docName = metaData["org.peerdrive.annotation"]["title"]
+				except:
+					docName = "Unnamed"
+			if not docIcon:
+				uti = Connector().stat(rev, [self.__store]).type()
+				docIcon = QtGui.QIcon(Registry().getIcon(uti))
+
+			if self.__doc == self.__store:
+				label = Connector().enum().fromSId(self.__store).label
+				docName = '[' + label + '] ' + docName
+		except IOError:
 			docName = ''
-			docIcon = QtGui.QIcon("icons/uti/store.png")
+			docIcon = QtGui.QIcon("icons/uti/file_broken.png")
 			self.setEnabled(False)
 
 		if len(docName) > 20:

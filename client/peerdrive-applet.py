@@ -294,16 +294,19 @@ class SyncEditor(QtGui.QDialog):
 		self.__addChooser.clear()
 		self.__addItems = []
 
+		enum = Connector().enum()
 		rules = self.__rules.rules()
-		stores = [s.sid for s in Connector().enum().regularStores()]
+		stores = [s.sid for s in enum.regularStores()]
 		self.__addItems = [(s, p) for s in stores for p in stores
 			if s < p and (s,p) not in rules and (p,s) not in rules ]
 
 		self.__addBtn.setEnabled(bool(self.__addItems))
 		for (store, peer) in self.__addItems:
-			title = (struct.readTitle(struct.DocLink(store, store, False), '?') +
-				' - ' + struct.readTitle(struct.DocLink(peer, peer, False), '?'))
-			self.__addChooser.addItem(title)
+			fromStore = '[' + enum.fromSId(store).label + '] '
+			fromStore += struct.readTitle(struct.DocLink(store, store, False), '?')
+			peerStore = '[' + enum.fromSId(peer).label + '] '
+			peerStore += struct.readTitle(struct.DocLink(peer, peer, False), '?')
+			self.__addChooser.addItem(fromStore + ' - ' + peerStore)
 
 	def __cleanup(self):
 		for line in self.__lines:

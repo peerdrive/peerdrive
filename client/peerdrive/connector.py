@@ -767,6 +767,16 @@ class Enum(object):
 
 		return None
 
+	def fromSId(self, sid):
+		if sid == self.__sysStore.sid:
+			return self.__sysStore
+
+		for store in self.__stores:
+			if store.sid == sid:
+				return store
+
+		return None
+
 
 class Lookup(object):
 	def __init__(self, reply):
