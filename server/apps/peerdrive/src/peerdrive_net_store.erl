@@ -753,7 +753,7 @@ fixup_ssl_err(Posix) -> Posix.
 
 % {IpAddress, Port, Name} = "name@xxx.xxx.xxx.xxx:port"
 parse_address(Address) ->
-	Res = re:run(Address, "^(.+)@([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)(:[0-9]+)?$",
+	Res = re:run(Address, "^(.+)@([-.[:alnum:]]+)(:[0-9]+)?$",
 		[{capture, all_but_first, list}]),
 	case Res of
 		{match, [Name, Ip]} ->
