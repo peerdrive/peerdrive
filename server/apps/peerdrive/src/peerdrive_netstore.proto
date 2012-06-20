@@ -160,7 +160,7 @@ message InitReq {
 message InitCnf {
 	required uint32 major = 1;
 	required uint32 minor = 2;
-	optional uint32 max_packet_size = 3 [default = 4096];
+	optional uint32 max_packet_size = 3 [default = 16384];
 	optional bool starttls = 4;
 }
 
