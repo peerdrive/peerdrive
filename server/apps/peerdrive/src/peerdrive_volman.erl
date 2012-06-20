@@ -101,6 +101,9 @@ init([]) ->
 				Store;
 
 			{error, Error} ->
+				error_logger:error_report(["Could not mount system store",
+					{error, Error}, {src, Src}, {options, Options},
+					{type, Type}]),
 				throw(Error)
 		end,
 		{ok, #state{sys_store=SysStore, stores=[]}}
