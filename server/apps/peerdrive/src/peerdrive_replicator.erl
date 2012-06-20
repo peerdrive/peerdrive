@@ -66,10 +66,10 @@ start_child_sync(Args) ->
 	Ref = make_ref(),
 	case start_child(Args ++ [{self(), Ref}]) of
 		{ok, WorkerPid} ->
-			MonRef = monitor(process, WorkerPid),
+			MonRef = erlang:monitor(process, WorkerPid),
 			receive
 				{Ref, Reply} ->
-					demonitor(MonRef, [flush]),
+					erlang:demonitor(MonRef, [flush]),
 					Reply;
 
 				{'DOWN', MonRef, process, WorkerPid, _Info} ->
