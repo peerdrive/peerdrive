@@ -101,7 +101,7 @@ class Launchbox(QtGui.QDialog):
 				set([ s.label for s in stores ]))
 			for label in unmounted:
 				action = self.__trayIconMenu.addAction("Mount "+label)
-				action.triggered.connect(lambda x,l=label: self.__fstab.mount(l))
+				action.triggered.connect(lambda x,l=label: self.__mount(l))
 		except IOError:
 			pass
 		self.__trayIconMenu.addSeparator()
@@ -185,6 +185,13 @@ class Launchbox(QtGui.QDialog):
 		if ret == 0:
 			ret = cmp(t1.lower(), t2.lower())
 		return ret
+
+	def __mount(self, label):
+		try:
+			self.__fstab.mount(label)
+		except IOError as e:
+			QtGui.QMessageBox.warning(self, label, 'Mount opertaion failed: ' +
+				str(e))
 
 	def __unmount(self, store):
 		try:
