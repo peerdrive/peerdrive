@@ -687,9 +687,6 @@ class _Connector(QtCore.QObject):
 		finally:
 			self.recursion -= 1
 
-		if self.indications:
-			self.__dispatchIndications()
-
 	def __make_ref(self):
 		ref = self.next
 		self.next += 1
