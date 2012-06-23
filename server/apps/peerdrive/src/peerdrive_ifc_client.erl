@@ -598,8 +598,9 @@ do_get_path_req(Body) ->
 		#peerdrive_store{label=Found} -> Found;
 		false -> throw({error, enoent})
 	end,
-	Path = filename:nativename(filename:join([BasePath, StoreName, <<".docs">>,
-		peerdrive_util:bin_to_hexstr(DId), Title])),
+	Path0 = filename:join([BasePath, StoreName, <<".docs">>,
+		peerdrive_util:bin_to_hexstr(DId), Title]),
+	Path = filename:nativename(unicode:characters_to_list(Path0)),
 	peerdrive_client_pb:encode_getpathcnf(#getpathcnf{path=Path}).
 
 
