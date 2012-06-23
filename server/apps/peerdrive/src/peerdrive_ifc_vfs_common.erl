@@ -1094,11 +1094,11 @@ folder_find_name(FullName, Entries) ->
 folder_split_name(Name) ->
 	% FIXME: precompile
 	RegExp = <<"(.*)~([[:xdigit:]]+)(\\.\\w+)?">>,
-	case re:run(Name, RegExp, [{capture, all_but_first, binary}]) of
+	case re:run(Name, RegExp, [{capture, all_but_first, binary}, unicode]) of
 		{match, [Title, DocId, Extension]} ->
-			{<<Title/binary, Extension/binary>>, unicode:characters_to_list(DocId)};
+			{<<Title/binary, Extension/binary>>, safe_characters_to_list(DocId)};
 		{match, [Title, DocId]} ->
-			{Title, unicode:characters_to_list(DocId)};
+			{Title, safe_characters_to_list(DocId)};
 		nomatch ->
 			{Name, ""}
 	end.
@@ -1247,7 +1247,7 @@ folder_read_title(Store, Rev) ->
 			case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
 				{ok, Title} when is_binary(Title) ->
 					unicode:characters_to_binary(sanitize(
-						unicode:characters_to_list(Title)));
+						safe_characters_to_list(Title)));
 				{ok, _} ->
 					<<"">>;
 				error ->
@@ -1705,4 +1705,18 @@ parse_name_to_uuid(Name) when is_binary(Name) and (size(Name) == 32) ->
 
 parse_name_to_uuid(_Name) ->
 	error.
+
+
+safe_characters_to_list(Subject) ->
+	case unicode:characters_to_list(Subject) of
+		Result when is_list(Result) ->
+			Result;
+		_ ->
+			case unicode:characters_to_list(Subject, latin1) of
+				Fallback when is_list(Fallback) ->
+					Fallback;
+				_ ->
+					"invalid encoding"
+			end
+	end.
 
