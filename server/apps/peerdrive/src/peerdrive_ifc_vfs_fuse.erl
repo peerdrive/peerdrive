@@ -58,7 +58,7 @@ start_link(Options) ->
 		{error,{already_started,fuserl}} -> ok;
 		{error, Reason}                  -> {fuserl, Reason}
 	end,
-	LinkedIn = proplists:get_value(linkedin, Options, false),
+	LinkedIn = proplists:get_value(linkedin, Options, true),
 	MountOpts1 = lists:foldl(
 		fun
 			(default_permissions, Acc) ->
