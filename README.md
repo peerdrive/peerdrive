@@ -47,9 +47,8 @@ out. It is assumed that Erlang, Rebar and Python are all in your path.
 1. Clone the git repository: `git clone git://github.com/jkloetzke/peerdrive.git`
 2. Open two terminals
 3. Type in the 1st terminal:
+    * `make`
     * `cd server`
-    * `rebar get-deps`
-    * `rebar compile`
     * `./peerdrive.sh` or on Windows: `peerdrive.bat`
     * This will start the PeerDrive server in the foreground. To gracefully
       shut down the server type `q().`.

@@ -1,0 +1,3 @@
+*.pyc
+/.deps
+/client/peerdrive/peerdrive_client_pb2.py
