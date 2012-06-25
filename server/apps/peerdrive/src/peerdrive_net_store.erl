@@ -293,7 +293,7 @@ do_init(Tls, #state{socket=Socket} = S) ->
 					{ok, SslSocket} ->
 						S2#state{transport=ssl, socket=SslSocket};
 					Error4 ->
-						throw(fixup_ssl_err(Error4))
+						throw(Error4)
 				end;
 			not StartTls and (TlsReq =/= required) ->
 				S2;
@@ -301,7 +301,8 @@ do_init(Tls, #state{socket=Socket} = S) ->
 				throw({error, ebade})
 		end
 	catch
-		throw:{error, Error} -> gen_tcp:close(Socket), throw(Error)
+		throw:{error, Error} ->
+			gen_tcp:close(Socket), throw(fixup_sock_err(Error))
 	end.
 
 
@@ -334,7 +335,7 @@ do_mount(Name, NoVerify, #state{transport=Trsp, socket=Socket} = S) ->
 		S#state{guid=SId}
 	catch
 		throw:{error, Error} ->
-			Trsp:close(Socket), throw(fixup_ssl_err(Error))
+			Trsp:close(Socket), throw(fixup_sock_err(Error))
 	end.
 
 
@@ -740,15 +741,16 @@ sync_trap_exit(From, #state{synclocks=SLocks} = S) ->
 	end.
 
 
-fixup_ssl_err({error, Error}) -> {error, fixup_ssl_err(Error)};
-fixup_ssl_err(closed) -> econnaborted;
-fixup_ssl_err(ecacertfile) -> einval;
-fixup_ssl_err(ecertfile) -> einval;
-fixup_ssl_err(ekeyfile) -> einval;
-fixup_ssl_err(esslaccept) -> erpcmismatch;
-fixup_ssl_err(esslconnect) -> erpcmismatch;
-fixup_ssl_err({eoptions, _}) -> einval;
-fixup_ssl_err(Posix) -> Posix.
+fixup_sock_err({error, Error}) -> {error, fixup_sock_err(Error)};
+fixup_sock_err(closed) -> econnaborted;
+fixup_sock_err(timeout) -> etimedout;
+fixup_sock_err(ecacertfile) -> einval;
+fixup_sock_err(ecertfile) -> einval;
+fixup_sock_err(ekeyfile) -> einval;
+fixup_sock_err(esslaccept) -> erpcmismatch;
+fixup_sock_err(esslconnect) -> erpcmismatch;
+fixup_sock_err({eoptions, _}) -> einval;
+fixup_sock_err(Posix) -> Posix.
 
 
 % {IpAddress, Port, Name} = "name@xxx.xxx.xxx.xxx:port"
