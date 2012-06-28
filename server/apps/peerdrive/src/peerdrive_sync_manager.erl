@@ -15,11 +15,11 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_sync_manager).
--behaviour(gen_fsm).
+-behaviour(gen_server).
 
 -export([start_link/0]).
--export([init/1, handle_info/3, handle_event/3, handle_sync_event/4,
-	terminate/3, code_change/4]).
+-export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
+	terminate/2]).
 
 -include("utils.hrl").
 -include("volman.hrl").
@@ -31,7 +31,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link() ->
-	gen_fsm:start_link(?MODULE, [], []).
+	gen_server:start_link(?MODULE, [], []).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -41,169 +41,74 @@ start_link() ->
 init([]) ->
 	#peerdrive_store{sid=SysDoc, pid=SysStore} = peerdrive_volman:sys_store(),
 	peerdrive_vol_monitor:register_proc(),
-	case find_sync_rules(SysStore, SysDoc) of
+	case peerdrive_util:walk(SysStore, <<"syncrules">>) of
 		{ok, Doc} ->
 			case read_sync_rules(SysStore, Doc) of
 				{ok, SyncRules} ->
 					S = #state{store=SysStore, sys=SysDoc, doc=Doc, rules=SyncRules},
 					S2 = check_workers(S),
-					{ok, monitor, S2};
+					{ok, S2};
 
-				error ->
-					S = #state{store=SysStore, sys=SysDoc, doc=Doc},
-					{ok, try_read, S}
+				{error, Reason} ->
+					{stop, Reason}
 			end;
 
-		error ->
-			S = #state{store=SysStore, sys=SysDoc},
-			{ok, wait, S}
+		{error, enoent} ->
+			case create_sync_rules(SysStore, SysDoc) of
+				{ok, Doc} ->
+					S = #state{store=SysStore, sys=SysDoc, doc=Doc},
+					{ok, S};
+				{error, Reason} ->
+					{stop, Reason}
+			end;
+
+		{error, Reason} ->
+			{stop, Reason}
 	end.
 
 
-handle_info({vol_event, add_store, _Store, _}, monitor, S) ->
+handle_info({vol_event, add_store, _Store, _}, S) ->
 	S2 = check_workers(S),
-	{next_state, monitor, S2};
+	{noreply, S2};
 
-handle_info({vol_event, rem_store, Store, _}, monitor, S) ->
+handle_info({vol_event, rem_store, Store, _}, S) ->
 	S2 = remove_store(Store, S),
-	{next_state, monitor, S2};
+	{noreply, S2};
 
-handle_info({vol_event, mod_doc, Store, Doc}, State, #state{sys=Store, doc=Doc} = S)
-	when
-		(State == monitor) or
-		(State == try_read) ->
+handle_info({vol_event, mod_doc, Store, Doc}, #state{sys=Store, doc=Doc} = S) ->
 	case read_sync_rules(S#state.store, Doc) of
 		{ok, SyncRules} ->
 			S2 = check_workers(S#state{rules=SyncRules}),
-			{next_state, monitor, S2};
+			{noreply, S2};
 
-		error ->
-			{next_state, try_read, S}
+		{error, Reason} ->
+			{stop, Reason, S}
 	end;
 
-handle_info({vol_event, mod_doc, SysDoc, SysDoc}, wait, #state{sys=SysDoc} = S) ->
-	case find_sync_rules(S#state.store, SysDoc) of
-		{ok, Doc} ->
-			case read_sync_rules(S#state.store, Doc) of
-				{ok, SyncRules} ->
-					S2 = S#state{doc=Doc, rules=SyncRules},
-					S3 = check_workers(S2),
-					{next_state, monitor, S3};
-
-				error ->
-					S2 = S#state{doc=Doc},
-					{next_state, try_read, S2}
-			end;
-
-		error ->
-			{next_state, wait, S}
-	end;
-
-handle_info(_, State, S) ->
-	{next_state, State, S}.
+handle_info(_, S) ->
+	{noreply, S}.
 
 
-handle_event(_Event, StateName, StateData) ->
-	{next_state, StateName, StateData}.
-
-
-handle_sync_event(_Event, _From, StateName, StateData) ->
-	{reply, badarg, StateName, StateData}.
-
-
-terminate(_Reason, _StateName, _StateData) ->
+terminate(_Reason, _StateData) ->
 	peerdrive_vol_monitor:deregister_proc().
 
 
-code_change(_OldVsn, StateName, StateData, _Extra) ->
-	{ok, StateName, StateData}.
+handle_call(_Request, _From, S) -> {reply, badarg, S}.
+handle_cast(_Request, State) -> {noreply, State}.
+code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local stuff
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-find_sync_rules(Store, Doc) ->
-	case read_doc(Store, Doc) of
-		{ok, Dir} ->
-			find_sync_rules_loop(Store, Dir);
-		error ->
-			error
-	end.
-
-
-find_sync_rules_loop(_Store, []) ->
-	error;
-
-find_sync_rules_loop(Store, [Entry | Rest]) when ?IS_GB_TREE(Entry) ->
-	case gb_trees:lookup(<<"">>, Entry) of
-		{value, {dlink, Doc}} ->
-			try read_file_name(Store, Doc) of
-				<<"syncrules">> ->
-					{ok, Doc};
-				_ ->
-					find_sync_rules_loop(Store, Rest)
-			catch
-				throw:error ->
-					find_sync_rules_loop(Store, Rest)
-			end;
-
-		none ->
-			find_sync_rules_loop(Store, Rest)
-	end;
-
-find_sync_rules_loop(Store, [_ | Rest]) ->
-	find_sync_rules_loop(Store, Rest).
-
-
-read_doc(StorePid, Doc) ->
-	case peerdrive_store:lookup(StorePid, Doc) of
-		{ok, Rev, _} -> peerdrive_util:read_rev_struct(StorePid, Rev, <<"PDSD">>);
-		error        -> {error, enoent}
-	end.
-
-
-read_file_name(Store, Doc) ->
-	Rev = case peerdrive_store:lookup(Store, Doc) of
-		{ok, R, _} -> R;
-		erro -> throw(error)
-	end,
-	Meta = case peerdrive_util:read_rev_struct(Store, Rev, <<"META">>) of
-		{ok, Value1} when ?IS_GB_TREE(Value1) ->
-			Value1;
-		{ok, _} ->
-			throw(error);
-		{error, _} ->
-			throw(error)
-	end,
-	case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
-		{ok, Title} when is_binary(Title) ->
-			Title;
-		{ok, _} ->
-			throw(error);
-		error ->
-			throw(error)
-	end.
-
-
-meta_read_entry(Meta, []) ->
-	{ok, Meta};
-meta_read_entry(Meta, [Step|Path]) when ?IS_GB_TREE(Meta) ->
-	case gb_trees:lookup(Step, Meta) of
-		{value, Value} -> meta_read_entry(Value, Path);
-		none           -> error
-	end;
-meta_read_entry(_Meta, _Path) ->
-	error.
-
-
 read_sync_rules(Store, Doc) ->
-	case read_doc(Store, Doc) of
+	case peerdrive_util:read_doc_struct(Store, Doc, <<"PDSD">>) of
 		{ok, Rules} when is_list(Rules) ->
 			{ok, lists:foldl(fun parse_rule/2, sets:new(), Rules)};
 		{ok, _} ->
-			error;
-		error ->
-			error
+			{error, eio};
+		{error, _} = Error ->
+			Error
 	end.
 
 
@@ -285,4 +190,32 @@ remove_store(Store, #state{workers=Workers} = S) ->
 		end,
 		Workers),
 	S#state{workers=NewWorkers}.
+
+
+create_sync_rules(Store, Root) ->
+	try
+		{ok, Doc, Handle} = check(peerdrive_broker:create(Store,
+			<<"org.peerdrive.syncrules">>, <<"">>)),
+		try
+			Meta = gb_trees:from_orddict([{<<"org.peerdrive.annotation">>,
+				gb_trees:from_orddict([{<<"title">>, <<"syncrules">>}])}]),
+			ok = check(peerdrive_broker:write(Handle, <<"META">>, 0,
+				peerdrive_struct:encode(Meta))),
+			ok = check(peerdrive_broker:write(Handle, <<"PDSD">>, 0,
+				peerdrive_struct:encode([]))),
+			{ok, _Rev} = check(peerdrive_broker:commit(Handle)),
+			ok = check(peerdrive_util:folder_link(Store, Root, Doc)),
+			{ok, Doc}
+		after
+			peerdrive_broker:close(Handle)
+		end
+	catch
+		throw:Error -> Error
+	end.
+
+
+check({error, _} = Error) ->
+	throw(Error);
+check(Term) ->
+	Term.
 

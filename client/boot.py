@@ -21,20 +21,6 @@ import peerdrive.struct
 from peerdrive.importer import importObjectByPath
 import json
 
-# set default sync rules
-importObjectByPath(
-	"sys/syncrules",
-	"org.peerdrive.syncrules",
-	[
-		("PDSD", peerdrive.struct.dumps([])),
-		("META", peerdrive.struct.dumps({
-			"org.peerdrive.annotation" : {
-				"title" : "syncrules",
-				"description" : "Static synchronization rules between stores"
-			}
-		}))
-	])
-
 # import templates to store
 importObjectByPath(
 	"sys/templates/Text document",
