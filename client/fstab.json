@@ -1,7 +1,0 @@
-{
-	"usr" : {
-		"type" : "file",
-		"src" : "stores/user",
-		"auto" : true
-	}
-}

@@ -1,0 +1,43 @@
+
+File stores (file)
+==================
+
+File stores take only the source argument: the path to the directory where the
+content is stored. No other options are supported currently.
+
+Network stores (net)
+====================
+
+Network stores mount remote stores through the network which are shared by
+other PeerDrive instances. The store needs at least the source argument which
+specifies the remote address and store in the following format:
+
+  store@server[:port]
+
+where 'store' is the label of the exported store, 'server' is the DNS of IP
+address of the remote store server and 'port' is the optional port number.
+
+For TLS the following options may also be given. Most options are directly
+passed to the Erlang SSL application:
+
+ tls=deny     |             -- No TLS (default)
+     optional |             -- Use TLS if available on peer
+     required               -- Always use TLS, fail if server does not support TLS
+
+ cacertfile=cacert.pem      -- Root certificate(s)
+ certfile=my-cert.pem       -- Client certificate
+ keyfile=my-private-key.pem -- Client private key
+ verify_peer=true           -- Verify server certificate
+
+Encrypted stores
+================
+
+Encrypted stores are just a front-end to other stores. They don't store the data
+themselves but transparently encrypt and decrypt them before passing it to the
+backing store. The backing store must have been mounted with the 'noverify'
+option, otherwise any writes of the encrypted store will fail.
+
+The source argument is the backing stores SId, encoded as URN in the following
+form: "urn:peerdrive:store:000102030405060708090a0b0c0d0e0f". Additionally a
+password must be specified as credential in the following format: "pwd=secret".
+

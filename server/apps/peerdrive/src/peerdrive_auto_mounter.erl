@@ -38,7 +38,7 @@ start_link() ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([]) ->
-	#peerdrive_store{pid=SysStore} = peerdrive_volman:sys_store(),
+	#peerdrive_store{pid=SysStore, sid=SysSId} = peerdrive_volman:sys_store(),
 	peerdrive_vol_monitor:register_proc(),
 	case peerdrive_util:walk(SysStore, <<"fstab">>) of
 		{ok, Doc} ->
@@ -53,8 +53,13 @@ init([]) ->
 			end;
 
 		{error, enoent} ->
-			S = #state{store=SysStore, fstab=gb_trees:empty()},
-			{ok, S};
+			case create_fstab(SysStore, SysSId) of
+				ok ->
+					S = #state{store=SysStore, fstab=gb_trees:empty()},
+					{ok, S};
+				{error, Reason} ->
+					{stop, Reason}
+			end;
 
 		{error, Reason} ->
 			{stop, Reason}
@@ -127,4 +132,31 @@ get_value(Key, Default, Tree) ->
 		{value, Value} -> Value;
 		none -> Default
 	end.
+
+
+create_fstab(Store, Root) ->
+	try
+		{ok, Doc, Handle} = check(peerdrive_broker:create(Store,
+			<<"org.peerdrive.fstab">>, <<"">>)),
+		try
+			Meta = gb_trees:from_orddict([{<<"org.peerdrive.annotation">>,
+				gb_trees:from_orddict([{<<"title">>, <<"fstab">>}])}]),
+			ok = check(peerdrive_broker:write(Handle, <<"META">>, 0,
+				peerdrive_struct:encode(Meta))),
+			ok = check(peerdrive_broker:write(Handle, <<"PDSD">>, 0,
+				peerdrive_struct:encode(gb_trees:empty()))),
+			{ok, _Rev} = check(peerdrive_broker:commit(Handle)),
+			ok = check(peerdrive_util:folder_link(Store, Root, Doc))
+		after
+			peerdrive_broker:close(Handle)
+		end
+	catch
+		throw:Error -> Error
+	end.
+
+
+check({error, _} = Error) ->
+	throw(Error);
+check(Term) ->
+	Term.
 
