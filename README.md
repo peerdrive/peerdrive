@@ -56,26 +56,8 @@ out. It is assumed that Erlang, Rebar and Python are all in your path.
       erldokan are installed)
 4. In the 2nd terminal type:
     * `cd client`
-    * `./boot.py`
     * `./peerdrive-applet.py`
 
-The stores place their files under "stores/". Initially all stores start empty.
-When executing "boot.py" some necessary documents are created in the system
-store. This has to be done only once after the system store was created.
-
-There are some convenient options when starting the server:
-
-    peerdrive.sh clear
-
-This will clear out all stores. Call boot.py before any other client after this
-command.
-
-    peerdrive.sh save <name>
-
-This will save the state of all stores to a tar+gzip archive under
-"snapshots/<name>.tgz".
-
-    peerdrive.sh restore <name>
-
-Restore the state of all stores from the given checkpoint.
+Initially no stores are mounted. Use `./mount.py <dir> <name>` to mount a store
+as label <name> in directory <dir>.
 

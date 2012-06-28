@@ -1163,18 +1163,39 @@ class FolderWidget(widgets.DocumentView):
 
 	def __addCreateActions(self, menu):
 		newMenu = menu.addMenu(QtGui.QIcon("icons/filenew.png"), "New document")
+		action = newMenu.addAction(QtGui.QIcon("icons/uti/folder.png"), "Folder")
+		action.triggered.connect(self.__doCreateFolder)
+		newMenu.addSeparator()
+
+		items = {}
 		sysStore = Connector().enum().sysStore().sid
 		sysDict = struct.Folder(struct.DocLink(sysStore, sysStore))
-		templatesDict = struct.Folder(sysDict.get("templates").update(sysStore))
-		items = templatesDict.items()
-		items.sort(key=lambda item: item[0])
-		for (name, link) in items:
-			rev = link.rev()
-			icon = QtGui.QIcon(Registry().getIcon(Connector().stat(rev).type()))
-			action = newMenu.addAction(icon, name)
-			action.triggered.connect(lambda x,r=rev,n=name: self.__doCreate(sysStore, r, n))
+		templatesDoc = sysDict.get("templates")
+		if templatesDoc:
+			templatesDict = struct.Folder(templatesDoc.update(sysStore))
+			items = templatesDict.items()
+			items.sort(key=lambda item: item[0])
+		if items:
+			for (name, link) in items:
+				rev = link.rev()
+				icon = QtGui.QIcon(Registry().getIcon(Connector().stat(rev).type()))
+				action = newMenu.addAction(icon, name)
+				action.triggered.connect(lambda x,r=rev,n=name: self.__doCreateFromTemplate(sysStore, r, n))
+		else:
+			action = newMenu.addAction("No templates found")
+			action.setEnabled(False)
 
-	def __doCreate(self, srcStore, srcRev, name):
+	def __doCreateFolder(self):
+		store = self.store()
+		with Connector().create(store, "org.peerdrive.folder", "") as w:
+			w.write('META', struct.dumps({ "org.peerdrive.annotation" :
+				{"title" : "Folder"} }))
+			w.write('PDSD', struct.dumps( [] ))
+			w.commit("Created")
+			self.model().insertLink(struct.DocLink(store, w.getDoc()))
+			self.save("Added new folder")
+
+	def __doCreateFromTemplate(self, srcStore, srcRev, name):
 		info = Connector().stat(srcRev, [srcStore])
 		dstStore = self.store()
 		with Connector().create(dstStore, info.type(), info.creator()) as w:
