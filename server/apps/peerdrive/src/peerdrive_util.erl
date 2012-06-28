@@ -18,6 +18,7 @@
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
 -export([read_doc_struct/3, read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
 -export([walk/2, read_doc_file_name/2]).
+-export([folder_link/3]).
 -export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1, make_bin_16/1]).
 
 -include("utils.hrl").
@@ -158,6 +159,52 @@ read_doc_file_name(Store, Doc) ->
 	catch
 		throw:Error -> Error
 	end.
+
+
+folder_link(Store, Folder, Doc) ->
+	case peerdrive_store:lookup(Store, Folder) of
+		{ok, Rev, _} ->
+			case read_rev_struct(Store, Rev, <<"PDSD">>) of
+				{ok, Dir} ->
+					Entry = gb_trees:from_orddict([{<<"">>, {dlink, Doc}}]),
+					NewDir = [Entry | Dir],
+					write_rev_struct(Store, Folder, Rev, <<"PDSD">>, NewDir);
+
+				Error ->
+					Error
+			end;
+
+		error ->
+			{error, enoent}
+	end.
+
+
+write_rev_struct(Store, Doc, Rev, Part, Data) ->
+	case peerdrive_broker:update(Store, Doc, Rev, undefined) of
+		{ok, Handle} ->
+			try
+				Raw = peerdrive_struct:encode(Data),
+				ok = peerdrive_broker:truncate(Handle, Part, 0),
+				case peerdrive_broker:write(Handle, Part, 0, Raw) of
+					ok ->
+						case peerdrive_broker:commit(Handle) of
+							{ok, _NewRev} ->
+								ok;
+							Error ->
+								Error
+						end;
+
+					Error ->
+						Error
+				end
+			after
+				peerdrive_broker:close(Handle)
+			end;
+
+		Error ->
+			Error
+	end.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Document/Revision reading

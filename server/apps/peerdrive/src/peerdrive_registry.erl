@@ -58,7 +58,7 @@ conformes(Uti, SuperClass) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init([]) ->
-	#peerdrive_store{pid=SysStore} = peerdrive_volman:sys_store(),
+	#peerdrive_store{pid=SysStore, sid=SysSId} = peerdrive_volman:sys_store(),
 	peerdrive_vol_monitor:register_proc(),
 	case peerdrive_util:walk(SysStore, <<"registry">>) of
 		{ok, Doc} ->
@@ -72,8 +72,22 @@ init([]) ->
 			end;
 
 		{error, enoent} ->
-			S = #state{store=SysStore, reg=gb_trees:empty()},
-			{ok, S};
+			RegFile = filename:join(code:priv_dir(peerdrive), "registry.json"),
+			case file:read_file(RegFile) of
+				{ok, RawJson} ->
+					ParsedJson = jsx:decode(RawJson),
+					NewReg = transform_jsx(ParsedJson),
+					case save_registry(SysStore, SysSId, NewReg) of
+						ok ->
+							S = #state{store=SysStore, reg=NewReg},
+							{ok, S};
+						{error, Reason} ->
+							{stop, Reason}
+					end;
+
+				{error, _} ->
+					{stop, eio}
+			end;
 
 		{error, Reason} ->
 			{stop, Reason}
@@ -159,4 +173,45 @@ conformes(Uti, SuperClass, Reg) ->
 		none ->
 			false
 	end.
+
+
+transform_jsx([{}]) ->
+	gb_trees:empty();
+
+transform_jsx([Head | _] = Object) when is_tuple(Head) ->
+	Dict = [ {Key, transform_jsx(Val)} || {Key, Val} <- Object ],
+	gb_trees:from_orddict(orddict:from_list(Dict));
+
+transform_jsx(List) when is_list(List) ->
+	[ transform_jsx(Elem) || Elem <- List ];
+
+transform_jsx(Term) ->
+	Term.
+
+
+save_registry(Store, Root, NewReg) ->
+	try
+		{ok, Doc, Handle} = check(peerdrive_broker:create(Store,
+			<<"org.peerdrive.registry">>, <<"">>)),
+		try
+			Meta = gb_trees:from_orddict([{<<"org.peerdrive.annotation">>,
+				gb_trees:from_orddict([{<<"title">>, <<"registry">>}])}]),
+			ok = check(peerdrive_broker:write(Handle, <<"PDSD">>, 0,
+				peerdrive_struct:encode(NewReg))),
+			ok = check(peerdrive_broker:write(Handle, <<"META">>, 0,
+				peerdrive_struct:encode(Meta))),
+			{ok, _Rev} = check(peerdrive_broker:commit(Handle)),
+			ok = check(peerdrive_util:folder_link(Store, Root, Doc))
+		after
+			peerdrive_broker:close(Handle)
+		end
+	catch
+		throw:Error -> Error
+	end.
+
+
+check({error, _} = Error) ->
+	throw(Error);
+check(Term) ->
+	Term.
 

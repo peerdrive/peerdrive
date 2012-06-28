@@ -22,22 +22,6 @@ from peerdrive.importer import importObjectByPath
 import json
 
 
-with open("registry.json") as file:
-	registry = json.load(file)
-
-importObjectByPath(
-	"sys/registry",
-	"org.peerdrive.registry",
-	[
-		("PDSD", peerdrive.struct.dumps(registry)),
-		("META", peerdrive.struct.dumps({
-			"org.peerdrive.annotation" : {
-				"title"   : "registry"
-			}
-		}))
-	],
-	True)
-
 with open("fstab.json") as file:
 	fstab = json.load(file)
 
