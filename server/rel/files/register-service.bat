@@ -23,3 +23,6 @@ REM Add dependency to DokanMounter service if installed
 reg query HKLM\SYSTEM\CurrentControlSet\Services\DokanMounter /v Start>NUL
 IF NOT ERRORLEVEL 1 sc config peerdrive depend= LanmanWorkstation/DokanMounter
 
+REM Start service immediately
+sc start peerdrive
+

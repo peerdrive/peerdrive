@@ -9,3 +9,5 @@ for /f "tokens=1,2 delims= " %%a in ("%starterl%") do set erts_vsn=%%a&set app_v
 
 erts-%erts_vsn%\bin\erlsrv.exe remove "PeerDrive"
 
+TASKKILL /F IM epmd.exe
+
