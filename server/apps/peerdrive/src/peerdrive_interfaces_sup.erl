@@ -66,7 +66,7 @@ check_ifc_spec(_) ->
 map_ifc_spec({native, Options}) ->
 	Port = proplists:get_value(port, Options, 4567),
 	peerdrive_server_sup:get_supervisor_spec("native", peerdrive_ifc_client,
-		Port, Options);
+		Port, Options ++ [{ip, "127.0.0.1"}]);
 
 map_ifc_spec({netstore, Options}) ->
 	Port = proplists:get_value(port, Options, 4568),
