@@ -5,8 +5,10 @@ peer-to-peer data model and will be a perfect solution when you need your data
 on different devices in different locations without relying on a permanent
 network connection or central infrastructure.
 
-For an introduction into PeerDrive's features see http://www.peerdrive.org, the
-Wiki on the project home and the doc/ directory.
+For an introduction into PeerDrive's features see
+[peerdrive.org](http://www.peerdrive.org), the
+[Wiki](https://github.com/jkloetzke/peerdrive/wiki) on the project home and the
+[doc/](https://github.com/jkloetzke/peerdrive/tree/master/doc) directory.
 
 Homepage: http://www.peerdrive.org
 
@@ -19,7 +21,7 @@ Current status
 ==============
 
 Currently PeerDrive is in the early alpha stage and hence (unless you're really
-brave) for *developers only*. The basic design is settled and there is a
+brave) not ready for production. The basic design is settled and there is a
 prototype implementation of the file system in Erlang. Mounting via FUSE/Dokan,
 network transparency and automatic synchronization/replication are roughly
 working.  Additionally some small GUI applications exist to demonstrate the
