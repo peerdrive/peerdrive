@@ -323,8 +323,11 @@ class FolderEntry(Watch):
 
 		# determine revision
 		needMerge = False
+		isReplicated = False
 		if self.__doc:
-			revisions = Connector().lookupDoc(self.__doc).revs()
+			l = Connector().lookupDoc(self.__doc)
+			isReplicated = len(l.stores()) > 1
+			revisions = l.revs()
 			if len(revisions) == 0:
 				return
 			elif len(revisions) > 1:
@@ -339,11 +342,14 @@ class FolderEntry(Watch):
 		except IOError:
 			return
 		self.__uti = s.type()
-		if needMerge:
+		if needMerge or isReplicated:
 			image = QtGui.QImage(Registry().getIcon(s.type()))
 			painter = QtGui.QPainter()
 			painter.begin(image)
-			painter.drawImage(0, 0, QtGui.QImage("icons/uti/merge_overlay.png"))
+			if needMerge:
+				painter.drawImage(0, 16, QtGui.QImage("icons/emblems/split.png"))
+			elif isReplicated:
+				painter.drawImage(0, 16, QtGui.QImage("icons/emblems/distributed.png"))
 			painter.end()
 			self.__icon = QtGui.QIcon(QtGui.QPixmap.fromImage(image))
 		else:
