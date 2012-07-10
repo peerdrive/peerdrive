@@ -342,12 +342,10 @@ class SyncRuleWidget(QtGui.QWidget):
 		self.__rules = rules
 
 		self.__descrEdit = QtGui.QLineEdit()
-		self.__descrEdit.textEdited.connect(self.__setRule)
 		self.__storeBtn = DocButton(store, store, True)
 		self.__peerBtn = DocButton(peer, peer, True)
 		self.__modeSel = QtGui.QComboBox()
 		self.__modeSel.addItems([SyncRuleWidget.MAP[m] for m in SyncRuleWidget.MODES])
-		self.__modeSel.currentIndexChanged.connect(self.__setRule)
 		self.__reverseBtn = QtGui.QPushButton('Reverse')
 		self.__reverseBtn.clicked.connect(self.__reverse)
 		self.__removeBtn = QtGui.QPushButton('Remove')
@@ -365,6 +363,10 @@ class SyncRuleWidget(QtGui.QWidget):
 		mode = (rules.mode(store, peer), rules.mode(peer, store))
 		self.__modeSel.setCurrentIndex(SyncRuleWidget.MODES.index(mode))
 		self.__descrEdit.setText(rules.descr(store, peer))
+
+		# connect signals as last step, otherwise loading the rule already triggers
+		self.__descrEdit.textEdited.connect(self.__setRule)
+		self.__modeSel.currentIndexChanged.connect(self.__setRule)
 
 	def cleanup(self):
 		self.__storeBtn.cleanup()
