@@ -1,4 +1,5 @@
 @ECHO OFF
+SETLOCAL ENABLEDELAYEDEXPANSION
 
 REM Create directories...
 IF NOT EXIST stores\user MKDIR stores\user
@@ -13,6 +14,6 @@ IF NOT EXIST peerdrive.config (
 
 REM Configure additional code paths
 SET PA=apps\peerdrive\ebin
-FOR /D %%D IN (deps\*) DO SET PA=%PA% %%D\ebin
+FOR /D %%D IN (deps\*) DO SET PA=!PA! %%D\ebin
 
 start werl -pa %PA% +A4 +Ww -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive
