@@ -3,7 +3,7 @@
 	peerdrive,
 	[
 		{description, "PeerDrive server"},
-		{vsn, "0.0.1"},
+		{vsn, git},
 		{applications, [kernel, stdlib, crypto, sasl, ssl]},
 		{mod, {peerdrive_app, []}}
 	]
