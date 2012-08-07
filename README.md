@@ -10,12 +10,12 @@ For an introduction into PeerDrive's features see
 [Wiki](https://github.com/jkloetzke/peerdrive/wiki) on the project home and the
 [doc/](https://github.com/jkloetzke/peerdrive/tree/master/doc) directory.
 
-Homepage: http://www.peerdrive.org
-
-Project home: http://github.com/jkloetzke/peerdrive
-
-Mailing list: hotchpotch@freelists.org (the projects former name)
-              http://www.freelists.org/list/hotchpotch
+Resources:
+* [Website](http://www.peerdrive.org)
+* [Project home](https://github.com/jkloetzke/peerdrive)
+* Twitter: [@PeerDrive](https://twitter.com/PeerDrive)
+* Mailing list: hotchpotch@freelists.org (the projects former name)
+                http://www.freelists.org/list/hotchpotch
 
 Current status
 ==============
