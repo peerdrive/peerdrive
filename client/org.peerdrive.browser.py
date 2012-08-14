@@ -504,6 +504,7 @@ class ViewHandler(object):
 	def leave(self, state={}):
 		self._view.checkpoint("<<Changed by browser>>")
 		self._view._saveSettings(state)
+		self._view.docClose(False)
 
 	def getView(self):
 		return self._view
