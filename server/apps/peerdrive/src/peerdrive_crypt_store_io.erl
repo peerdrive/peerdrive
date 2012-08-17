@@ -243,17 +243,20 @@ do_commit_forward(CurEncRId, NewRId, NewEncRId, NewEncRev, S) ->
 			{{ok, NewRId}, S#state{readonly=true}};
 
 		{ok, [NewEncRId], Handle} ->
-			case upload_rev(NewEncRId, NewEncRev, S) of
-				ok ->
-					case peerdrive_store:forward_doc_commit(Handle) of
-						ok ->
-							{{ok, NewRId}, S#state{readonly=true}};
-						Error ->
-							{Error, S}
-					end;
-				Error ->
-					peerdrive_store:forward_doc_abort(Handle),
-					{Error, S}
+			try
+				case upload_rev(NewEncRId, NewEncRev, S) of
+					ok ->
+						case peerdrive_store:forward_doc_commit(Handle) of
+							ok ->
+								{{ok, NewRId}, S#state{readonly=true}};
+							Error ->
+								{Error, S}
+						end;
+					Error ->
+						{Error, S}
+				end
+			after
+				peerdrive_store:forward_doc_close(Handle)
 			end;
 
 		{error, _} = Error ->
@@ -296,17 +299,20 @@ do_suspend(Comment, #state{did=DId, store=Store, prerid=PreRId} = S) ->
 					{{ok, NewRId}, S2#state{readonly=true}};
 
 				{ok, Handle} ->
-					case upload_rev(NewEncRId, NewEncRev, S2) of
-						ok ->
-							case peerdrive_store:remember_rev_commit(Handle) of
-								ok ->
-									{{ok, NewRId}, S2#state{readonly=true}};
-								Error ->
-									{Error, S2}
-							end;
-						Error ->
-							peerdrive_store:remember_rev_abort(Handle),
-							{Error, S2}
+					try
+						case upload_rev(NewEncRId, NewEncRev, S2) of
+							ok ->
+								case peerdrive_store:remember_rev_commit(Handle) of
+									ok ->
+										{{ok, NewRId}, S2#state{readonly=true}};
+									Error ->
+										{Error, S2}
+								end;
+							Error ->
+								{Error, S2}
+						end
+					after
+						peerdrive_store:remember_rev_close(Handle)
 					end;
 
 				{error, _} = Error ->
@@ -418,7 +424,9 @@ upload_rev(RId, Rev, #state{store=Store} = S) ->
 					MissingParts),
 				peerdrive_store:put_rev_commit(Handle)
 			catch
-				throw:Error -> peerdrive_store:put_rev_abort(Handle), Error
+				throw:Error -> Error
+			after
+				peerdrive_store:put_rev_close(Handle)
 			end;
 
 		{error, _} = Error ->

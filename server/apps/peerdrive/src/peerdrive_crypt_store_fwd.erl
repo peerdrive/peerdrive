@@ -45,20 +45,20 @@ init({State, User}) ->
 
 handle_call(commit, _From, #state{handle=Handle} = S) ->
 	Reply = peerdrive_store:forward_doc_commit(Handle),
-	{stop, normal, Reply, S};
+	{reply, Reply, S};
 
-handle_call(abort, _From, #state{handle=Handle} = S) ->
-	peerdrive_store:forward_doc_abort(Handle),
+handle_call(close, _From, #state{handle=Handle} = S) ->
+	peerdrive_store:forward_doc_close(Handle),
 	{stop, normal, ok, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store, user=User} = S) ->
 	case From of
 		User ->
-			peerdrive_store:forward_doc_abort(S#state.handle),
+			peerdrive_store:forward_doc_close(S#state.handle),
 			{stop, normal, S};
 		Store ->
-			peerdrive_store:forward_doc_abort(S#state.handle),
+			peerdrive_store:forward_doc_close(S#state.handle),
 			{stop, Reason, S};
 		_ ->
 			{noreply, S}

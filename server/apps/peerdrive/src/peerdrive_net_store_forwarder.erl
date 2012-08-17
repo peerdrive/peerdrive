@@ -45,11 +45,10 @@ init({State, User}) ->
 
 
 handle_call(commit, _From, S) ->
-	Reply = do_commit(S),
-	{stop, normal, Reply, S};
+	{reply, do_commit(S), S};
 
-handle_call(abort, _From, S) ->
-	do_abort(S),
+handle_call(close, _From, S) ->
+	do_close(S),
 	{stop, normal, ok, S}.
 
 
@@ -58,7 +57,7 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 		Store ->
 			{stop, {orphaned, Reason}, S};
 		_User ->
-			do_abort(S),
+			do_close(S),
 			{stop, normal, S}
 	end.
 
@@ -82,10 +81,10 @@ do_commit(#state{handle=Handle} = S) ->
 	relay_request(?FF_DOC_COMMIT_MSG, Req, S).
 
 
-do_abort(#state{handle=Handle} = S) ->
-	Req = peerdrive_netstore_pb:encode_forwarddocabortreq(
-		#forwarddocabortreq{handle=Handle}),
-	relay_request(?FF_DOC_ABORT_MSG, Req, S).
+do_close(#state{handle=Handle} = S) ->
+	Req = peerdrive_netstore_pb:encode_forwarddocclosereq(
+		#forwarddocclosereq{handle=Handle}),
+	relay_request(?FF_DOC_CLOSE_MSG, Req, S).
 
 
 relay_request(Request, Body, #state{store=Store}) ->

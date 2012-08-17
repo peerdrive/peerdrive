@@ -343,11 +343,12 @@ put_rev(SourceStore, DestStore, Rev) ->
 				comment   = Stat#rev_stat.comment
 			},
 			case peerdrive_store:put_rev_start(DestStore, Rev, Revision) of
-				ok ->
-					ok;
-
 				{ok, MissingParts, Importer} ->
-					copy_parts(Rev, SourceStore, Importer, MissingParts);
+					try
+						copy_parts(Rev, SourceStore, Importer, MissingParts)
+					after
+						peerdrive_store:put_rev_close(Importer)
+					end;
 
 				{error, Reason} ->
 					{error, Reason}
@@ -358,22 +359,24 @@ put_rev(SourceStore, DestStore, Rev) ->
 	end.
 
 
+copy_parts(_Rev, _SourceStore, _Importer, []) ->
+	ok;
+
 copy_parts(Rev, SourceStore, Importer, Parts) ->
 	case peerdrive_store:peek(SourceStore, Rev) of
 		{ok, Reader} ->
-			case copy_parts_loop(Parts, Reader, Importer) of
-				ok ->
-					peerdrive_store:close(Reader),
-					peerdrive_store:put_rev_commit(Importer);
-
-				{error, Reason} ->
-					peerdrive_store:close(Reader),
-					peerdrive_store:put_rev_abort(Importer),
-					{error, Reason}
+			try
+				case copy_parts_loop(Parts, Reader, Importer) of
+					ok ->
+						peerdrive_store:put_rev_commit(Importer);
+					{error, Reason} ->
+						{error, Reason}
+				end
+			after
+				peerdrive_store:close(Reader)
 			end;
 
 		{error, Reason} ->
-			peerdrive_store:put_rev_abort(Importer),
 			{error, Reason}
 	end.
 

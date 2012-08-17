@@ -53,21 +53,20 @@ handle_call({put_part, Part, Data}, _From, S) ->
 	{reply, Reply, S2};
 
 handle_call(commit, _From, S) ->
-	Reply = do_commit(S),
-	{stop, normal, Reply, S};
+	{reply, do_commit(S), S};
 
-handle_call(abort, _From, #state{handle=Handle} = S) ->
-	peerdrive_store:put_rev_abort(Handle),
+handle_call(close, _From, #state{handle=Handle} = S) ->
+	peerdrive_store:put_rev_close(Handle),
 	{stop, normal, ok, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store, user=User} = S) ->
 	case From of
 		Store ->
-			peerdrive_store:put_rev_abort(S#state.handle),
+			peerdrive_store:put_rev_close(S#state.handle),
 			{stop, Reason, S};
 		User ->
-			peerdrive_store:put_rev_abort(S#state.handle),
+			peerdrive_store:put_rev_close(S#state.handle),
 			{stop, normal, S}
 	end.
 
@@ -115,7 +114,6 @@ do_commit(#state{handle=Handle, parts=Parts}) ->
 		peerdrive_store:put_rev_commit(Handle)
 	catch
 		throw:ThrowErr ->
-			peerdrive_store:put_rev_abort(Handle),
 			{error, ThrowErr}
 	end.
 

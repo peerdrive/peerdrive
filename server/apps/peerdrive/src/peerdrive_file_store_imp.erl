@@ -24,7 +24,7 @@
 
 -define(THRESHOLD, 1024).
 
--record(state, {store, rid, rev, parts, noverify}).
+-record(state, {store, rid, rev, parts, noverify, done}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -38,7 +38,8 @@ start_link(RId, Rev, Missing, User, NoVerify) ->
 		parts = orddict:from_list(
 			[{FCC, {PId, <<>>, peerdrive_util:merkle_init()}} || {FCC, PId} <- Missing]
 		),
-		noverify = NoVerify
+		noverify = NoVerify,
+		done = false
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -58,12 +59,15 @@ handle_call({put_part, Part, Data}, _From, S) ->
 	{reply, Reply, S2};
 
 % returns `ok | {error, Reason}'
-handle_call(commit, _From, S) ->
+handle_call(commit, _From, #state{done=false} = S) ->
 	{Reply, S2} = do_commit(S),
-	{stop, normal, Reply, S2};
+	{reply, Reply, S2};
+
+handle_call(commit, _From, S) ->
+	{reply, {error, ebadf}, S};
 
 % returns nothing
-handle_call(abort, _From, S) ->
+handle_call(close, _From, S) ->
 	{stop, normal, ok, S}.
 
 
@@ -74,10 +78,11 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 	end.
 
 
-terminate(_Reason, #state{store=Store, parts=Parts, rev=Rev}) ->
+terminate(_Reason, #state{store=Store, parts=Parts, rev=Rev, rid=RId}) ->
 	lists:foreach(
 		fun({_, PId}) -> peerdrive_file_store:part_unlock(Store, PId) end,
 		Rev#revision.parts),
+	peerdrive_file_store:rev_unlock(Store, RId),
 	lists:foreach(
 		fun({_, {_PId, Content, _Sha}}) ->
 			case Content of
@@ -154,7 +159,7 @@ do_commit(#state{store=Store, rid=RId, rev=Rev, parts=Parts, noverify=NoVerify} 
 			ok ->
 				{
 					peerdrive_file_store:put_rev_commit(Store, RId, Rev),
-					S#state{parts=[]}
+					S#state{parts=[], done=true}
 				};
 			{Error, Remaining} ->
 				{Error, S#state{parts=Remaining}}

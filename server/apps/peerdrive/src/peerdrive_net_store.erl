@@ -256,7 +256,7 @@ do_init(Tls, #state{socket=Socket} = S) ->
 		deny -> TlsReq = deny, SslOpts = [];
 		{TlsReq, SslOpts} -> ok
 	end,
-	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=0, minor=0,
+	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=1, minor=0,
 		starttls=TlsReq}),
 	InitReq = <<0:32, ?INIT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
 	try
@@ -501,15 +501,10 @@ req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
 cnf_put_rev(Body, MaxPacketSize, User) ->
 	#putrevstartcnf{handle=Handle, missing_parts=Missing} =
 		peerdrive_netstore_pb:decode_putrevstartcnf(Body),
-	case Handle of
-		undefined ->
-			ok;
-		_ ->
-			true = lists:all(fun(P) -> ?ASSERT_PART(P) end, Missing),
-			{ok, Importer} = peerdrive_net_store_importer:start_link(self(), Handle,
-				MaxPacketSize, User),
-			{ok, Missing, Importer}
-	end.
+	true = lists:all(fun(P) -> ?ASSERT_PART(P) end, Missing),
+	{ok, Importer} = peerdrive_net_store_importer:start_link(self(), Handle,
+		MaxPacketSize, User),
+	{ok, Missing, Importer}.
 
 
 req_remember_rev(DId, PreRId, OldPreRId, From, S) ->

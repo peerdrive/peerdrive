@@ -739,36 +739,26 @@ do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
 	end.
 
 
-% ok | {ok, MissingParts, Handle} | {error, Reason}
+% {ok, MissingParts, Handle} | {error, Reason}
 do_put_rev(RId, Rev, User, S) ->
 	NoVerify = S#state.noverify,
-	ValidRev = NoVerify orelse RId == peerdrive_store:hash_revision(Rev),
-	case dets:member(S#state.rev_tbl, RId) of
-		false when ValidRev ->
+	case NoVerify orelse RId == peerdrive_store:hash_revision(Rev) of
+		true ->
 			Parts = Rev#revision.parts,
 			PartTbl = S#state.part_tbl,
-			case [P || {_, PId} = P <- Parts, not dets:member(PartTbl, PId)] of
-				[] ->
-					do_put_rev_commit(RId, Rev, S);
-
-				Missing ->
-					% Some parts are missing and need to be uploaded. Make sure
-					% nothing gets garbage collected in between...
-					S2 = lists:foldl(
-						fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
-						S,
-						Parts),
-					{ok, Handle} = peerdrive_file_store_imp:start_link(RId,
-						Rev, Missing, User, NoVerify),
-					NeededFourCCs = [FCC || {FCC, _} <- Missing],
-					{{ok, NeededFourCCs, Handle}, S2}
-			end;
+			Missing = [P || {_, PId} = P <- Parts, not dets:member(PartTbl, PId)],
+			% Make sure nothing gets garbage collected in between...
+			S2 = lists:foldl(
+				fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+				do_lock({rev, RId}, S),
+				Parts),
+			{ok, Handle} = peerdrive_file_store_imp:start_link(RId,
+				Rev, Missing, User, NoVerify),
+			NeededFourCCs = [FCC || {FCC, _} <- Missing],
+			{{ok, NeededFourCCs, Handle}, S2};
 
 		false ->
-			{{error, einval}, S};
-
-		true ->
-			{ok, S}
+			{{error, einval}, S}
 	end.
 
 

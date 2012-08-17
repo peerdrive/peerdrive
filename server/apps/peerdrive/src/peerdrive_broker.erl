@@ -509,7 +509,9 @@ do_forward_doc(DstStore, Doc, SrcStore, RevPath, ToRev, Options) ->
 					MissingRevs),
 				peerdrive_store:forward_doc_commit(Handle)
 			catch
-				throw:Error -> peerdrive_store:forward_doc_abort(Handle), Error
+				throw:Error -> Error
+			after
+				peerdrive_store:forward_doc_close(Handle)
 			end;
 
 		{error, _Reason} = Error ->

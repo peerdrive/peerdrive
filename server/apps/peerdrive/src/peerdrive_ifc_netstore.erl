@@ -233,9 +233,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 				peerdrive_netstore_pb:decode_forwarddoccommitreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?FF_DOC_ABORT_MSG ->
-			ReqData = #forwarddocabortreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_forwarddocabortreq(Body),
+		?FF_DOC_CLOSE_MSG ->
+			ReqData = #forwarddocclosereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_forwarddocclosereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?RMBR_REV_COMMIT_MSG ->
@@ -243,9 +243,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 				peerdrive_netstore_pb:decode_rememberrevcommitreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?RMBR_REV_ABORT_MSG ->
-			ReqData = #rememberrevabortreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_rememberrevabortreq(Body),
+		?RMBR_REV_CLOSE_MSG ->
+			ReqData = #rememberrevclosereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_rememberrevclosereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?PUT_DOC_COMMIT_MSG ->
@@ -268,9 +268,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 				peerdrive_netstore_pb:decode_putrevcommitreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?PUT_REV_ABORT_MSG ->
-			ReqData = #putrevabortreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_putrevabortreq(Body),
+		?PUT_REV_CLOSE_MSG ->
+			ReqData = #putrevclosereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_putrevclosereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S)
 	end;
 
@@ -308,7 +308,7 @@ do_init(Body, RetPath, #state{tls=Tls} = S) ->
 			starttls = StartTls
 		} = peerdrive_netstore_pb:decode_initreq(Body),
 		case Major of
-			0 -> ok;
+			1 -> ok;
 			_ -> throw({error, erpcmismatch})
 		end,
 		S2 = S#state{init=true},
@@ -531,14 +531,10 @@ do_put_rev_start(Store, NetHandle, ReqData) ->
 		rev_links = PbRev#putrevstartreq_revision.rev_links,
 		comment = PbRev#putrevstartreq_revision.comment
 	},
-	case check(peerdrive_store:put_rev_start(Store, RId, Rev)) of
-		ok ->
-			{stop, <<>>};
-
-		{ok, Missing, StoreHandle} ->
-			Cnf = #putrevstartcnf{handle=NetHandle, missing_parts=Missing},
-			{start, StoreHandle, peerdrive_netstore_pb:encode_putrevstartcnf(Cnf)}
-	end.
+	{ok, Missing, StoreHandle} = check(peerdrive_store:put_rev_start(Store,
+		RId, Rev)),
+	Cnf = #putrevstartcnf{handle=NetHandle, missing_parts=Missing},
+	{start, StoreHandle, peerdrive_netstore_pb:encode_putrevstartcnf(Cnf)}.
 
 
 do_sync_get_changes(Body, Store) ->
@@ -737,38 +733,30 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 forward_handler(Handle, Request, _ReqData) ->
 	case Request of
 		?FF_DOC_COMMIT_MSG ->
-			case peerdrive_store:forward_doc_commit(Handle) of
-				ok ->
-					{stop, <<>>};
-				{error, _} = Error ->
-					{abort, Error}
-			end;
+			ok = check(peerdrive_store:forward_doc_commit(Handle)),
+			<<>>;
 
-		?FF_DOC_ABORT_MSG ->
-			ok = peerdrive_store:forward_doc_abort(Handle),
+		?FF_DOC_CLOSE_MSG ->
+			ok = peerdrive_store:forward_doc_close(Handle),
 			{stop, <<>>};
 
 		closed ->
-			ok = peerdrive_store:forward_doc_abort(Handle)
+			ok = peerdrive_store:forward_doc_close(Handle)
 	end.
 
 
 remember_handler(Handle, Request, _ReqData) ->
 	case Request of
 		?RMBR_REV_COMMIT_MSG ->
-			case peerdrive_store:remember_rev_commit(Handle) of
-				ok ->
-					{stop, <<>>};
-				{error, _} = Error ->
-					{abort, Error}
-			end;
+			ok = check(peerdrive_store:remember_rev_commit(Handle)),
+			<<>>;
 
-		?RMBR_REV_ABORT_MSG ->
-			ok = peerdrive_store:remember_rev_abort(Handle),
+		?RMBR_REV_CLOSE_MSG ->
+			ok = peerdrive_store:remember_rev_close(Handle),
 			{stop, <<>>};
 
 		closed ->
-			ok = peerdrive_store:remember_rev_abort(Handle)
+			ok = peerdrive_store:remember_rev_close(Handle)
 	end.
 
 
@@ -796,19 +784,15 @@ put_rev_handler(Handle, Request, ReqData) ->
 			<<>>;
 
 		?PUT_REV_COMMIT_MSG ->
-			case peerdrive_store:put_rev_commit(Handle) of
-				ok ->
-					{stop, <<>>};
-				{error, _} = Error ->
-					{abort, Error}
-			end;
+			ok = check(peerdrive_store:put_rev_commit(Handle)),
+			<<>>;
 
-		?PUT_REV_ABORT_MSG ->
-			ok = peerdrive_store:put_rev_abort(Handle),
+		?PUT_REV_CLOSE_MSG ->
+			ok = peerdrive_store:put_rev_close(Handle),
 			{stop, <<>>};
 
 		closed ->
-			ok = peerdrive_store:put_rev_abort(Handle)
+			ok = peerdrive_store:put_rev_close(Handle)
 	end.
 
 

@@ -17,9 +17,10 @@
 -module(peerdrive_store).
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
--export([put_doc/3, put_doc_commit/1, put_doc_close/1, forward_doc_start/4, forward_doc_commit/1,
-	forward_doc_abort/1, put_rev_start/3, put_rev_part/3, put_rev_abort/1,
-	put_rev_commit/1, remember_rev/4, remember_rev_commit/1, remember_rev_abort/1]).
+-export([put_doc/3, put_doc_commit/1, put_doc_close/1, forward_doc_start/4,
+	forward_doc_commit/1, forward_doc_close/1, put_rev_start/3, put_rev_part/3,
+	put_rev_close/1, put_rev_commit/1, remember_rev/4, remember_rev_commit/1,
+	remember_rev_close/1]).
 -export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
 	write/4, suspend/1, suspend/2, get_links/1, set_links/3, get_flags/1, set_flags/2]).
@@ -385,7 +386,7 @@ forward_doc_start(Store, Doc, RevPath, OldPreRev) ->
 %%
 %% Commits a document fast-forward operation after all requested revisions were
 %% uploaded. If the document has been updated in between then the operation
-%% will fail. Irregardless of the result the handle is invalid after the call.
+%% will fail.
 %%
 %% @spec forward_doc_commit(Handle) -> Result
 %%       Handle = pid()
@@ -395,15 +396,15 @@ forward_doc_commit(Handle) ->
 	call_store(Handle, commit).
 
 
-%% @doc Abort a fast-forward operation
+%% @doc Close a fast-forward operation
 %%
-%% Invalidates the handle. Any revisions uploaded so far may be garbage
-%% collected.
+%% Close the handle. Any revisions uploaded so far may be garbage collected if
+%% the operation was not committed yet.
 %%
-%% @spec forward_doc_abort(Handle) -> ok
+%% @spec forward_doc_close(Handle) -> ok
 %%       Handle = pid()
-forward_doc_abort(Handle) ->
-	call_store(Handle, abort, ok).
+forward_doc_close(Handle) ->
+	call_store(Handle, close, ok).
 
 
 %% @doc Add a preliminary revision to a document
@@ -428,24 +429,24 @@ remember_rev_commit(Handle) ->
 	call_store(Handle, commit).
 
 
-remember_rev_abort(Handle) ->
-	call_store(Handle, abort).
+remember_rev_close(Handle) ->
+	call_store(Handle, close).
 
 
 %% @doc Put/import a revision into the store.
 %%
 %% The function takes the specification of the whole revision and returns the
 %% list of missing parts which the caller has to supply by subsequent
-%% put_rev_part/3 calls. If all parts are already available in the store then
-%% the function just returns `ok'.
+%% put_rev_part/3 calls. The revision will not be garbage collected as long as
+%% the handle is kept open.
 %%
 %% @spec put_rev_start(Store, Rev, Revision) -> Result
 %%       Store = pid()
 %%       Rev = guid()
 %%       Revision = #revision
-%%       Result = ok | {ok, MissingParts, Importer} | {error, Reason}
+%%       Result = {ok, MissingParts, Handle} | {error, Reason}
 %%       MissingParts = [FourCC]
-%%       Importer = pid()
+%%       Handle = pid()
 %%       Reason = ecode()
 put_rev_start(Store, Rev, Revision) ->
 	call_store(Store, {put_rev, Rev, Revision}).
@@ -459,17 +460,21 @@ put_rev_start(Store, Rev, Revision) ->
 put_rev_part(Importer, Part, Data) ->
 	call_store(Importer, {put_part, Part, Data}).
 
-%% @doc Abort importing a revision
-%% @spec put_rev_abort(Importer::pid()) -> none()
-put_rev_abort(Importer) ->
-	call_store(Importer, abort, ok).
-
-%% @doc Finish importing a revision
+%% @doc Commit imported revision
+%%
+%% The revision will be made visible to others. As long as the handle stays
+%% open the revision will not be garbage collected.
+%%
 %% @spec put_rev_commit(Importer::pid()) -> ok | {error, Reason}
 %%       Importer = pid()
 %%       Reason = ecode()
 put_rev_commit(Importer) ->
 	call_store(Importer, commit).
+
+%% @doc Close import handle
+%% @spec put_rev_close(Importer::pid()) -> none()
+put_rev_close(Importer) ->
+	call_store(Importer, close, ok).
 
 
 %% @doc Get changes since the last sync point of peer store

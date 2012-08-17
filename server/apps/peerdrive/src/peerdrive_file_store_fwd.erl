@@ -20,7 +20,7 @@
 -export([start_link/4]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, did, revpath, oldprerid}).
+-record(state, {store, did, revpath, oldprerid, done}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -31,7 +31,8 @@ start_link(DId, RevPath, OldPreRid, User) ->
 		store     = self(),
 		did       = DId,
 		revpath   = RevPath,
-		oldprerid = OldPreRid
+		oldprerid = OldPreRid,
+		done      = false
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -46,12 +47,19 @@ init({State, User}) ->
 
 
 % returns `ok | {error, Reason}'
+handle_call(commit, _From, #state{done=false} = S) ->
+	case do_commit(S) of
+		ok ->
+			{reply, ok, S#state{done=true}};
+		Error ->
+			{reply, Error, S}
+	end;
+
 handle_call(commit, _From, S) ->
-	Reply = do_commit(S),
-	{stop, normal, Reply, S};
+	{reply, {error, ebadf}, S};
 
 % returns nothing
-handle_call(abort, _From, S) ->
+handle_call(close, _From, S) ->
 	{stop, normal, ok, S}.
 
 

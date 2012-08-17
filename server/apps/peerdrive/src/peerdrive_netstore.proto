@@ -420,7 +420,7 @@ message ForwardDocCommitReq {
 	required uint32 handle = 1;
 }
 
-message ForwardDocAbortReq {
+message ForwardDocCloseReq {
 	required uint32 handle = 1;
 }
 
@@ -447,7 +447,7 @@ message PutRevStartReq {
 }
 
 message PutRevStartCnf {
-	optional uint32 handle = 1;
+	required uint32 handle = 1;
 	repeated bytes missing_parts = 2;
 }
 
@@ -461,7 +461,7 @@ message PutRevCommitReq {
 	required uint32 handle = 1;
 }
 
-message PutRevAbortReq {
+message PutRevCloseReq {
 	required uint32 handle = 1;
 }
 
@@ -525,7 +525,7 @@ message RememberRevCommitReq {
 	required uint32 handle = 1;
 }
 
-message RememberRevAbortReq {
+message RememberRevCloseReq {
 	required uint32 handle = 1;
 }
 

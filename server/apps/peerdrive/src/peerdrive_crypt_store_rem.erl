@@ -43,20 +43,20 @@ init({State, User}) ->
 
 
 handle_call(commit, _From, #state{handle=Handle} = S) ->
-	{stop, normal, peerdrive_store:remember_rev_commit(Handle), S};
+	{reply, peerdrive_store:remember_rev_commit(Handle), S};
 
-handle_call(abort, _From, #state{handle=Handle} = S) ->
-	peerdrive_store:remember_rev_abort(Handle),
+handle_call(close, _From, #state{handle=Handle} = S) ->
+	peerdrive_store:remember_rev_close(Handle),
 	{stop, normal, ok, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store, user=User} = S) ->
 	case From of
 		User ->
-			peerdrive_store:remember_rev_abort(S#state.handle),
+			peerdrive_store:remember_rev_close(S#state.handle),
 			{stop, normal, S};
 		Store ->
-			peerdrive_store:remember_rev_abort(S#state.handle),
+			peerdrive_store:remember_rev_close(S#state.handle),
 			{stop, Reason, S};
 		_ ->
 			{noreply, S}

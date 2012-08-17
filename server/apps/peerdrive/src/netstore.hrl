@@ -54,10 +54,10 @@
 -define(PUT_DOC_CLOSE_MSG,    16#020).
 -define(FF_DOC_START_MSG,     16#021).
 -define(FF_DOC_COMMIT_MSG,    16#022).
--define(FF_DOC_ABORT_MSG,     16#023).
+-define(FF_DOC_CLOSE_MSG,     16#023).
 -define(PUT_REV_START_MSG,    16#024).
 -define(PUT_REV_PART_MSG,     16#025).
--define(PUT_REV_ABORT_MSG,    16#026).
+-define(PUT_REV_CLOSE_MSG,    16#026).
 -define(PUT_REV_COMMIT_MSG,   16#027).
 -define(SYNC_GET_CHANGES_MSG, 16#028).
 -define(SYNC_GET_ANCHOR_MSG,  16#029).
@@ -67,5 +67,5 @@
 -define(SYNC_MSG,             16#02d).
 -define(RMBR_REV_START_MSG,   16#02e).
 -define(RMBR_REV_COMMIT_MSG,  16#02f).
--define(RMBR_REV_ABORT_MSG,   16#030).
+-define(RMBR_REV_CLOSE_MSG,   16#030).
 
