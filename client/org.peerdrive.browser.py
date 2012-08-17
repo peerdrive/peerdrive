@@ -803,7 +803,7 @@ class BrowserWindow(QtGui.QMainWindow):
 		if checked:
 			self.centralWidget().setParent(None)
 			state = {}
-			self.__viewHandler.leave(state)
+			self.__viewHandler.getView()._saveSettings(state)
 			warp = WarpView(self.__viewHandler.getClass(), self.__store,
 				self.__viewHandler.rev(), state)
 			warp.openItem.connect(self.__warpOpen)
