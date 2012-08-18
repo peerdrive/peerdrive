@@ -307,13 +307,17 @@ sync_doc(Doc, From, To, SyncFun) ->
 					skip;
 				{ok, FromRev, _} ->
 					SyncFun(Doc, From, FromRev, To, ToRev);
-				error ->
+				{error, enoent} ->
 					% deleted -> ignore
-					skip
+					skip;
+				{error, Reason} ->
+					throw([{code, Reason}, {doc, Doc}])
 			end;
-		error ->
+		{error, enoent} ->
 			% doesn't exist on destination -> ignore
-			skip
+			skip;
+		{error, Reason} ->
+			throw([{code, Reason}, {doc, Doc}])
 	end.
 
 

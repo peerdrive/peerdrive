@@ -260,10 +260,10 @@ replicate_doc(Doc, First, S) ->
 					throw({error, ErrInfo})
 			end;
 
-		error when First ->
-			throw({error, [{code, enoent}, {doc, Doc}]});
+		{error, Reason} when First or (Reason =/= enoent) ->
+			throw({error, [{code, Reason}, {doc, Doc}]});
 
-		error ->
+		{error, enoent} ->
 			S
 	end.
 

@@ -45,12 +45,13 @@ statfs(Store) ->
 %% Returns the current revision and any pending preliminary revisions if the
 %% document is found in the store, or `error' if no such document exists.
 %%
-%% @spec lookup(Store, Doc) -> {ok, Rev, PreRevs} | error
+%% @spec lookup(Store, Doc) -> {ok, Rev, PreRevs} | {error, Reason}
 %%       Store = pid()
 %%       Doc = Rev = guid()
 %%       PreRevs = [guid()]
+%%       Reason = enoent | enxio
 lookup(Store, Doc) ->
-	call_store(Store, {lookup, Doc}, error).
+	call_store(Store, {lookup, Doc}).
 
 %% @doc Check if a revision exists in the store
 %% @spec contains(Store, Rev) -> bool()

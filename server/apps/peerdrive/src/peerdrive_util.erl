@@ -174,8 +174,8 @@ folder_link(Store, Folder, Doc) ->
 					Error
 			end;
 
-		error ->
-			{error, enoent}
+		{error, _} = Error ->
+			Error
 	end.
 
 
@@ -213,7 +213,7 @@ write_rev_struct(Store, Doc, Rev, Part, Data) ->
 read_doc_struct(Store, Doc, Part) ->
 	case peerdrive_store:lookup(Store, Doc) of
 		{ok, Rev, _} -> read_rev_struct(Store, Rev, Part);
-		error        -> {error, enoent}
+		Error        -> Error
 	end.
 
 

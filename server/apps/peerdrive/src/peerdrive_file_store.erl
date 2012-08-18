@@ -148,7 +148,7 @@ handle_call({lookup, DId}, _From, S) ->
 		[{_DId, RId, PreRIds, _Gen}] ->
 			{reply, {ok, RId, PreRIds}, S};
 		[] ->
-			{reply, error, S}
+			{reply, {error, enoent}, S}
 	end;
 
 handle_call({contains, RId}, _From, S) ->

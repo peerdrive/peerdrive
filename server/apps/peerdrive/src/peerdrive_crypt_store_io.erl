@@ -227,8 +227,10 @@ do_commit(Comment, #state{did=DId, store=Store} = S) ->
 			case peerdrive_store:lookup(Store, DId) of
 				{ok, CurEncRId, _CurPreRevs} ->
 					do_commit_forward(CurEncRId, NewRId, NewEncRId, NewEncRev, S2);
-				error ->
-					do_commit_put(NewRId, NewEncRId, NewEncRev, S2)
+				{error, enoent} ->
+					do_commit_put(NewRId, NewEncRId, NewEncRev, S2);
+				{error, _} = Error ->
+					{Error, S2}
 			end;
 
 		{error, _} = Error ->

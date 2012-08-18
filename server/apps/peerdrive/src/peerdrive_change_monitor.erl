@@ -180,7 +180,7 @@ doc_population(Doc) ->
 		fun(#peerdrive_store{sid=StoreGuid, pid=StorePid}, Acc) ->
 			case peerdrive_store:lookup(StorePid, Doc) of
 				{ok, _Rev, _PreRevs} -> sets:add_element(StoreGuid, Acc);
-				error -> Acc
+				{error, _} -> Acc
 			end
 		end,
 		sets:new(),
@@ -254,7 +254,7 @@ trigger_add_store(StoreGuid, Watches) ->
 									end,
 									{sets:add_element(StoreGuid, StoreSet), PidSet};
 
-								error ->
+								{error, _} ->
 									{StoreSet, PidSet}
 							end;
 

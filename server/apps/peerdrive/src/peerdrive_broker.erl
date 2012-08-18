@@ -47,7 +47,7 @@ lookup_doc(Doc, Stores) ->
 					NewAccRev = dict:append(Rev, StoreGuid, AccRev),
 					{NewAccRev, NewAccPreRev};
 
-				error ->
+				{error, _} ->
 					{AccRev, AccPreRev}
 			end
 		end,

@@ -92,8 +92,8 @@ handle_call({lookup, Doc}, _From, #state{store=Store, key=Key} = S) ->
 			Rev = dec_xid(Key, EncRev),
 			PreRevs = [ dec_xid(Key, EncPreRev) || EncPreRev <- EncPreRevs ],
 			{ok, Rev, PreRevs};
-		error ->
-			error
+		{error, _} = Error ->
+			Error
 	end,
 	{reply, Reply, S};
 

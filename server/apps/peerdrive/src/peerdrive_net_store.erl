@@ -157,7 +157,7 @@ handle_call(statfs, From, S) ->
 
 handle_call({lookup, Doc}, From, S) ->
 	Req = peerdrive_netstore_pb:encode_lookupreq(#lookupreq{doc=Doc}),
-	send_request(From, ?LOOKUP_MSG, Req, fun cnf_lookup/1, fun(_) -> error end, S);
+	send_request(From, ?LOOKUP_MSG, Req, fun cnf_lookup/1, S);
 
 handle_call({contains, Rev}, From, S) ->
 	Req = peerdrive_netstore_pb:encode_containsreq(#containsreq{rev=Rev}),
