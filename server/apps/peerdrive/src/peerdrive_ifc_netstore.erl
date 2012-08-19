@@ -480,14 +480,9 @@ do_delete_rev(Body, Store) ->
 do_put_doc_start(Store, NetHandle, ReqData) ->
 	#putdocstartreq{doc=Doc, rev=Rev} =
 		peerdrive_netstore_pb:decode_putdocstartreq(ReqData),
-	case check(peerdrive_store:put_doc(Store, Doc, Rev)) of
-		ok ->
-			{stop, <<>>};
-
-		{ok, StoreHandle} ->
-			Cnf = #putdocstartcnf{handle=NetHandle},
-			{start, StoreHandle, peerdrive_netstore_pb:encode_putdocstartcnf(Cnf)}
-	end.
+	{ok, StoreHandle} = check(peerdrive_store:put_doc(Store, Doc, Rev)),
+	Cnf = #putdocstartcnf{handle=NetHandle},
+	{start, StoreHandle, peerdrive_netstore_pb:encode_putdocstartcnf(Cnf)}.
 
 
 do_forward_doc_start(Store, NetHandle, ReqData) ->

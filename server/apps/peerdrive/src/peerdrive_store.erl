@@ -331,16 +331,16 @@ delete_rev(Store, Rev) ->
 
 %% @doc Put a document in the store
 %%
-%% If the Doc does not exist yet then the function will return a Handle and the
-%% caller has the chance to upload the revision before committing. After the
-%% commit the Doc it is created and points to Rev. If the Doc exits it must
-%% point to Rev, causing the function to return `ok', otherwise the call will
-%% fail.
+%% The function will return a Handle and the caller has the chance to upload
+%% the revision before committing. After the commit the Doc it is created and
+%% points to Rev. If the Doc exits it must point to Rev, otherwise the call
+%% will fail. As long as the handle is kept open the Doc and the Rev are
+%% guaranteed to be not garbage collected.
 %%
 %% @spec put_doc(Store, Doc, Rev) -> Result
 %%       Store = pid()
 %%       Doc = Rev = guid()
-%%       Result = ok | {ok, Handle} | {error, Reason}
+%%       Result = {ok, Handle} | {error, Reason}
 %%       Handle = pid()
 %%       Reason = ecode()
 put_doc(Store, Doc, Rev) ->

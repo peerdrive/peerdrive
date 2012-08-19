@@ -492,8 +492,6 @@ do_put_doc(Doc, Rev, User, #state{store=Store, key=Key}) ->
 	EncDoc = enc_xid(Key, Doc),
 	EncRev = enc_xid(Key, Rev),
 	case peerdrive_store:put_doc(Store, EncDoc, EncRev) of
-		ok ->
-			ok;
 		{ok, Handle} ->
 			peerdrive_crypt_store_put:start_link(self(), Handle, User);
 		{error, _} = Error ->

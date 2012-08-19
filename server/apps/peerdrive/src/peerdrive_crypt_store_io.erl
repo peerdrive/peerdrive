@@ -268,9 +268,6 @@ do_commit_forward(CurEncRId, NewRId, NewEncRId, NewEncRev, S) ->
 
 do_commit_put(NewRId, NewEncRId, NewEncRev, #state{did=DId, store=Store} = S) ->
 	case peerdrive_store:put_doc(Store, DId, NewEncRId) of
-		ok ->
-			{{ok, NewRId}, S#state{readonly=true}};
-
 		{ok, Handle} ->
 			case upload_rev(NewEncRId, NewEncRev, S) of
 				ok ->
@@ -417,9 +414,6 @@ prepare_rev(Comment, #state{rev=Rev, parts=Parts, key=Key} = S) ->
 
 upload_rev(RId, Rev, #state{store=Store} = S) ->
 	case peerdrive_store:put_rev_start(Store, RId, Rev) of
-		ok ->
-			ok;
-
 		{ok, MissingParts, Handle} ->
 			try
 				lists:foreach(fun(FCC) -> upload_rev_part(Handle, FCC, S) end,

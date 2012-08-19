@@ -531,20 +531,15 @@ do_delete_doc(DId, RId, #state{doc_tbl=DocTbl, sid=SId} = S) ->
 
 do_put_doc(DId, RId, User, #state{doc_tbl=DocTbl} = S) ->
 	case dets:lookup(DocTbl, DId) of
-		% document does not exist (yet)...
-		[] ->
+		% pointing to other rev?
+		[{_, CurRId, _, _}] when CurRId =/= RId ->
+			{{error, econflict}, S};
+
+		_ ->
 			S2 = do_lock({rev, RId}, do_lock({doc, DId}, S)),
 			{ok, Handle} = peerdrive_file_store_put:start_link(DId,
 				RId, User),
-			{{ok, Handle}, S2};
-
-		% already pointing to requested rev
-		[{_, RId, _, _}] ->
-			{ok, S};
-
-		% completely other rev
-		[_] ->
-			{{error, econflict}, S}
+			{{ok, Handle}, S2}
 	end.
 
 
