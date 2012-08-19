@@ -24,8 +24,9 @@
 	handle_sync_event/4, terminate/3]).
 -export([working/2, paused/2, error/2]).
 
--record(state, {parent_backlog, req_backlog, srcstore, dststore, depth,
-	verbose, monitor, count, done, pauseonerror, from, result}).
+-record(state, {g, backlog, srcstore, dststore, depth,
+	verbose, monitor, all, done, pauseonerror, from, result}).
+-record(copy, {rid, parts, part, reader, imp, pos, accsize, factor}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% External interface...
@@ -43,32 +44,36 @@ start_link(Request, SrcStore, DstStore, Options, From) ->
 
 init({Request, From, SrcStore, DstStore, Options}) ->
 	process_flag(trap_exit, true),
-	Info = case Request of
-		{replicate_doc, Doc, _First} ->
-			{rep_doc, peerdrive_store:guid(SrcStore), Doc,
-				peerdrive_store:guid(DstStore)};
-
-		{replicate_rev, Rev, _First} ->
-			{rep_rev, peerdrive_store:guid(SrcStore), Rev,
-				peerdrive_store:guid(DstStore)}
-	end,
-	{ok, Monitor} = peerdrive_work:new(Info),
-	peerdrive_work:start(Monitor),
 	S = #state{
-		parent_backlog = queue:new(),
-		req_backlog    = gb_sets:singleton(Request),
+		g              = digraph:new([acyclic]),
+		backlog        = [],
 		srcstore       = SrcStore,
 		dststore       = DstStore,
 		depth          = proplists:get_value(depth, Options, 0),
 		verbose        = proplists:get_bool(verbose, Options),
-		monitor        = Monitor,
-		count          = 1,
+		all            = 1,
 		done           = 0,
 		pauseonerror   = proplists:get_bool(pauseonerror, Options),
 		from           = From,
 		result         = ok
 	},
-	{ok, working, S, 0}.
+	digraph:add_vertex(S#state.g, root),
+	S2 = schedule(estimate, handle_node(undefined, root, S)),
+	S3 = case Request of
+		{doc, DId} ->
+			Info = {rep_doc, peerdrive_store:guid(SrcStore), DId,
+				peerdrive_store:guid(DstStore)},
+			discover_doc(root, DId, true, S2);
+
+		{rev, RId} ->
+			Info = {rep_rev, peerdrive_store:guid(SrcStore), RId,
+				peerdrive_store:guid(DstStore)},
+			discover_rev(root, RId, true, true, S2)
+	end,
+	{ok, Monitor} = peerdrive_work:new(Info),
+	peerdrive_work:start(Monitor),
+	S4 = S3#state{monitor=Monitor},
+	{ok, working, S4, 0}.
 
 
 terminate(_Reason, _State, #state{monitor=Monitor, from=From, result=Result}) ->
@@ -84,8 +89,8 @@ terminate(_Reason, _State, #state{monitor=Monitor, from=From, result=Result}) ->
 
 working(timeout, S) ->
 	try
-		S2 = run_queues(S),
-		#state{count=Count, done=Done, monitor=Monitor} = S2,
+		S2 = step(S),
+		#state{all=Count, done=Done, monitor=Monitor} = S2,
 		peerdrive_work:progress(Monitor, Done * 255 div Count),
 		{next_state, working, S2, 0}
 	catch
@@ -160,144 +165,143 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-push_doc(Doc, #state{req_backlog=Backlog} = S) ->
-	NewBacklog = gb_sets:add({replicate_doc, Doc, false}, Backlog),
-	S#state{req_backlog=NewBacklog}.
+schedule(Action, #state{backlog=Backlog} = S) ->
+	NewBacklog = [Action | Backlog],
+	S#state{backlog=NewBacklog}.
 
 
-push_rev(Rev, #state{req_backlog=Backlog} = S) ->
-	NewBacklog = gb_sets:add({replicate_rev, Rev, false}, Backlog),
-	S#state{req_backlog=NewBacklog}.
+step(#state{backlog=[Step | Rest]} = S) ->
+	S2 = S#state{backlog=Rest},
+	case Step of
+		{discover_doc, Parent, DId, First} ->
+			do_discover_doc(Parent, DId, First, S2);
+		{discover_rev, Parent, RId, First, Force} ->
+			do_discover_rev(Parent, RId, First, Force, S2);
+		{handle_node, Parent, Node} ->
+			do_handle_node(Parent, Node, S2);
+		#copy{} = CopyAction ->
+			do_copy(CopyAction, S2);
+		estimate ->
+			do_estimate(S2)
+	end;
+
+step(#state{backlog=[]}) ->
+	throw(done).
 
 
-push_parent(Rev, First, #state{parent_backlog=Backlog} = S) ->
-	NewBacklog = queue:in({Rev, First}, Backlog),
-	S#state{parent_backlog=NewBacklog}.
+skip(#state{g=G, backlog=[Skip | NewBacklog]} = S) ->
+	S2 = S#state{backlog=NewBacklog},
+	case Skip of
+		#copy{reader=Reader, accsize=Size} ->
+			peerdrive_store:close(Reader),
+			account_size(Size, S2);
+		{handle_node, _Parent, Node} ->
+			{Node, MyProps} = digraph:vertex(G, Node),
+			Size = proplists:get_value(size, MyProps, 0),
+			account_size(Size, S2);
+		_ ->
+			S2
+	end;
+
+skip(#state{backlog=[]} = S) ->
+	S.
 
 
-run_queues(#state{parent_backlog=ParentBL} = S) ->
-	case queue:out(ParentBL) of
-		{{value, {Rev, First}}, NewParentBL} ->
-			replicate_rev(Rev, First, S#state{parent_backlog=NewParentBL});
+discover_doc(Parent, DId, S) ->
+	discover_doc(Parent, DId, false, S).
 
-		{empty, _ParentBL} ->
-			#state{req_backlog=ReqBacklog, count=OldCount, done=Done} = S,
-			case gb_sets:is_empty(ReqBacklog) of
-				false ->
-					{Item, Remaining} = gb_sets:take_smallest(ReqBacklog),
-					PrevSize = gb_sets:size(Remaining),
-					S2 = S#state{req_backlog=Remaining},
-					S3 = case Item of
-						{replicate_doc, Doc, First} ->
-							replicate_doc(Doc, First, S2);
-						{replicate_rev, Rev, First} ->
-							replicate_rev(Rev, First, S2)
-					end,
-					NextSize = gb_sets:size(S3#state.req_backlog),
-					S3#state{count=OldCount+NextSize-PrevSize, done=Done+1};
-
-				true ->
-					throw(done)
-			end
-	end.
-
-
-skip(#state{parent_backlog=ParentBL} = S) ->
-	case queue:out(ParentBL) of
-		{{value, _}, NewParentBL} ->
-			S#state{parent_backlog=NewParentBL};
-
-		{empty, _ParentBL} ->
-			ReqBacklog = S#state.req_backlog,
-			case gb_sets:is_empty(ReqBacklog) of
-				false ->
-					{_, NewReqBacklog} = gb_sets:take_smallest(ReqBacklog);
-				true ->
-					NewReqBacklog = ReqBacklog
-			end,
-			S#state{req_backlog=NewReqBacklog}
-	end.
-
-
-replicate_doc(Doc, First, S) ->
-	#state{
-		srcstore = SrcStore,
-		dststore = DstStore,
-		verbose  = Verbose
-	} = S,
-	case peerdrive_store:lookup(SrcStore, Doc) of
-		{ok, Rev, _PreRevs} ->
-			case peerdrive_store:put_doc(DstStore, Doc, Rev) of
-				ok ->
-					case Verbose of
-						false -> S;
-						true  -> replicate_rev(Rev, First, S)
-					end;
-
-				{ok, Handle} ->
-					% replicate corresponding rev
-					try
-						S2 = replicate_rev(Rev, First, S),
-						case peerdrive_store:put_doc_commit(Handle) of
-							ok ->
-								S2;
-							{error, econflict} when not First ->
-								% Not treated as an error but deliberately
-								% drop new state
-								S;
-							{error, Reason} ->
-								ErrInfo = [{code, Reason}, {doc, Doc}, {rev, Rev}],
-								throw({error, ErrInfo})
-						end
-					after
-						peerdrive_store:put_doc_close(Handle)
-					end;
-
-				{error, econflict} when not First ->
-					S;
-				{error, Reason} ->
-					ErrInfo = [{code, Reason}, {doc, Doc}, {rev, Rev}],
-					throw({error, ErrInfo})
-			end;
-
-		{error, Reason} when First or (Reason =/= enoent) ->
-			throw({error, [{code, Reason}, {doc, Doc}]});
-
-		{error, enoent} ->
+discover_doc(Parent, DId, First, #state{g=G, backlog=Backlog} = S) ->
+	Node = {doc, DId},
+	case digraph:vertex(G, Node) of
+		false ->
+			NewBacklog = [{discover_doc, Parent, DId, First} | Backlog],
+			S#state{backlog=NewBacklog};
+		_ ->
 			S
 	end.
 
 
-replicate_rev(Rev, First, #state{verbose=Verbose} = S) ->
-	Contains = (not Verbose) andalso peerdrive_store:contains(S#state.dststore,
-		Rev),
-	case Contains of
-		false -> do_replicate_rev(Rev, First, S);
-		true  -> S
+discover_rev(Parent, RId, S) ->
+	discover_rev(Parent, RId, false, false, S).
+
+discover_rev(Parent, RId, First, Force, #state{g=G, backlog=Backlog} = S) ->
+	Node = {rev, RId},
+	case digraph:vertex(G, Node) of
+		false ->
+			NewBacklog = [{discover_rev, Parent, RId, First, Force} | Backlog],
+			S#state{backlog=NewBacklog};
+		_ ->
+			S
 	end.
 
 
-do_replicate_rev(Rev, First, S) ->
+do_discover_doc(Parent, DId, First, S) ->
 	#state{
-		srcstore = SrcStore,
-		dststore = DstStore,
-		depth    = Depth
+		g=G,
+		verbose=Verbose,
+		srcstore=SrcStore,
+		dststore=DstStore
 	} = S,
-	case peerdrive_store:stat(SrcStore, Rev) of
-		{ok, #rev_stat{parents=Parents, mtime=Mtime} = Stat}
-		when (Mtime >= Depth) or First ->
-			case put_rev(SrcStore, DstStore, Rev) of
-				ok ->
+	Exists = case peerdrive_store:lookup(DstStore, DId) of
+		{ok, _, _} -> true;
+		{error, _} -> false
+	end,
+	case Verbose or not Exists of
+		true ->
+			case peerdrive_store:lookup(SrcStore, DId) of
+				{ok, RId, _PreRevs} ->
+					Node = {doc, DId},
+					Props = case Exists of
+						true -> [exists];
+						false -> []
+					end,
+					Node = digraph:add_vertex(G, Node, [{rev, RId} | Props]),
+					['$e' | _] = digraph:add_edge(G, Parent, Node),
+					discover_rev(Node, RId, First, true, S);
+
+				{error, Reason} when First or (Reason =/= enoent) ->
+					throw({error, [{code, Reason}, {doc, DId}]});
+				{error, enoent} ->
+					S
+			end;
+
+		false ->
+			S
+	end.
+
+
+do_discover_rev(Parent, RId, First, Force, S) ->
+	#state{
+		g=G,
+		verbose=Verbose,
+		srcstore=SrcStore,
+		dststore=DstStore,
+		depth=Depth
+	} = S,
+	Exists = peerdrive_store:contains(DstStore, RId),
+	case Verbose or not Exists of
+		true ->
+			case peerdrive_store:stat(SrcStore, RId) of
+				{ok, #rev_stat{parents=Ancestors, mtime=Mtime} = Stat}
+				when (Mtime >= Depth) or Force ->
+					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.parts ],
+					Node = {rev, RId},
+					Props = case Exists of
+						true -> [exists];
+						false -> []
+					end,
+					Node = digraph:add_vertex(G, Node, [{parts, Parts} | Props]),
+					['$e' | _] = digraph:add_edge(G, Parent, Node),
 					S2 = lists:foldl(
-						fun(Parent, Acc) -> push_parent(Parent, First, Acc) end,
+						fun(Ancestor, Acc) -> discover_rev(Node, Ancestor, Acc) end,
 						S,
-						Parents),
+						Ancestors),
 					case is_sticky(Stat) of
 						true ->
 							lists:foldl(
-								fun(Ref, Acc) -> push_doc(Ref, Acc) end,
+								fun(Ref, Acc) -> discover_doc(Node, Ref, Acc) end,
 								lists:foldl(
-									fun(Ref, Acc) -> push_rev(Ref, Acc) end,
+									fun(Ref, Acc) -> discover_rev(Node, Ref, Acc) end,
 									S2,
 									Stat#rev_stat.rev_links),
 								Stat#rev_stat.doc_links);
@@ -305,28 +309,99 @@ do_replicate_rev(Rev, First, S) ->
 							S2
 					end;
 
-				{error, Reason} ->
-					throw({error, [{code, Reason}, {rev, Rev}]})
+				{ok, Stat} ->
+					% add sentinel node for correct transfer size estimation
+					Node = {sentinel, RId},
+					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.parts ],
+					digraph:add_vertex(G, Node, [{parts, Parts}]),
+					digraph:add_edge(G, Parent, Node),
+					S;
+
+				{error, Reason} when First or (Reason =/= enoent) ->
+					throw({error, [{code, Reason}, {rev, RId}]});
+
+				{error, enoent} ->
+					S
 			end;
 
-		{ok, _} ->
-			S;
-
-		{error, Reason} when First ->
-			throw({error, [{code, Reason}, {rev, Rev}]});
-
-		{error, _} ->
+		false ->
 			S
 	end.
 
 
-is_sticky(#rev_stat{flags=Flags}) ->
-	(Flags band ?REV_FLAG_STICKY) =/= 0.
+handle_node(Parent, Node, #state{backlog=Backlog} = S) ->
+	NewBacklog = [{handle_node, Parent, Node} | Backlog],
+	S#state{backlog=NewBacklog}.
 
 
-% returns ok | {error, Reason}
-put_rev(SourceStore, DestStore, Rev) ->
-	case peerdrive_store:stat(SourceStore, Rev) of
+do_handle_node(Parent, Node, #state{g=G} = S) ->
+	case digraph:out_edges(G, Node) of
+		[] ->
+			{Node, MyProps} = digraph:vertex(G, Node),
+			Size = proplists:get_value(size, MyProps, 0),
+			% Do the replication and keep the handle open
+			case Node of
+				{doc, DId} ->
+					RId = proplists:get_value(rev, MyProps),
+					{Handle, S2} = replicate_doc(DId, RId, Size, S);
+				{rev, RId} ->
+					{Handle, S2} = replicate_rev(RId, Size, S);
+				_ ->
+					Handle = undefined,
+					S2 = S
+			end,
+			% Now queue the handle at the parent
+			case Handle of
+				undefined ->
+					ok;
+				_ ->
+					{Parent, ParentProps} = digraph:vertex(G, Parent),
+					digraph:add_vertex(G, Parent, [Handle | ParentProps])
+			end,
+			% Lastly, close our handles
+			lists:foreach(
+				fun
+					({dhandle, ChldHndl}) -> peerdrive_store:put_doc_close(ChldHndl);
+					({rhandle, ChldHndl}) -> peerdrive_store:put_rev_close(ChldHndl);
+					(_) -> ok
+				end,
+				MyProps),
+			S2;
+
+		[Edge | _] ->
+			% Remove the child link and queue both
+			{Edge, Node, Child, _Label} = digraph:edge(G, Edge),
+			digraph:del_edge(G, Edge),
+			handle_node(Node, Child, handle_node(Parent, Node, S))
+	end.
+
+
+replicate_doc(DId, RId, Size, S) ->
+	#state{
+		dststore = DstStore
+	} = S,
+	case peerdrive_store:put_doc(DstStore, DId, RId) of
+		{ok, Handle} ->
+			case peerdrive_store:put_doc_commit(Handle) of
+				ok ->
+					{{dhandle, Handle}, account_size(Size, S)};
+				{error, Reason} ->
+					ErrInfo = [{code, Reason}, {doc, DId}, {rev, RId}],
+					throw({error, ErrInfo})
+			end;
+
+		{error, Reason} ->
+			ErrInfo = [{code, Reason}, {doc, DId}, {rev, RId}],
+			throw({error, ErrInfo})
+	end.
+
+
+replicate_rev(RId, AccountedSize, S) ->
+	#state{
+		srcstore = SrcStore,
+		dststore = DstStore
+	} = S,
+	case peerdrive_store:stat(SrcStore, RId) of
 		{ok, Stat} ->
 			Revision = #revision{
 				flags = Stat#rev_stat.flags,
@@ -342,75 +417,143 @@ put_rev(SourceStore, DestStore, Rev) ->
 				rev_links = Stat#rev_stat.rev_links,
 				comment   = Stat#rev_stat.comment
 			},
-			case peerdrive_store:put_rev_start(DestStore, Rev, Revision) of
-				{ok, MissingParts, Importer} ->
-					try
-						copy_parts(Rev, SourceStore, Importer, MissingParts)
-					after
-						peerdrive_store:put_rev_close(Importer)
-					end;
+			case peerdrive_store:put_rev_start(DstStore, RId, Revision) of
+				{ok, MissingParts, Handle} ->
+					RealSize = lists:foldl(
+						fun(P, Acc) ->
+							{_, Size, _} = lists:keyfind(P, 1, Stat#rev_stat.parts),
+							Acc + Size
+						end,
+						0,
+						MissingParts),
+					copy_parts(RId, SrcStore, Handle, MissingParts,
+						AccountedSize, RealSize, S);
 
 				{error, Reason} ->
-					{error, Reason}
-			end;
-
-		Error ->
-			Error
-	end.
-
-
-copy_parts(_Rev, _SourceStore, _Importer, []) ->
-	ok;
-
-copy_parts(Rev, SourceStore, Importer, Parts) ->
-	case peerdrive_store:peek(SourceStore, Rev) of
-		{ok, Reader} ->
-			try
-				case copy_parts_loop(Parts, Reader, Importer) of
-					ok ->
-						peerdrive_store:put_rev_commit(Importer);
-					{error, Reason} ->
-						{error, Reason}
-				end
-			after
-				peerdrive_store:close(Reader)
+					throw({error, [{code, Reason}, {rev, RId}]})
 			end;
 
 		{error, Reason} ->
-			{error, Reason}
+			throw({error, [{code, Reason}, {rev, RId}]})
 	end.
 
-copy_parts_loop([], _Reader, _Importer) ->
-	ok;
-copy_parts_loop([Part|Remaining], Reader, Importer) ->
-	case copy(Part, Reader, Importer) of
-		ok   -> copy_parts_loop(Remaining, Reader, Importer);
-		Else -> Else
+
+copy_parts(RId, _SourceStore, Importer, [], AccSize, _RealSize, S) ->
+	case peerdrive_store:put_rev_commit(Importer) of
+		ok ->
+			{{rhandle, Importer}, account_size(AccSize, S)};
+		{error, Reason} ->
+			throw({error, [{code, Reason}, {rev, RId}]})
+	end;
+
+copy_parts(RId, SourceStore, Importer, Parts, AccSize, RealSize, S) ->
+	case peerdrive_store:peek(SourceStore, RId) of
+		{ok, Reader} ->
+			Action = #copy{rid=RId, parts=Parts, reader=Reader, imp=Importer,
+				accsize=AccSize, factor=(AccSize / max(RealSize, 1))},
+			{{rhandle, Importer}, schedule(Action, S)};
+
+		{error, Reason} ->
+			throw({error, [{code, Reason}, {rev, RId}]})
 	end.
 
-copy(Part, Reader, Importer) ->
-	copy_loop(Part, Reader, Importer, 0).
 
-copy_loop(Part, Reader, Importer, Pos) ->
-	case peerdrive_store:read(Reader, Part, Pos, 16#100000) of
+do_copy(#copy{parts=[], part=undefined, imp=Importer, reader=Reader} = Action, S) ->
+	case peerdrive_store:put_rev_commit(Importer) of
+		ok ->
+			peerdrive_store:close(Reader),
+			account_size(Action#copy.accsize, S);
+		{error, Reason} ->
+			throw({error, [{code, Reason}, {rev, Action#copy.rid}]})
+	end;
+
+do_copy(#copy{parts=[Part|Remaining], part=undefined} = Action, S) ->
+	schedule(Action#copy{parts=Remaining, part=Part, pos=0}, S);
+
+do_copy(Action, S) ->
+	#copy{
+		part    = Part,
+		reader  = Reader,
+		imp     = Importer,
+		pos     = Pos,
+		factor  = Factor,
+		accsize = AccSize
+	} = Action,
+	case peerdrive_store:read(Reader, Part, Pos, 16#40000) of
 		{ok, Data} ->
 			case peerdrive_store:put_rev_part(Importer, Part, Data) of
 				ok ->
-					if
-						size(Data) == 16#100000 ->
-							copy_loop(Part, Reader, Importer, Pos+16#100000);
+					Done = size(Data),
+					NewAction1 = if
+						Done == 16#40000 ->
+							Action#copy{pos=Pos+16#40000};
 						true ->
-							ok
-					end;
+							Action#copy{part=undefined}
+					end,
+					Account = min(round(Done * Factor), AccSize),
+					NewAction2 = NewAction1#copy{accsize=AccSize-Account},
+					schedule(NewAction2, account_size(Account, S));
 
 				{error, Reason} ->
-					{error, Reason}
+					throw({error, [{code, Reason}, {rev, Action#copy.rid}]})
 			end;
 
 		eof ->
-			ok;
+			schedule(Action#copy{part=undefined}, S);
 
 		{error, Reason} ->
-			{error, Reason}
+			throw({error, [{code, Reason}, {rev, Action#copy.rid}]})
 	end.
+
+
+do_estimate(#state{g=G, all=All} = S) ->
+	{Size, _Parts} = do_estimate(root, G),
+	S#state{all=All+Size}.
+
+
+do_estimate(Node, G) ->
+	{SubSize, SubPIds} = lists:foldl(
+		fun(SubNode, {AccSize, AccPIds}) ->
+			{Size, PIds} = do_estimate(SubNode, G),
+			{AccSize+Size, sets:union(AccPIds, PIds)}
+		end,
+		{0, sets:new()},
+		digraph:out_neighbours(G, Node)),
+	{_, Props} = digraph:vertex(G, Node),
+	Parts = proplists:get_value(parts, Props, []),
+	PIds = sets:from_list([ PId || {PId, _} <- Parts]),
+	Size = case Node of
+		{rev, _} ->
+			MissingPIds = sets:subtract(PIds, SubPIds),
+			sets:fold(
+				fun(PId, Acc) ->
+					Acc + proplists:get_value(PId, Parts)
+				end,
+				0,
+				MissingPIds);
+		{doc, _} ->
+			1024;
+		_ ->
+			0
+	end,
+	AccountedSize = case proplists:get_bool(exists, Props) of
+		true -> max(Size, 1024);
+		false -> Size
+	end,
+	if
+		AccountedSize > 0 ->
+			NewProps = [{size, AccountedSize} | Props],
+			digraph:add_vertex(G, Node, NewProps);
+		true ->
+			ok
+	end,
+	{AccountedSize+SubSize, sets:union(PIds, SubPIds)}.
+
+
+is_sticky(#rev_stat{flags=Flags}) ->
+	(Flags band ?REV_FLAG_STICKY) =/= 0.
+
+
+account_size(Size, #state{done=Done} = S) ->
+	S#state{done = Done + Size}.
 

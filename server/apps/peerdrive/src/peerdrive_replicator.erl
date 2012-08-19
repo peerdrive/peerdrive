@@ -30,16 +30,16 @@ start_link() ->
 	supervisor:start_link({local, peerdrive_replicator}, ?MODULE, []).
 
 replicate_doc(SrcStore, Doc, DstStore, Options) ->
-	start_child([{replicate_doc, Doc, true}, SrcStore, DstStore, Options]).
+	start_child([{doc, Doc}, SrcStore, DstStore, Options]).
 
 replicate_doc_sync(SrcStore, Doc, DstStore, Options) ->
-	start_child_sync([{replicate_doc, Doc, true}, SrcStore, DstStore, Options]).
+	start_child_sync([{doc, Doc}, SrcStore, DstStore, Options]).
 
 replicate_rev(SrcStore, Rev, DstStore, Options) ->
-	start_child([{replicate_rev, Rev, true}, SrcStore, DstStore, Options]).
+	start_child([{rev, Rev}, SrcStore, DstStore, Options]).
 
 replicate_rev_sync(SrcStore, Rev, DstStore, Options) ->
-	start_child_sync([{replicate_rev, Rev, true}, SrcStore, DstStore, Options]).
+	start_child_sync([{rev, Rev}, SrcStore, DstStore, Options]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
