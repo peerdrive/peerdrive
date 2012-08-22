@@ -421,7 +421,8 @@ class ProgressWidget(QtGui.QFrame):
 			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
 		self.toBtn = DocButton(toStore, toStore, True)
 		self.progressBar = QtGui.QProgressBar()
-		self.progressBar.setMaximum(255)
+		self.progressBar.setMinimum(0)
+		self.progressBar.setMaximum(0)
 		self.__pauseBtn = QtGui.QToolButton()
 		self.__pauseBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
 		self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
@@ -467,6 +468,8 @@ class ProgressWidget(QtGui.QFrame):
 		if self.tag != tag:
 			return
 
+		if value > 0:
+			self.progressBar.setMaximum(255)
 		self.progressBar.setValue(value)
 		if self.__state == state:
 			return

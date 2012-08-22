@@ -1277,7 +1277,8 @@ class FolderProgressWidget(QtGui.QFrame):
 			self.fromBtn = widgets.RevButton(fromStore, item, True)
 			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-replicate.png"))
 		self.progressBar = QtGui.QProgressBar()
-		self.progressBar.setMaximum(255)
+		self.progressBar.setMinimum(0)
+		self.progressBar.setMaximum(0)
 		self.__pauseBtn = QtGui.QToolButton()
 		self.__pauseBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
 		self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-pause.png"))
@@ -1321,6 +1322,8 @@ class FolderProgressWidget(QtGui.QFrame):
 		if self.tag != tag:
 			return
 
+		if value > 0:
+			self.progressBar.setMaximum(255)
 		self.progressBar.setValue(value)
 		if self.__state == state:
 			return
