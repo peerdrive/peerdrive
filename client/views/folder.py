@@ -24,7 +24,7 @@ import struct as pystruct
 
 from peerdrive import Connector, Registry
 from peerdrive import struct, importer, fuse
-from peerdrive.connector import Watch
+from peerdrive.connector import Watch, Stat
 from peerdrive.gui import widgets, utils
 
 class AbortException(Exception):
@@ -1197,6 +1197,7 @@ class FolderWidget(widgets.DocumentView):
 			w.write('META', struct.dumps({ "org.peerdrive.annotation" :
 				{"title" : "Folder"} }))
 			w.write('PDSD', struct.dumps( [] ))
+			w.setFlags([Stat.FLAG_STICKY])
 			w.commit("Created")
 			self.model().insertLink(struct.DocLink(store, w.getDoc()))
 			self.save("Added new folder")
