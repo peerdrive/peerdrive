@@ -138,8 +138,7 @@ do_merge(Handle, DstStore, SrcStore, Rev, Options) ->
 					NewParents = lists:usort([Rev | Parents]),
 					case peerdrive_store:set_parents(Handle, NewParents) of
 						ok ->
-							% FIXME: _sync?
-							peerdrive_replicator:replicate_rev(SrcStore, Rev,
+							peerdrive_replicator:replicate_rev_sync(SrcStore, Rev,
 								DstStore, Options),
 							ok;
 						{error, _} = Error ->

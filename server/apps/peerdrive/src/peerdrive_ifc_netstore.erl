@@ -126,14 +126,14 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 		?DELETE_REV_MSG ->
 			handle(Body, RetPath, Store, fun do_delete_rev/2, S);
 
-		?PUT_DOC_START_MSG ->
-			start_worker(S, Body, RetPath, fun do_put_doc_start/3, fun put_doc_handler/3);
+		?PUT_DOC_MSG ->
+			start_worker(S, Body, RetPath, fun do_put_doc/3, fun io_handler/3);
 
-		?FF_DOC_START_MSG ->
-			start_worker(S, Body, RetPath, fun do_forward_doc_start/3, fun forward_handler/3);
+		?FF_DOC_MSG ->
+			start_worker(S, Body, RetPath, fun do_forward_doc/3, fun io_handler/3);
 
-		?PUT_REV_START_MSG ->
-			start_worker(S, Body, RetPath, fun do_put_rev_start/3, fun put_rev_handler/3);
+		?PUT_REV_MSG ->
+			start_worker(S, Body, RetPath, fun do_put_rev/3, fun io_handler/3);
 
 		?SYNC_GET_CHANGES_MSG ->
 			handle(Body, RetPath, Store, fun do_sync_get_changes/2, S);
@@ -150,8 +150,8 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 		?SYNC_MSG ->
 			handle(Body, RetPath, Store, fun do_sync/2, S);
 
-		?RMBR_REV_START_MSG ->
-			start_worker(S, Body, RetPath, fun do_remember_rev_start/3, fun remember_handler/3);
+		?RMBR_REV_MSG ->
+			start_worker(S, Body, RetPath, fun do_remember_rev/3, fun io_handler/3);
 
 		?READ_MSG ->
 			ReqData = #readreq{handle=Handle} =
@@ -228,49 +228,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 				peerdrive_netstore_pb:decode_gettypereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?FF_DOC_COMMIT_MSG ->
-			ReqData = #forwarddoccommitreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_forwarddoccommitreq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
-		?FF_DOC_CLOSE_MSG ->
-			ReqData = #forwarddocclosereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_forwarddocclosereq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
-		?RMBR_REV_COMMIT_MSG ->
-			ReqData = #rememberrevcommitreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_rememberrevcommitreq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
-		?RMBR_REV_CLOSE_MSG ->
-			ReqData = #rememberrevclosereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_rememberrevclosereq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
-		?PUT_DOC_COMMIT_MSG ->
-			ReqData = #putdoccommitreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_putdoccommitreq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
-		?PUT_DOC_CLOSE_MSG ->
-			ReqData = #putdocclosereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_putdocclosereq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
 		?PUT_REV_PART_MSG ->
 			ReqData = #putrevpartreq{handle=Handle} =
 				peerdrive_netstore_pb:decode_putrevpartreq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
-		?PUT_REV_COMMIT_MSG ->
-			ReqData = #putrevcommitreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_putrevcommitreq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
-		?PUT_REV_CLOSE_MSG ->
-			ReqData = #putrevclosereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_putrevclosereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S)
 	end;
 
@@ -477,59 +437,59 @@ do_delete_rev(Body, Store) ->
 	<<>>.
 
 
-do_put_doc_start(Store, NetHandle, ReqData) ->
-	#putdocstartreq{doc=Doc, rev=Rev} =
-		peerdrive_netstore_pb:decode_putdocstartreq(ReqData),
+do_put_doc(Store, NetHandle, ReqData) ->
+	#putdocreq{doc=Doc, rev=Rev} =
+		peerdrive_netstore_pb:decode_putdocreq(ReqData),
 	{ok, StoreHandle} = check(peerdrive_store:put_doc(Store, Doc, Rev)),
-	Cnf = #putdocstartcnf{handle=NetHandle},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_putdocstartcnf(Cnf)}.
+	Cnf = #putdoccnf{handle=NetHandle},
+	{start, StoreHandle, peerdrive_netstore_pb:encode_putdoccnf(Cnf)}.
 
 
-do_forward_doc_start(Store, NetHandle, ReqData) ->
-	#forwarddocstartreq{doc=Doc, rev_path=RevPath, old_pre_rev=OldPreRev} =
-		peerdrive_netstore_pb:decode_forwarddocstartreq(ReqData),
-	case check(peerdrive_store:forward_doc_start(Store, Doc, RevPath, OldPreRev)) of
+do_forward_doc(Store, NetHandle, ReqData) ->
+	#forwarddocreq{doc=Doc, rev_path=RevPath, old_pre_rev=OldPreRev} =
+		peerdrive_netstore_pb:decode_forwarddocreq(ReqData),
+	case check(peerdrive_store:forward_doc(Store, Doc, RevPath, OldPreRev)) of
 		ok ->
 			{stop, <<>>};
 
 		{ok, Missing, StoreHandle} ->
-			Cnf = #forwarddocstartcnf{handle=NetHandle, missing_revs=Missing},
-			{start, StoreHandle, peerdrive_netstore_pb:encode_forwarddocstartcnf(Cnf)}
+			Cnf = #forwarddoccnf{handle=NetHandle, missing_revs=Missing},
+			{start, StoreHandle, peerdrive_netstore_pb:encode_forwarddoccnf(Cnf)}
 	end.
 
 
-do_remember_rev_start(Store, NetHandle, ReqData) ->
-	#rememberrevstartreq{doc=Doc, pre_rev=PreRev, old_pre_rev=OldPreRev} =
-		peerdrive_netstore_pb:decode_rememberrevstartreq(ReqData),
+do_remember_rev(Store, NetHandle, ReqData) ->
+	#rememberrevreq{doc=Doc, pre_rev=PreRev, old_pre_rev=OldPreRev} =
+		peerdrive_netstore_pb:decode_rememberrevreq(ReqData),
 	case check(peerdrive_store:remember_rev(Store, Doc, PreRev, OldPreRev)) of
 		ok ->
 			{stop, <<>>};
 
 		{ok, StoreHandle} ->
-			Cnf = #rememberrevstartcnf{handle=NetHandle},
-			{start, StoreHandle, peerdrive_netstore_pb:encode_rememberrevstartcnf(Cnf)}
+			Cnf = #rememberrevcnf{handle=NetHandle},
+			{start, StoreHandle, peerdrive_netstore_pb:encode_rememberrevcnf(Cnf)}
 	end.
 
 
-do_put_rev_start(Store, NetHandle, ReqData) ->
-	#putrevstartreq{rid=RId, revision=PbRev} =
-		peerdrive_netstore_pb:decode_putrevstartreq(ReqData),
+do_put_rev(Store, NetHandle, ReqData) ->
+	#putrevreq{rid=RId, revision=PbRev} =
+		peerdrive_netstore_pb:decode_putrevreq(ReqData),
 	Rev = #revision{
-		flags = PbRev#putrevstartreq_revision.flags,
-		parts = [ {FCC, PId} || #putrevstartreq_revision_part{fourcc=FCC, pid=PId}
-			<- PbRev#putrevstartreq_revision.parts, ?ASSERT_PART(FCC) ],
-		parents = PbRev#putrevstartreq_revision.parents,
-		mtime = PbRev#putrevstartreq_revision.mtime,
-		type = PbRev#putrevstartreq_revision.type_code,
-		creator = PbRev#putrevstartreq_revision.creator_code,
-		doc_links = PbRev#putrevstartreq_revision.doc_links,
-		rev_links = PbRev#putrevstartreq_revision.rev_links,
-		comment = PbRev#putrevstartreq_revision.comment
+		flags = PbRev#putrevreq_revision.flags,
+		parts = [ {FCC, PId} || #putrevreq_revision_part{fourcc=FCC, pid=PId}
+			<- PbRev#putrevreq_revision.parts, ?ASSERT_PART(FCC) ],
+		parents = PbRev#putrevreq_revision.parents,
+		mtime = PbRev#putrevreq_revision.mtime,
+		type = PbRev#putrevreq_revision.type_code,
+		creator = PbRev#putrevreq_revision.creator_code,
+		doc_links = PbRev#putrevreq_revision.doc_links,
+		rev_links = PbRev#putrevreq_revision.rev_links,
+		comment = PbRev#putrevreq_revision.comment
 	},
-	{ok, Missing, StoreHandle} = check(peerdrive_store:put_rev_start(Store,
+	{ok, Missing, StoreHandle} = check(peerdrive_store:put_rev(Store,
 		RId, Rev)),
-	Cnf = #putrevstartcnf{handle=NetHandle, missing_parts=Missing},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_putrevstartcnf(Cnf)}.
+	Cnf = #putrevcnf{handle=NetHandle, missing_parts=Missing},
+	{start, StoreHandle, peerdrive_netstore_pb:encode_putrevcnf(Cnf)}.
 
 
 do_sync_get_changes(Body, Store) ->
@@ -663,12 +623,12 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 			{stop, <<>>};
 
 		?COMMIT_MSG ->
-			#commitreq{comment=CommentStr} = ReqData,
-			Comment = if
-				CommentStr == undefined -> undefined;
-				true -> unicode:characters_to_binary(CommentStr)
+			#commitreq{comment=Comment} = ReqData,
+			{ok, Rev} = case Comment of
+				undefined -> check(peerdrive_store:commit(Handle));
+				_ -> check(peerdrive_store:commit(Handle,
+					unicode:characters_to_binary(Comment)))
 			end,
-			{ok, Rev} = check(peerdrive_store:commit(Handle, Comment)),
 			peerdrive_netstore_pb:encode_commitcnf(#commitcnf{rev=Rev});
 
 		?SUSPEND_MSG ->
@@ -720,74 +680,14 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 			Cnf = #gettypecnf{type_code=Type},
 			peerdrive_netstore_pb:encode_gettypecnf(Cnf);
 
-		closed ->
-			peerdrive_store:close(Handle)
-	end.
-
-
-forward_handler(Handle, Request, _ReqData) ->
-	case Request of
-		?FF_DOC_COMMIT_MSG ->
-			ok = check(peerdrive_store:forward_doc_commit(Handle)),
-			<<>>;
-
-		?FF_DOC_CLOSE_MSG ->
-			ok = peerdrive_store:forward_doc_close(Handle),
-			{stop, <<>>};
-
-		closed ->
-			ok = peerdrive_store:forward_doc_close(Handle)
-	end.
-
-
-remember_handler(Handle, Request, _ReqData) ->
-	case Request of
-		?RMBR_REV_COMMIT_MSG ->
-			ok = check(peerdrive_store:remember_rev_commit(Handle)),
-			<<>>;
-
-		?RMBR_REV_CLOSE_MSG ->
-			ok = peerdrive_store:remember_rev_close(Handle),
-			{stop, <<>>};
-
-		closed ->
-			ok = peerdrive_store:remember_rev_close(Handle)
-	end.
-
-
-put_doc_handler(Handle, Request, _ReqData) ->
-	case Request of
-		?PUT_DOC_COMMIT_MSG ->
-			ok = check(peerdrive_store:put_doc_commit(Handle)),
-			<<>>;
-
-		?PUT_DOC_CLOSE_MSG ->
-			ok = peerdrive_store:put_doc_close(Handle),
-			{stop, <<>>};
-
-		closed ->
-			ok = peerdrive_store:put_doc_close(Handle)
-	end.
-
-
-put_rev_handler(Handle, Request, ReqData) ->
-	case Request of
 		?PUT_REV_PART_MSG ->
 			#putrevpartreq{part=Part, data=Data} = ReqData,
 			?ASSERT_PART(Part),
 			ok = check(peerdrive_store:put_rev_part(Handle, Part, Data)),
 			<<>>;
 
-		?PUT_REV_COMMIT_MSG ->
-			ok = check(peerdrive_store:put_rev_commit(Handle)),
-			<<>>;
-
-		?PUT_REV_CLOSE_MSG ->
-			ok = peerdrive_store:put_rev_close(Handle),
-			{stop, <<>>};
-
 		closed ->
-			ok = peerdrive_store:put_rev_close(Handle)
+			peerdrive_store:close(Handle)
 	end.
 
 

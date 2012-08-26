@@ -56,17 +56,17 @@ handle_call(commit, _From, S) ->
 	{reply, do_commit(S), S};
 
 handle_call(close, _From, #state{handle=Handle} = S) ->
-	peerdrive_store:put_rev_close(Handle),
+	peerdrive_store:close(Handle),
 	{stop, normal, ok, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store, user=User} = S) ->
 	case From of
 		Store ->
-			peerdrive_store:put_rev_close(S#state.handle),
+			peerdrive_store:close(S#state.handle),
 			{stop, Reason, S};
 		User ->
-			peerdrive_store:put_rev_close(S#state.handle),
+			peerdrive_store:close(S#state.handle),
 			{stop, normal, S}
 	end.
 
@@ -111,7 +111,7 @@ do_commit(#state{handle=Handle, parts=Parts}) ->
 				peerdrive_util:merkle_final(ShaCtx) == PId orelse throw(einval)
 			end,
 			Parts),
-		peerdrive_store:put_rev_commit(Handle)
+		peerdrive_store:commit(Handle)
 	catch
 		throw:ThrowErr ->
 			{error, ThrowErr}

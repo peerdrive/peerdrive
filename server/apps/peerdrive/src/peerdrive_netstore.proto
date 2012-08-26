@@ -388,43 +388,27 @@ message DeleteRevReq {
 	required bytes rev = 1;
 }
 
-message PutDocStartReq {
+message PutDocReq {
 	required bytes doc = 1;
 	required bytes rev = 2;
 }
 
-message PutDocStartCnf {
+message PutDocCnf {
 	required uint32 handle = 1;
 }
 
-message PutDocCommitReq {
-	required uint32 handle = 1;
-}
-
-message PutDocCloseReq {
-	required uint32 handle = 1;
-}
-
-message ForwardDocStartReq {
+message ForwardDocReq {
 	required bytes doc = 1;
 	repeated bytes rev_path = 2;
 	optional bytes old_pre_rev = 3;
 }
 
-message ForwardDocStartCnf {
+message ForwardDocCnf {
 	optional uint32 handle = 1;
 	repeated bytes missing_revs = 2;
 }
 
-message ForwardDocCommitReq {
-	required uint32 handle = 1;
-}
-
-message ForwardDocCloseReq {
-	required uint32 handle = 1;
-}
-
-message PutRevStartReq {
+message PutRevReq {
 	message Revision {
 		message Part {
 			required bytes fourcc = 1;
@@ -446,7 +430,7 @@ message PutRevStartReq {
 	required Revision revision = 2;
 }
 
-message PutRevStartCnf {
+message PutRevCnf {
 	required uint32 handle = 1;
 	repeated bytes missing_parts = 2;
 }
@@ -455,14 +439,6 @@ message PutRevPartReq {
 	required uint32 handle = 1;
 	required bytes part = 2;
 	required bytes data = 3;
-}
-
-message PutRevCommitReq {
-	required uint32 handle = 1;
-}
-
-message PutRevCloseReq {
-	required uint32 handle = 1;
 }
 
 message SyncGetChangesReq {
@@ -511,21 +487,13 @@ message TriggerInd {
 	required bytes element = 2;
 }
 
-message RememberRevStartReq {
+message RememberRevReq {
 	required bytes doc = 1;
 	required bytes pre_rev = 2;
 	optional bytes old_pre_rev = 3;
 }
 
-message RememberRevStartCnf {
+message RememberRevCnf {
 	optional uint32 handle = 1;
-}
-
-message RememberRevCommitReq {
-	required uint32 handle = 1;
-}
-
-message RememberRevCloseReq {
-	required uint32 handle = 1;
 }
 

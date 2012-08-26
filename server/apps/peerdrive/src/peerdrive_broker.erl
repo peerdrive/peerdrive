@@ -471,7 +471,7 @@ search_path(Stores, FromRev, ToRev, Path) ->
 
 
 do_forward_doc(DstStore, Doc, SrcStore, RevPath, ToRev, Options) ->
-	case peerdrive_store:forward_doc_start(DstStore, Doc, RevPath, undefined) of
+	case peerdrive_store:forward_doc(DstStore, Doc, RevPath, undefined) of
 		ok ->
 			% Do an explicit asynchronous replication if verbose operation
 			% requested
@@ -507,11 +507,14 @@ do_forward_doc(DstStore, Doc, SrcStore, RevPath, ToRev, Options) ->
 						end
 					end,
 					MissingRevs),
-				peerdrive_store:forward_doc_commit(Handle)
+				case peerdrive_store:commit(Handle) of
+					{ok, ToRev} -> ok;
+					Err3 -> throw(Err3)
+				end
 			catch
 				throw:Error -> Error
 			after
-				peerdrive_store:forward_doc_close(Handle)
+				peerdrive_store:close(Handle)
 			end;
 
 		{error, _Reason} = Error ->

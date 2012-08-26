@@ -493,7 +493,7 @@ do_put_doc(Doc, Rev, User, #state{store=Store, key=Key}) ->
 	EncRev = enc_xid(Key, Rev),
 	case peerdrive_store:put_doc(Store, EncDoc, EncRev) of
 		{ok, Handle} ->
-			peerdrive_crypt_store_put:start_link(self(), Handle, User);
+			peerdrive_crypt_store_guard:start_link(Handle, User);
 		{error, _} = Error ->
 			Error
 	end.
@@ -506,11 +506,11 @@ do_forward_doc(Doc, RevPath, OldPreRId, User, #state{store=Store, key=Key}) ->
 		undefined -> undefined;
 		_ -> enc_xid(Key, OldPreRId)
 	end,
-	case peerdrive_store:forward_doc_start(Store, EncDoc, EncRevPath, EncOldPreRId) of
+	case peerdrive_store:forward_doc(Store, EncDoc, EncRevPath, EncOldPreRId) of
 		ok ->
 			ok;
 		{ok, Handle} ->
-			peerdrive_crypt_store_fwd:start_link(self(), Handle, User);
+			peerdrive_crypt_store_guard:start_link(Handle, User);
 		{error, _} = Error ->
 			Error
 	end.
@@ -541,7 +541,7 @@ do_put_rev(Rev, Revision, User, #state{store=Store, key=Key} = S) ->
 		doc_links = [ enc_xid(Key, DId) || DId <- DocLinks ],
 		rev_links = [ enc_xid(Key, RId) || RId <- DocLinks ]
 	},
-	case peerdrive_store:put_rev_start(Store, enc_xid(Key, Rev), EncRevision) of
+	case peerdrive_store:put_rev(Store, enc_xid(Key, Rev), EncRevision) of
 		ok ->
 			ok;
 		{ok, Missing, Handle} ->
@@ -563,7 +563,7 @@ do_remember_rev(DId, NewPreRId, OldPreRId, User, #state{store=Store, key=Key}) -
 		ok ->
 			ok;
 		{ok, Handle} ->
-			peerdrive_crypt_store_rem:start_link(self(), Handle, User);
+			peerdrive_crypt_store_guard:start_link(Handle, User);
 		{error, _} = Error ->
 			Error
 	end.

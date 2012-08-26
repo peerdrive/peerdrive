@@ -49,18 +49,18 @@ init({State, User}) ->
 % returns `ok | {error, Reason}'
 handle_call(commit, _From, #state{done=false} = S) ->
 	case do_commit(S) of
-		ok ->
-			{reply, ok, S#state{done=true}};
+		{ok, Ok} = Ok ->
+			{reply, Ok, S#state{done=true}};
 		Error ->
 			{reply, Error, S}
 	end;
 
-handle_call(commit, _From, S) ->
-	{reply, {error, ebadf}, S};
-
 % returns nothing
 handle_call(close, _From, S) ->
-	{stop, normal, ok, S}.
+	{stop, normal, ok, S};
+
+handle_call(_, _, S) ->
+	{reply, {error, ebadf}, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->

@@ -17,10 +17,7 @@
 -module(peerdrive_store).
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
--export([put_doc/3, put_doc_commit/1, put_doc_close/1, forward_doc_start/4,
-	forward_doc_commit/1, forward_doc_close/1, put_rev_start/3, put_rev_part/3,
-	put_rev_close/1, put_rev_commit/1, remember_rev/4, remember_rev_commit/1,
-	remember_rev_close/1]).
+-export([put_doc/3, forward_doc/4, put_rev/3, put_rev_part/3, remember_rev/4]).
 -export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
 	write/4, suspend/1, suspend/2, get_links/1, set_links/3, get_flags/1, set_flags/2]).
@@ -255,7 +252,7 @@ set_links(Handle, DocLinks, RevLinks) ->
 %%       Rev = guid()
 %%       Reason = ecode()
 commit(Handle) ->
-	call_store(Handle, {commit, undefined}).
+	call_store(Handle, commit).
 
 commit(Handle, Comment) ->
 	call_store(Handle, {commit, Comment}).
@@ -347,14 +344,6 @@ put_doc(Store, Doc, Rev) ->
 	call_store(Store, {put_doc, Doc, Rev}).
 
 
-put_doc_commit(Handle) ->
-	call_store(Handle, commit).
-
-
-put_doc_close(Handle) ->
-	call_store(Handle, close).
-
-
 %% @doc Fast-forward a document
 %%
 %% This function forwards Doc from the current revision to a new revision where
@@ -365,13 +354,13 @@ put_doc_close(Handle) ->
 %%
 %% If the store has already all involved revisions then the Doc is forwarded
 %% and the function just returns `ok'. Otherwise a list of missing revisions is
-%% returned which have to be uploaded in any order with put_rev_start/3 before
-%% the forward can be committed by forward_doc_commit/1.
+%% returned which have to be uploaded in any order with put_rev/3 before
+%% the forward can be committed by commit/1.
 %%
 %% If the document is successfully forwarded OldPreRev is atomically removed
 %% from the list of preliminary revisions (if given).
 %%
-%% @spec forward_doc_start(Store, Doc, RevPath, OldPreRev) -> Result
+%% @spec forward_doc(Store, Doc, RevPath, OldPreRev) -> Result
 %%       Store = pid()
 %%       Doc = guid()
 %%       RevPath = MissingRevs = [guid()]
@@ -379,33 +368,8 @@ put_doc_close(Handle) ->
 %%       Result = ok | {ok, MissingRevs, Handle} | {error, Reason}
 %%       Handle = pid()
 %%       Reason = ecode()
-forward_doc_start(Store, Doc, RevPath, OldPreRev) ->
+forward_doc(Store, Doc, RevPath, OldPreRev) ->
 	call_store(Store, {forward_doc, Doc, RevPath, OldPreRev}).
-
-
-%% @doc Commit a fast-forward operation
-%%
-%% Commits a document fast-forward operation after all requested revisions were
-%% uploaded. If the document has been updated in between then the operation
-%% will fail.
-%%
-%% @spec forward_doc_commit(Handle) -> Result
-%%       Handle = pid()
-%%       Result = ok | {error, Reason}
-%%       Reason = ecode()
-forward_doc_commit(Handle) ->
-	call_store(Handle, commit).
-
-
-%% @doc Close a fast-forward operation
-%%
-%% Close the handle. Any revisions uploaded so far may be garbage collected if
-%% the operation was not committed yet.
-%%
-%% @spec forward_doc_close(Handle) -> ok
-%%       Handle = pid()
-forward_doc_close(Handle) ->
-	call_store(Handle, close, ok).
 
 
 %% @doc Add a preliminary revision to a document
@@ -426,14 +390,6 @@ remember_rev(Store, Doc, PreRev, OldPreRev) ->
 	call_store(Store, {remember_rev, Doc, PreRev, OldPreRev}).
 
 
-remember_rev_commit(Handle) ->
-	call_store(Handle, commit).
-
-
-remember_rev_close(Handle) ->
-	call_store(Handle, close).
-
-
 %% @doc Put/import a revision into the store.
 %%
 %% The function takes the specification of the whole revision and returns the
@@ -441,7 +397,7 @@ remember_rev_close(Handle) ->
 %% put_rev_part/3 calls. The revision will not be garbage collected as long as
 %% the handle is kept open.
 %%
-%% @spec put_rev_start(Store, Rev, Revision) -> Result
+%% @spec put_rev(Store, Rev, Revision) -> Result
 %%       Store = pid()
 %%       Rev = guid()
 %%       Revision = #revision
@@ -449,7 +405,7 @@ remember_rev_close(Handle) ->
 %%       MissingParts = [FourCC]
 %%       Handle = pid()
 %%       Reason = ecode()
-put_rev_start(Store, Rev, Revision) ->
+put_rev(Store, Rev, Revision) ->
 	call_store(Store, {put_rev, Rev, Revision}).
 
 %% @doc Add data to a revision that's imported
@@ -460,23 +416,6 @@ put_rev_start(Store, Rev, Revision) ->
 %%       Reason = ecode()
 put_rev_part(Importer, Part, Data) ->
 	call_store(Importer, {put_part, Part, Data}).
-
-%% @doc Commit imported revision
-%%
-%% The revision will be made visible to others. As long as the handle stays
-%% open the revision will not be garbage collected.
-%%
-%% @spec put_rev_commit(Importer::pid()) -> ok | {error, Reason}
-%%       Importer = pid()
-%%       Reason = ecode()
-put_rev_commit(Importer) ->
-	call_store(Importer, commit).
-
-%% @doc Close import handle
-%% @spec put_rev_close(Importer::pid()) -> none()
-put_rev_close(Importer) ->
-	call_store(Importer, close, ok).
-
 
 %% @doc Get changes since the last sync point of peer store
 %%

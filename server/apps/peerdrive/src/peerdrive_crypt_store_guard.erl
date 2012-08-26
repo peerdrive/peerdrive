@@ -14,22 +14,23 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--module(peerdrive_crypt_store_put).
+-module(peerdrive_crypt_store_guard).
 -behaviour(gen_server).
 
--export([start_link/3]).
+-export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -record(state, {store, handle, user}).
 
 -include("store.hrl").
+-include("cryptstore.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Store, Handle, User) ->
-	State = #state{store=Store, handle=Handle, user=User},
+start_link(Handle, User) ->
+	State = #state{store=self(), handle=Handle, user=User},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -43,30 +44,35 @@ init({State, User}) ->
 
 
 handle_call(commit, _From, #state{handle=Handle} = S) ->
-	{reply, peerdrive_store:put_doc_commit(Handle), S};
+	Reply = peerdrive_store:commit(Handle),
+	{reply, Reply, S};
 
-handle_call(close, _From, S) ->
-	{stop, normal, ok, S}.
+handle_call(close, _From, #state{handle=Handle} = S) ->
+	peerdrive_store:close(Handle),
+	{stop, normal, ok, S};
+
+handle_call(_, _, S) ->
+	{reply, {error, ebadf}, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store, user=User} = S) ->
 	case From of
 		User ->
+			peerdrive_store:close(S#state.handle),
 			{stop, normal, S};
 		Store ->
+			peerdrive_store:close(S#state.handle),
 			{stop, Reason, S};
 		_ ->
 			{noreply, S}
 	end.
 
-
-terminate(_, #state{handle=Handle}) ->
-	peerdrive_store:put_doc_close(Handle).
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+
 handle_cast(_, State)    -> {stop, enotsup, State}.
 code_change(_, State, _) -> {ok, State}.
+terminate(_, _)          -> ok.
 

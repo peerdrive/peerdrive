@@ -549,11 +549,11 @@ do_put_doc_commit(DId, RId, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 		[] ->
 			peerdrive_vol_monitor:trigger_add_doc(S#state.sid, DId),
 			ok = dets:insert(DocTbl, {DId, RId, [], Gen}),
-			{ok, next_gen(S)};
+			{{ok, RId}, next_gen(S)};
 
 		% already pointing to requested rev
 		[{_, RId, _, _}] ->
-			{ok, S};
+			{{ok, RId}, S};
 
 		% completely other rev
 		[_] ->
@@ -644,7 +644,10 @@ do_forward_doc(DId, RevPath, OldPreRId, User, S) when length(RevPath) >= 2 ->
 			RevTbl = S#state.rev_tbl,
 			case [RId || RId <- RevPath, not dets:member(RevTbl, RId)] of
 				[] ->
-					do_forward_doc_commit(DId, RevPath, OldPreRId, S);
+					case do_forward_doc_commit(DId, RevPath, OldPreRId, S) of
+						{{ok, _}, S2} -> {ok, S2};
+						Error -> Error
+					end;
 
 				Missing ->
 					% Some Revs are missing and need to be uploaded. Make sure
@@ -710,12 +713,12 @@ do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
 			[{_, NewRId, PreRIds, _}] ->
 				case lists:member(OldPreRId, PreRIds) of
 					false ->
-						{ok, S};
+						{{ok, NewRId}, S};
 					true ->
 						NewPreRIds = lists:delete(OldPreRId, PreRIds),
 						ok = dets:insert(DocTbl, {DId, NewRId, NewPreRIds, S#state.gen}),
 						peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
-						{ok, next_gen(S)}
+						{{ok, NewRId}, next_gen(S)}
 				end;
 
 			% forward old version
@@ -723,7 +726,7 @@ do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
 				NewPreRIds = lists:delete(OldPreRId, PreRIds),
 				ok = dets:insert(DocTbl, {DId, NewRId, NewPreRIds, S#state.gen}),
 				peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
-				{ok, next_gen(S)};
+				{{ok, NewRId}, next_gen(S)};
 
 			% errors
 			[_] -> throw(econflict);
@@ -760,7 +763,7 @@ do_put_rev(RId, Rev, User, S) ->
 do_put_rev_commit(RId, Rev, #state{sid=SId, rev_tbl=RevTbl} = S) ->
 	ok = dets:insert(RevTbl, {RId, Rev}),
 	peerdrive_vol_monitor:trigger_add_rev(SId, RId),
-	{ok, S}.
+	{{ok, RId}, S}.
 
 
 do_remember_rev(DId, NewPreRId, OldPreRId, User, S) ->
@@ -769,7 +772,10 @@ do_remember_rev(DId, NewPreRId, OldPreRId, User, S) ->
 		true ->
 			case dets:member(RevTbl, NewPreRId) of
 				true ->
-					do_remember_rev_commit(DId, NewPreRId, OldPreRId, S);
+					case do_remember_rev_commit(DId, NewPreRId, OldPreRId, S) of
+						{{ok, _}, S2} -> {ok, S2};
+						Error -> Error
+					end;
 
 				false ->
 					S2 = do_lock({rev, NewPreRId}, S),
@@ -791,7 +797,7 @@ do_remember_rev_commit(DId, NewPreRId, OldPreRId, #state{doc_tbl=DocTbl} = S) ->
 			),
 			ok = dets:insert(DocTbl, {DId, RId, NewPreRIds, S#state.gen}),
 			peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
-			{ok, next_gen(S)};
+			{{ok, NewPreRId}, next_gen(S)};
 
 		[] ->
 			{{error, enoent}, S}

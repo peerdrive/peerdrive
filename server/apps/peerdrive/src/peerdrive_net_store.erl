@@ -428,35 +428,35 @@ cnf_resume(Cnf, MaxPacketSize, User) ->
 
 req_put_doc(Doc, Rev, From, S) ->
 	{User, _Tag} = From,
-	Req = peerdrive_netstore_pb:encode_putdocstartreq(#putdocstartreq{
+	Req = peerdrive_netstore_pb:encode_putdocreq(#putdocreq{
 		doc=Doc, rev=Rev}),
 	Handler = fun(B) -> cnf_put_doc(B, User) end,
-	send_request(From, ?PUT_DOC_START_MSG, Req, Handler, S).
+	send_request(From, ?PUT_DOC_MSG, Req, Handler, S).
 
 
 cnf_put_doc(Body, User) ->
-	#putdocstartcnf{handle=Handle} =
-		peerdrive_netstore_pb:decode_putdocstartcnf(Body),
-	peerdrive_net_store_put:start_link(self(), Handle, User).
+	#putdoccnf{handle=Handle} =
+		peerdrive_netstore_pb:decode_putdoccnf(Body),
+	peerdrive_net_store_io:start_link(self(), Handle, 1024, User).
 
 
 req_forward_doc(Doc, RevPath, OldPreRev, From, S) ->
 	{User, _Tag} = From,
-	Req = peerdrive_netstore_pb:encode_forwarddocstartreq(#forwarddocstartreq{
+	Req = peerdrive_netstore_pb:encode_forwarddocreq(#forwarddocreq{
 		doc=Doc, rev_path=RevPath, old_pre_rev=OldPreRev}),
 	Handler = fun(B) -> cnf_forward_doc(B, User) end,
-	send_request(From, ?FF_DOC_START_MSG, Req, Handler, S).
+	send_request(From, ?FF_DOC_MSG, Req, Handler, S).
 
 
 cnf_forward_doc(Body, User) ->
-	#forwarddocstartcnf{handle=Handle, missing_revs=Missing} =
-		peerdrive_netstore_pb:decode_forwarddocstartcnf(Body),
+	#forwarddoccnf{handle=Handle, missing_revs=Missing} =
+		peerdrive_netstore_pb:decode_forwarddoccnf(Body),
 	case Handle of
 		undefined ->
 			ok;
 		_ ->
-			{ok, Importer} = peerdrive_net_store_forwarder:start_link(self(),
-				Handle, User),
+			{ok, Importer} = peerdrive_net_store_io:start_link(self(),
+				Handle, 1024, User),
 			{ok, Missing, Importer}
 	end.
 
@@ -474,11 +474,11 @@ req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
 		rev_links = RevLinks,
 		comment   = Comment
 	} = Revision,
-	Req = peerdrive_netstore_pb:encode_putrevstartreq(#putrevstartreq{
+	Req = peerdrive_netstore_pb:encode_putrevreq(#putrevreq{
 		rid = Rev,
-		revision = #putrevstartreq_revision{
+		revision = #putrevreq_revision{
 			flags = Flags,
-			parts = [ #putrevstartreq_revision_part{fourcc=FCC, pid=PId} ||
+			parts = [ #putrevreq_revision_part{fourcc=FCC, pid=PId} ||
 				{FCC, PId} <- Parts ],
 			parents = Parents,
 			mtime = Mtime,
@@ -490,34 +490,34 @@ req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
 		}
 	}),
 	Handler = fun(B) -> cnf_put_rev(B, MPS, User) end,
-	send_request(From, ?PUT_REV_START_MSG, Req, Handler, S).
+	send_request(From, ?PUT_REV_MSG, Req, Handler, S).
 
 
 cnf_put_rev(Body, MaxPacketSize, User) ->
-	#putrevstartcnf{handle=Handle, missing_parts=Missing} =
-		peerdrive_netstore_pb:decode_putrevstartcnf(Body),
+	#putrevcnf{handle=Handle, missing_parts=Missing} =
+		peerdrive_netstore_pb:decode_putrevcnf(Body),
 	true = lists:all(fun(P) -> ?ASSERT_PART(P) end, Missing),
-	{ok, Importer} = peerdrive_net_store_importer:start_link(self(), Handle,
+	{ok, Importer} = peerdrive_net_store_io:start_link(self(), Handle,
 		MaxPacketSize, User),
 	{ok, Missing, Importer}.
 
 
 req_remember_rev(DId, PreRId, OldPreRId, From, S) ->
 	{User, _Tag} = From,
-	Req = peerdrive_netstore_pb:encode_rememberrevstartreq(#rememberrevstartreq{
+	Req = peerdrive_netstore_pb:encode_rememberrevreq(#rememberrevreq{
 		doc=DId, pre_rev=PreRId, old_pre_rev=OldPreRId}),
 	Handler = fun(B) -> cnf_remember_rev(B, User) end,
-	send_request(From, ?RMBR_REV_START_MSG, Req, Handler, S).
+	send_request(From, ?RMBR_REV_MSG, Req, Handler, S).
 
 
 cnf_remember_rev(Body, User) ->
-	#rememberrevstartcnf{handle=Handle} =
-		peerdrive_netstore_pb:decode_rememberrevstartcnf(Body),
+	#rememberrevcnf{handle=Handle} =
+		peerdrive_netstore_pb:decode_rememberrevcnf(Body),
 	case Handle of
 		undefined ->
 			ok;
 		_ ->
-			{ok, _} = peerdrive_net_store_rem:start_link(Handle, User)
+			{ok, _} = peerdrive_net_store_io:start_link(self(), Handle, 1024, User)
 	end.
 
 

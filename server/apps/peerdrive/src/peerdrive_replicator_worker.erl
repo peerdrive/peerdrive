@@ -361,8 +361,7 @@ do_handle_node(Parent, Node, #state{g=G} = S) ->
 			% Lastly, close our handles
 			lists:foreach(
 				fun
-					({dhandle, ChldHndl}) -> peerdrive_store:put_doc_close(ChldHndl);
-					({rhandle, ChldHndl}) -> peerdrive_store:put_rev_close(ChldHndl);
+					({handle, ChldHndl}) -> peerdrive_store:close(ChldHndl);
 					(_) -> ok
 				end,
 				MyProps),
@@ -382,9 +381,9 @@ replicate_doc(DId, RId, Size, S) ->
 	} = S,
 	case peerdrive_store:put_doc(DstStore, DId, RId) of
 		{ok, Handle} ->
-			case peerdrive_store:put_doc_commit(Handle) of
-				ok ->
-					{{dhandle, Handle}, account_size(Size, S)};
+			case peerdrive_store:commit(Handle) of
+				{ok, RId} ->
+					{{handle, Handle}, account_size(Size, S)};
 				{error, Reason} ->
 					ErrInfo = [{code, Reason}, {doc, DId}, {rev, RId}],
 					throw({error, ErrInfo})
@@ -417,7 +416,7 @@ replicate_rev(RId, AccountedSize, S) ->
 				rev_links = Stat#rev_stat.rev_links,
 				comment   = Stat#rev_stat.comment
 			},
-			case peerdrive_store:put_rev_start(DstStore, RId, Revision) of
+			case peerdrive_store:put_rev(DstStore, RId, Revision) of
 				{ok, MissingParts, Handle} ->
 					RealSize = lists:foldl(
 						fun(P, Acc) ->
@@ -439,9 +438,9 @@ replicate_rev(RId, AccountedSize, S) ->
 
 
 copy_parts(RId, _SourceStore, Importer, [], AccSize, _RealSize, S) ->
-	case peerdrive_store:put_rev_commit(Importer) of
-		ok ->
-			{{rhandle, Importer}, account_size(AccSize, S)};
+	case peerdrive_store:commit(Importer) of
+		{ok, _} ->
+			{{handle, Importer}, account_size(AccSize, S)};
 		{error, Reason} ->
 			throw({error, [{code, Reason}, {rev, RId}]})
 	end;
@@ -451,7 +450,7 @@ copy_parts(RId, SourceStore, Importer, Parts, AccSize, RealSize, S) ->
 		{ok, Reader} ->
 			Action = #copy{rid=RId, parts=Parts, reader=Reader, imp=Importer,
 				accsize=AccSize, factor=(AccSize / max(RealSize, 1))},
-			{{rhandle, Importer}, schedule(Action, S)};
+			{{handle, Importer}, schedule(Action, S)};
 
 		{error, Reason} ->
 			throw({error, [{code, Reason}, {rev, RId}]})
@@ -459,8 +458,8 @@ copy_parts(RId, SourceStore, Importer, Parts, AccSize, RealSize, S) ->
 
 
 do_copy(#copy{parts=[], part=undefined, imp=Importer, reader=Reader} = Action, S) ->
-	case peerdrive_store:put_rev_commit(Importer) of
-		ok ->
+	case peerdrive_store:commit(Importer) of
+		{ok, _} ->
 			peerdrive_store:close(Reader),
 			account_size(Action#copy.accsize, S);
 		{error, Reason} ->

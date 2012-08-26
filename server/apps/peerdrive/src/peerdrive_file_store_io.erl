@@ -94,6 +94,11 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | {error, Reason}'
+handle_call(commit, _From, S) ->
+	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/4, undefined, S),
+	{reply, Reply, S2};
+
+% returns `{ok, Hash} | {error, Reason}'
 handle_call({commit, Comment}, _From, S) ->
 	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/4, Comment, S),
 	{reply, Reply, S2};

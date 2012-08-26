@@ -240,16 +240,16 @@ do_commit(Comment, #state{did=DId, store=Store} = S) ->
 
 do_commit_forward(CurEncRId, NewRId, NewEncRId, NewEncRev, S) ->
 	#state{store=Store, did=DId, prerid=PreRId} = S,
-	case peerdrive_store:forward_doc_start(Store, DId, [CurEncRId, NewEncRId], PreRId) of
+	case peerdrive_store:forward_doc(Store, DId, [CurEncRId, NewEncRId], PreRId) of
 		ok ->
 			{{ok, NewRId}, S#state{readonly=true}};
 
 		{ok, [NewEncRId], Handle} ->
 			try
 				case upload_rev(NewEncRId, NewEncRev, S) of
-					ok ->
-						case peerdrive_store:forward_doc_commit(Handle) of
-							ok ->
+					{ok, NewEncRId} ->
+						case peerdrive_store:commit(Handle) of
+							{ok, NewEncRId} ->
 								{{ok, NewRId}, S#state{readonly=true}};
 							Error ->
 								{Error, S}
@@ -258,7 +258,7 @@ do_commit_forward(CurEncRId, NewRId, NewEncRId, NewEncRev, S) ->
 						{Error, S}
 				end
 			after
-				peerdrive_store:forward_doc_close(Handle)
+				peerdrive_store:close(Handle)
 			end;
 
 		{error, _} = Error ->
@@ -270,18 +270,18 @@ do_commit_put(NewRId, NewEncRId, NewEncRev, #state{did=DId, store=Store} = S) ->
 	case peerdrive_store:put_doc(Store, DId, NewEncRId) of
 		{ok, Handle} ->
 			case upload_rev(NewEncRId, NewEncRev, S) of
-				ok ->
-					case peerdrive_store:put_doc_commit(Handle) of
-						ok ->
+				{ok, NewEncRId} ->
+					case peerdrive_store:commit(Handle) of
+						{ok, NewEncRId} ->
 							% Keep handle intentionally open to protect DId from
 							% garbage collection.
 							{{ok, NewRId}, S#state{readonly=true}};
 						Error ->
-							peerdrive_store:put_doc_close(Handle),
+							peerdrive_store:close(Handle),
 							{Error, S}
 					end;
 				Error ->
-					peerdrive_store:put_doc_close(Handle),
+					peerdrive_store:close(Handle),
 					{Error, S}
 			end;
 
@@ -300,9 +300,9 @@ do_suspend(Comment, #state{did=DId, store=Store, prerid=PreRId} = S) ->
 				{ok, Handle} ->
 					try
 						case upload_rev(NewEncRId, NewEncRev, S2) of
-							ok ->
-								case peerdrive_store:remember_rev_commit(Handle) of
-									ok ->
+							{ok, NewEncRId} ->
+								case peerdrive_store:commit(Handle) of
+									{ok, NewEncRId} ->
 										{{ok, NewRId}, S2#state{readonly=true}};
 									Error ->
 										{Error, S2}
@@ -311,7 +311,7 @@ do_suspend(Comment, #state{did=DId, store=Store, prerid=PreRId} = S) ->
 								{Error, S2}
 						end
 					after
-						peerdrive_store:remember_rev_close(Handle)
+						peerdrive_store:close(Handle)
 					end;
 
 				{error, _} = Error ->
@@ -413,16 +413,16 @@ prepare_rev(Comment, #state{rev=Rev, parts=Parts, key=Key} = S) ->
 
 
 upload_rev(RId, Rev, #state{store=Store} = S) ->
-	case peerdrive_store:put_rev_start(Store, RId, Rev) of
+	case peerdrive_store:put_rev(Store, RId, Rev) of
 		{ok, MissingParts, Handle} ->
 			try
 				lists:foreach(fun(FCC) -> upload_rev_part(Handle, FCC, S) end,
 					MissingParts),
-				peerdrive_store:put_rev_commit(Handle)
+				peerdrive_store:commit(Handle)
 			catch
 				throw:Error -> Error
 			after
-				peerdrive_store:put_rev_close(Handle)
+				peerdrive_store:close(Handle)
 			end;
 
 		{error, _} = Error ->

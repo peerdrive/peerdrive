@@ -63,12 +63,12 @@ handle_call(commit, _From, #state{done=false} = S) ->
 	{Reply, S2} = do_commit(S),
 	{reply, Reply, S2};
 
-handle_call(commit, _From, S) ->
-	{reply, {error, ebadf}, S};
-
 % returns nothing
 handle_call(close, _From, S) ->
-	{stop, normal, ok, S}.
+	{stop, normal, ok, S};
+
+handle_call(_, _, S) ->
+	{reply, {error, ebadf}, S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
