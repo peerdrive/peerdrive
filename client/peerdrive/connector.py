@@ -435,7 +435,12 @@ class _Connector(QtCore.QObject):
 		if depth is not None:
 			req.depth = depth
 		if verbose: req.verbose = verbose
-		self._rpc(_Connector.REPLICATE_DOC_MSG, req.SerializeToString(), async)
+		return self._rpc(_Connector.REPLICATE_DOC_MSG, req.SerializeToString(),
+			async, self.__replicateDocDone)
+
+	def __replicateDocDone(self, reply):
+		cnf = pb.ReplicateDocCnf.FromString(reply)
+		return ReplicateHandle(self, cnf.handle)
 
 	def replicateRev(self, srcStore, rev, dstStore, depth=None, verbose=False, async=None):
 		req = pb.ReplicateRevReq()
@@ -445,7 +450,12 @@ class _Connector(QtCore.QObject):
 		if depth is not None:
 			req.depth = depth
 		if verbose: req.verbose = verbose
-		self._rpc(_Connector.REPLICATE_REV_MSG, req.SerializeToString(), async)
+		return self._rpc(_Connector.REPLICATE_REV_MSG, req.SerializeToString(),
+			async, self.__replicateRevDone)
+
+	def __replicateRevDone(self, reply):
+		cnf = pb.ReplicateRevCnf.FromString(reply)
+		return ReplicateHandle(self, cnf.handle)
 
 	def mount(self, src, label, type, options=None, credentials=None):
 		req = pb.MountReq()
@@ -560,23 +570,24 @@ class _Connector(QtCore.QObject):
 			self.pending = False
 
 	class _AsyncCompletion(object):
-		__slots__ = ['__callback', '__msg']
-		def __init__(self, msg, callback):
+		__slots__ = ['__callback', '__msg', '__done']
+		def __init__(self, msg, callback, done):
 			self.__msg = msg
 			self.__callback = callback
+			self.__done = done
 
 		def setResult(self, cnf, reply):
 			if cnf == self.__msg:
-				self.__callback(None)
+				self.__callback(self.__done(reply))
 			elif cnf == _Connector.ERROR_MSG:
 				error_cnf = pb.ErrorCnf.FromString(reply)
 				self.__callback(IOError(_errorCodes[error_cnf.error]))
 
-	def _rpc(self, msg, request = '', async=None):
+	def _rpc(self, msg, request = '', async=None, done=lambda x: x):
 		ref = self.__make_ref()
 		req_msg = (msg << 4) | _Connector.FLAG_REQ
 		if async:
-			completion = _Connector._AsyncCompletion(msg, async)
+			completion = _Connector._AsyncCompletion(msg, async, done)
 		else:
 			completion = _Connector._PollCompletion()
 		self.confirmations[ref] = completion
@@ -584,7 +595,7 @@ class _Connector(QtCore.QObject):
 		if not async:
 			self.__poll(completion)
 			if completion.cnf == msg:
-				return completion.reply
+				return done(completion.reply)
 			elif completion.cnf == _Connector.ERROR_MSG:
 				error_cnf = pb.ErrorCnf.FromString(completion.reply)
 				_raiseError(error_cnf.error)
@@ -1101,6 +1112,33 @@ class Handle(object):
 
 	def getStore(self):
 		return self.__store
+
+class ReplicateHandle(object):
+	def __init__(self, connector, handle):
+		self.connector = connector
+		self.handle = handle
+		self.active = True
+
+	def __enter__(self):
+		return self
+
+	def __exit__(self, type, value, traceback):
+		if self.active:
+			self.close()
+		return False
+
+	def __del__(self):
+		if self.active:
+			self.close()
+
+	def close(self):
+		if self.active:
+			self.active = False
+			req = pb.CloseReq()
+			req.handle = self.handle
+			self.connector._rpc(_Connector.CLOSE_MSG, req.SerializeToString())
+		else:
+			raise IOError('Handle expired')
 
 _connection = None
 

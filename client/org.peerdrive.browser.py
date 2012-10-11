@@ -25,7 +25,7 @@ from peerdrive import Connector, Registry, struct, connector, settingsPath
 from peerdrive.gui import utils
 from peerdrive.gui.widgets import DocumentView, DocButton
 
-from views.folder import FolderWidget, FolderProgressWidget
+from views.folder import FolderWidget
 from views.text import TextEdit
 
 class HistoryItem(object):
@@ -534,25 +534,13 @@ class FolderViewHandler(ViewHandler):
 			FolderWidget(BrowserWindow.TYPES.keys()))
 		self._view.itemOpen.connect(self._main.itemOpen)
 		self._view.checkpointNeeded.connect(self.__checkpoint)
-		self._view.copyStart.connect(self.__copyStart)
-		self._view.copyStop.connect(self.__copyStop)
 
 		self.__fileMenu = self._main.menuBar().addMenu("File")
 		self.__fileMenu.aboutToShow.connect(self.__showFileMenu)
 		self.__colMenu = self._main.menuBar().addMenu("Columns")
 		self.__colMenu.aboutToShow.connect(self.__columnsShow)
 
-		self.__copyPending = []
-		self.__progressWidgets = {}
-		Connector().regProgressHandler(start=self.__progressStart,
-			stop=self.__progressStop)
-
 	def delete(self):
-		Connector().unregProgressHandler(start=self.__progressStart,
-			stop=self.__progressStop)
-		for widget in self.__progressWidgets.values():
-			self._main.statusBar().removeWidget(widget)
-		self.__progressWidgets.clear()
 		super(FolderViewHandler, self).delete()
 
 	def getClass(self):
@@ -608,25 +596,6 @@ class FolderViewHandler(ViewHandler):
 			action.triggered.connect(lambda en, col=key: model.remColumn(col))
 		else:
 			action.triggered.connect(lambda en, col=key: model.addColumn(col))
-
-	def __copyStart(self, src, dst, item):
-		self.__copyPending.append((src, dst, item))
-
-	def __copyStop(self, src, dst, item):
-		self.__copyPending.remove((src, dst, item))
-
-	def __progressStart(self, tag, typ, src, dst, item=None):
-		if (src, dst, item) in self.__copyPending:
-			widget = FolderProgressWidget(tag, typ, src, dst, item)
-			self.__progressWidgets[tag] = widget
-			self._main.statusBar().addWidget(widget)
-
-	def __progressStop(self, tag):
-		if tag in self.__progressWidgets:
-			widget = self.__progressWidgets[tag]
-			del self.__progressWidgets[tag]
-			widget.remove()
-			self._main.statusBar().removeWidget(widget)
 
 
 class TextViewHandler(ViewHandler):

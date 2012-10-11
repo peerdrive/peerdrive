@@ -19,7 +19,7 @@
 
 -export([start_link/0]).
 -export([replicate_rev/4, replicate_rev_sync/4, replicate_doc/4,
-         replicate_doc_sync/4]).
+         replicate_doc_sync/4, close/1]).
 -export([init/1]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -33,13 +33,16 @@ replicate_doc(SrcStore, Doc, DstStore, Options) ->
 	start_child([{doc, Doc}, SrcStore, DstStore, Options]).
 
 replicate_doc_sync(SrcStore, Doc, DstStore, Options) ->
-	start_child_sync([{doc, Doc}, SrcStore, DstStore, Options]).
+	start_child_sync([{doc, Doc}, SrcStore, DstStore, [{wait, self()} | Options]]).
 
 replicate_rev(SrcStore, Rev, DstStore, Options) ->
 	start_child([{rev, Rev}, SrcStore, DstStore, Options]).
 
 replicate_rev_sync(SrcStore, Rev, DstStore, Options) ->
-	start_child_sync([{rev, Rev}, SrcStore, DstStore, Options]).
+	start_child_sync([{rev, Rev}, SrcStore, DstStore, [{wait, self()} | Options]]).
+
+close(Handle) ->
+	gen_fsm:send_all_state_event(Handle, close).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Callback functions...
@@ -70,7 +73,10 @@ start_child_sync(Args) ->
 			receive
 				{Ref, Reply} ->
 					erlang:demonitor(MonRef, [flush]),
-					Reply;
+					case Reply of
+						ok -> {ok, WorkerPid};
+						Error -> Error
+					end;
 
 				{'DOWN', MonRef, process, WorkerPid, _Info} ->
 					{error, eio}

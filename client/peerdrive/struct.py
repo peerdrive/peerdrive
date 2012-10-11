@@ -757,11 +757,8 @@ def copyDoc(src, dstStore):
 	if not src.rev():
 		raise IOError('Source not found!')
 
-	# create a dummy containter to prevent the garbage collection of the source rev
-	dummy = Folder()
-	dummy.append(RevLink(dstStore, src.rev()))
-	with dummy.create(dstStore) as dummyHandle:
-		connector.Connector().replicateRev(src.store(), src.rev(), dstStore)
+	repHandle = connector.Connector().replicateRev(src.store(), src.rev(), dstStore)
+	try:
 		handle = connector.Connector().fork(dstStore, src.rev(), 'org.peerdrive.cp')
 		try:
 			try:
@@ -786,4 +783,6 @@ def copyDoc(src, dstStore):
 		except:
 			handle.close()
 			raise
+	finally:
+		repHandle.close()
 

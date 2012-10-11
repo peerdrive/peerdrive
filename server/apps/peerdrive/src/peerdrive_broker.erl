@@ -421,7 +421,7 @@ forward_doc(Store, Doc, FromRev, ToRev, SrcStore, Options) ->
 %%       Doc = guid()
 %%       Options = [{depth, interger()} | verbose]
 %%       SrcStore, DstStore = guid()
-%%       Result = ok | {error, Reason}
+%%       Result = {ok, Handle} | {error, Reason}
 replicate_doc(SrcStore, Doc, DstStore, Options) ->
 	peerdrive_replicator:replicate_doc_sync(SrcStore, Doc, DstStore, Options).
 
@@ -436,7 +436,7 @@ replicate_doc(SrcStore, Doc, DstStore, Options) ->
 %%       Rev = guid()
 %%       Options = [{depth, interger()} | verbose]
 %%       SrcStore, DstStore = guid()
-%%       Result = ok | {error, Reason}
+%%       Result = {ok, Handle} | {error, Reason}
 replicate_rev(SrcStore, Rev, DstStore, Options) ->
 	peerdrive_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Options).
 
@@ -492,7 +492,7 @@ do_forward_doc(DstStore, Doc, SrcStore, RevPath, ToRev, Options) ->
 						% final Rev. This will anyways bring in the other
 						% missing revs.
 						case replicate_rev(SrcStore, ToRev, DstStore, Options) of
-							ok   -> ok;
+							{ok, RepHdl1} -> close(RepHdl1), ok;
 							Err1 -> throw(Err1)
 						end,
 						MissingOpt = [{depth, peerdrive_util:get_time()}];
@@ -502,7 +502,7 @@ do_forward_doc(DstStore, Doc, SrcStore, RevPath, ToRev, Options) ->
 				lists:foreach(
 					fun(Rev) ->
 						case replicate_rev(SrcStore, Rev, DstStore, MissingOpt) of
-							ok   -> ok;
+							{ok, RepHdp2} -> close(RepHdp2), ok;
 							Err2 -> throw(Err2)
 						end
 					end,

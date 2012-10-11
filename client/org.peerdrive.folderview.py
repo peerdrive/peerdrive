@@ -23,7 +23,7 @@ from peerdrive import struct, Registry, Connector
 from peerdrive.gui import main, utils
 from peerdrive.gui.widgets import DocButton, RevButton
 
-from views.folder import FolderWidget, FolderModel, FolderProgressWidget
+from views.folder import FolderWidget, FolderModel
 
 class FolderWindow(main.MainWindow):
 
@@ -49,13 +49,6 @@ class FolderWindow(main.MainWindow):
 		widget.revChanged.connect(self.__revChanged)
 		widget.mutable.connect(self.__setMutable)
 		widget.itemOpen.connect(self.__itemOpen)
-		widget.copyStart.connect(self.__copyStart)
-		widget.copyStop.connect(self.__copyStop)
-
-		self.__copyPending = []
-		self.__progressWidgets = {}
-		Connector().regProgressHandler(start=self.__progressStart,
-			stop=self.__progressStop)
 
 	def __columnsShow(self):
 		self.__colMenu.clear()
@@ -114,25 +107,6 @@ class FolderWindow(main.MainWindow):
 		else:
 			ref = None
 		utils.showDocument(link, executable=executable, referrer=ref)
-
-	def __copyStart(self, src, dst, item):
-		self.__copyPending.append((src, dst, item))
-
-	def __copyStop(self, src, dst, item):
-		self.__copyPending.remove((src, dst, item))
-
-	def __progressStart(self, tag, typ, src, dst, item=None):
-		if (src, dst, item) in self.__copyPending:
-			widget = FolderProgressWidget(tag, typ, src, dst, item)
-			self.__progressWidgets[tag] = widget
-			self.statusBar().addWidget(widget)
-
-	def __progressStop(self, tag):
-		if tag in self.__progressWidgets:
-			widget = self.__progressWidgets[tag]
-			del self.__progressWidgets[tag]
-			widget.remove()
-			self.statusBar().removeWidget(widget)
 
 
 if __name__ == '__main__':

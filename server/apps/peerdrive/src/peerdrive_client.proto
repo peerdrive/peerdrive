@@ -469,6 +469,7 @@ message ReplicateDocReq {
 }
 
 message ReplicateDocCnf {
+	required uint32 handle = 1;
 }
 
 message ReplicateRevReq {
@@ -480,6 +481,7 @@ message ReplicateRevReq {
 }
 
 message ReplicateRevCnf {
+	required uint32 handle = 1;
 }
 
 message MountReq {

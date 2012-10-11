@@ -22,10 +22,10 @@
 -export([start_link/4, start_link/5]).
 -export([init/1, code_change/4, handle_event/3, handle_info/3,
 	handle_sync_event/4, terminate/3]).
--export([working/2, paused/2, error/2]).
+-export([working/2, paused/2, error/2, wait/2]).
 
 -record(state, {g, backlog, srcstore, dststore, depth,
-	verbose, monitor, all, done, pauseonerror, from, result}).
+	verbose, monitor, all, done, pauseonerror, from, wait}).
 -record(copy, {rid, parts, part, reader, imp, pos, accsize, factor}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -44,6 +44,7 @@ start_link(Request, SrcStore, DstStore, Options, From) ->
 
 init({Request, From, SrcStore, DstStore, Options}) ->
 	process_flag(trap_exit, true),
+	Wait = proplists:get_value(wait, Options, none),
 	S = #state{
 		g              = digraph:new([acyclic]),
 		backlog        = [],
@@ -55,8 +56,12 @@ init({Request, From, SrcStore, DstStore, Options}) ->
 		done           = 0,
 		pauseonerror   = proplists:get_bool(pauseonerror, Options),
 		from           = From,
-		result         = ok
+		wait           = Wait
 	},
+	case Wait of
+		none -> ok;
+		_ -> link(Wait)
+	end,
 	digraph:add_vertex(S#state.g, root),
 	S2 = schedule(estimate, handle_node(undefined, root, S)),
 	S3 = case Request of
@@ -76,15 +81,16 @@ init({Request, From, SrcStore, DstStore, Options}) ->
 	{ok, working, S4, 0}.
 
 
-terminate(_Reason, _State, #state{monitor=Monitor, from=From, result=Result}) ->
-	peerdrive_work:stop(Monitor),
-	peerdrive_work:delete(Monitor),
-	case From of
-		{Pid, Ref} ->
-			Pid ! {Ref, Result};
-		_Else ->
-			ok
-	end.
+terminate(_Reason, _State, #state{g=G}) ->
+	% Close the last handle queued on the root
+	{root, MyProps} = digraph:vertex(G, root),
+	lists:foreach(
+		fun
+			({handle, ChldHndl}) -> peerdrive_store:close(ChldHndl);
+			(_) -> ok
+		end,
+		MyProps),
+	ok.
 
 
 working(timeout, S) ->
@@ -95,7 +101,7 @@ working(timeout, S) ->
 		{next_state, working, S2, 0}
 	catch
 		throw:done ->
-			{stop, normal, S};
+			stop(ok, S);
 
 		throw:{error, ErrInfo} ->
 			case S#state.pauseonerror of
@@ -104,7 +110,7 @@ working(timeout, S) ->
 					{next_state, error, S};
 				false ->
 					Result = {error, proplists:get_value(code, ErrInfo, eio)},
-					{stop, normal, S#state{result=Result}}
+					stop(Result, S)
 			end
 	end.
 
@@ -117,6 +123,10 @@ error(_, S) ->
 	{next_state, error, S}.
 
 
+wait(_, S) ->
+	{next_state, wait, S}.
+
+
 handle_info({work_req, Req}, State, #state{monitor=Monitor} = S) ->
 	case State of
 		working ->
@@ -125,7 +135,7 @@ handle_info({work_req, Req}, State, #state{monitor=Monitor} = S) ->
 					peerdrive_work:pause(Monitor),
 					{next_state, paused, S};
 				stop ->
-					{stop, normal, S#state{result={error, eintr}}};
+					stop({error, eintr}, S);
 				_ ->
 					{next_state, working, S, 0}
 			end;
@@ -139,10 +149,19 @@ handle_info({work_req, Req}, State, #state{monitor=Monitor} = S) ->
 					peerdrive_work:resume(Monitor),
 					{next_state, working, skip(S), 0};
 				stop ->
-					{stop, normal, S#state{result={error, eintr}}};
+					stop({error, eintr}, S);
 				_ ->
 					{next_state, Halted, S}
 			end
+	end;
+
+
+handle_info({'EXIT', Wait, _Reason}, State, #state{wait=Wait} = S) ->
+	S2 = S#state{wait=none},
+	case State of
+		working -> {next_state, working, S2, 0};
+		wait -> {stop, normal, S2};
+		_ -> {next_state, State, S2}
 	end;
 
 handle_info(_, working, S) ->
@@ -152,8 +171,15 @@ handle_info(_, State, S) ->
 	{next_state, State, S}.
 
 
-handle_event(_Event, StateName, StateData) ->
-	{next_state, StateName, StateData, 0}.
+handle_event(close, wait, S) ->
+	{stop, normal, S};
+
+handle_event(close, State, S) ->
+	{next_state, State, S#state{wait=none}, 0};
+
+handle_event(_Event, State, S) ->
+	{next_state, State, S, 0}.
+
 
 handle_sync_event(_Event, _From, StateName, StateData) ->
 	{next_state, StateName, StateData, 0}.
@@ -164,6 +190,26 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+stop(Result, #state{monitor=Monitor, from=From, wait=Wait} = S) ->
+	peerdrive_work:stop(Monitor),
+	peerdrive_work:delete(Monitor),
+	case From of
+		{Pid, Ref} ->
+			Pid ! {Ref, Result};
+		_Else ->
+			ok
+	end,
+	case Wait of
+		none ->
+			{stop, normal, S};
+		_ ->
+			case Result of
+				ok   -> {next_state, wait, S};
+				_Err -> {stop, normal, S}
+			end
+	end.
+
 
 schedule(Action, #state{backlog=Backlog} = S) ->
 	NewBacklog = [Action | Backlog],
@@ -350,21 +396,22 @@ do_handle_node(Parent, Node, #state{g=G} = S) ->
 					Handle = undefined,
 					S2 = S
 			end,
-			% Now queue the handle at the parent
 			case Handle of
 				undefined ->
+					% the root node is handled in terminate/3
 					ok;
 				_ ->
+					% Now queue the handle at the parent
 					{Parent, ParentProps} = digraph:vertex(G, Parent),
-					digraph:add_vertex(G, Parent, [Handle | ParentProps])
+					digraph:add_vertex(G, Parent, [Handle | ParentProps]),
+					% Lastly, close our handles
+					lists:foreach(
+						fun
+							({handle, ChldHndl}) -> peerdrive_store:close(ChldHndl);
+							(_) -> ok
+						end,
+						MyProps)
 			end,
-			% Lastly, close our handles
-			lists:foreach(
-				fun
-					({handle, ChldHndl}) -> peerdrive_store:close(ChldHndl);
-					(_) -> ok
-				end,
-				MyProps),
 			S2;
 
 		[Edge | _] ->

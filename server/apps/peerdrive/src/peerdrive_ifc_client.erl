@@ -207,12 +207,10 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 			{ok, S};
 
 		?REPLICATE_DOC_MSG ->
-			fork(Body, RetPath, fun do_replicate_doc/1),
-			{ok, S};
+			start_worker(S, fun do_replicate_doc/2, RetPath, Body);
 
 		?REPLICATE_REV_MSG ->
-			fork(Body, RetPath, fun do_replicate_rev/1),
-			{ok, S};
+			start_worker(S, fun do_replicate_rev/2, RetPath, Body);
 
 		?MOUNT_MSG ->
 			fork(Body, RetPath, fun do_mount/1),
@@ -507,7 +505,7 @@ do_forward(Body) ->
 	<<>>.
 
 
-do_replicate_doc(Body) ->
+do_replicate_doc(Cookie, Body) ->
 	#replicatedocreq{
 		src_store = SrcStore,
 		doc = Doc,
@@ -517,12 +515,13 @@ do_replicate_doc(Body) ->
 	} = peerdrive_client_pb:decode_replicatedocreq(Body),
 	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
-	ok = check(peerdrive_broker:replicate_doc(get_store(SrcStore), Doc,
-		get_store(DstStore), [pauseonerror | Opt2])),
-	<<>>.
+	{ok, Handle} = check(peerdrive_broker:replicate_doc(get_store(SrcStore),
+		Doc, get_store(DstStore), [pauseonerror | Opt2])),
+	Reply = #replicatedoccnf{handle=Cookie},
+	{Handle, [], peerdrive_client_pb:encode_replicatedoccnf(Reply)}.
 
 
-do_replicate_rev(Body) ->
+do_replicate_rev(Cookie, Body) ->
 	#replicaterevreq{
 		src_store = SrcStore,
 		rev = Rev,
@@ -532,9 +531,10 @@ do_replicate_rev(Body) ->
 	} = peerdrive_client_pb:decode_replicaterevreq(Body),
 	Opt1 = case Depth of undefined -> []; _ -> [{depth, Depth}] end,
 	Opt2 = case Verbose of false -> Opt1; true -> [verbose | Opt1] end,
-	ok = check(peerdrive_broker:replicate_rev(get_store(SrcStore), Rev,
-		get_store(DstStore), [pauseonerror | Opt2])),
-	<<>>.
+	{ok, Handle} = check(peerdrive_broker:replicate_rev(get_store(SrcStore),
+		Rev, get_store(DstStore), [pauseonerror | Opt2])),
+	Reply = #replicaterevcnf{handle=Cookie},
+	{Handle, [], peerdrive_client_pb:encode_replicaterevcnf(Reply)}.
 
 
 do_mount(Body) ->

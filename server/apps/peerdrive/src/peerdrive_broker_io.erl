@@ -68,61 +68,91 @@ resume(Store, Doc, PreRev, Creator) ->
 	end.
 
 read({_, Handle}, Part, Offset, Length) ->
-	peerdrive_store:read(Handle, Part, Offset, Length).
+	peerdrive_store:read(Handle, Part, Offset, Length);
+read(_, _, _, _) ->
+	{error, ebadf}.
 
 write({_, Handle}, Part, Offset, Data) when Part == <<"FILE">>;
                                             Part == <<"META">>;
                                             Part == <<"PDSD">>;
                                             Part == <<"ENCR">> ->
 	peerdrive_store:write(Handle, Part, Offset, Data);
-
+write({_, _}, _, _, _) ->
+	{error, einval};
 write(_, _, _, _) ->
-	{error, einval}.
+	{error, ebadf}.
 
 truncate({_, Handle}, Part, Offset) when Part == <<"FILE">>;
                                          Part == <<"META">>;
                                          Part == <<"PDSD">>;
                                          Part == <<"ENCR">> ->
 	peerdrive_store:truncate(Handle, Part, Offset);
-
+truncate({_, _}, _, _) ->
+	{error, einval};
 truncate(_, _, _) ->
-	{error, einval}.
+	{error, ebadf}.
+
 
 get_parents({_, Handle}) ->
-	peerdrive_store:get_parents(Handle).
+	peerdrive_store:get_parents(Handle);
+get_parents(_) ->
+	{error, ebadf}.
 
 merge({DstStore, Handle}, SrcStore, Rev, Options) ->
-	do_merge(Handle, DstStore, SrcStore, Rev, Options).
+	do_merge(Handle, DstStore, SrcStore, Rev, Options);
+merge(_, _, _, _) ->
+	{error, ebadf}.
+
 
 rebase({_, Handle}, Rev) ->
-	do_rebase(Handle, Rev).
+	do_rebase(Handle, Rev);
+rebase(_, _) ->
+	{error, ebadf}.
 
 get_flags({_, Handle}) ->
-	peerdrive_store:get_flags(Handle).
+	peerdrive_store:get_flags(Handle);
+get_flags(_) ->
+	{error, ebadf}.
 
 set_flags({_, Handle}, Flags) ->
-	peerdrive_store:set_flags(Handle, Flags).
+	peerdrive_store:set_flags(Handle, Flags);
+set_flags(_, _) ->
+	{error, ebadf}.
 
 get_type({_, Handle}) ->
-	peerdrive_store:get_type(Handle).
+	peerdrive_store:get_type(Handle);
+get_type(_) ->
+	{error, ebadf}.
 
 set_type({_, Handle}, Type) ->
-	peerdrive_store:set_type(Handle, Type).
+	peerdrive_store:set_type(Handle, Type);
+set_type(_, _) ->
+	{error, ebadf}.
 
 commit({_, Handle}) ->
-	do_commit(Handle, fun() -> peerdrive_store:commit(Handle) end).
+	do_commit(Handle, fun() -> peerdrive_store:commit(Handle) end);
+commit(_) ->
+	{error, ebadf}.
 
 commit({_, Handle}, Comment) ->
-	do_commit(Handle, fun() -> peerdrive_store:commit(Handle, Comment) end).
+	do_commit(Handle, fun() -> peerdrive_store:commit(Handle, Comment) end);
+commit(_, _) ->
+	{error, ebadf}.
 
 suspend({_, Handle}) ->
-	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle) end).
+	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle) end);
+suspend(_) ->
+	{error, ebadf}.
 
 suspend({_, Handle}, Comment) ->
-	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle, Comment) end).
+	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle, Comment) end);
+suspend(_, _) ->
+	{error, ebadf}.
 
 close({_, Handle}) ->
-	peerdrive_store:close(Handle).
+	peerdrive_store:close(Handle);
+close(Handle) ->
+	peerdrive_replicator:close(Handle).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -136,11 +166,13 @@ do_merge(Handle, DstStore, SrcStore, Rev, Options) ->
 				{ok, Parents} ->
 					% TODO: check if the new Rev supersedes any present parent
 					NewParents = lists:usort([Rev | Parents]),
-					case peerdrive_store:set_parents(Handle, NewParents) of
-						ok ->
-							peerdrive_replicator:replicate_rev_sync(SrcStore, Rev,
-								DstStore, Options),
-							ok;
+					case peerdrive_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Options) of
+						{ok, Handle} ->
+							try
+								peerdrive_store:set_parents(Handle, NewParents)
+							after
+								peerdrive_replicator:close(Handle)
+							end;
 						{error, _} = Error ->
 							Error
 					end;
