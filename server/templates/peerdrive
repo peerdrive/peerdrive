@@ -1,0 +1,123 @@
+#!/bin/bash
+# -*- tab-width:4;indent-tabs-mode:nil -*-
+# ex: ts=4 sw=4 et
+
+# Extract the target node name from node.args
+NAME_ARG=`grep -e '-[s]*name' %etcdir%/vm.args`
+if [ -z "$NAME_ARG" ]; then
+    echo "%etcdir%/vm.args needs to have either -name or -sname parameter."
+    exit 1
+fi
+
+# Extract the target cookie
+COOKIE_ARG=`grep -e '-setcookie' %etcdir%/vm.args`
+if [ -z "$COOKIE_ARG" ]; then
+    echo "%etcdir%/vm.args needs to have a -setcookie parameter."
+    exit 1
+fi
+
+# Setup command to control the node
+PIDFILE=%homedir%/daemon.pid
+NODETOOL="escript %bindir%/nodetool $NAME_ARG $COOKIE_ARG"
+
+# The status command can be run by anybody
+if [ "$1" = "ping" ]; then
+    ## See if the VM is alive
+    $NODETOOL ping
+    exit
+fi
+
+# Make sure we run all other commands as the right user
+if [ `whoami` != "peerdrive" ]; then
+    if [ `whoami` != "root" ]; then
+        echo "$0 must be run as 'root' or 'peerdrive' user!"
+        exit 1
+    fi
+    exec su -l -c "$0 $@" peerdrive
+fi
+
+# Check the first argument for instructions
+case "$1" in
+    start)
+        # Make sure there is not already a node running
+        RES=`$NODETOOL ping`
+        if [ "$RES" = "pong" ]; then
+            echo "PeerDrive is already running!"
+            exit 1
+        fi
+        HEART_COMMAND="%bindir%/peerdrive start"
+        export HEART_COMMAND
+        shift # remove $1
+        run_erl -daemon "%homedir%/" "%logdir%" "exec %bindir%/peerdrive console $@" 2>&1
+        ;;
+
+    stop)
+        if [ -r $PIDFILE ]; then
+            PID=`cat $PIDFILE`
+
+            if ! `kill -0 $PID 2>/dev/null`; then
+                echo "stale PID file?"
+                rm $PIDFILE
+                exit 1
+            fi
+            RES=`$NODETOOL stop 2>&1`
+            if [ "$RES" != "ok" ]; then
+                echo "error: $RES"
+                exit 1
+            fi
+
+            # Wait for the node to completely stop...
+            i=31
+            while [ $i -gt 0 ] && `kill -0 $PID 2>/dev/null`; do
+                sleep 1
+                i=$((i-1))
+            done
+
+            if [ $i -eq 0 ]; then
+                echo "error"
+                false
+            else
+                rm $PIDFILE
+            fi
+        else
+            echo "not running!"
+            exit 1
+        fi
+        ;;
+
+    restart)
+        ## Restart the VM without exiting the process
+        $NODETOOL restart
+        ;;
+
+    reboot)
+        ## Restart the VM completely (uses heart to restart it)
+        $NODETOOL reboot
+        ;;
+
+    attach)
+        # Make sure a node IS running
+        RES=`$NODETOOL ping`
+        if [ "$RES" != "pong" ]; then
+            echo "PeerDrive is not running!"
+            exit 1
+        fi
+        to_erl "%homedir%/"
+        ;;
+
+    console|console_clean)
+        # Log the startup
+        logger -t "peerdrive[$$]" "Starting up"
+        echo -n $$ > $PIDFILE
+
+        # Start the VM
+        export ERL_LIBS=%libsdir%
+        exec erl -args_file %etcdir%/vm.args -config %etcdir%/peerdrive \
+            -boot start_sasl -s crypto -s ssl -s peerdrive
+        ;;
+
+    *)
+        echo "Usage: $SCRIPT {start|stop|restart|reboot|ping|console|console_clean|attach}"
+        exit 1
+        ;;
+esac
