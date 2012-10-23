@@ -1,0 +1,9 @@
+{
+	application,
+	netwatch,
+	[
+		{description, "PeerDrive Network Watcher"},
+		{vsn, "0.1.0"},
+		{applications, [kernel, stdlib]}
+	]
+}.

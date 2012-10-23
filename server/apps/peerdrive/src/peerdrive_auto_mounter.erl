@@ -23,7 +23,7 @@
 -include("utils.hrl").
 -include("volman.hrl").
 
--record(state, {store, doc, fstab}).
+-record(state, {store, doc, fstab, watch}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -40,13 +40,15 @@ start_link() ->
 init([]) ->
 	#peerdrive_store{pid=SysStore, sid=SysSId} = peerdrive_volman:sys_store(),
 	peerdrive_vol_monitor:register_proc(),
+	Watch = netwatch:start(),
+	S1 = #state{store=SysStore, watch=Watch},
 	case peerdrive_util:walk(SysStore, <<"fstab">>) of
 		{ok, Doc} ->
 			case read_fstab(SysStore, Doc) of
 				{ok, FsTab} ->
-					S = #state{store=SysStore, doc=Doc, fstab=FsTab},
-					auto_mount(S),
-					{ok, S};
+					S2 = S1#state{doc=Doc, fstab=FsTab},
+					auto_mount(S2),
+					{ok, S2};
 
 				{error, Reason} ->
 					{stop, Reason}
@@ -54,9 +56,9 @@ init([]) ->
 
 		{error, enoent} ->
 			case create_fstab(SysStore, SysSId) of
-				ok ->
-					S = #state{store=SysStore, fstab=gb_trees:empty()},
-					{ok, S};
+				{ok, Doc} ->
+					S2 = S1#state{doc=Doc, fstab=gb_trees:empty()},
+					{ok, S2};
 				{error, Reason} ->
 					{stop, Reason}
 			end;
@@ -66,12 +68,34 @@ init([]) ->
 	end.
 
 
-terminate(_Reason, _State) ->
+terminate(_Reason, S) ->
+	netwatch:stop(S#state.watch),
 	peerdrive_vol_monitor:deregister_proc().
 
 
+handle_info({vol_event, mod_doc, _Store, Doc}, #state{doc=Doc} = S) ->
+	case read_fstab(S#state.store, Doc) of
+		{ok, FsTab} ->
+			{noreply, S#state{fstab=FsTab}};
+
+		{error, Reason} ->
+			{stop, Reason, S}
+	end;
+
+handle_info({Watch, ifup}, #state{watch=Watch} = S) ->
+	% wait some time for the network to settle...
+	erlang:send_after(7000, self(), check_net_stores),
+	{noreply, S};
+
+handle_info(check_net_stores, S) ->
+	check_net_stores(S#state.fstab),
+	{noreply, S};
+
+handle_info(_, S) ->
+	{noreply, S}.
+
+
 handle_call(_Request, _From, S) -> {reply, badarg, S}.
-handle_info(_, S) -> {noreply, S}.
 handle_cast(_Request, State) -> {noreply, State}.
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
@@ -98,15 +122,9 @@ auto_mount_store({Label, Spec}) when ?IS_GB_TREE(Spec) ->
 	try
 		case gb_trees:lookup(<<"auto">>, Spec) of
 			{value, true} ->
-				Src = unicode:characters_to_list(get_value(<<"src">>, Spec)),
 				Type = unicode:characters_to_list(get_value(<<"type">>,
 					<<"file">>, Spec)),
-				Options = unicode:characters_to_list(get_value(<<"options">>,
-					<<"">>, Spec)),
-				Credentials = unicode:characters_to_list(get_value(
-					<<"credentials">>, <<"">>, Spec)),
-				peerdrive_volman:mount(Src, Options, Credentials, Type,
-					unicode:characters_to_list(Label));
+				mount_store(Label, Type, Spec);
 			_ ->
 				ok
 		end
@@ -146,7 +164,8 @@ create_fstab(Store, Root) ->
 			ok = check(peerdrive_broker:write(Handle, <<"PDSD">>, 0,
 				peerdrive_struct:encode(gb_trees:empty()))),
 			{ok, _Rev} = check(peerdrive_broker:commit(Handle)),
-			ok = check(peerdrive_util:folder_link(Store, Root, Doc))
+			ok = check(peerdrive_util:folder_link(Store, Root, Doc)),
+			{ok, Doc}
 		after
 			peerdrive_broker:close(Handle)
 		end
@@ -160,3 +179,42 @@ check({error, _} = Error) ->
 check(Term) ->
 	Term.
 
+
+check_net_stores(FsTab) ->
+	lists:foreach(fun check_net_store/1, gb_trees:to_list(FsTab)).
+
+check_net_store({Label, Spec}) when ?IS_GB_TREE(Spec) ->
+	try
+		get_value(<<"auto">>, false, Spec)
+			andalso (get_value(<<"type">>, <<"file">>, Spec) =:= <<"net">>)
+			andalso not is_mounted(Label)
+			andalso mount_store(Label, "net", Spec)
+	catch
+		throw:Error ->
+			error_logger:error_report([{module, ?MODULE},
+				{function, auto_mount_store}, {error, Error}])
+	end;
+
+check_net_store(_) ->
+	ok.
+
+
+mount_store(Label, Type, Spec) ->
+	Src = unicode:characters_to_list(get_value(<<"src">>, Spec)),
+	Options = unicode:characters_to_list(get_value(<<"options">>,
+		<<"">>, Spec)),
+	Credentials = unicode:characters_to_list(get_value(
+		<<"credentials">>, <<"">>, Spec)),
+	peerdrive_volman:mount(Src, Options, Credentials, Type,
+		unicode:characters_to_list(Label)).
+
+
+is_mounted(BinLabel) ->
+	Label = unicode:characters_to_list(BinLabel),
+	Stores = peerdrive_volman:enum(),
+	is_mounted(Label, Stores).
+
+is_mounted(_Label, []) ->
+	false;
+is_mounted(Label, [Store | Rest]) ->
+	Store#peerdrive_store.label == Label orelse is_mounted(Label, Rest).

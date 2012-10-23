@@ -3,13 +3,9 @@
 set -e
 
 cd `dirname "$0"`
-ERL="erl -pa apps/peerdrive/ebin"
-STORES="stores/user/ stores/sys/"
 
-# add fetched dependencies
-for i in deps/*; do
-	ERL="$ERL -pa $i/ebin"
-done
+export ERL_LIBS=apps/:deps/
+STORES="stores/user/ stores/sys/"
 
 # some special options
 if [ $# -gt 0 ]; then
@@ -44,6 +40,6 @@ mkdir -p vfs
 [ -f peerdrive.config ] || cp templates/peerdrive.config peerdrive.config
 
 # start erlang
-$ERL +A 4 +W w -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive \
+erl +A 4 +W w -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive \
 	-sname peerdrive
 

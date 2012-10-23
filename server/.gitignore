@@ -6,3 +6,4 @@
 /snapshots/
 /stores/
 /vfs/
+*.o
