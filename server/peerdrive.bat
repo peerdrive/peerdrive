@@ -13,7 +13,6 @@ IF NOT EXIST peerdrive.config (
 )
 
 REM Configure additional code paths
-SET PA=apps\peerdrive\ebin
-FOR /D %%D IN (deps\*) DO SET PA=!PA! %%D\ebin
+set ERL_LIBS=apps;deps
 
-start werl -pa %PA% +A4 +Ww -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive
+erl +A4 +Ww -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive
