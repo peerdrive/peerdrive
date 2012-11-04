@@ -442,7 +442,7 @@ do_put_doc(Store, NetHandle, ReqData) ->
 		peerdrive_netstore_pb:decode_putdocreq(ReqData),
 	{ok, StoreHandle} = check(peerdrive_store:put_doc(Store, Doc, Rev)),
 	Cnf = #putdoccnf{handle=NetHandle},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_putdoccnf(Cnf)}.
+	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_putdoccnf(Cnf)}.
 
 
 do_forward_doc(Store, NetHandle, ReqData) ->
@@ -454,7 +454,7 @@ do_forward_doc(Store, NetHandle, ReqData) ->
 
 		{ok, Missing, StoreHandle} ->
 			Cnf = #forwarddoccnf{handle=NetHandle, missing_revs=Missing},
-			{start, StoreHandle, peerdrive_netstore_pb:encode_forwarddoccnf(Cnf)}
+			{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_forwarddoccnf(Cnf)}
 	end.
 
 
@@ -467,7 +467,7 @@ do_remember_rev(Store, NetHandle, ReqData) ->
 
 		{ok, StoreHandle} ->
 			Cnf = #rememberrevcnf{handle=NetHandle},
-			{start, StoreHandle, peerdrive_netstore_pb:encode_rememberrevcnf(Cnf)}
+			{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_rememberrevcnf(Cnf)}
 	end.
 
 
@@ -489,7 +489,7 @@ do_put_rev(Store, NetHandle, ReqData) ->
 	{ok, Missing, StoreHandle} = check(peerdrive_store:put_rev(Store,
 		RId, Rev)),
 	Cnf = #putrevcnf{handle=NetHandle, missing_parts=Missing},
-	{start, StoreHandle, peerdrive_netstore_pb:encode_putrevcnf(Cnf)}.
+	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_putrevcnf(Cnf)}.
 
 
 do_sync_get_changes(Body, Store) ->
