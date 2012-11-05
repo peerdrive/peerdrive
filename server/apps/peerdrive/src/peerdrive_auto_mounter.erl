@@ -87,6 +87,10 @@ handle_info({Watch, ifup}, #state{watch=Watch} = S) ->
 	erlang:send_after(7000, self(), check_net_stores),
 	{noreply, S};
 
+handle_info({Watch, ifdown}, #state{watch=Watch} = S) ->
+	ping_net_stores(),
+	{noreply, S};
+
 handle_info(check_net_stores, S) ->
 	check_net_stores(S#state.fstab),
 	{noreply, S};
@@ -218,3 +222,55 @@ is_mounted(_Label, []) ->
 	false;
 is_mounted(Label, [Store | Rest]) ->
 	Store#peerdrive_store.label == Label orelse is_mounted(Label, Rest).
+
+
+ping_net_stores() ->
+	NetStores = [ Store || Store <- peerdrive_volman:enum(),
+		Store#peerdrive_store.type =:= "net" ],
+	lists:foreach(fun(Store) -> spawn(fun() -> ping_net_store(Store) end) end,
+		NetStores).
+
+
+ping_net_store(#peerdrive_store{pid=Pid, sid=SId, src=Src}) ->
+	Res = re:run(Src, "^(.+)@([-.[:alnum:]]+)(:[0-9]+)?$",
+		[{capture, all_but_first, list}]),
+	{Address, Port} = case Res of
+		{match, [_Name, Ip]} ->
+			{Ip, 4568};
+		{match, [_Name, Ip, [_|PortStr]]} ->
+			Prt = try
+				list_to_integer(PortStr)
+			catch
+				error:badarg -> throw(einval)
+			end,
+			{Ip, Prt};
+		_ ->
+			throw(einval)
+	end,
+	Self = self(),
+	% Try to connect to TCP port
+	spawn(fun() -> Self ! {connect, connect_to_port(Address, Port)} end),
+	% Also call store to see if it still responds
+	spawn(fun() -> Self ! {statfs, peerdrive_store:statfs(Pid)} end),
+	receive
+		{connect, ok} ->
+			ok;
+		{connect, error} ->
+			peerdrive_volman:unmount(SId);
+		{statfs, _} ->
+			ok % netstore will stop by itself on a transport error
+	after
+		% 15 seconds should be enough
+		15000 ->
+			peerdrive_volman:unmount(SId)
+	end.
+
+
+connect_to_port(Address, Port) ->
+	case gen_tcp:connect(Address, Port, [binary, {active, false}]) of
+		{ok, Socket} ->
+			gen_tcp:close(Socket),
+			ok;
+		{error, _} ->
+			error
+	end.

@@ -45,6 +45,7 @@ struct self {
 	ErlDrvPort port;
 	struct nl_handle *nlh;
 	ErlDrvTermData ifup_ind_terms[6];
+	ErlDrvTermData ifdn_ind_terms[6];
 	struct ifc *alive_ifcs;
 };
 
@@ -71,7 +72,7 @@ static struct ifc *check_ifc_alive(struct ifc *me, unsigned int idx, int *result
 	return me;
 }
 
-static struct ifc *check_ifc_dead(struct ifc *me, unsigned int idx)
+static struct ifc *check_ifc_dead(struct ifc *me, unsigned int idx, int *result)
 {
 	if (!me)
 		return NULL;
@@ -80,8 +81,9 @@ static struct ifc *check_ifc_dead(struct ifc *me, unsigned int idx)
 		struct ifc *tmp = me;
 		me = me->next;
 		driver_free(tmp);
+		*result = 1;
 	} else
-		me->next = check_ifc_dead(me->next, idx);
+		me->next = check_ifc_dead(me->next, idx, result);
 
 	return me;
 }
@@ -110,8 +112,12 @@ static void netlink_msg_handler(struct nl_object *obj, void *arg)
 		if (is_new)
 			driver_output_term(self->port, self->ifup_ind_terms,
 				ARRAY_SIZE(self->ifup_ind_terms));
-	} else
-		self->alive_ifcs = check_ifc_dead(self->alive_ifcs, ifidx);
+	} else {
+		self->alive_ifcs = check_ifc_dead(self->alive_ifcs, ifidx, &is_new);
+		if (is_new)
+			driver_output_term(self->port, self->ifdn_ind_terms,
+				ARRAY_SIZE(self->ifdn_ind_terms));
+	}
 
 done:
 	rtnl_link_put(filter);
@@ -128,6 +134,8 @@ static int netlink_msg_ready(struct nl_msg *msg, void *arg)
 static int netlink_setup(struct self *self)
 {
 	int err;
+	struct nl_cache *cache;
+	struct nl_object *obj;
 
 	self->nlh = nl_handle_alloc();
 	if (!self->nlh)
@@ -139,21 +147,47 @@ static int netlink_setup(struct self *self)
 
 	err = nl_connect(self->nlh, NETLINK_ROUTE);
 	if (err < 0)
-		return err;
+		goto err_sock_free;
 
 	err = nl_set_passcred(self->nlh, 1);
 	if (err < 0)
-		return err;
+		goto err_sock_free;
 
 	err = nl_socket_set_nonblocking(self->nlh);
 	if (err < 0)
-		return err;
+		goto err_sock_free;
 
 	err = nl_socket_add_membership(self->nlh, RTNLGRP_LINK);
 	if (err < 0)
-		return err;
+		goto err_sock_free;
+
+	/* build up list of all available interfaces */
+	cache = rtnl_link_alloc_cache(self->nlh);
+	if (!cache) {
+		err = -ENOMEM;
+		goto err_sock_free;
+	}
+
+	obj = nl_cache_get_first(cache);
+	while (obj) {
+		struct rtnl_link *link_obj = (struct rtnl_link *)obj;
+
+		if (rtnl_link_get_flags(link_obj) & IFF_LOWER_UP) {
+			int dummy;
+			unsigned int ifidx = rtnl_link_get_ifindex(link_obj);
+			self->alive_ifcs = check_ifc_alive(self->alive_ifcs, ifidx, &dummy);
+		}
+
+		obj = nl_cache_get_next(obj);
+	}
+
+	nl_cache_free(cache);
 
 	return 0;
+
+err_sock_free:
+	nl_handle_destroy(self->nlh);
+	return err;
 }
 
 
@@ -174,15 +208,24 @@ static void finish(void)
 static ErlDrvData start(ErlDrvPort port, char* cmd)
 {
 	struct self *self = driver_alloc(sizeof(struct self));
+	struct ifc *i;
 
 	memset(self, 0, sizeof(*self));
 	self->port = port;
+
 	self->ifup_ind_terms[0] = ERL_DRV_PORT;
 	self->ifup_ind_terms[1] = driver_mk_port(port);
 	self->ifup_ind_terms[2] = ERL_DRV_ATOM;
 	self->ifup_ind_terms[3] = driver_mk_atom("ifup");
 	self->ifup_ind_terms[4] = ERL_DRV_TUPLE;
 	self->ifup_ind_terms[5] = 2;
+
+	self->ifdn_ind_terms[0] = ERL_DRV_PORT;
+	self->ifdn_ind_terms[1] = driver_mk_port(port);
+	self->ifdn_ind_terms[2] = ERL_DRV_ATOM;
+	self->ifdn_ind_terms[3] = driver_mk_atom("ifdown");
+	self->ifdn_ind_terms[4] = ERL_DRV_TUPLE;
+	self->ifdn_ind_terms[5] = 2;
 
 	if (netlink_setup(self))
 		goto err_setup;
@@ -194,6 +237,12 @@ static ErlDrvData start(ErlDrvPort port, char* cmd)
 	return (ErlDrvData)self;
 
 err_select:
+	i = self->alive_ifcs;
+	while (i) {
+		struct ifc *tmp = i;
+		i = i->next;
+		driver_free(tmp);
+	}
 	nl_handle_destroy(self->nlh);
 err_setup:
 	driver_free(self);
@@ -204,6 +253,7 @@ static void stop(ErlDrvData handle)
 {
 	struct self *self = (struct self *)handle;
 	int i, fd = nl_socket_get_fd(self->nlh);
+	struct ifc *j;
 
 	/*
 	 * De-selecting and closing handles is a bit odd. The call below will
@@ -225,6 +275,12 @@ static void stop(ErlDrvData handle)
 	erl_drv_mutex_unlock(stop_select_mutex);
 	driver_select(self->port, (ErlDrvEvent)fd, ERL_DRV_READ | ERL_DRV_USE, 0);
 
+	j = self->alive_ifcs;
+	while (j) {
+		struct ifc *tmp = j;
+		j = j->next;
+		driver_free(tmp);
+	}
 	driver_free(self);
 }
 

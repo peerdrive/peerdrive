@@ -40,6 +40,7 @@
 struct self {
 	ErlDrvPort port;
 	ErlDrvTermData ifupIndTems[6];
+	ErlDrvTermData ifdnIndTems[6];
 
 	DWORD *knownAddrs; /* 0 is an unused slot */
 	unsigned int knownAddrsLen;
@@ -80,7 +81,7 @@ static DWORD ScanAddrTable(struct self *self, int notify)
 	PMIB_IPADDRTABLE pIPAddrTable = NULL;
 	DWORD dwSize = sizeof(MIB_IPADDRTABLE) + 4 * sizeof(MIB_IPADDRROW);
 	DWORD ret = 0;
-	unsigned int i, j, isNew = 0;
+	unsigned int i, j, isNew = 0, isDown = 0;
 
 	do {
 		if (pIPAddrTable)
@@ -112,6 +113,7 @@ static DWORD ScanAddrTable(struct self *self, int notify)
 		if (j >= pIPAddrTable->dwNumEntries) {
 			DBG("down: addr:%ld\n", addr);
 			self->knownAddrs[i] = 0;
+			isDown = 1;
 		}
 	}
 
@@ -136,6 +138,11 @@ static DWORD ScanAddrTable(struct self *self, int notify)
 			isNew = 1;
 		}
 	}
+
+	/* send event if some new interface went down */
+	if (isDown && notify)
+		driver_output_term(self->port, self->ifdnIndTems,
+			ARRAY_SIZE(self->ifdnIndTems));
 
 	/* send event if some new interface got up */
 	if (isNew && notify)
@@ -173,12 +180,21 @@ static ErlDrvData start(ErlDrvPort port, char* cmd)
 
 	memset(self, 0, sizeof(*self));
 	self->port = port;
+
 	self->ifupIndTems[0] = ERL_DRV_PORT;
 	self->ifupIndTems[1] = driver_mk_port(port);
 	self->ifupIndTems[2] = ERL_DRV_ATOM;
 	self->ifupIndTems[3] = driver_mk_atom("ifup");
 	self->ifupIndTems[4] = ERL_DRV_TUPLE;
 	self->ifupIndTems[5] = 2;
+
+	self->ifdnIndTems[0] = ERL_DRV_PORT;
+	self->ifdnIndTems[1] = driver_mk_port(port);
+	self->ifdnIndTems[2] = ERL_DRV_ATOM;
+	self->ifdnIndTems[3] = driver_mk_atom("ifdown");
+	self->ifdnIndTems[4] = ERL_DRV_TUPLE;
+	self->ifdnIndTems[5] = 2;
+
 	self->knownAddrsLen = 4;
 	self->knownAddrs = driver_alloc(self->knownAddrsLen * sizeof(DWORD));
 	if (!self->knownAddrs)
