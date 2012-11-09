@@ -364,9 +364,9 @@ get_part_writable(Part, Conv, S) ->
 	case orddict:find(Part, S#state.parts) of
 		{ok, {rw, Content}} ->
 			if
-				is_binary(Content) and Conv == forcefile ->
+				is_binary(Content) and (Conv == forcefile) ->
 					part_bin_to_file(Part, Content, S);
-				not is_binary(Content) and Conv == forcebin ->
+				not is_binary(Content) and (Conv == forcebin) ->
 					part_file_to_bin(Part, Content, S);
 				true ->
 					{ok, Content, S}
@@ -374,9 +374,9 @@ get_part_writable(Part, Conv, S) ->
 
 		{ok, {ro, Content}} ->
 			if
-				is_binary(Content) and Conv == forcefile ->
+				is_binary(Content) and (Conv == forcefile) ->
 					part_bin_to_file(Part, Content, S);
-				not is_binary(Content) and Conv == forcebin ->
+				not is_binary(Content) and (Conv == forcebin) ->
 					part_file_to_bin(Part, Content, S);
 				true ->
 					part_open_write(Part, Conv, part_close_abort(Part, S))
