@@ -1,0 +1,47 @@
+
+{Enable, Config} = case os:type() of
+	{unix, linux} ->
+		LnxCfg = [
+			{erl_opts, [ {define, 'HAVE_NETWATCH_DRV'} ]},
+			{port_specs, [ {"priv/netwatch_drv.so", ["c_src/netwatch_linux.c"]} ]},
+			{port_env, [ {"DRV_LDFLAGS", "$DRV_LDFLAGS -lnl"} ]}
+		],
+		Includes = [ "linux/types.h", "netlink/socket.h" ],
+		Paths = [ "/usr/include/", "/usr/local/include/" ],
+		try
+			lists:foreach(
+				fun(F) ->
+					lists:any(fun(P) -> filelib:is_file(P ++ F) end, Paths) orelse
+						throw(F)
+				end,
+				Includes),
+			{true, LnxCfg}
+		catch
+			Missing -> {Missing, []}
+		end;
+
+	{win32, _} ->
+		{
+			true,
+			[
+				{erl_opts, [ {define, 'HAVE_NETWATCH_DRV'} ]},
+				{port_specs, [ {"priv/netwatch_drv.dll", ["c_src/netwatch_win32.c"]} ]},
+				{port_env, [
+					{"DRV_CFLAGS", "/TC /Zi /W3 /O2 /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _WINDOWS /D _USRDLL /D _WINDLL /D UNICODE /D _UNICODE /EHsc /MD /GS /Gy /Fdc_src\\ $ERL_CFLAGS "},
+					{"DRV_LDFLAGS", "/DLL /INCREMENTAL:NO /OPT:REF /OPT:ICF /DEBUG /PDB:priv\\netwatch_drv.pdb /SUBSYSTEM:WINDOWS /LTCG /DYNAMICBASE /NXCOMPAT /LIBPATH:$ERL_EI_LIBDIR ei_md.lib erl_interface_md.lib kernel32.lib user32.lib"}
+				]}
+			]
+		};
+
+	_ ->
+		{false, []}
+end,
+
+Status = case Enable of
+	true  -> "enabled";
+	false -> "disabled";
+	File  -> "missing " ++ File
+end,
+io:format("netwatch: ~s~n", [Status]),
+
+Config.
