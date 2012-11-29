@@ -72,6 +72,7 @@
 -define(PROGRESS_MSG,        16#027).
 -define(PROGRESS_END_MSG,    16#028).
 -define(PROGRESS_QUERY_MSG,  16#029).
+-define(WALK_PATH_MSG,       16#02a).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Servlet callbacks
@@ -235,6 +236,10 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 
 		?PROGRESS_QUERY_MSG ->
 			{reply, do_progress_query(RetPath), S};
+
+		?WALK_PATH_MSG ->
+			fork(Body, RetPath, fun do_walk_path/1),
+			{ok, S};
 
 		?READ_MSG ->
 			ReqData = #readreq{handle=Handle} =
@@ -639,6 +644,31 @@ do_progress_query(RetPath) ->
 	send_reply(RetPath, Reply).
 
 
+do_walk_path(Body) ->
+	#walkpathreq{path=Path} = peerdrive_client_pb:decode_walkpathreq(Body),
+	Enum = peerdrive_volman:enum_all(),
+	Result = case re:split(Path, ":", [{return, list}]) of
+		[Store, []] ->
+			case lists:keyfind(Store, #peerdrive_store.label, Enum) of
+				#peerdrive_store{sid=SId} ->
+					[ #walkpathcnf_item{store=SId, doc=SId} ];
+				false -> throw({error, enoent})
+			end;
+
+		[Store, Remainder] ->
+			case lists:keyfind(Store, #peerdrive_store.label, Enum) of
+				#peerdrive_store{pid=Pid, sid=SId} ->
+					case peerdrive_util:walk(Pid, Remainder) of
+						{ok, Doc} -> [ #walkpathcnf_item{store=SId, doc=Doc} ];
+						{error, _} = Error -> throw(Error)
+					end;
+				false -> throw({error, enoent})
+			end;
+
+		_ ->
+			throw({error, einval})
+	end,
+	peerdrive_client_pb:encode_walkpathcnf(#walkpathcnf{items=Result}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% IO handler loop

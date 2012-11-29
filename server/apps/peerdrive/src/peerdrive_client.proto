@@ -584,3 +584,17 @@ message ProgressQueryCnf {
 	repeated Item items = 1;
 }
 
+message WalkPathReq {
+	required string path = 1;
+	optional uint32 max_results = 2;
+}
+
+message WalkPathCnf {
+	message Item {
+		required bytes store = 1;
+		optional bytes doc = 2;
+		optional bytes rev = 3;
+	}
+
+	repeated Item items = 1;
+}
