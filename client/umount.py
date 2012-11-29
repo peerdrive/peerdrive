@@ -23,18 +23,10 @@ from peerdrive import Connector, struct
 parser = optparse.OptionParser(usage="usage: %prog [options] <label>")
 parser.add_option("-r", "--remove", action="store_true",
 	help="Remove mount label from fstab")
-parser.add_option("-s", "--server", help="PeerDrive server address (host[:port])")
 
 (options, args) = parser.parse_args()
 if len(args) != 1:
 	parser.error("incorrect number of arguments")
-
-# make connection to server
-try:
-	Connector(options.server)
-except IOError as e:
-	print >>sys.stderr, str(e)
-	sys.exit(1)
 
 label = args[0]
 try:

@@ -42,7 +42,6 @@ parser.add_option("-p", "--persist", action="store_true",
 	help="Save mount label permanently in fstab")
 parser.add_option("-a", "--auto", action="store_true",
 	help="Mount store automatically on startup (depends on '-p')")
-parser.add_option("-s", "--server", help="PeerDrive server address (host[:port])")
 parser.add_option("-v", "--verbose", action="store_true", help="Verbose output")
 
 (options, args) = parser.parse_args()
@@ -52,13 +51,6 @@ if options.auto and not options.persist:
 	parser.error("'--auto' depends on '--persist'")
 if options.persist and (len(args) < 2):
 	parser.error("incorrect number of arguments")
-
-# make connection to server
-try:
-	Connector(options.server)
-except IOError as e:
-	print >>sys.stderr, str(e)
-	sys.exit(1)
 
 fstab = struct.FSTab()
 

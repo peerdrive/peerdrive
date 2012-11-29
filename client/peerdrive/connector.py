@@ -20,7 +20,7 @@ from __future__ import absolute_import
 
 from PyQt4 import QtCore, QtNetwork
 from datetime import datetime
-import sys, struct, atexit, weakref, traceback
+import sys, struct, atexit, weakref, traceback, os
 from . import peerdrive_client_pb2 as pb
 
 _errorCodes = {
@@ -242,6 +242,8 @@ class _Connector(QtCore.QObject):
 
 		host = '127.0.0.1'
 		port = 4567
+		if not address:
+			address = os.getenv('PEERDRIVE')
 		if address:
 			if ':' in address:
 				(host, port) = address.split(':')
