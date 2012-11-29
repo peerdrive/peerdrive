@@ -222,6 +222,7 @@ class _Connector(QtCore.QObject):
 	PROGRESS_MSG        = 0x0027
 	PROGRESS_END_MSG    = 0x0028
 	PROGRESS_QUERY_MSG  = 0x0029
+	WALK_PATH_MSG       = 0x002a
 
 	FLAG_REQ = 0
 	FLAG_CNF = 1
@@ -492,6 +493,13 @@ class _Connector(QtCore.QObject):
 		reply = self._rpc(_Connector.GET_PATH_MSG, req.SerializeToString())
 		cnf = pb.GetPathCnf.FromString(reply)
 		return cnf.path
+
+	def walkPath(self, path):
+		req = pb.WalkPathReq()
+		req.path = path
+		reply = self._rpc(_Connector.WALK_PATH_MSG, req.SerializeToString())
+		cnf = pb.WalkPathCnf.FromString(reply)
+		return [ (item.store, item.doc) for item in cnf.items ]
 
 	def flush(self):
 		while self.socket.flush():

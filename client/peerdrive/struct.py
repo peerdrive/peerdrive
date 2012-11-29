@@ -38,7 +38,9 @@ def Link(spec):
 		link._fromString(spec)
 		return link
 	else:
-		return resolvePath(spec)
+		# FIXME: this assumes that we will only ever get single doc links o_O
+		[(store, doc)] = connector.Connector().walkPath(spec)
+		return DocLink(store, doc, False)
 
 class RevLink(object):
 	MIME_TYPE = 'application/x-peerdrive-revlink'
@@ -737,19 +739,6 @@ def walkPath(path, create=False):
 
 	# return result
 	return (storeDoc, curFolder, docName)
-
-
-def resolvePath(path):
-	if '/' in path:
-		(storeDoc, folder, docName) = walkPath(path)
-		if docName not in folder:
-			raise IOError("Path not found")
-		return folder[docName]
-	else:
-		store = connector.Connector().enum().fromLabel(path)
-		if store is None:
-			raise IOError("Path not found")
-		return DocLink(store.sid, store.sid, False)
 
 
 def copyDoc(src, dstStore):
