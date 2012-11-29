@@ -41,5 +41,5 @@ mkdir -p vfs
 
 # start erlang
 erl +A 4 +W w -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive \
-	-sname peerdrive
+	-sname peerdrive_test
 
