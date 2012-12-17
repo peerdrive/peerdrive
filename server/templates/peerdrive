@@ -96,19 +96,25 @@ case "$1" in
         to_erl "%homedir%/"
         ;;
 
-    console|console_clean)
+    console|console_clean|foreground)
         # Log the startup
         logger -t "peerdrive[$$]" "Starting up"
         echo -n $$ > $PIDFILE
 
+        FOREGROUNDOPTIONS=""
+        if [ "$1" == "foreground" ]; then
+            FOREGROUNDOPTIONS="-noinput +Bd"
+        fi
+
         # Start the VM
         export ERL_LIBS=%libsdir%
-        exec erl -args_file %etcdir%/vm.args -config %etcdir%/peerdrive \
-            -boot start_sasl -s crypto -s ssl -s peerdrive
+        exec erl $FOREGROUNDOPTIONS -args_file %etcdir%/vm.args \
+            -config %etcdir%/peerdrive -boot start_sasl \
+            -s crypto -s ssl -s peerdrive
         ;;
 
     *)
-        echo "Usage: $SCRIPT {start|stop|restart|reboot|ping|console|console_clean|attach}"
+        echo "Usage: $SCRIPT {start|foreground|stop|restart|reboot|ping|console|console_clean|attach}"
         exit 1
         ;;
 esac
