@@ -36,10 +36,10 @@ start_link() ->
 %% @doc Start watching a UUID (Doc or Rev). If a match occurs the calling
 %%      process will receive the following message:
 %%
-%%      {watch, Cause, Type, Uuid} where
+%%      {watch, Cause, Type, Store, Uuid} where
 %%          Cause = modified | appeared | replicated | diminished | disappeared
 %%          Type  = doc | rev
-%%          Uuid  = guid()
+%%          Store = Uuid = guid()
 %%
 %% @spec watch(Type, Uuid) -> ok
 %%       Type = doc | rev
@@ -70,10 +70,10 @@ init([]) ->
 	{ok, #state{watches=dict:new()}}.
 
 
-handle_info({vol_event, mod_doc, _Store, Doc}, #state{watches=Watches} = State) ->
+handle_info({vol_event, mod_doc, Store, Doc}, #state{watches=Watches} = State) ->
 	case dict:find({doc, Doc}, Watches) of
 		{ok, {_StoreSet, PidSet}} ->
-			fire_trigger(modified, doc, Doc, PidSet);
+			fire_trigger(modified, doc, Store, Doc, PidSet);
 		error ->
 			ok
 	end,
@@ -206,8 +206,8 @@ trigger_inc(Type, Store, Uuid, Watches) ->
 		{ok, {StoreSet, PidSet}} ->
 			NewStoreSet = sets:add_element(Store, StoreSet),
 			case sets:size(NewStoreSet) of
-				1 -> fire_trigger(appeared, Type, Uuid, PidSet);
-				_ -> fire_trigger(replicated, Type, Uuid, PidSet)
+				1 -> fire_trigger(appeared, Type, Store, Uuid, PidSet);
+				_ -> fire_trigger(replicated, Type, Store, Uuid, PidSet)
 			end,
 			dict:store(Key, {NewStoreSet, PidSet}, Watches);
 
@@ -222,8 +222,8 @@ trigger_dec(Type, Store, Uuid, Watches) ->
 		{ok, {StoreSet, PidSet}} ->
 			NewStoreSet = sets:del_element(Store, StoreSet),
 			case sets:size(NewStoreSet) of
-				0 -> fire_trigger(disappeared, Type, Uuid, PidSet);
-				_ -> fire_trigger(diminished, Type, Uuid, PidSet)
+				0 -> fire_trigger(disappeared, Type, Store, Uuid, PidSet);
+				_ -> fire_trigger(diminished, Type, Store, Uuid, PidSet)
 			end,
 			dict:store(Key, {NewStoreSet, PidSet}, Watches);
 
@@ -236,7 +236,7 @@ trigger_add_store(StoreGuid, Watches) ->
 	Root = <<0:128>>,
 	case dict:find({doc, Root}, Watches) of
 		{ok, {_StoreSet, RootPidSet}} ->
-			fire_trigger(modified, doc, Root, RootPidSet);
+			fire_trigger(modified, doc, Root, Root, RootPidSet);
 		error ->
 			ok
 	end,
@@ -249,8 +249,8 @@ trigger_add_store(StoreGuid, Watches) ->
 							case peerdrive_store:lookup(StorePid, Hash) of
 								{ok, _Rev, _PreRevs} ->
 									case sets:size(StoreSet) of
-										0 -> fire_trigger(appeared, doc, Hash, PidSet);
-										_ -> fire_trigger(replicated, doc, Hash, PidSet)
+										0 -> fire_trigger(appeared, doc, StoreGuid, Hash, PidSet);
+										_ -> fire_trigger(replicated, doc, StoreGuid, Hash, PidSet)
 									end,
 									{sets:add_element(StoreGuid, StoreSet), PidSet};
 
@@ -262,8 +262,8 @@ trigger_add_store(StoreGuid, Watches) ->
 							case peerdrive_store:contains(StorePid, Hash) of
 								true ->
 									case sets:size(StoreSet) of
-										0 -> fire_trigger(appeared, rev, Hash, PidSet);
-										_ -> fire_trigger(replicated, rev, Hash, PidSet)
+										0 -> fire_trigger(appeared, rev, StoreGuid, Hash, PidSet);
+										_ -> fire_trigger(replicated, rev, StoreGuid, Hash, PidSet)
 									end,
 									{sets:add_element(StoreGuid, StoreSet), PidSet};
 
@@ -284,7 +284,7 @@ trigger_rem_store(StoreGuid, Watches) ->
 	Root = <<0:128>>,
 	case dict:find({doc, Root}, Watches) of
 		{ok, {_StoreSet, RootPidSet}} ->
-			fire_trigger(modified, doc, Root, RootPidSet);
+			fire_trigger(modified, doc, Root, Root, RootPidSet);
 		error ->
 			ok
 	end,
@@ -294,8 +294,8 @@ trigger_rem_store(StoreGuid, Watches) ->
 				true ->
 					NewStoreSet = sets:del_element(StoreGuid, StoreSet),
 					case sets:size(NewStoreSet) of
-						0 -> fire_trigger(disappeared, Type, Hash, PidSet);
-						_ -> fire_trigger(diminished, Type, Hash, PidSet)
+						0 -> fire_trigger(disappeared, Type, StoreGuid, Hash, PidSet);
+						_ -> fire_trigger(diminished, Type, StoreGuid, Hash, PidSet)
 					end,
 					{NewStoreSet, PidSet};
 
@@ -306,9 +306,9 @@ trigger_rem_store(StoreGuid, Watches) ->
 		Watches).
 
 
-fire_trigger(Cause, Type, Hash, Pids) ->
+fire_trigger(Cause, Type, Store, Hash, Pids) ->
 	%io:format("trigger: ~w ~w ~s~n", [Cause, Type, peerdrive_util:bin_to_hexstr(Hash)]),
 	lists:foreach(
-		fun (Pid) -> Pid ! {watch, Cause, Type, Hash} end,
+		fun (Pid) -> Pid ! {watch, Cause, Type, Store, Hash} end,
 		sets:to_list(Pids)).
 

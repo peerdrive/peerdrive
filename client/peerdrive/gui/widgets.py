@@ -61,9 +61,9 @@ class DocButton(QtGui.QToolButton, Watch):
 			Watch.__init__(self, Watch.TYPE_DOC, doc)
 			Connector().watch(self)
 			self.__watching = True
-		self.triggered(Watch.EVENT_APPEARED)
+		self.triggered(Watch.EVENT_APPEARED, store)
 
-	def triggered(self, cause):
+	def triggered(self, cause, store):
 		try:
 			if cause == Watch.EVENT_REPLICATED:
 				return
@@ -500,7 +500,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 
 	# === re-implemented inherited methods
 
-	def triggered(self, event):
+	def triggered(self, event, store):
 		#print >>sys.stderr, "watch %d for %s" % (event, self.getHash().encode('hex'))
 		if event != Watch.EVENT_MODIFIED:
 			self.distributionChanged.emit()

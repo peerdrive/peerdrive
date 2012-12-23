@@ -21,7 +21,7 @@ class CommonParts(unittest.TestCase):
 		def close(self):
 			Connector().unwatch(self)
 
-		def triggered(self, cause):
+		def triggered(self, cause, store):
 			if self.__event == cause:
 				self.__received = True
 

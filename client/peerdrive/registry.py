@@ -39,7 +39,7 @@ class _Registry(connector.Watch):
 		with self.connection.peek(self.__regLink.store(), self.__regLink.rev()) as r:
 			self.registry = struct.loads(self.__regLink.store(), r.readAll('PDSD'))
 
-	def triggered(self, event):
+	def triggered(self, event, store):
 		if event == connector.Watch.EVENT_MODIFIED:
 			self.loadRegistry()
 		else:

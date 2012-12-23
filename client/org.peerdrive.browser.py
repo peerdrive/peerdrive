@@ -251,7 +251,7 @@ class WarpItem(connector.Watch):
 		if self.__widget:
 			self.__widget.fadeOut()
 
-	def triggered(self, event):
+	def triggered(self, event, store):
 		if event == connector.Watch.EVENT_DISAPPEARED:
 			self.__available = False
 			self.__watch()

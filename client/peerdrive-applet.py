@@ -34,7 +34,7 @@ class Launchbox(QtGui.QDialog):
 			self.__mounted = set([s.label for s in enum.regularStores()])
 			Watch.__init__(self, Watch.TYPE_DOC, Watch.ROOT_DOC)
 
-		def triggered(self, cause):
+		def triggered(self, cause, store):
 			enum = Connector().enum()
 			mounted = set([s.label for s in enum.regularStores()])
 			for s in (self.__mounted - mounted):

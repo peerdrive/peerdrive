@@ -529,7 +529,8 @@ message WatchInd {
 
 	required Event event = 1;
 	required Type type = 2;
-	required bytes element = 3;
+	required bytes store = 3;
+	required bytes element = 4;
 }
 
 message ProgressStartInd {

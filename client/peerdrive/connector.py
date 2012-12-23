@@ -663,7 +663,7 @@ class _Connector(QtCore.QObject):
 						for i in matches:
 							i = i() # dereference weakref
 							if i is not None:
-								i.triggered(ind.event)
+								i.triggered(ind.event, ind.store)
 					elif msg == _Connector.PROGRESS_START_MSG:
 						ind = pb.ProgressStartInd.FromString(packet)
 						handlers = [h for (e,h) in self.progressHandlers if e == msg]
@@ -745,7 +745,7 @@ class Watch(object):
 	def getHash(self):
 		return self.__h
 
-	def triggered(self, cause):
+	def triggered(self, cause, store):
 		pass
 
 

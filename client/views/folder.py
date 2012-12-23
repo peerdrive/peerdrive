@@ -388,7 +388,7 @@ class FolderEntry(Watch):
 					self.__columnValues[i] = column.default()
 
 	# callback when watch was triggered
-	def triggered(self, cause):
+	def triggered(self, cause, store):
 		if cause in [Watch.EVENT_MODIFIED, Watch.EVENT_REPLICATED, Watch.EVENT_DIMINISHED]:
 			self.update()
 			self.__model.entryChanged(self)

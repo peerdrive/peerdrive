@@ -128,8 +128,8 @@ handle_info({work_event, Event, Tag, Info}, S) ->
 handle_info({done, Cookie}, S) ->
 	{ok, S#state{handles=dict:erase(Cookie, S#state.handles)}};
 
-handle_info({watch, Cause, Type, Uuid}, S) ->
-	Ind = #watchind{event=Cause, type=Type, element=Uuid},
+handle_info({watch, Cause, Type, Store, Uuid}, S) ->
+	Ind = #watchind{event=Cause, type=Type, store=Store, element=Uuid},
 	send_indication(?WATCH_MSG, peerdrive_client_pb:encode_watchind(Ind), S);
 
 handle_info({'EXIT', From, Reason}, S) ->
