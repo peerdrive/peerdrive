@@ -1,4 +1,5 @@
 
+NoCfg = [ {port_specs, [{"disabled", "", []}]} ],
 {Enable, Config} = case os:type() of
 	{unix, linux} ->
 		LnxCfg = [
@@ -17,7 +18,7 @@
 				Includes),
 			{true, LnxCfg}
 		catch
-			Missing -> {Missing, []}
+			Missing -> {Missing, NoCfg}
 		end;
 
 	{win32, _} ->
@@ -34,7 +35,7 @@
 		};
 
 	_ ->
-		{false, []}
+		{false, NoCfg}
 end,
 
 Status = case Enable of
