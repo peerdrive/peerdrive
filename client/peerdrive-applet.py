@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys, itertools
+import sys, itertools, os, os.path
 from PyQt4 import QtCore, QtGui
 
 from peerdrive import struct, Registry
@@ -576,6 +576,8 @@ class SyncRules(object):
 		self.__rules[(store, peer)]['descr'] = descr
 		self.__changed = True
 
+# change to our base directory
+os.chdir(os.path.dirname(sys.argv[0]))
 
 app = QtGui.QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(False)
