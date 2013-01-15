@@ -50,7 +50,10 @@ init([]) ->
 					{ok, S2};
 
 				{error, Reason} ->
-					{stop, Reason}
+					error_logger:error_report([{module, ?MODULE},
+						{error, 'cannot read syncrules'}, {reason, Reason}]),
+					S = #state{store=SysStore, sys=SysDoc, doc=Doc},
+					{ok, S}
 			end;
 
 		{error, enoent} ->
@@ -59,7 +62,10 @@ init([]) ->
 					S = #state{store=SysStore, sys=SysDoc, doc=Doc},
 					{ok, S};
 				{error, Reason} ->
-					{stop, Reason}
+					error_logger:error_report([{module, ?MODULE},
+						{error, 'cannot create syncrules'}, {reason, Reason}]),
+					S = #state{store=SysStore, sys=SysDoc},
+					{ok, S}
 			end;
 
 		{error, Reason} ->
@@ -120,6 +126,8 @@ parse_rule(Rule, Acc) when ?IS_GB_TREE(Rule) ->
 				{value, PeerHex} ->
 					Peer = peerdrive_util:hexstr_to_bin(binary_to_list(PeerHex)),
 					case gb_trees:lookup(<<"mode">>, Rule) of
+						_ when Store == Peer ->
+							Acc; % reject sync on itself
 						{value, <<"ff">>}     ->
 							sets:add_element({ff, Store, Peer}, Acc);
 						{value, <<"latest">>} ->
