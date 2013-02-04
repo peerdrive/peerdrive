@@ -697,17 +697,17 @@ io_loop(Handle, State) ->
 	receive
 		{Req, ReqData, RetPath} ->
 			try io_loop_process(Handle, State, Req, ReqData) of
-				Reply when is_binary(Reply) ->
-					send_reply(RetPath, Reply),
-					io_loop(Handle, State);
-				{Reply, NewState} when is_binary(Reply) ->
-					send_reply(RetPath, Reply),
-					io_loop(Handle, NewState);
 				{stop, Reply} ->
 					send_reply(RetPath, Reply);
 				{error, Error, NewState} ->
 					send_error(RetPath, Error),
-					io_loop(Handle, NewState)
+					io_loop(Handle, NewState);
+				{Reply, NewState} ->
+					send_reply(RetPath, Reply),
+					io_loop(Handle, NewState);
+				Reply ->
+					send_reply(RetPath, Reply),
+					io_loop(Handle, State)
 			catch
 				throw:Error ->
 					send_error(RetPath, Error),
@@ -876,8 +876,8 @@ send_reply(#retpath{req=Req} = RetPath, Data) ->
 
 
 send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
-	Raw = <<Ref:32, Cnf:16, Data/binary>>,
-	%io:format("[~w] Confirm: ~w~n", [self(), Raw]),
+	Raw = [<<Ref:32, Cnf:16>>, Data],
+	%io:format("[~w] Confirm: ~w~n", [self(), iolist_to_binary(Raw)]),
 	case self() of
 		Servlet -> Raw;
 		_       -> Servlet ! {send, Raw}, Raw
@@ -886,8 +886,8 @@ send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
 
 send_indication(Ind, Data, S) ->
 	Indication = (Ind bsl 4) bor ?FLAG_IND,
-	Raw = <<16#FFFFFFFF:32, Indication:16, Data/binary>>,
-	%io:format("[~w] Indication: ~w~n", [self(), Raw]),
+	Raw = [<<16#FFFFFFFF:32, Indication:16>>, Data],
+	%io:format("[~w] Indication: ~w~n", [self(), iolist_to_binary(Raw)]),
 	{reply, Raw, S}.
 
 

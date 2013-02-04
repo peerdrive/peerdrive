@@ -555,19 +555,19 @@ worker_loop(ReqFun, State) ->
 	receive
 		{Req, ReqData, RetPath} ->
 			try ReqFun(State, Req, ReqData) of
-				Reply when is_binary(Reply) ->
-					send_reply(RetPath, Reply),
-					worker_loop(ReqFun, State);
-				{Reply, NewState} when is_binary(Reply) ->
-					send_reply(RetPath, Reply),
-					worker_loop(ReqFun, NewState);
 				{stop, Reply} ->
 					send_reply(RetPath, Reply);
 				{abort, Error} ->
 					send_error(RetPath, Error);
 				{error, Error, NewState} ->
 					send_error(RetPath, Error),
-					worker_loop(ReqFun, NewState)
+					worker_loop(ReqFun, NewState);
+				{Reply, NewState} ->
+					send_reply(RetPath, Reply),
+					worker_loop(ReqFun, NewState);
+				Reply ->
+					send_reply(RetPath, Reply),
+					worker_loop(ReqFun, State)
 			catch
 				throw:Error ->
 					send_error(RetPath, Error),
@@ -724,7 +724,7 @@ send_reply(#retpath{req=Req} = RetPath, Data) ->
 
 
 send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
-	Raw = <<Ref:32, Cnf:16, Data/binary>>,
+	Raw = [<<Ref:32, Cnf:16>>, Data],
 	case self() of
 		Servlet -> Raw;
 		_       -> Servlet ! {send, Raw}, Raw
@@ -733,7 +733,7 @@ send_cnf(#retpath{ref=Ref, servlet=Servlet}, Cnf, Data) ->
 
 send_indication(Ind, Data, S) ->
 	Indication = (Ind bsl 4) bor ?FLAG_IND,
-	Raw = <<16#FFFFFFFF:32, Indication:16, Data/binary>>,
+	Raw = [<<16#FFFFFFFF:32, Indication:16>>, Data],
 	{reply, Raw, S}.
 
 

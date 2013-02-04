@@ -603,7 +603,7 @@ send_request_internal(Req, Body, Continuation, S) ->
 send_request_internal(Req, Body, Continuation, Asyc, S) ->
 	#state{transport=Transport, socket=Socket, requests=Requests} = S,
 	Ref = get_next_ref(S),
-	case Transport:send(Socket, <<Ref:32, Req:12, ?FLAG_REQ:4, Body/binary>>) of
+	case Transport:send(Socket, [<<Ref:32, Req:12, ?FLAG_REQ:4>>, Body]) of
 		ok ->
 			S2 = S#state{requests=gb_trees:enter(Ref, Continuation, Requests)},
 			case Asyc of
