@@ -21,7 +21,7 @@ import sys, itertools, os, os.path
 from PyQt4 import QtCore, QtGui
 
 from peerdrive import struct, Registry
-from peerdrive.connector import Connector, Watch
+from peerdrive.connector import Connector, Watch, DocLink, RevLink
 from peerdrive.gui.widgets import DocButton, RevButton
 from peerdrive.gui.utils import showDocument, showProperties
 
@@ -115,7 +115,7 @@ class Launchbox(QtGui.QDialog):
 			self.setVisible(not self.isVisible())
 
 	def __addStoreMenu(self, store, removable):
-		l = struct.DocLink(store.sid, store.sid)
+		l = DocLink(store.sid, store.sid)
 		type = Connector().stat(l.rev(), [store.sid]).type()
 		executables = Registry().getExecutables(type)
 		title = struct.readTitle(l)
@@ -289,8 +289,8 @@ class SyncEditor(QtGui.QDialog):
 		(store, peer) = self.__addItems[self.__addChooser.currentIndex()]
 		self.__rules.setMode(store, peer, 'ff')
 		self.__rules.setDescr(store, peer, "Sync '" +
-			struct.readTitle(struct.DocLink(store, store, False), '?') +	"' and '" +
-			struct.readTitle(struct.DocLink(peer, peer, False), '?') + "'")
+			struct.readTitle(DocLink(store, store, False), '?') + "' and '" +
+			struct.readTitle(DocLink(peer, peer, False), '?') + "'")
 		line = SyncRuleWidget(store, peer, self.__rules, self)
 		line.removed.connect(self.__removed)
 		self.__lines.append(line)
@@ -310,9 +310,9 @@ class SyncEditor(QtGui.QDialog):
 		self.__addBtn.setEnabled(bool(self.__addItems))
 		for (store, peer) in self.__addItems:
 			fromStore = '[' + enum.fromSId(store).label + '] '
-			fromStore += struct.readTitle(struct.DocLink(store, store, False), '?')
+			fromStore += struct.readTitle(DocLink(store, store, False), '?')
 			peerStore = '[' + enum.fromSId(peer).label + '] '
-			peerStore += struct.readTitle(struct.DocLink(peer, peer, False), '?')
+			peerStore += struct.readTitle(DocLink(peer, peer, False), '?')
 			self.__addChooser.addItem(fromStore + ' - ' + peerStore)
 
 	def __cleanup(self):
@@ -493,7 +493,7 @@ class ProgressWidget(QtGui.QFrame):
 			self.__pauseBtn.setIcon(QtGui.QIcon("icons/progress-retry.png"))
 			self.__pauseBtn.setToolTip("Retry")
 			self.__progressInd.setPixmap(QtGui.QPixmap("icons/progress-error.png"))
-			doc = struct.readTitle(struct.RevLink(self.__fromStore, err_rev),
+			doc = struct.readTitle(RevLink(self.__fromStore, err_rev),
 				'unknown document')
 			self.__errorMsg.setText("Error '" + err_code[1] + "' while processing '"
 				+ doc + "'!")
@@ -504,8 +504,8 @@ class ProgressWidget(QtGui.QFrame):
 				title = "Replication error"
 				message = "replicating"
 			message = "Error '" + err_code[1] + "' while " + message + " '" + doc + \
-				"' \nfrom '" + struct.readTitle(struct.DocLink(self.__fromStore, self.__fromStore), "unknown store") + \
-				"' to '" + struct.readTitle(struct.DocLink(self.__toStore, self.__toStore), "unknown store") + \
+				"' \nfrom '" + struct.readTitle(DocLink(self.__fromStore, self.__fromStore), "unknown store") + \
+				"' to '" + struct.readTitle(DocLink(self.__toStore, self.__toStore), "unknown store") + \
 				"'!"
 			self.__trayIcon.showMessage(title, message, QtGui.QSystemTrayIcon.Warning)
 
@@ -525,10 +525,10 @@ class ProgressWidget(QtGui.QFrame):
 class SyncRules(object):
 	def __init__(self):
 		self.sysStore = Connector().enum().sysStore().sid
-		self.syncDoc = struct.Folder(struct.DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
+		self.syncDoc = struct.Folder(DocLink(self.sysStore, self.sysStore))["syncrules"].doc()
 		self.syncRev = Connector().lookupDoc(self.syncDoc).rev(self.sysStore)
 		with Connector().peek(self.sysStore, self.syncRev) as r:
-			rules = struct.loads(self.sysStore, r.readAll('PDSD'))
+			rules = r.getData('/org.peerdrive.syncrules')
 
 		self.__changed = False
 		self.__rules = {}
@@ -541,7 +541,7 @@ class SyncRules(object):
 
 		rules = [ rule for rule in self.__rules.values() ]
 		with Connector().update(self.sysStore, self.syncDoc, self.syncRev) as w:
-			w.writeAll('PDSD', struct.dumps(rules))
+			w.setData('/org.peerdrive.syncrules', rules)
 			w.commit()
 			self.rev = w.getRev()
 

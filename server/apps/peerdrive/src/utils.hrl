@@ -15,9 +15,6 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
--define(ASSERT_PART(G), ((is_binary(G) and (size(G) == 4)) orelse
-                         begin throw({error, einval}), false end)).
-
 -define(IS_GB_TREE(Term), (is_tuple(Term) andalso tuple_size(Term) == 2
                            andalso is_integer(element(1, Term)))).
 

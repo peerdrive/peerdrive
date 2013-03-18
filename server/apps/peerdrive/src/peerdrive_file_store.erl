@@ -21,9 +21,9 @@
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 % Functions used by helper processes (io/forwarder/importer)
--export([commit/4, doc_unlock/2, forward_commit/4, part_get/2, part_lock/2,
-	part_put/3, part_unlock/2, put_doc_commit/3, put_rev_commit/3,
-	remember_commit/4, rev_unlock/2, suspend/4, tmp_name/1, rev_lock/2]).
+-export([commit/6, doc_unlock/2, forward_commit/4, part_get/2, part_lock/2,
+	part_put/3, part_unlock/2, put_doc_commit/3, put_rev_commit/5,
+	remember_commit/4, rev_unlock/2, suspend/6, tmp_name/1, rev_lock/2]).
 
 -include("store.hrl").
 -include_lib("kernel/include/file.hrl").
@@ -36,7 +36,7 @@
 	wb_tmr,
 	gc_gen,
 	doc_tbl,  % dets: {Doc::DId, Rev::RId, [PreRev::RId], Generation}
-	rev_tbl,  % dets: {Rev::RId, #revision{}}
+	rev_tbl,  % dets: {Rev::RId, #revision{}, [DocLinks::DId], [RevLinks::RId]}
 	part_tbl, % dets: {Part::PId, Content::binary() | Size::int()}
 	peer_tbl, % dets: {Store::Sid, Generation}
 	objlocks, % dict: {doc, DId} | {part, PId} -> Count::int()
@@ -46,6 +46,9 @@
 -define(WB_DIRTY_TIME, 60*1000). % delay until write back (reset on new activity)
 -define(GC_MIN_UPDATES, 1000).   % gc will be scheduled after this number of updates
 -define(GC_MAX_UPDATES, 10000).  % gc is forced after this number of updates
+
+-define(THRESHOLD, 1024).
+-define(EMPTY_DATA, <<0,0,0,0,0>>).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Server state management...
@@ -115,11 +118,11 @@ part_put(Store, PId, Content) ->
 part_get(Store, PId) ->
 	call_store(Store, {part_get, PId}).
 
-commit(Store, Doc, PreRev, Revision) ->
-	call_store(Store, {commit, Doc, PreRev, Revision}).
+commit(Store, DId, PreRId, Rev, DocLinks, RevLinks) ->
+	call_store(Store, {commit, DId, PreRId, Rev, DocLinks, RevLinks}).
 
-suspend(Store, Doc, PreRev, Revision) ->
-	call_store(Store, {suspend, Doc, PreRev, Revision}).
+suspend(Store, DId, PreRId, Rev, DocLinks, RevLinks) ->
+	call_store(Store, {suspend, DId, PreRId, Rev, DocLinks, RevLinks}).
 
 forward_commit(Store, Doc, RevPath, OldPreRId) ->
 	call_store(Store, {forward_commit, Doc, RevPath, OldPreRId}).
@@ -127,8 +130,8 @@ forward_commit(Store, Doc, RevPath, OldPreRId) ->
 put_doc_commit(Store, DId, RId) ->
 	call_store(Store, {put_doc_commit, DId, RId}).
 
-put_rev_commit(Store, RId, Rev) ->
-	call_store(Store, {put_rev_commit, RId, Rev}).
+put_rev_commit(Store, RId, Rev, DocLinks, RevLinks) ->
+	call_store(Store, {put_rev_commit, RId, Rev, DocLinks, RevLinks}).
 
 remember_commit(Store, DId, NewPreRId, OldPreRId) ->
 	call_store(Store, {remember_rev_commit, DId, NewPreRId, OldPreRId}).
@@ -157,6 +160,10 @@ handle_call({contains, RId}, _From, S) ->
 
 handle_call({stat, Rev}, _From, S) ->
 	Reply = do_stat(Rev, S),
+	{reply, Reply, S};
+
+handle_call({get_links, Rev}, _From, S) ->
+	Reply = do_get_links(Rev, S),
 	{reply, Reply, S};
 
 handle_call({peek, RId}, From, S) ->
@@ -204,8 +211,8 @@ handle_call({forward_doc, DId, RevPath, OldPreRev}, {User, _}, S) ->
 	{Reply, S2} = do_forward_doc(DId, RevPath, OldPreRev, User, S),
 	{reply, Reply, S2};
 
-handle_call({put_rev, RId, Rev}, {User, _}, S) ->
-	{Reply, S2} = do_put_rev(RId, Rev, User, S),
+handle_call({put_rev, RId, Rev, Data, DocLinks, RevLinks}, {User, _}, S) ->
+	{Reply, S2} = do_put_rev(RId, Rev, Data, DocLinks, RevLinks, User, S),
 	{reply, Reply, S2};
 
 handle_call({remember_rev, DId, PreRId, OldPreRId}, {User, _}, S) ->
@@ -245,13 +252,13 @@ handle_call(tmp_name, _From, S) ->
 	{reply, peerdrive_util:gen_tmp_name(S#state.path), S};
 
 % internal: commit a new revision
-handle_call({commit, DId, PreRId, Rev}, _From, S) ->
-	{Reply, S2} = do_commit(DId, PreRId, Rev, S),
+handle_call({commit, DId, PreRId, Rev, DocLinks, RevLinks}, _From, S) ->
+	{Reply, S2} = do_commit(DId, PreRId, Rev, DocLinks, RevLinks, S),
 	{reply, Reply, S2};
 
 % internal: queue a preliminary revision
-handle_call({suspend, DId, PreRId, Rev}, _From, S) ->
-	{Reply, S2} = do_suspend(DId, PreRId, Rev, S),
+handle_call({suspend, DId, PreRId, Rev, DocLinks, RevLinks}, _From, S) ->
+	{Reply, S2} = do_suspend(DId, PreRId, Rev, DocLinks, RevLinks, S),
 	{reply, Reply, S2};
 
 % internal: ok | {error, Reason}
@@ -265,8 +272,8 @@ handle_call({put_doc_commit, DId, RId}, _From, S) ->
 	{reply, Reply, S2};
 
 % internal: ok | {error, Reason}
-handle_call({put_rev_commit, RId, Rev}, _From, S) ->
-	{Reply, S2} = do_put_rev_commit(RId, Rev, S),
+handle_call({put_rev_commit, RId, Rev, DocLinks, RevLinks}, _From, S) ->
+	{Reply, S2} = do_put_rev_commit(RId, Rev, DocLinks, RevLinks, S),
 	{reply, Reply, S2};
 
 % internal: put part into database
@@ -352,20 +359,29 @@ do_statfs(_S) ->
 
 do_stat(RId, #state{rev_tbl=RevTbl} = S) ->
 	case dets:lookup(RevTbl, RId) of
-		[{_, Rev}] ->
-			Parts = [ {FourCC, part_size(PId, S), PId} ||
-				{FourCC, PId} <- Rev#revision.parts ],
+		[{_, Rev, _DocLinks, _RevLinks}] ->
+			Attachments = [ {Attachment, part_size(PId, S), PId} ||
+				{Attachment, PId} <- Rev#revision.attachments ],
 			{ok, #rev_stat{
-				flags     = Rev#revision.flags,
-				parts     = Parts,
-				parents   = Rev#revision.parents,
-				mtime     = Rev#revision.mtime,
-				type      = Rev#revision.type,
-				creator   = Rev#revision.creator,
-				doc_links = Rev#revision.doc_links,
-				rev_links = Rev#revision.rev_links,
-				comment   = Rev#revision.comment
+				flags       = Rev#revision.flags,
+				data        = {part_size(Rev#revision.data, S), Rev#revision.data},
+				attachments = Attachments,
+				parents     = Rev#revision.parents,
+				mtime       = Rev#revision.mtime,
+				type        = Rev#revision.type,
+				creator     = Rev#revision.creator,
+				comment     = Rev#revision.comment
 			}};
+
+		[] ->
+			{error, enoent}
+	end.
+
+
+do_get_links(RId, #state{rev_tbl=RevTbl}) ->
+	case dets:lookup(RevTbl, RId) of
+		[{_, _Rev, DocLinks, RevLinks}] ->
+			{ok, {DocLinks, RevLinks}};
 
 		[] ->
 			{error, enoent}
@@ -374,11 +390,12 @@ do_stat(RId, #state{rev_tbl=RevTbl} = S) ->
 
 do_peek(RId, User, #state{rev_tbl=RevTbl} = S) ->
 	case dets:lookup(RevTbl, RId) of
-		[{_, Rev}] ->
+		[{_, Rev, _DocLinks, _RevLinks}] ->
+			S1 = do_lock({part, Rev#revision.data}, S),
 			S2 = lists:foldl(
 				fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
-				S,
-				Rev#revision.parts),
+				S1,
+				Rev#revision.attachments),
 			S3 = lists:foldl(
 				fun(ParentRId, AccS) -> do_lock({rev, ParentRId}, AccS) end,
 				S2,
@@ -393,7 +410,8 @@ do_peek(RId, User, #state{rev_tbl=RevTbl} = S) ->
 
 do_create(Type, Creator, User, S) ->
 	DId = crypto:rand_bytes(16),
-	Rev = #revision{type=Type, creator=Creator},
+	Rev = #revision{data=?REV_DATA_EMPTY_HASH, type=Type, creator=Creator},
+	ok = dets:insert(S#state.part_tbl, {?REV_DATA_EMPTY_HASH, ?EMPTY_DATA}),
 	case start_writer(DId, undefined, Rev, User, S) of
 		{{ok, Handle}, S2} ->
 			{{ok, DId, Handle}, S2};
@@ -405,7 +423,7 @@ do_create(Type, Creator, User, S) ->
 do_fork(StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
 	DId = crypto:rand_bytes(16),
 	case dets:lookup(RevTbl, StartRId) of
-		[{_, Rev}] ->
+		[{_, Rev, _DocLinks, _RevLinks}] ->
 			NewRev = Rev#revision{
 				parents = [StartRId],
 				creator = Creator,
@@ -428,7 +446,7 @@ do_update(DId, StartRId, Creator, User, S) ->
 	case dets:member(DocTbl, DId) of
 		true ->
 			case dets:lookup(RevTbl, StartRId) of
-				[{_, Rev}] ->
+				[{_, Rev, _DocLinks, _RevLinks}] ->
 					NewCreator = case Creator of
 						undefined -> Rev#revision.creator;
 						_ -> Creator
@@ -456,7 +474,7 @@ do_resume(DId, PreRId, Creator, User, S) ->
 			case lists:member(PreRId, PreRevs) of
 				true ->
 					case dets:lookup(RevTbl, PreRId) of
-						[{_, Rev}] ->
+						[{_, Rev, _DocLinks, _RevLinks}] ->
 							NewCreator = case Creator of
 								undefined -> Rev#revision.creator;
 								_ -> Creator
@@ -561,14 +579,14 @@ do_put_doc_commit(DId, RId, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 	end.
 
 
-do_commit(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
+do_commit(DId, OldPreRId, Rev, DocLinks, RevLinks, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 	RId = peerdrive_store:hash_revision(Rev),
 	case dets:lookup(DocTbl, DId) of
 		[{_, CurrentRId, CurrentPreRIds, _Gen}] ->
 			case lists:member(CurrentRId, Rev#revision.parents) of
 				true  ->
 					NewPreRIds = [R || R <- CurrentPreRIds, R =/= OldPreRId],
-					ok = dets:insert(S#state.rev_tbl, {RId, Rev}),
+					ok = dets:insert(S#state.rev_tbl, {RId, Rev, DocLinks, RevLinks}),
 					ok = dets:insert(DocTbl, {DId, RId, NewPreRIds, Gen}),
 					peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
 					{{ok, RId}, next_gen(S)};
@@ -578,21 +596,21 @@ do_commit(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 			end;
 
 		[] ->
-			ok = dets:insert(S#state.rev_tbl, {RId, Rev}),
+			ok = dets:insert(S#state.rev_tbl, {RId, Rev, DocLinks, RevLinks}),
 			ok = dets:insert(DocTbl, {DId, RId, [], Gen}),
 			peerdrive_vol_monitor:trigger_add_doc(S#state.sid, DId),
 			{{ok, RId}, next_gen(S)}
 	end.
 
 
-do_suspend(DId, OldPreRId, Rev, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
+do_suspend(DId, OldPreRId, Rev, DocLinks, RevLinks, #state{doc_tbl=DocTbl, gen=Gen} = S) ->
 	RId = peerdrive_store:hash_revision(Rev),
 	case dets:lookup(DocTbl, DId) of
 		[{_, CurrentRId, CurrentPreRIds, _Gen}] ->
 			NewPreRIds = lists:usort(
 				[RId] ++ [R || R <- CurrentPreRIds, R =/= OldPreRId]
 			),
-			ok = dets:insert(S#state.rev_tbl, {RId, Rev}),
+			ok = dets:insert(S#state.rev_tbl, {RId, Rev, DocLinks, RevLinks}),
 			ok = dets:insert(DocTbl, {DId, CurrentRId, NewPreRIds, Gen}),
 			peerdrive_vol_monitor:trigger_mod_doc(S#state.sid, DId),
 			{{ok, RId}, next_gen(S)};
@@ -700,7 +718,7 @@ do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
 		% check if the revisions are all connected to each other
 		lists:foreach(
 			fun({RId1, RId2}) ->
-				[{_, #revision{parents=Parents}}] = dets:lookup(RevTbl, RId2),
+				[{_, #revision{parents=Parents}, _, _}] = dets:lookup(RevTbl, RId2),
 				lists:member(RId1, Parents) orelse throw(einval)
 			end,
 			zip_parent_child(RevPath)),
@@ -737,31 +755,49 @@ do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
 	end.
 
 
-% {ok, MissingParts, Handle} | {error, Reason}
-do_put_rev(RId, Rev, User, S) ->
+% {ok, MissingAttachments, Handle} | {error, Reason}
+do_put_rev(RId, Rev, Data, DocLinks, RevLinks, User, S) ->
 	NoVerify = S#state.noverify,
 	case NoVerify orelse RId == peerdrive_store:hash_revision(Rev) of
 		true ->
-			Parts = Rev#revision.parts,
-			PartTbl = S#state.part_tbl,
-			Missing = [P || {_, PId} = P <- Parts, not dets:member(PartTbl, PId)],
-			% Make sure nothing gets garbage collected in between...
-			S2 = lists:foldl(
-				fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
-				do_lock({rev, RId}, S),
-				Parts),
-			{ok, Handle} = peerdrive_file_store_imp:start_link(RId,
-				Rev, Missing, User, NoVerify),
-			NeededFourCCs = [FCC || {FCC, _} <- Missing],
-			{{ok, NeededFourCCs, Handle}, S2};
+			case do_put_rev_data(Rev#revision.data, Data, NoVerify, S) of
+				ok ->
+					Attachments = Rev#revision.attachments,
+					PartTbl = S#state.part_tbl,
+					Missing = [P || {_, PId} = P <- Attachments, not dets:member(PartTbl, PId)],
+					% Make sure nothing gets garbage collected in between...
+					S1 = do_lock({part, Rev#revision.data}, S),
+					S2 = lists:foldl(
+						fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+						do_lock({rev, RId}, S1),
+						Attachments),
+					{ok, Handle} = peerdrive_file_store_imp:start_link(RId,
+						Rev, Missing, User, NoVerify, DocLinks, RevLinks),
+					NeededAttachments = [Att || {Att, _} <- Missing],
+					{{ok, NeededAttachments, Handle}, S2};
+				Error ->
+					{Error, S}
+			end;
 
 		false ->
 			{{error, einval}, S}
 	end.
 
 
-do_put_rev_commit(RId, Rev, #state{sid=SId, rev_tbl=RevTbl} = S) ->
-	ok = dets:insert(RevTbl, {RId, Rev}),
+do_put_rev_data(PId, Data, NoVerify, #state{part_tbl=PartTbl} = S) ->
+	case dets:member(PartTbl, PId) of
+		true ->
+			ok;
+		false ->
+			case NoVerify orelse PId == peerdrive_util:merkle(Data) of
+				true  -> write_part(PId, Data, S);
+				false -> {error, einval}
+			end
+	end.
+
+
+do_put_rev_commit(RId, Rev, DocLinks, RevLinks, #state{sid=SId, rev_tbl=RevTbl} = S) ->
+	ok = dets:insert(RevTbl, {RId, Rev, DocLinks, RevLinks}),
 	peerdrive_vol_monitor:trigger_add_rev(SId, RId),
 	{{ok, RId}, S}.
 
@@ -865,10 +901,10 @@ do_gc(S) ->
 		dict:new(),
 		S#state.doc_tbl),
 	GcObj2 = dets:foldl(
-		fun({RId, Rev}, Acc) ->
-			DRefs = [{doc, D} || D <- Rev#revision.doc_links],
-			RRefs = [{rev, R} || R <- Rev#revision.parents ++ Rev#revision.rev_links],
-			PRefs = [{part, P} || {_, P} <- Rev#revision.parts],
+		fun({RId, Rev, DocLinks, RevLinks}, Acc) ->
+			DRefs = [{doc, D} || D <- DocLinks],
+			RRefs = [{rev, R} || R <- Rev#revision.parents ++ RevLinks],
+			PRefs = [{part, Rev#revision.data} | [{part, P} || {_, P} <- Rev#revision.attachments]],
 			dict:store({rev, RId}, DRefs++RRefs++PRefs, Acc)
 		end,
 		GcObj1,
@@ -945,10 +981,11 @@ sync_lock(PeerSId, Caller, #state{synclocks=SLocks} = S) ->
 
 % lock document and part hashes, then start writer process
 start_writer(DId, PreRId, Rev, User, S) ->
+	S1 = do_lock({part, Rev#revision.data}, S),
 	S2 = lists:foldl(
 		fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
-		S,
-		Rev#revision.parts),
+		S1,
+		Rev#revision.attachments),
 	S3 = lists:foldl(
 		fun(RId, AccS) -> do_lock({rev, RId}, AccS) end,
 		S2,
@@ -974,10 +1011,8 @@ load_store(#state{path=Path} = S) ->
 			{sid, Sid} = lists:keyfind(sid, 1, Info),
 			{gen, Gen} = lists:keyfind(gen, 1, Info),
 			case lists:keyfind(version, 1, Info) of
-				{version, 2} ->
+				{version, 3} ->
 					ok;
-				{version, 1} ->
-					load_store_convert(Path);
 				_ ->
 					throw(enodev)
 			end,
@@ -1000,21 +1035,6 @@ load_store(#state{path=Path} = S) ->
 	S2#state{doc_tbl=DocTbl, rev_tbl=RevTbl, part_tbl=PartTbl, peer_tbl=PeerTbl}.
 
 
-load_store_convert(Path) ->
-	load_store_convert_tab(Path, "docs"),
-	load_store_convert_tab(Path, "revs"),
-	load_store_convert_tab(Path, "peers").
-
-
-load_store_convert_tab(Path, Tab) ->
-	TmpRef = make_ref(),
-	{ok, Tbl} = check(ets:file2tab(Path ++ "/" ++ Tab ++ ".ets")),
-	check(dets:open_file(TmpRef, [{file, Path ++ "/" ++ Tab ++ ".dets"}])),
-	check(dets:from_ets(TmpRef, Tbl)),
-	check(dets:close(TmpRef)),
-	ets:delete(Tbl).
-
-
 save_store(MountState, #state{path=Path} = S) ->
 	ok = dets:sync(S#state.part_tbl),
 	ok = dets:sync(S#state.doc_tbl),
@@ -1022,7 +1042,7 @@ save_store(MountState, #state{path=Path} = S) ->
 	ok = dets:sync(S#state.peer_tbl),
 	{ok, File} = file:open(Path ++ "/info.new", [write]),
 	try
-		ok = file:write(File, "{version, 2}.\n"),
+		ok = file:write(File, "{version, 3}.\n"),
 		ok = file:write(File, io_lib:print({state, MountState})),
 		ok = file:write(File, ".\n"),
 		ok = file:write(File, io_lib:print({sid, S#state.sid})),
@@ -1049,36 +1069,50 @@ check_root_doc(#state{sid=SId, gen=Gen} = S) ->
 			S;
 		false ->
 			Name = "file_store on '" ++ S#state.path ++ "'",
-			RootContent = [],
-			ContentPId = crd_write_part(RootContent, S),
+			Content = [],
 			Annotation1 = gb_trees:empty(),
 			Annotation2 = gb_trees:enter(<<"title">>, list_to_binary(Name), Annotation1),
-			RootMeta1 = gb_trees:empty(),
-			RootMeta2 = gb_trees:enter(<<"org.peerdrive.annotation">>, Annotation2, RootMeta1),
-			MetaPId = crd_write_part(RootMeta2, S),
+			Data1 = gb_trees:empty(),
+			Data2 = gb_trees:enter(<<"org.peerdrive.folder">>, Content, Data1),
+			Data3 = gb_trees:enter(<<"org.peerdrive.annotation">>, Annotation2, Data2),
+			DataPId = check_root_doc_write(Data3, S),
 			RootRev = #revision{
 				flags     = ?REV_FLAG_STICKY,
-				parts     = [{<<"META">>, MetaPId}, {<<"PDSD">>, ContentPId}],
-				parents   = [],
+				data      = DataPId,
 				mtime     = peerdrive_util:get_time(),
 				type      = <<"org.peerdrive.store">>,
 				creator   = <<"org.peerdrive.file-store">>,
-				doc_links = [],
-				rev_links = [],
 				comment   = <<"">>
 			},
 			RId = peerdrive_store:hash_revision(RootRev),
-			ok = dets:insert(S#state.rev_tbl, {RId, RootRev}),
+			ok = dets:insert(S#state.rev_tbl, {RId, RootRev, [], []}),
 			ok = dets:insert(S#state.doc_tbl, {SId, RId, [], Gen}),
 			S#state{gen=Gen+1}
 	end.
 
 
-crd_write_part(Data, S) ->
+check_root_doc_write(Data, S) ->
 	BinData = peerdrive_struct:encode(Data),
 	PId = peerdrive_util:merkle(BinData),
-	ok = dets:insert(S#state.part_tbl, {PId, BinData}),
+	ok = write_part(PId, BinData, S),
 	PId.
+
+
+write_part(PId, Data, #state{part_tbl=PartTbl, path=Path}) ->
+	case size(Data) > ?THRESHOLD of
+		true ->
+			Name = peerdrive_util:build_path(Path, PId),
+			Written = filelib:is_regular(Name) orelse
+				(filelib:ensure_dir(Name) == ok andalso file:write_file(Name, Data) == ok),
+			case Written of
+				true ->
+					ok = dets:insert(PartTbl, {PId, size(Data)});
+				false ->
+					{error, eio}
+			end;
+		false ->
+			ok = dets:insert(PartTbl, {PId, Data})
+	end.
 
 
 zip_parent_child([Head | Childs]) ->

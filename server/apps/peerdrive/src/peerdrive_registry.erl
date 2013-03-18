@@ -128,7 +128,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 read_registry(Store, Doc) ->
-	case peerdrive_util:read_doc_struct(Store, Doc, <<"PDSD">>) of
+	case peerdrive_util:read_doc_struct(Store, Doc, <<"/org.peerdrive.registry">>) of
 		{ok, Registry} when ?IS_GB_TREE(Registry) ->
 			{ok, Registry};
 		{ok, _} ->
@@ -194,12 +194,11 @@ save_registry(Store, Root, NewReg) ->
 		{ok, Doc, Handle} = check(peerdrive_broker:create(Store,
 			<<"org.peerdrive.registry">>, <<"">>)),
 		try
-			Meta = gb_trees:from_orddict([{<<"org.peerdrive.annotation">>,
-				gb_trees:from_orddict([{<<"title">>, <<"registry">>}])}]),
-			ok = check(peerdrive_broker:write(Handle, <<"PDSD">>, 0,
-				peerdrive_struct:encode(NewReg))),
-			ok = check(peerdrive_broker:write(Handle, <<"META">>, 0,
-				peerdrive_struct:encode(Meta))),
+			Meta = gb_trees:enter(<<"title">>, <<"registry">>, gb_trees:empty()),
+			Data = gb_trees:enter(<<"org.peerdrive.registry">>, NewReg,
+				gb_trees:enter(<<"org.peerdrive.annotation">>, Meta, gb_trees:empty())),
+			ok = check(peerdrive_broker:set_data(Handle, <<"">>,
+				peerdrive_struct:encode(Data))),
 			{ok, _Rev} = check(peerdrive_broker:commit(Handle)),
 			ok = check(peerdrive_util:folder_link(Store, Root, Doc))
 		after

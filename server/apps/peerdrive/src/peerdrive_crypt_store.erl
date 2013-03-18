@@ -19,7 +19,7 @@
 
 -export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
--export([enc_xid/2]).
+-export([dec_xid/2, enc_xid/2]).
 
 -include("store.hrl").
 -include("cryptstore.hrl").
@@ -70,7 +70,7 @@ init({Address, _Options, Credentials}) ->
 			{ok, OpenState} -> OpenState;
 			unencrypted     -> init_create_crypt(Pwd, S)
 		end,
-		init_install_filter(S2),
+		init_install_filter(SId, S2),
 		link(Store),
 		{ok, S2}
 
@@ -85,6 +85,9 @@ handle_call(guid, _From, #state{sid=SId} = S) ->
 
 handle_call(statfs, _From, #state{store=Store} = S) ->
 	{reply, peerdrive_store:statfs(Store), S};
+
+handle_call(sync, _From, #state{store=Store} = S) ->
+	{reply, peerdrive_store:sync(Store), S};
 
 handle_call({lookup, Doc}, _From, #state{store=Store, key=Key} = S) ->
 	Reply = case peerdrive_store:lookup(Store, enc_xid(Key, Doc)) of
@@ -102,6 +105,9 @@ handle_call({contains, Rev}, _From, #state{store=Store, key=Key} = S) ->
 
 handle_call({stat, Rev}, _From, S) ->
 	{reply, do_stat(Rev, S), S};
+
+handle_call({get_links, Rev}, _From, S) ->
+	{reply, do_get_links(Rev, S), S};
 
 handle_call({peek, Rev}, {User, _Tag}, S) ->
 	{reply, do_peek(Rev, User, S), S};
@@ -137,8 +143,8 @@ handle_call({put_doc, Doc, Rev}, {User, _Tag}, S) ->
 handle_call({forward_doc, Doc, RevPath, OldPreRId}, {User, _Tag}, S) ->
 	{reply, do_forward_doc(Doc, RevPath, OldPreRId, User, S), S};
 
-handle_call({put_rev, Rev, Revision}, {User, _Tag}, S) ->
-	{reply, do_put_rev(Rev, Revision, User, S), S};
+handle_call({put_rev, RId, Rev, Data, DocLinks, RevLinks}, {User, _Tag}, S) ->
+	{reply, do_put_rev(RId, Rev, Data, DocLinks, RevLinks, User, S), S};
 
 handle_call({remember_rev, DId, PreRId, OldPreRId}, {User, _}, S) ->
 	{reply, do_remember_rev(DId, PreRId, OldPreRId, User, S), S};
@@ -235,15 +241,9 @@ read_encr_spec(Store, Doc) ->
 	{ok, Rev, _PreRevs} = check(peerdrive_store:lookup(Store, Doc)),
 	{ok, Handle} = check(peerdrive_store:peek(Store, Rev)),
 	try
-		case peerdrive_store:read(Handle, <<"ENCR">>, 0, 16#100000) of
+		case peerdrive_store:get_data(Handle, <<"/org.peerdrive.crypt-store">>) of
 			{ok, Data} ->
-				case catch peerdrive_struct:decode(Data) of
-					{'EXIT', _Reason} ->
-						throw({error, eio});
-					Struct ->
-						{ok, Struct}
-				end;
-
+				{ok, peerdrive_struct:decode(Data)};
 			{error, enoent} ->
 				unencrypted;
 			{error, _} = Error ->
@@ -294,7 +294,7 @@ init_create_crypt(Pwd, #state{store=Store, sid=Doc} = S) ->
 			{<<"mk-iter">>, MkIter}, {<<"slots">>, [Slot]},
 			{<<"root">>, {dlink, EncSId}} ])),
 
-		check(peerdrive_broker:write(Handle, <<"ENCR">>, 0,
+		check(peerdrive_broker:set_data(Handle, <<"/org.peerdrive.crypt-store">>,
 			peerdrive_struct:encode(Spec))),
 		EncRootHandle = init_create_crypt_root(Store, EncSId, Key),
 		try
@@ -303,14 +303,13 @@ init_create_crypt(Pwd, #state{store=Store, sid=Doc} = S) ->
 				<<"New encrypted store">>, Annotation1), % TODO: get from unencrypted root
 			Annotation3 = gb_trees:enter(<<"comment">>,
 				<<"<<Initial store creation>>">>, Annotation2),
-			RootMeta1 = gb_trees:empty(),
-			RootMeta2 = gb_trees:enter(<<"org.peerdrive.annotation">>,
-				Annotation3, RootMeta1),
+			Root1 = gb_trees:empty(),
+			Root2 = gb_trees:enter(<<"org.peerdrive.annotation">>, Annotation3,
+				Root1),
+			Root3 = gb_trees:enter(<<"org.peerdrive.folder">>, [], Root2),
 
-			check(peerdrive_store:write(EncRootHandle, <<"PDSD">>, 0,
-				peerdrive_struct:encode([]))),
-			check(peerdrive_store:write(EncRootHandle, <<"META">>, 0,
-				peerdrive_struct:encode(RootMeta2))),
+			check(peerdrive_store:set_data(EncRootHandle, <<>>,
+				peerdrive_struct:encode(Root3))),
 			check(peerdrive_store:set_flags(EncRootHandle, ?REV_FLAG_STICKY)),
 
 			check(peerdrive_store:commit(EncRootHandle)),
@@ -334,7 +333,7 @@ init_create_crypt_root(Store, EncDId, Key) ->
 	Handle.
 
 
-init_install_filter(#state{sid=SId, key=Key}) ->
+init_install_filter(SId, #state{key=Key}) ->
 	Fun = fun
 		({vol_event, Event, Store, EncId}) when is_atom(Event), is_binary(EncId),
 		                                        size(EncId) rem 16 == 0 ->
@@ -349,35 +348,44 @@ do_stat(Rev, #state{store=Store, key=Key}) ->
 	case peerdrive_store:stat(Store, enc_xid(Key, Rev)) of
 		{ok, EncStat} ->
 			#rev_stat{
-				flags     = EncFlags,
-				parts     = EncParts,
-				parents   = EncParents,
-				mtime     = EncMtime,
-				type      = EncType,
-				creator   = EncCreator,
-				comment   = EncComment,
-				doc_links = EncDocLinks,
-				rev_links = EncRevLinks
+				flags       = EncFlags,
+				data        = {DataSize, EncDataHash},
+				attachments = EncAttachments,
+				parents     = EncParents,
+				mtime       = EncMtime,
+				type        = EncType,
+				creator     = EncCreator,
+				comment     = EncComment
 			} = EncStat,
 			<<Flags:32>> = crypto:aes_ctr_decrypt(Key, ?CS_FLAGS_IVEC(Rev),
 				<<EncFlags:32>>),
 			<<Mtime:64>> = crypto:aes_ctr_decrypt(Key, ?CS_MTIME_IVEC(Rev),
 				<<EncMtime:64>>),
 			Stat = #rev_stat{
-				flags     = Flags,
-				parts     = [ {FCC, Size, dec_xid(Key, PId)} ||
-					{FCC, Size, PId} <- EncParts ],
+				flags       = Flags,
+				data        = {DataSize, dec_xid(Key, EncDataHash)},
+				attachments = [ {Name, Size, dec_xid(Key, PId)} ||
+					{Name, Size, PId} <- EncAttachments ],
 				parents   = [ dec_xid(Key, Parent) || Parent <- EncParents ],
 				mtime     = Mtime,
 				type      = crypto:aes_ctr_decrypt(Key, ?CS_TYPE_IVEC(Rev), EncType),
 				creator   = crypto:aes_ctr_decrypt(Key, ?CS_CREATOR_IVEC(Rev),
 					EncCreator),
 				comment   = crypto:aes_ctr_decrypt(Key, ?CS_COMMENT_IVEC(Rev),
-					EncComment),
-				doc_links = [ dec_xid(Key, DId) || DId <- EncDocLinks ],
-				rev_links = [ dec_xid(Key, RId) || RId <- EncDocLinks ]
+					EncComment)
 			},
 			{ok, Stat};
+
+		{error, _} = Error ->
+			Error
+	end.
+
+
+do_get_links(Rev, #state{store=Store, key=Key}) ->
+	case peerdrive_store:get_links(Store, enc_xid(Key, Rev)) of
+		{ok, {EncDocLinks, EncRevLinks}} ->
+			{ok, { [ dec_xid(Key, DId) || DId <- EncDocLinks ],
+				   [ dec_xid(Key, RId) || RId <- EncRevLinks ] }};
 
 		{error, _} = Error ->
 			Error
@@ -493,7 +501,7 @@ do_put_doc(Doc, Rev, User, #state{store=Store, key=Key}) ->
 	EncRev = enc_xid(Key, Rev),
 	case peerdrive_store:put_doc(Store, EncDoc, EncRev) of
 		{ok, Handle} ->
-			peerdrive_crypt_store_guard:start_link(Handle, User);
+			peerdrive_crypt_store_guard:start_link(Handle, Key, User);
 		{error, _} = Error ->
 			Error
 	end.
@@ -509,43 +517,44 @@ do_forward_doc(Doc, RevPath, OldPreRId, User, #state{store=Store, key=Key}) ->
 	case peerdrive_store:forward_doc(Store, EncDoc, EncRevPath, EncOldPreRId) of
 		ok ->
 			ok;
-		{ok, Handle} ->
-			peerdrive_crypt_store_guard:start_link(Handle, User);
+		{ok, EncMissingRevs, Handle} ->
+			MissingRevs = [ dec_xid(Key, RId) || RId <- EncMissingRevs ],
+			{ok, Guard} = peerdrive_crypt_store_guard:start_link(Handle, Key, User),
+			{ok, MissingRevs, Guard};
 		{error, _} = Error ->
 			Error
 	end.
 
 
-do_put_rev(Rev, Revision, User, #state{store=Store, key=Key} = S) ->
+do_put_rev(RId, Rev, Data, DocLinks, RevLinks, User, #state{store=Store, key=Key} = S) ->
 	#revision{
-		flags     = Flags,
-		parts     = Parts,
-		parents   = Parents,
-		mtime     = Mtime,
-		type      = TypeCode,
-		creator   = CreatorCode,
-		comment   = Comment,
-		doc_links = DocLinks,
-		rev_links = RevLinks
-	} = Revision,
-	<<EncFlags:32>> = crypto:aes_ctr_encrypt(Key, ?CS_FLAGS_IVEC(Rev), <<Flags:32>>),
-	<<EncMtime:64>> = crypto:aes_ctr_encrypt(Key, ?CS_MTIME_IVEC(Rev), <<Mtime:64>>),
-	EncRevision = #revision{
-		flags     = EncFlags,
-		parts     = [ {FCC, enc_xid(Key, PId)} || {FCC, PId} <- Parts ],
-		parents   = [ enc_xid(Key, Parent) || Parent <- Parents ],
-		mtime     = EncMtime,
-		type      = crypto:aes_ctr_encrypt(Key, ?CS_TYPE_IVEC(Rev), TypeCode),
-		creator   = crypto:aes_ctr_encrypt(Key, ?CS_CREATOR_IVEC(Rev), CreatorCode),
-		comment   = crypto:aes_ctr_encrypt(Key, ?CS_COMMENT_IVEC(Rev), Comment),
-		doc_links = [ enc_xid(Key, DId) || DId <- DocLinks ],
-		rev_links = [ enc_xid(Key, RId) || RId <- DocLinks ]
+		flags       = Flags,
+		data        = DataHash,
+		attachments = Attachments,
+		parents     = Parents,
+		mtime       = Mtime,
+		type        = TypeCode,
+		creator     = CreatorCode,
+		comment     = Comment
+	} = Rev,
+	<<EncFlags:32>> = crypto:aes_ctr_encrypt(Key, ?CS_FLAGS_IVEC(RId), <<Flags:32>>),
+	<<EncMtime:64>> = crypto:aes_ctr_encrypt(Key, ?CS_MTIME_IVEC(RId), <<Mtime:64>>),
+	EncRev = #revision{
+		flags       = EncFlags,
+		data        = enc_xid(Key, DataHash),
+		attachments = [ {Name, enc_xid(Key, PId)} || {Name, PId} <- Attachments ],
+		parents     = [ enc_xid(Key, Parent) || Parent <- Parents ],
+		mtime       = EncMtime,
+		type        = crypto:aes_ctr_encrypt(Key, ?CS_TYPE_IVEC(RId), TypeCode),
+		creator     = crypto:aes_ctr_encrypt(Key, ?CS_CREATOR_IVEC(RId), CreatorCode),
+		comment     = crypto:aes_ctr_encrypt(Key, ?CS_COMMENT_IVEC(RId), Comment)
 	},
-	case peerdrive_store:put_rev(Store, enc_xid(Key, Rev), EncRevision) of
-		ok ->
-			ok;
+	EncData = crypto:aes_ctr_encrypt(Key, peerdrive_util:make_bin_16(DataHash), Data),
+	EncDL = [ enc_xid(Key, LDId) || LDId <- DocLinks ],
+	EncRL = [ enc_xid(Key, LRId) || LRId <- RevLinks ],
+	case peerdrive_store:put_rev(Store, enc_xid(Key, RId), EncRev, EncData, EncDL, EncRL) of
 		{ok, Missing, Handle} ->
-			MissingParts = [ M || M = {FCC, _PId} <- Parts,
+			MissingParts = [ M || M = {FCC, _PId} <- Attachments,
 				lists:member(FCC, Missing) ],
 			{ok, Importer} = peerdrive_crypt_store_imp:start_link(self(), Key,
 				Handle, MissingParts, User),
@@ -563,7 +572,7 @@ do_remember_rev(DId, NewPreRId, OldPreRId, User, #state{store=Store, key=Key}) -
 		ok ->
 			ok;
 		{ok, Handle} ->
-			peerdrive_crypt_store_guard:start_link(Handle, User);
+			peerdrive_crypt_store_guard:start_link(Handle, Key, User);
 		{error, _} = Error ->
 			Error
 	end.
@@ -645,33 +654,31 @@ get_revision(RId, EncRId, #state{store=Store, key=Key}) ->
 	case peerdrive_store:stat(Store, EncRId) of
 		{ok, EncStat} ->
 			#rev_stat{
-				flags     = EncFlags,
-				parts     = EncParts,
-				parents   = EncParents,
-				mtime     = EncMtime,
-				type      = EncType,
-				creator   = EncCreator,
-				comment   = EncComment,
-				doc_links = EncDocLinks,
-				rev_links = EncRevLinks
+				flags       = EncFlags,
+				data        = {_DataSize, EncDataHash},
+				attachments = EncAttachments,
+				parents     = EncParents,
+				mtime       = EncMtime,
+				type        = EncType,
+				creator     = EncCreator,
+				comment     = EncComment
 			} = EncStat,
 			<<Flags:32>> = crypto:aes_ctr_decrypt(Key, ?CS_FLAGS_IVEC(RId),
 				<<EncFlags:32>>),
 			<<Mtime:64>> = crypto:aes_ctr_decrypt(Key, ?CS_MTIME_IVEC(RId),
 				<<EncMtime:64>>),
 			Rev = #revision{
-				flags     = Flags,
-				parts     = [ {FCC, dec_xid(Key, PId)} ||
-					{FCC, _Size, PId} <- EncParts ],
-				parents   = [ dec_xid(Key, Parent) || Parent <- EncParents ],
-				mtime     = Mtime,
-				type      = crypto:aes_ctr_decrypt(Key, ?CS_TYPE_IVEC(RId), EncType),
-				creator   = crypto:aes_ctr_decrypt(Key, ?CS_CREATOR_IVEC(RId),
+				flags       = Flags,
+				data        = dec_xid(Key, EncDataHash),
+				attachments = [ {Name, dec_xid(Key, PId)} ||
+					{Name, _Size, PId} <- EncAttachments ],
+				parents     = [ dec_xid(Key, Parent) || Parent <- EncParents ],
+				mtime       = Mtime,
+				type        = crypto:aes_ctr_decrypt(Key, ?CS_TYPE_IVEC(RId), EncType),
+				creator     = crypto:aes_ctr_decrypt(Key, ?CS_CREATOR_IVEC(RId),
 					EncCreator),
-				comment   = crypto:aes_ctr_decrypt(Key, ?CS_COMMENT_IVEC(RId),
-					EncComment),
-				doc_links = [ dec_xid(Key, DLId) || DLId <- EncDocLinks ],
-				rev_links = [ dec_xid(Key, RLId) || RLId <- EncDocLinks ]
+				comment     = crypto:aes_ctr_decrypt(Key, ?CS_COMMENT_IVEC(RId),
+					EncComment)
 			},
 			{ok, Rev};
 

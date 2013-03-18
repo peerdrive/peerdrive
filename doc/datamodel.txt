@@ -1,139 +1,40 @@
 
 In PeerDrive the documents are stored in so called "stores". Each document is
-uniquely identified by a 128 bit random number (DId), where the document/DId
-can simultaneously live in more than one store. Each store maintains a mapping
-of DIds to the latest revision of the document (plus zero or more preliminary
-revisions). The actual content is stored in revisions and each revision is
-identified by the hash of its content called RId.
+uniquely identified by a random number (DId, usually 128 bit), where the
+document/DId can simultaneously live in more than one store. Each store
+maintains a mapping of DIds to the latest revision of the document (plus zero
+or more preliminary revisions). The actual content is stored in revisions and
+each revision is identified by the hash of its content called RId.
 
 At the basic level each revision consists of the following:
 
 	- a set of flags
 		- sticky flag
 		- possibly other flags in the future
-	- one or more "parts", each identified by a FourCC and containing a blob
+	- structured data (see below)
+	- one or more binary attachments, each identified by a string
 	- a type code, specifying the format of the document (encoded as a Uniform
 	  Type Identifier [UTI])
 	- a creator code, denoting the application which created the revision
 	  (encoded as a reverse-DNS string)
 	- the modification time (microseconds since epoch, UTC)
-	- an optional user comment describing the revision
-	- a list of it's preceding revision(s) (parents),
-	- all document/revision links, extracted from all parts
-		- list of document links
-		- list of revision links
+	- an optional user comment describing the revision,
+	- a list of it's preceding revision(s) (parents)
 
-This basic level is sufficient to store and retrieve arbitrary data, preserve
-the history of changes to a document and also replicate and synchronize
-documents between multiple stores. It also stores all necessary information to
-link to other documents/revisions, independent of the actual link encoding in
-one of the parts.
+This basic level is sufficient to store and retrieve schema-less, structured
+and arbitrary binary data, preserve the history of changes to a document and
+also replicate and synchronize documents between multiple stores. It also
+stores all necessary information to link to other documents/revisions in the
+structured data part.
 
 
-Binary object representation
-============================
+PeerDrive Structured Data (PDSD)
+================================
 
-To compute the hash of a revision a common binary representation is needed.
-All values are encoded as little endian...
-
-uint32           .. Flags (0: Sticky, 1..31: Reserved [0])
-uint32           .. PartsCount
-	char[4]      .. FourCC
-	uint160      .. hash tree sum of part content
-uint32           .. ParentsCount
-	uint160      .. Parent object
-uint64           .. Mtime (UTC unix time in microsecons)
-uint32           .. Type code string length
-	char[]       .. Type code
-uint32           .. Creator code string length
-	char[]       .. Creator code
-uint32           .. Comment string length
-	char[]       .. Comment
-uint32           .. DocLinkCount
-	uint128      .. Document link
-uint32           .. RevLinkCount
-	uint160      .. Revision link
-
-The SHA1 hash sums of the parts are computed as binary hash tree with a block
-size of 4096 bytes. This ensures that the new hash sum can be calculated
-quickly if only small areas in a very big part are changed.
-
-Each block is hashed with a 0x00 byte prepended before applying the SHA1
-function. All internal nodes of the binary hash tree prepend a 0x01 byte and
-are defined as SHA1(0x01, LeftChildSum, RightChildSum). If the number of blocks
-is not a power of two the tree will be unbalanced. In such a tree interim nodes
-that do not have a sibling are propagated upwards until a sibling is found.
-
-Well known part FourCCs
-=======================
-
-In PeerDrive the following part FourCCs are currently defined:
-
-	- 'META': standardized, extensible meta data
-	- 'FILE': byte stream (POSIX file content)
-	- 'PDSD': structured content (PeerDrive Structured Data)
-
-The data in 'META' and 'PDSD' is semantically similar to JSON. See below for
-its definition and binary representation. The 'FILE' part is not interpreted by
-the PeerDrive server. Other part FourCC will be rejected.
-
-
-Document linking
-================
-
-Each document is treated completely independent of any other document. For
-navigational access there can be directed links between them. As entry point to
-the link chain there is a root document in each store, just like the root
-directory in file systems.
-
-There are two types of links in PeerDrive:
-
-	- Document link: points to a document
-	- Revision link: points to a revision
-
-In essence PeerDrive links are like symbolic links in the meaning that they
-symbolically refer to another document/revision. But they are also like hard
-links in the sense that they are independent of the target's location, even
-across stores.
-
-To make the document linking independent from the actual encoding the links are
-stored as meta data in each revision. They are extracted from known parts
-(currently 'META' and 'PDSD') when a new revision is created.
-
-
-Garbage collection
-==================
-
-Even though documents and revisions can be deleted explicitly they are normally
-garbage collected implicitly. When there is no path from the root document of a
-store to a certain document/revision then it is eligible for garbage
-collection. The path is formed by links in the revision meta data (Doc- and
-Rev-links) and the parent pointers of each revision.
-
-This garbage collection scheme will keep documents alive as long as there is
-any revision pointing to the document, even if none of them is current revision
-of a document. In other words it would still be possible to open or update a
-document which is not reachable by any current document revision. Stores should
-prevent updates to such documents for a consistent user experience.
-
-There is only one exception to the garbage collection rules above: newly
-created documents. It is guaranteed that new documents are exempted from
-garbage collection as long as the handle which committed the initial version is
-kept open.
-
-The rationale behind this exception is that new documents cannot be linked
-before they are committed for the first time, simply because they don't exist
-yet. This makes it impossible to satisfy the reachability criterion of the
-garbage collector. By keeping the document handle open the creating application
-can safely add a document link to the new document after committing the initial
-version.
-
-
-PeerDrive Structured Data
-=========================
-
-The data in the 'PDSD' and 'META' parts of a revision has a defined semantics
-and binary representation.
+The structured data of a revision has a defined semantics and binary
+representation. The data is self describing so that no additional schema is
+necessary to retrieve the stored structure. The binary representation is used
+both as exchange format and to compute the hash tree sum.
 
 Semantics
 ---------
@@ -190,4 +91,81 @@ uint32 = 0x64, ?unsigned long?
 sint32 = 0x65, ?signed long?
 uint64 = 0x66, ?unsigned long long?
 sint64 = 0x67, ?signed long long?
+
+
+Document linking
+================
+
+Each document is treated completely independent of any other document. For
+navigational access there can be directed links between them. As entry point to
+the link chain there is a root document in each store, just like the root
+directory in file systems.
+
+There are two types of links in PeerDrive:
+
+	- Document link: points to a document
+	- Revision link: points to a revision
+
+In essence PeerDrive links are like symbolic links in the meaning that they
+symbolically refer to another document/revision. But they are also like hard
+links in the sense that they are independent of the target's location, even
+across stores.
+
+
+Garbage collection
+==================
+
+Even though documents and revisions can be deleted explicitly they are normally
+garbage collected implicitly. When there is no path from the root document of a
+store to a certain document/revision then it is eligible for garbage
+collection. The path is formed by links in the revision meta data (Doc- and
+Rev-links) and the parent pointers of each revision.
+
+This garbage collection scheme will keep documents alive as long as there is
+any revision pointing to the document, even if none of them is current revision
+of a document. In other words it would still be possible to open or update a
+document which is not reachable by any current document revision. Stores should
+prevent updates to such documents for a consistent user experience.
+
+There is only one exception to the garbage collection rules above: newly
+created documents. It is guaranteed that new documents are exempted from
+garbage collection as long as the handle which committed the initial version is
+kept open.
+
+The rationale behind this exception is that new documents cannot be linked
+before they are committed for the first time, simply because they don't exist
+yet. This makes it impossible to satisfy the reachability criterion of the
+garbage collector. By keeping the document handle open the creating application
+can safely add a document link to the new document after committing the initial
+version.
+
+
+Binary object representation
+============================
+
+To compute the hash of a revision a common binary representation is needed.
+All values are encoded as little endian...
+
+uint32                .. Flags (0: Sticky, 1..31: Reserved [0])
+uint8, uint8[]        .. Hash tree sum of structured data (length and sum, see PDSD)
+uint32                .. Number of binary attachments
+	uint32, char[]    .. Attachment name (length and string, UTF-8)
+	uint8, uint8[]    .. hash tree sum of attachment content (length and sum)
+uint32                .. Number of parents
+	uint8, uint8[]    .. Parent object id (length and id)
+uint64                .. Mtime (UTC unix time in nanosecons)
+uint32, char[]        .. Type code (length and string, UTF-8)
+uint32, char[]        .. Creator code (length and string, UTF-8)
+uint32, char[]        .. Comment (length and string, UTF-8)
+
+The SHA1 hash sums of the parts are computed as binary hash tree with a block
+size of 4096 bytes. This ensures that the new hash sum can be calculated
+quickly if only small areas in a very big part are changed.
+
+Each block is hashed with a 0x00 byte prepended before applying the SHA1
+function. All internal nodes of the binary hash tree prepend a 0x01 byte and
+are defined as SHA1(0x01, LeftChildSum, RightChildSum). If the number of blocks
+is not a power of two the tree will be unbalanced. In such a tree interim nodes
+that do not have a sibling are propagated upwards until a sibling is found.
+
 

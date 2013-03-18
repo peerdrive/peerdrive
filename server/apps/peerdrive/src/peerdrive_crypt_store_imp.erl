@@ -20,7 +20,7 @@
 -export([start_link/5]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, handle, parts, user}).
+-record(state, {store, handle, parts, key, user}).
 
 -include("store.hrl").
 -include("cryptstore.hrl").
@@ -30,7 +30,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(Store, Key, Handle, Parts, User) ->
-	State = #state{store=Store, handle=Handle, user=User,
+	State = #state{store=Store, handle=Handle, user=User, key=Key,
 		parts=orddict:from_list(
 			[{FCC, {PId, peerdrive_util:merkle_init(),
 				crypto:aes_ctr_stream_init(Key, peerdrive_util:make_bin_16(PId))}
@@ -104,14 +104,17 @@ do_put_part(Part, Data, #state{handle=Handle, parts=Parts} = S) ->
 	end.
 
 
-do_commit(#state{handle=Handle, parts=Parts}) ->
+do_commit(#state{handle=Handle, parts=Parts, key=Key}) ->
 	try
 		lists:foreach(
 			fun({_, {PId, ShaCtx, _AesCtx}}) ->
 				peerdrive_util:merkle_final(ShaCtx) == PId orelse throw(einval)
 			end,
 			Parts),
-		peerdrive_store:commit(Handle)
+		case peerdrive_store:commit(Handle) of
+			{ok, EncRId} -> {ok, peerdrive_crypt_store:dec_xid(Key, EncRId)};
+			Error        -> Error
+		end
 	catch
 		throw:ThrowErr ->
 			{error, ThrowErr}

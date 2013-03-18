@@ -19,12 +19,12 @@
 from __future__ import absolute_import
 
 import os
-from . import struct
+from . import connector
 from .connector import Connector
 
 def findFuseFile(link):
 	try:
-		if isinstance(link, struct.DocLink):
+		if isinstance(link, connector.DocLink):
 			path = Connector().getDocPath(link.store(), link.doc())
 		else:
 			path = Connector().getRevPath(link.store(), link.rev())

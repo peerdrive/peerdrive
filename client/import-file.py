@@ -19,7 +19,6 @@
 
 import sys, os
 
-from peerdrive import struct
 from peerdrive.importer import importFileByPath
 
 

@@ -445,8 +445,7 @@ get_handler_fun(TypeSet) ->
 		[Folder] when Folder =:= <<"org.peerdrive.store">>;
 		              Folder =:= <<"org.peerdrive.folder">> ->
 			Handlers = orddict:from_list([
-				{<<"META">>, fun merge_meta/4},
-				{<<"PDSD">>, fun merge_folder/4}
+				{data, fun merge_folder/4}
 			]),
 			fun(Doc, From, To, BaseRev, FromRev, ToRev) ->
 				merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers)
@@ -465,17 +464,16 @@ get_handler_fun(TypeSet) ->
 %% TODO: Support addition and removal of whole parts
 %%
 merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers) ->
-	#rev_stat{parts=FromParts} = check(peerdrive_broker:stat(FromRev, [From]),
+	#rev_stat{attachments=FromParts} = check(peerdrive_broker:stat(FromRev, [From]),
 		Doc, FromRev),
-	#rev_stat{parts=ToParts} = check(peerdrive_broker:stat(ToRev, [To]), Doc,
+	#rev_stat{attachments=ToParts} = check(peerdrive_broker:stat(ToRev, [To]), Doc,
 		ToRev),
-	#rev_stat{parts=BaseParts} = check(peerdrive_broker:stat(BaseRev, [From, To]),
+	#rev_stat{attachments=BaseParts} = check(peerdrive_broker:stat(BaseRev, [From, To]),
 		Doc, BaseRev),
 	OtherParts = ToParts ++ FromParts,
 
-	% Merge only changed parts, except META because we want to update the comment
-	Parts = [ FourCC || {FourCC, _Size, Hash} <- BaseParts,
-		(FourCC == <<"META">>) orelse
+	% Merge only changed parts
+	Parts = [data] ++ [ FourCC || {FourCC, _Size, Hash} <- BaseParts,
 		lists:any(
 			fun({F,_,H}) -> (F =:= FourCC) and (H =/= Hash) end,
 			OtherParts) ],
@@ -513,6 +511,15 @@ merge_read(Doc, Rev, Parts, [Store | Rest]) ->
 	end.
 
 
+merge_read_part(Doc, Rev, Reader, data) ->
+	try
+		peerdrive_struct:decode(check(peerdrive_broker:get_data(Reader, <<>>)
+			, Doc, Rev))
+	catch
+		error:_ ->
+			throw([{code, eio}, {doc, Doc}, {rev, Rev}])
+	end;
+
 merge_read_part(Doc, Rev, Reader, Part) ->
 	merge_read_part(Doc, Rev, Reader, Part, 0, <<>>).
 
@@ -547,9 +554,13 @@ merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
 	try
 		check(peerdrive_broker:merge(Writer, To, ToRev, []), Doc, ToRev),
 		lists:foreach(
-			fun({Part, Data}) ->
-				check(peerdrive_broker:truncate(Writer, Part, 0), Doc, FromRev),
-				check(peerdrive_broker:write(Writer, Part, 0, Data), Doc, FromRev)
+			fun
+				({data, Data}) ->
+					check(peerdrive_broker:set_data(Writer, <<>>,
+						peerdrive_struct:encode(Data)), Doc, FromRev);
+				({Part, Data}) ->
+					check(peerdrive_broker:truncate(Writer, Part, 0), Doc, FromRev),
+					check(peerdrive_broker:write(Writer, Part, 0, Data), Doc, FromRev)
 			end,
 			NewData),
 		check(peerdrive_broker:commit(Writer, <<"<<Synchronized by system>>">>),
@@ -563,21 +574,37 @@ merge_write(Doc, From, FromRev, To, ToRev, NewData) ->
 %% Content handlers
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-merge_meta(Doc, Base, From, To) ->
-	case peerdrive_struct:merge(decode(Doc, Base), [decode(Doc, From), decode(Doc, To)]) of
+merge_folder(Doc, Base, From, To) ->
+	% FIXME: The following code merges the data without checking for other
+	% keys. This may lead to data loss!
+	{Conflict1, NewMeta} = merge_folder_meta(Doc,
+		gb_trees:get(<<"org.peerdrive.annotation">>, Base),
+		gb_trees:get(<<"org.peerdrive.annotation">>, From),
+		gb_trees:get(<<"org.peerdrive.annotation">>, To)),
+	{Conflict2, NewFolder} = merge_folder_content(Doc,
+		gb_trees:get(<<"org.peerdrive.folder">>, Base),
+		gb_trees:get(<<"org.peerdrive.folder">>, From),
+		gb_trees:get(<<"org.peerdrive.folder">>, To)),
+	New = gb_trees:update(<<"org.peerdrive.annotation">>, NewMeta,
+		gb_trees:update(<<"org.peerdrive.folder">>, NewFolder, Base)),
+	{Conflict1 or Conflict2, New}.
+
+
+merge_folder_meta(Doc, Base, From, To) ->
+	case peerdrive_struct:merge(Base, [From, To]) of
 		{ok, Data} ->
-			{false, peerdrive_struct:encode(Data)};
+			{false, Data};
 		{econflict, Data} ->
-			{true, peerdrive_struct:encode(Data)};
+			{true, Data};
 		error ->
 			throw([{code, eio}, {doc, Doc}])
 	end.
 
 
-merge_folder(Doc, RawBase, RawFrom, RawTo) ->
-	Base = folder_make_gb_tree(decode(Doc, RawBase)),
-	From = folder_make_gb_tree(decode(Doc, RawFrom)),
-	To   = folder_make_gb_tree(decode(Doc, RawTo)),
+merge_folder_content(Doc, RawBase, RawFrom, RawTo) ->
+	Base = folder_make_gb_tree(RawBase),
+	From = folder_make_gb_tree(RawFrom),
+	To   = folder_make_gb_tree(RawTo),
 	{Conflict, New} = case peerdrive_struct:merge(Base, [From, To]) of
 		{ok, Data} ->
 			{false, Data};
@@ -586,7 +613,7 @@ merge_folder(Doc, RawBase, RawFrom, RawTo) ->
 		error ->
 			throw([{code, eio}, {doc, Doc}])
 	end,
-	{Conflict, peerdrive_struct:encode(gb_trees:values(New))}.
+	{Conflict, gb_trees:values(New)}.
 
 
 folder_make_gb_tree(Folder) ->
@@ -596,15 +623,6 @@ folder_make_gb_tree(Folder) ->
 		end,
 		gb_trees:empty(),
 		Folder).
-
-
-decode(Doc, Data) ->
-	try
-		peerdrive_struct:decode(Data)
-	catch
-		error:_ ->
-			throw([{code, eio}, {doc, Doc}])
-	end.
 
 
 check(BrokerResult, Doc, Rev) ->

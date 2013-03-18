@@ -17,10 +17,11 @@
 -module(peerdrive_store).
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
--export([put_doc/3, forward_doc/4, put_rev/3, put_rev_part/3, remember_rev/4]).
+-export([put_doc/3, forward_doc/4, put_rev/6, put_rev_part/3, remember_rev/4]).
 -export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
 	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
-	write/4, suspend/1, suspend/2, get_links/1, set_links/3, get_flags/1, set_flags/2]).
+	write/4, suspend/1, suspend/2, get_links/2, get_flags/1, set_flags/2,
+	get_data/2, set_data/3]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/3, sync_get_anchor/3, sync_set_anchor/4, sync_finish/2]).
 -export([hash_revision/1]).
@@ -69,8 +70,6 @@ contains(Store, Rev) ->
 %%   mtime = integer()
 %%   type = binary()
 %%   creator = binary()
-%%   doc_links = [DId::guid()]
-%%   rev_links = [RId::guid()]
 %%
 %% @spec stat(Store, Rev) -> {ok, Stat} | {error, enoent}
 %%       Store = pid()
@@ -78,6 +77,17 @@ contains(Store, Rev) ->
 %%       Stat = #rev_stat{}
 stat(Store, Rev) ->
 	call_store(Store, {stat, Rev}).
+
+%% @doc Query links of revision
+%%
+%% Return the set of all links of the structured data of a revision.
+%%
+%% @spec get_links(Store, Rev) -> Result
+%%       Store = pid()
+%%       Rev = guid()
+%%       Result = {ok, {DocLinks, RevLinks}} | {error, Reason}
+get_links(Store, Rev) ->
+	call_store(Store, {get_links, Rev}).
 
 %% @doc Commit all dirty data to disk
 %% @spec sync(Store::pid()) -> Result
@@ -161,44 +171,75 @@ update(Store, Doc, StartRev, Creator) ->
 resume(Store, Doc, PreRev, Creator) ->
 	call_store(Store, {resume, Doc, PreRev, Creator}).
 
-%% @doc Read a part of a document
+
+%% @doc Get structured data of a document
 %%
-%% Returns the requested data. Trying to read a non-existing part yields
-%% {error, enoent}. May return less data if the end of the part was hit.
+%% Returns the structured data in the common binary encoding. Use `Selector' to
+%% retrieve only a subset of the data. The selection is done by path-like
+%% syntax, e.g. <<"/foo/bar#3">>.
+get_data(Handle, Selector) ->
+	call_store(Handle, {get_data, Selector}).
+
+
+%% @doc Set structured data of a document
 %%
-%% @spec read(Handle, Part, Offset, Length) -> {ok, Data} | {error, Reason}
+%% Set the whole structured data (or a subset specified by `Selector') to `Data'.
+%% The data must be given in the common binary encoding.
+%%
+%% The selection is done by path-like syntax, e.g. <<"/foo#3/bar#+">>. Any
+%% non-existing key in a `/'-step implicitly creates the key in the dictionary.
+%% To append to a list use the `#+'-step, otherwise a `#'-step must reference
+%% an existing list entry.
+set_data(Handle, Selector, Data) ->
+	call_store(Handle, {set_data, Selector, Data}).
+
+
+%% @doc Read from a binary attachment of a document
+%%
+%% Returns the requested data. Non-existing attachment are implicitly empty.
+%% May return less data if the end of the part was hit.
+%%
+%% @spec read(Handle, Attachment, Offset, Length) -> {ok, Data} | {error, Reason}
 %%       Handle = pid()
-%%       Part = Data = binary()
+%%       Attachment = Data = binary()
 %%       Offset = Length = integer()
 %%       Reason = ecode()
-read(Handle, Part, Offset, Length) ->
-	call_store(Handle, {read, Part, Offset, Length}).
+read(Handle, Attachment, Offset, Length) ->
+	call_store(Handle, {read, Attachment, Offset, Length}).
 
-%% @doc Write a part of a document
+%% @doc Write a binary attachment of a document
 %%
-%% Writes the given data at the requested offset of the part. If the part does
-%% not exist yet it will be created.
+%% Writes the given data at the requested offset of the attachment. If the
+%% attachment does not exist yet it will be created.
 %%
-%% @spec write(Handle, Part, Offset, Data) -> ok | {error, Reason}
+%% @spec write(Handle, Attachment, Offset, Data) -> ok | {error, Reason}
 %%       Handle = pid()
-%%       Part = Data = binary()
+%%       Attachment = Data = binary()
 %%       Offset = integer()
 %%       Reason = ecode()
-write(Handle, Part, Offset, Data) ->
-	call_store(Handle, {write, Part, Offset, Data}).
+write(Handle, Attachment, Offset, Data) ->
+	call_store(Handle, {write, Attachment, Offset, Data}).
 
-%% @doc Truncate part
+%% @doc Truncate attachment to a specific length
 %%
-%% Truncates part at the given offset. If the part does not exist yet it will
-%% be created.
+%% Cause the named attachment to be truncated to a size of precisely Length
+%% bytes.
 %%
-%% @spec truncate(Handle, Part, Offset) -> ok | {error, Reason}
+%% If the attachment previously was larger than this size, the extra data is lost.
+%% If the attachment previously was shorter, it is extended, and the extended part
+%% reads as null bytes.
+%%
+%% If the attachment does not exist yet it will be created if Length is greater
+%% than zero. If the attachment is truncated at offset zero it is deleted
+%% implicitly.
+%%
+%% @spec truncate(Handle, Attachment, Length) -> ok | {error, Reason}
 %%       Handle = pid()
-%%       Part = binary()
-%%       Offset = integer()
+%%       Attachment = binary()
+%%       Length = integer()
 %%       Reason = ecode()
-truncate(Handle, Part, Offset) ->
-	call_store(Handle, {truncate, Part, Offset}).
+truncate(Handle, Attachment, Length) ->
+	call_store(Handle, {truncate, Attachment, Length}).
 
 % {ok, integer()} | {error, Reason}
 get_flags(Handle) ->
@@ -223,14 +264,6 @@ get_parents(Handle) ->
 % ok | {error, Reason}
 set_parents(Handle, Parents) ->
 	call_store(Handle, {set_parents, Parents}).
-
-% {ok, {DocLinks, RevLinks}} | {error, Reason}
-get_links(Handle) ->
-	call_store(Handle, get_links).
-
-% ok | {error, Reason}
-set_links(Handle, DocLinks, RevLinks) ->
-	call_store(Handle, {set_links, DocLinks, RevLinks}).
 
 %% @doc Commit a new revision
 %%
@@ -393,29 +426,31 @@ remember_rev(Store, Doc, PreRev, OldPreRev) ->
 %% @doc Put/import a revision into the store.
 %%
 %% The function takes the specification of the whole revision and returns the
-%% list of missing parts which the caller has to supply by subsequent
+%% list of missing attachments which the caller has to supply by subsequent
 %% put_rev_part/3 calls. The revision will not be garbage collected as long as
 %% the handle is kept open.
 %%
-%% @spec put_rev(Store, Rev, Revision) -> Result
+%% @spec put_rev(Store, Rev, Revision, Data, DocLinks, RevLinks) -> Result
 %%       Store = pid()
 %%       Rev = guid()
 %%       Revision = #revision
-%%       Result = {ok, MissingParts, Handle} | {error, Reason}
-%%       MissingParts = [FourCC]
+%%       Data = binary()
+%%       DocLinks = RevLinks = [guid()]
+%%       Result = {ok, MissingAttachments, Handle} | {error, Reason}
+%%       MissingAttachments = [binary()]
 %%       Handle = pid()
 %%       Reason = ecode()
-put_rev(Store, Rev, Revision) ->
-	call_store(Store, {put_rev, Rev, Revision}).
+put_rev(Store, Rev, Revision, Data, DocLinks, RevLinks) ->
+	call_store(Store, {put_rev, Rev, Revision, Data, DocLinks, RevLinks}).
 
 %% @doc Add data to a revision that's imported
 %%
-%% @spec put_rev_part(Importer, Part, Data) -> ok | {error, Reason}
+%% @spec put_rev_part(Importer, Attachment, Data) -> ok | {error, Reason}
 %%       Importer = pid()
-%%       Part = Data = binary()
+%%       Attachment = Data = binary()
 %%       Reason = ecode()
-put_rev_part(Importer, Part, Data) ->
-	call_store(Importer, {put_part, Part, Data}).
+put_rev_part(Importer, Attachment, Data) ->
+	call_store(Importer, {put_part, Attachment, Data}).
 
 %% @doc Get changes since the last sync point of peer store
 %%
@@ -459,31 +494,36 @@ sync_set_anchor(Store, FromSId, ToSId, SeqNum) ->
 
 
 hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
-	Parts = Revision#revision.parts,
-	BinParts = lists:foldl(
-		fun ({FourCC, Hash}, AccIn) ->
-			<<AccIn/binary, FourCC/binary, Hash/binary>>
+	BinData = hash_revision_hash(Revision#revision.data),
+	Attachments = Revision#revision.attachments,
+	BinAttachments = lists:foldl(
+		fun ({Name, Hash}, AccIn) ->
+			<<AccIn/binary, (hash_revision_string(Name))/binary,
+				(hash_revision_hash(Hash))/binary>>
 		end,
-		<<(length(Parts)):32/little>>,
-		Parts),
+		<<(length(Attachments)):32/little>>,
+		Attachments),
 	BinParents = hash_revision_list(Revision#revision.parents),
 	BinType = hash_revision_string(Revision#revision.type),
 	BinCreator = hash_revision_string(Revision#revision.creator),
 	BinComment = hash_revision_string(Revision#revision.comment),
-	BinDL = hash_revision_list(Revision#revision.doc_links),
-	BinRL = hash_revision_list(Revision#revision.rev_links),
-	crypto:sha(<<Flags:32/little, BinParts/binary, BinParents/binary,
-		Mtime:64/little, BinType/binary, BinCreator/binary, BinComment/binary,
-		BinDL/binary, BinRL/binary>>).
+	crypto:sha(<<Flags:32/little, BinData/binary, BinAttachments/binary,
+		BinParents/binary, Mtime:64/little, BinType/binary, BinCreator/binary,
+		BinComment/binary>>).
 
 hash_revision_list(List) ->
 	lists:foldl(
-		fun (Guid, AccIn) -> <<AccIn/binary, Guid/binary>> end,
+		fun (Hash, AccIn) ->
+			<<AccIn/binary, (hash_revision_hash(Hash))/binary>>
+		end,
 		<<(length(List)):32/little>>,
 		List).
 
 hash_revision_string(String) ->
 	<<(size(String)):32/little, String/binary>>.
+
+hash_revision_hash(Hash) ->
+	<<(size(Hash)):8/little, Hash/binary>>.
 
 
 call_store(Store, Request) ->

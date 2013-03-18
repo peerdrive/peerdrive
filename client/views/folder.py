@@ -23,7 +23,7 @@ from datetime import datetime
 import struct as pystruct
 
 from peerdrive import Connector, Registry
-from peerdrive import struct, importer, fuse
+from peerdrive import struct, importer, fuse, connector
 from peerdrive.connector import Watch, Stat
 from peerdrive.gui import widgets, utils
 
@@ -195,9 +195,9 @@ class StatColumnInfo(object):
 
 	@staticmethod
 	def __extractSize(stat):
-		size = 0
-		for part in stat.parts():
-			size += stat.size(part)
+		size = stat.dataSize()
+		for att in stat.attachments():
+			size += stat.size(att)
 		for unit in ['Bytes', 'KiB', 'MiB', 'GiB']:
 			if size < (1 << 10):
 				break
@@ -234,7 +234,7 @@ class FolderEntry(Watch):
 		self.__store = model.getStore()
 		self.__doc = link.doc()
 
-		if isinstance(link, struct.DocLink):
+		if isinstance(link, connector.DocLink):
 			super(FolderEntry, self).__init__(Watch.TYPE_DOC, link.doc())
 		else:
 			super(FolderEntry, self).__init__(Watch.TYPE_REV, link.rev())
@@ -262,7 +262,7 @@ class FolderEntry(Watch):
 			self.__columnDefs[index].update(meta, data)
 			try:
 				with Connector().update(self.__store, self.__doc, self.__rev) as w:
-					w.writeAll('META', struct.dumps(meta))
+					w.setData('/org.peerdrive.annotation', meta)
 					w.commit("Changed " + self.__columnDefs[index].name())
 				self.__rev = w.getRev()
 				self.__metaData = meta
@@ -369,7 +369,7 @@ class FolderEntry(Watch):
 			stat = Connector().stat(self.__rev)
 			with Connector().peek(self.__store, self.__rev) as r:
 				try:
-					metaData = struct.loads(self.__store, r.readAll('META'))
+					metaData = r.getData("/org.peerdrive.annotation")
 				except:
 					metaData = { }
 
@@ -416,7 +416,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		self.__autoClean = False
 		self.__mutable = False
 		self.__store = None
-		self.setColumns(["public.item:org.peerdrive.annotation/title"])
+		self.setColumns(["public.item:title"])
 
 	def doLoad(self, handle, readWrite, autoClean):
 		self.__mutable = readWrite
@@ -425,7 +425,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		self.__typeCodes = set()
 		self.__store = handle.getStore()
 		self._listing = []
-		data = struct.loads(handle.getStore(), handle.readAll('PDSD'))
+		data = handle.getData('/org.peerdrive.folder')
 		listing = [ FolderEntry(item, self, self._columns) for item in data ]
 		for entry in listing:
 			if entry.isValid() or (not self.__autoClean):
@@ -438,7 +438,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 
 	def doSave(self, handle):
 		data = [ item.getItem() for item in self._listing ]
-		handle.writeAll('PDSD', struct.dumps(data))
+		handle.setData('/org.peerdrive.folder', data)
 		self.__changedContent = False
 
 	def clear(self):
@@ -611,7 +611,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 
 	def mimeTypes(self):
 		types = QtCore.QStringList()
-		types << struct.LINK_MIME_TYPE
+		types << connector.LINK_MIME_TYPE
 		types << "text/uri-list"
 		types << "application/x-qt-windows-mime;value=\"FileContents\""
 		types << "application/x-qt-windows-mime;value=\"FileGroupDescriptor\""
@@ -625,10 +625,10 @@ class FolderModel(QtCore.QAbstractTableModel):
 			return None
 
 		mimeData = QtCore.QMimeData()
-		struct.dumpMimeData(mimeData, links)
+		connector.dumpMimeData(mimeData, links)
 		fuseData = []
 		for link in links:
-			if isinstance(link, struct.DocLink):
+			if isinstance(link, connector.DocLink):
 				f = fuse.findFuseFile(link)
 				if f:
 					fuseData.append(f)
@@ -642,8 +642,8 @@ class FolderModel(QtCore.QAbstractTableModel):
 		if action == QtCore.Qt.IgnoreAction:
 			return True
 
-		if data.hasFormat(struct.LINK_MIME_TYPE):
-			return self.__dropLinks(struct.loadMimeData(data))
+		if data.hasFormat(connector.LINK_MIME_TYPE):
+			return self.__dropLinks(connector.loadMimeData(data))
 		if data.hasFormat('text/uri-list'):
 			return self.__dropFile(data, parent)
 		if data.hasFormat('FileContents'):
@@ -713,18 +713,14 @@ class FolderModel(QtCore.QAbstractTableModel):
 		try:
 			helper = makeProgressHelper(progress)
 			for url in urlList:
-				try:
-					path = str(url.toLocalFile().toUtf8())
-					handle = importer.importFile(self.__store, path, progress=helper)
-					if handle:
-						try:
-							self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
-							self.__parent.save()
-						finally:
-							handle.close()
-				except IOError as error:
-					QtGui.QMessageBox.critical(self.__parent, "Import error",
-						"Error importing '"+path+"': "+str(error))
+				path = str(url.toLocalFile().toUtf8())
+				handle = importer.importFile(self.__store, path, progress=helper)
+				if handle:
+					try:
+						self.insertLink(connector.DocLink(self.__store, handle.getDoc()))
+						self.__parent.save()
+					finally:
+						handle.close()
 		except AbortException:
 			pass
 		finally:
@@ -743,7 +739,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		dropMenu.addAction("Abort")
 
 		copyAct.setEnabled(
-			any([isinstance(l, struct.DocLink) for l in links]))
+			any([isinstance(l, connector.DocLink) for l in links]))
 		action = dropMenu.exec_(QtGui.QCursor.pos())
 		if action is repAct:
 			for link in links:
@@ -756,7 +752,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 						handle.close()
 		elif action is copyAct:
 			for link in links:
-				if isinstance(link, struct.RevLink):
+				if isinstance(link, connector.RevLink):
 					if self.validateDragEnter(link):
 						handle = ReplicateHelper(self.__parent, self.__store, link)
 						try:
@@ -766,7 +762,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 							handle.close()
 				else:
 					with struct.copyDoc(link, self.__store) as handle:
-						self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
+						self.insertLink(connector.DocLink(self.__store, handle.getDoc()))
 						self.__parent.save()
 		else:
 			return False
@@ -776,25 +772,19 @@ class FolderModel(QtCore.QAbstractTableModel):
 	def __dropContents(self, mime):
 		# unfortunately Qt will only return the first object and nothing
 		# in case of Outlook messages
-		data = str(mime.data('FileContents'))
-		if len(data) == 0:
+		content = str(mime.data('FileContents'))
+		if len(content) == 0:
 			return False
 
 		name = getFileNamesFromMime(mime)[0]
 		ext  = os.path.splitext(name)[1].lower()
 		uti  = Registry().getUtiFromExtension(ext)
-		spec = [
-			('META', struct.dumps({
-				"org.peerdrive.annotation" : {
-					"title"   : name
-				}
-			})),
-			('FILE', data)
-		]
-		handle = importer.importObject(self.__store, uti, spec, [])
+		data = { "org.peerdrive.annotation" : { "title" : name } },
+		spec = [ ('public.data', content) ],
+		handle = importer.importObject(self.__store, uti, data, spec, [])
 		if handle:
 			try:
-				self.insertLink(struct.DocLink(self.__store, handle.getDoc()))
+				self.insertLink(connector.DocLink(self.__store, handle.getDoc()))
 				self.__parent.save()
 			finally:
 				handle.close()
@@ -853,7 +843,7 @@ class FolderTreeView(QtGui.QTreeView):
 			return
 		else:
 			data = event.mimeData()
-			links = struct.loadMimeData(data)
+			links = connector.loadMimeData(data)
 			# drag to ourself or already contained?
 			if any([l.doc() == self.__parent.doc() for l in links]):
 				return
@@ -1052,9 +1042,9 @@ class FolderWidget(widgets.DocumentView):
 
 	def __showSelfProperties(self):
 		if self.doc():
-			link = struct.DocLink(self.store(), self.doc(), False)
+			link = connector.DocLink(self.store(), self.doc(), False)
 		else:
-			link = struct.RevLink(self.store(), self.rev())
+			link = connector.RevLink(self.store(), self.rev())
 		utils.showProperties(link)
 
 	def __removeRows(self):
@@ -1115,7 +1105,7 @@ class FolderWidget(widgets.DocumentView):
 		c = Connector()
 		try:
 			allVolumes = set(c.lookupRev(self.rev()))
-			if isinstance(link, struct.DocLink):
+			if isinstance(link, connector.DocLink):
 				lookup = c.lookupDoc(link.doc())
 				curVolumes = set(lookup.stores())
 				try:
@@ -1134,13 +1124,13 @@ class FolderWidget(widgets.DocumentView):
 		srcVol = list(curVolumes)[0]
 		repVolumes = allVolumes - curVolumes
 		for store in repVolumes:
-			name = struct.readTitle(struct.DocLink(store, store), "Unknown store")
+			name = struct.readTitle(connector.DocLink(store, store), "Unknown store")
 			action = menu.addAction("Replicate item to '%s'" % name)
 			action.triggered.connect(
 				lambda x,l=link,s=store: self.__doReplicate(srcVol, l, s))
 
 	def __doReplicate(self, srcStore, link, dstStore):
-		if isinstance(link, struct.DocLink):
+		if isinstance(link, connector.DocLink):
 			Connector().replicateDoc(srcStore, link.doc(), dstStore, verbose=True)
 		else:
 			Connector().replicateRev(srcStore, link.rev(), dstStore, verbose=True)
@@ -1153,7 +1143,7 @@ class FolderWidget(widgets.DocumentView):
 
 		items = {}
 		sysStore = Connector().enum().sysStore().sid
-		sysDict = struct.Folder(struct.DocLink(sysStore, sysStore))
+		sysDict = struct.Folder(connector.DocLink(sysStore, sysStore))
 		templatesDoc = sysDict.get("templates")
 		if templatesDoc:
 			templatesDict = struct.Folder(templatesDoc.update(sysStore))
@@ -1172,12 +1162,13 @@ class FolderWidget(widgets.DocumentView):
 	def __doCreateFolder(self):
 		store = self.store()
 		with Connector().create(store, "org.peerdrive.folder", "") as w:
-			w.write('META', struct.dumps({ "org.peerdrive.annotation" :
-				{"title" : "Folder"} }))
-			w.write('PDSD', struct.dumps( [] ))
+			w.setData('', {
+				"org.peerdrive.annotation" : {"title" : "Folder"},
+				"org.peerdrive.folder" : []
+			})
 			w.setFlags([Stat.FLAG_STICKY])
 			w.commit("Created")
-			self.model().insertLink(struct.DocLink(store, w.getDoc()))
+			self.model().insertLink(connector.DocLink(store, w.getDoc()))
 			self.save("Added new folder")
 
 	def __doCreateFromTemplate(self, srcStore, srcRev, name):
@@ -1185,13 +1176,14 @@ class FolderWidget(widgets.DocumentView):
 		dstStore = self.store()
 		with Connector().create(dstStore, info.type(), info.creator()) as w:
 			with Connector().peek(srcStore, srcRev) as r:
-				for part in info.parts():
-					w.write(part, r.readAll(part))
+				w.set_data('', r.get_data(''))
+				for att in info.attachments():
+					w.write(att, r.readAll(att))
 				w.setFlags(r.getFlags())
 			w.commit("Created from template")
 			destDoc = w.getDoc()
 			# add link
-			self.model().insertLink(struct.DocLink(dstStore, destDoc))
+			self.model().insertLink(connector.DocLink(dstStore, destDoc))
 			# save immediately
 			self.save("Added '"+name+"' from templates")
 
@@ -1247,7 +1239,7 @@ class ReplicateHelper(object):
 		Connector().regProgressHandler(start=self.__progressStart,
 			progress=self.__progress)
 		try:
-			if isinstance(link, struct.DocLink):
+			if isinstance(link, connector.DocLink):
 				self.__item = link.doc()
 				Connector().replicateDoc(link.store(),
 					link.doc(), dstStore, verbose=True, async=self.__finished)

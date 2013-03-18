@@ -21,7 +21,7 @@ from PyQt4 import QtCore, QtGui#, QtOpenGL
 from datetime import datetime
 import itertools, optparse, copy, pickle, os.path
 
-from peerdrive import Connector, Registry, struct, connector, settingsPath
+from peerdrive import Connector, Registry, connector, settingsPath
 from peerdrive.gui import utils
 from peerdrive.gui.widgets import DocumentView, DocButton
 
@@ -318,7 +318,7 @@ class WarpItem(connector.Watch):
 
 class WarpView(QtGui.QGraphicsView):
 
-	openItem = QtCore.pyqtSignal(struct.RevLink, object)
+	openItem = QtCore.pyqtSignal(connector.RevLink, object)
 
 	def __init__(self, cls, store, rev, state):
 		self.__class = cls
@@ -479,7 +479,7 @@ class WarpView(QtGui.QGraphicsView):
 
 	def __open(self):
 		self.__state = self.__curItem.getState()
-		link = struct.RevLink(self.__store, self.__curItem.rev())
+		link = connector.RevLink(self.__store, self.__curItem.rev())
 		state = self.__state
 		self.__initTimeLine.setDirection(QtCore.QTimeLine.Backward)
 		self.__initTimeLine.finished.connect(
@@ -496,7 +496,7 @@ class ViewHandler(object):
 
 	def enter(self, link, state):
 		self._view._loadSettings(state)
-		if isinstance(link, struct.DocLink):
+		if isinstance(link, connector.DocLink):
 			self._view.docOpen(link.store(), link.doc(), True)
 		else:
 			self._view.docOpen(link.store(), link.rev(), False)
@@ -678,7 +678,7 @@ class BrowserWindow(QtGui.QMainWindow):
 
 		# parse command line
 		try:
-			link = struct.Link(args[0])
+			link = connector.Link(args[0])
 			link.update()
 		except IOError as e:
 			parser.error(str(e))

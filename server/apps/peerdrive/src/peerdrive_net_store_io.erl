@@ -64,8 +64,8 @@ handle_call(get_type, _From, S) ->
 handle_call(get_parents, _From, S) ->
 	{reply, do_get_parents(S), S};
 
-handle_call(get_links, _From, S) ->
-	{reply, do_get_links(S), S};
+handle_call({get_data, Selector}, _From, S) ->
+	{reply, do_get_data(S, Selector), S};
 
 handle_call(get_flags, _From, S) ->
 	{reply, do_get_flags(S), S};
@@ -85,8 +85,8 @@ handle_call({suspend, Comment}, _From, S) ->
 handle_call({set_type, Type}, _From, S) ->
 	{reply, do_set_type(Type, S), S};
 
-handle_call({set_links, DocLinks, RevLinks}, _From, S) ->
-	{reply, do_set_links(DocLinks, RevLinks, S), S};
+handle_call({set_data, Selector, Data}, _From, S) ->
+	{reply, do_set_data(Selector, Data, S), S};
 
 handle_call({set_parents, Parents}, _From, S) ->
 	{reply, do_set_parents(Parents, S), S};
@@ -260,7 +260,7 @@ do_put_part_loop(Part, Data, S, Pending, Ref) when (size(Data) > 0) and
 			Rest = <<>>
 	end,
 	Req = peerdrive_netstore_pb:encode_putrevpartreq(
-		#putrevpartreq{handle=Handle, part=Part, data=SendData}),
+		#putrevpartreq{handle=Handle, attachment=Part, data=SendData}),
 	Self = self(),
 	Finish = fun
 		({ok, <<>>}) ->
@@ -327,13 +327,14 @@ do_get_parents(#state{handle=Handle, store=Store}) ->
 	end.
 
 
-do_get_links(#state{handle=Handle, store=Store}) ->
-	Req = peerdrive_netstore_pb:encode_getlinksreq(#getlinksreq{handle=Handle}),
-	case peerdrive_net_store:io_request(Store, ?GET_LINKS_MSG, Req) of
+do_get_data(#state{handle=Handle, store=Store}, Selector) ->
+	Req = peerdrive_netstore_pb:encode_getdatareq(#getdatareq{handle=Handle,
+		selector=Selector}),
+	case peerdrive_net_store:io_request(Store, ?GET_DATA_MSG, Req) of
 		{ok, Cnf} ->
-			#getlinkscnf{doc_links=DocLinks, rev_links=RevLinks} =
-				peerdrive_netstore_pb:decode_getlinkscnf(Cnf),
-			{ok, {DocLinks, RevLinks}};
+			#getdatacnf{data=Data} =
+				peerdrive_netstore_pb:decode_getdatacnf(Cnf),
+			{ok, Data};
 
 		Error ->
 			Error
@@ -391,10 +392,10 @@ do_set_type(Type, #state{handle=Handle} = S) ->
 	simple_request(?SET_TYPE_MSG, Req, S).
 
 
-do_set_links(DocLinks, RevLinks, #state{handle=Handle} = S) ->
-	Req = peerdrive_netstore_pb:encode_setlinksreq(#setlinksreq{handle=Handle,
-		doc_links=DocLinks, rev_links=RevLinks}),
-	simple_request(?SET_LINKS_MSG, Req, S).
+do_set_data(Selector, Data, #state{handle=Handle} = S) ->
+	Req = peerdrive_netstore_pb:encode_setdatareq(#setdatareq{handle=Handle,
+		selector=Selector, data=Data}),
+	simple_request(?SET_DATA_MSG, Req, S).
 
 
 do_set_parents(Parents, #state{handle=Handle} = S) ->
