@@ -1,34 +1,36 @@
 
-Apps = lists:foldl(
-	fun(Path, Acc) ->
-		case lists:reverse(filename:split(Path)) of
-			["ebin", Lib | _] ->
-				Lib ++ ":" ++ Acc;
-			_ ->
-				Acc
-		end
-	end,
-	"",
-	code:get_path()),
+case os:getenv("DISABLE_VFS") of
+	false ->
+		{erl_opts, ErlOpts} = lists:keyfind(erl_opts, 1, CONFIG),
+		{deps, Deps} = lists:keyfind(deps, 1, CONFIG),
 
-Script = filename:basename(SCRIPT),
+		case os:type() of
+			{unix, _} ->
+				io:format("vfs: enabled (fuserl)~n"),
+				ErlOpts2 = [{d, have_fuserl} | ErlOpts],
+				Deps2 = [
+					{
+						fuserl,
+						".*",
+						{git, "https://github.com/jkloetzke/fuserl.git", {branch, "master"}}
+					} | Deps ];
 
-{erl_opts, Opts1} = lists:keyfind(erl_opts, 1, CONFIG),
-Opts2 = case re:run(Apps, "fuserl-", [{capture, none}]) of
-	match ->
-		io:format("~s: fuserl: enabled~n", [Script]),
-		[{d, have_fuserl} | Opts1];
-	nomatch ->
-		io:format("~s: fuserl: disabled~n", [Script]),
-		Opts1
-end,
-Opts3 = case re:run(Apps, "erldokan-", [{capture, none}]) of
-	match ->
-		io:format("~s: erldokan: enabled~n", [Script]),
-		[{d, have_dokan} | Opts2];
-	nomatch ->
-		io:format("~s: erldokan: disabled~n", [Script]),
-		Opts2
-end,
-lists:keystore(erl_opts, 1, CONFIG, {erl_opts, Opts3}).
+			{win32, _} ->
+				io:format("vfs: enabled (erldokan)~n"),
+				ErlOpts2 = [{d, have_dokan} | ErlOpts],
+				Deps2 = [
+					{
+						erldokan,
+						".*",
+						{git, "https://github.com/jkloetzke/erldokan.git", {tag, "1.1.0"}}
+					} | Deps ]
+		end,
+		lists:keystore(erl_opts, 1,
+			lists:keystore(deps, 1, CONFIG, {deps, Deps2}),
+			{erl_opts, ErlOpts2});
+
+	_ ->
+		io:format("vfs: disabled~n"),
+		CONFIG
+end.
 
