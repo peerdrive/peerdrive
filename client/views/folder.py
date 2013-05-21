@@ -239,7 +239,7 @@ class FolderEntry(Watch):
 		else:
 			super(FolderEntry, self).__init__(Watch.TYPE_REV, link.rev())
 
-		self.update()
+		self.update(False)
 
 	def isValid(self):
 		return self.__valid
@@ -312,7 +312,7 @@ class FolderEntry(Watch):
 	def getTypeCode(self):
 		return self.__uti
 
-	def update(self):
+	def update(self, updateItem = True):
 		# reset everything
 		self.__valid = False
 		self.__icon = None
@@ -332,7 +332,8 @@ class FolderEntry(Watch):
 				return
 			elif len(revisions) > 1:
 				needMerge = True
-			self.__item[''].update()
+			if updateItem:
+				self.__item[''].update()
 
 		self.__rev = self.__item[''].rev()
 
@@ -358,15 +359,16 @@ class FolderEntry(Watch):
 		self.__isFolder = Registry().conformes(self.__uti, "org.peerdrive.folder")
 		self.__replacable = not needMerge and not self.__isFolder
 		self.__valid = True
-		self.__updateColumns()
+		self.__updateColumns(s)
 
-	def __updateColumns(self):
+	def __updateColumns(self, stat = None):
 		# This makes only sense if we're a valid entry
 		if not self.__valid:
 			return
 
 		try:
-			stat = Connector().stat(self.__rev)
+			if stat is None:
+				stat = Connector().stat(self.__rev)
 			with Connector().peek(self.__store, self.__rev) as r:
 				try:
 					metaData = r.getData("/org.peerdrive.annotation")
