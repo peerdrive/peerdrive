@@ -12,7 +12,7 @@ case os:getenv("DISABLE_VFS") of
 					{
 						fuserl,
 						".*",
-						{git, "https://github.com/jkloetzke/fuserl.git", {branch, "master"}}
+						{git, "https://github.com/peerdrive/fuserl.git", {branch, "master"}}
 					} | Deps ];
 
 			{win32, _} ->
@@ -22,7 +22,7 @@ case os:getenv("DISABLE_VFS") of
 					{
 						erldokan,
 						".*",
-						{git, "https://github.com/jkloetzke/erldokan.git", {tag, "1.1.0"}}
+						{git, "https://github.com/peerdrive/erldokan.git", {tag, "1.1.0"}}
 					} | Deps ]
 		end,
 		lists:keystore(erl_opts, 1,

@@ -7,12 +7,12 @@ network connection or central infrastructure.
 
 For an introduction into PeerDrive's features see
 [peerdrive.org](http://www.peerdrive.org), the
-[Wiki](https://github.com/jkloetzke/peerdrive/wiki) on the project home and the
-[doc/](https://github.com/jkloetzke/peerdrive/tree/master/doc) directory.
+[Wiki](https://github.com/peerdrive/peerdrive/wiki) on the project home and the
+[doc/](https://github.com/peerdrive/peerdrive/tree/master/doc) directory.
 
 Resources:
 * [Website](http://www.peerdrive.org)
-* [Project home](https://github.com/jkloetzke/peerdrive)
+* [Project home](https://github.com/peerdrive/peerdrive)
 * Twitter: [@PeerDrive](https://twitter.com/PeerDrive)
 * Mailing list: hotchpotch@freelists.org (the projects former name)
                 http://www.freelists.org/list/hotchpotch
@@ -35,10 +35,7 @@ Requirements
     * protobuf (http://code.google.com/p/protobuf/)
     * magic (optional)
 * Erlang >= R14A (Windows: >= R14B03)
-    * rebar (http://github.com/basho/rebar)
-    * protobuffs (fetched automatically, git://github.com/freke/erlang_protobuffs.git)
-    * fuserl (optional, http://code.google.com/p/fuserl/)
-    * erldokan (optional, http://github.com/jkloetzke/erldokan)
+    * rebar (http://github.com/rebar/rebar)
 
 Try it out
 ==========
@@ -46,7 +43,7 @@ Try it out
 Currently there is no installation needed. Do the following steps to try it
 out. It is assumed that Erlang, Rebar and Python are all in your path.
 
-1. Clone the git repository: `git clone git://github.com/jkloetzke/peerdrive.git`
+1. Clone the git repository: `git clone git://github.com/peerdrive/peerdrive.git`
 2. Open two terminals
 3. Type in the 1st terminal:
     * `make`
