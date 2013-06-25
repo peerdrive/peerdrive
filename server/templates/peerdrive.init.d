@@ -19,19 +19,23 @@ DESC="peerdrive server"
 
 test -x $DAEMON || exit 0
 
+daemon() {
+	su -l -c "$DAEMON $1" peerdrive
+}
+
 case "$1" in
     start)
         echo -n "Starting $DESC: "
-        $DAEMON start
+        daemon start
         echo "$NAME."
         ;;
     stop)
         echo -n "Stopping $DESC: "
-        $DAEMON stop
+        daemon stop
         echo "$NAME."
         ;;
     status)
-        if `$DAEMON ping 2>&1 >/dev/null`; then
+        if `daemon ping 2>&1 >/dev/null`; then
             echo "$NAME is running."
         else
             echo "$NAME is not running."
@@ -42,7 +46,7 @@ case "$1" in
         ;;
     restart)
         echo -n "Restarting $DESC: "
-        $DAEMON restart
+        daemon restart
         echo "$NAME."
         ;;
     *)
