@@ -13,40 +13,34 @@
 set -e
 
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-DAEMON=%bindir%/peerdrive
+DAEMON="%bindir%/peerdrive"
 NAME=peerdrive
 DESC="peerdrive server"
 
 test -x $DAEMON || exit 0
 
 daemon() {
-	su -l -c "$DAEMON $1" peerdrive
+	su -l -c "$DAEMON --system $1" peerdrive
 }
 
 case "$1" in
     start)
         echo -n "Starting $DESC: "
-        daemon start
+        daemon --daemon
         echo "$NAME."
         ;;
     stop)
         echo -n "Stopping $DESC: "
-        daemon stop
+        daemon --stop
         echo "$NAME."
         ;;
     status)
-        if `daemon ping 2>&1 >/dev/null`; then
-            echo "$NAME is running."
-        else
-            echo "$NAME is not running."
-        fi
-        ;;
-    reload|force-reload)
-        echo "Reloading $DESC configuration files."
+		$DAEMON --system --check
         ;;
     restart)
         echo -n "Restarting $DESC: "
-        daemon restart
+        daemon --stop
+        daemon --daemon
         echo "$NAME."
         ;;
     *)

@@ -242,8 +242,15 @@ get_sys_store_spec() ->
 			throw(einval);
 
 		undefined ->
-			error_logger:error_msg("No system store spec found!~n"),
-			throw(enoent)
+			SysDir = filename:join(peerdrive_util:user_app_dir(), "sys"),
+			case filelib:ensure_dir(filename:join(SysDir, "dummy")) of
+				ok ->
+					{SysDir, "", "file"};
+				{error, Reason} ->
+					error_logger:error_msg("Cannot create system store dir: ~p~n",
+						[Reason]),
+					throw(Reason)
+			end
 	end.
 
 

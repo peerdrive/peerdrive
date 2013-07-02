@@ -1,120 +1,177 @@
-#!/bin/bash
-# -*- tab-width:4;indent-tabs-mode:nil -*-
-# ex: ts=4 sw=4 et
+#!/bin/sh
 
-# Extract the target node name from node.args
-NAME_ARG=`grep -e '-[s]*name' %etcdir%/vm.args`
-if [ -z "$NAME_ARG" ]; then
-    echo "%etcdir%/vm.args needs to have either -name or -sname parameter."
-    exit 1
-fi
+ERL_LIBS="$ERL_LIBS${ERL_LIBS+:}%libsdir%"
 
-# Extract the target cookie
-COOKIE_ARG=`grep -e '-setcookie' %etcdir%/vm.args`
-if [ -z "$COOKIE_ARG" ]; then
-    echo "%etcdir%/vm.args needs to have a -setcookie parameter."
-    exit 1
-fi
+NAME="peerdrive-$USER"
+CONFIG="$HOME/.peerdrive/etc/peerdrive"
+PID_FILE="$HOME/.peerdrive/peerdrive.pid"
+LOG_FILE="$HOME/.peerdrive/console.log"
 
-# Setup command to control the node
-PIDFILE=%homedir%/daemon.pid
-NODETOOL="escript %bindir%/nodetool $NAME_ARG $COOKIE_ARG"
+ERLDAEMON=$(ls -1 "%libsdir%"/erldaemon-*/priv/erldaemon | tail -n1)
 
-# The status command can be run by anybody
-if [ "$1" = "ping" ]; then
-    ## See if the VM is alive
-    $NODETOOL ping
-    exit
-fi
+get_pid() {
+	if test -f $PID_FILE; then
+		PID=`cat $PID_FILE`
+	fi
+	echo $PID
+}
 
-# Check the first argument for instructions
-case "$1" in
-    start)
-        # Make sure there is not already a node running
-        RES=`$NODETOOL ping`
-        if [ "$RES" = "pong" ]; then
-            echo "PeerDrive is already running!"
-            exit 1
-        fi
-        HEART_COMMAND="%bindir%/peerdrive start"
-        export HEART_COMMAND
-        shift # remove $1
-        run_erl -daemon "%homedir%/" "%logdir%" "exec %bindir%/peerdrive console $@" 2>&1
-        ;;
-
-    stop)
-        if [ -r $PIDFILE ]; then
-            PID=`cat $PIDFILE`
-
-            if ! `kill -0 $PID 2>/dev/null`; then
-                echo "stale PID file?"
-                rm $PIDFILE
-                exit 1
-            fi
-            RES=`$NODETOOL stop 2>&1`
-            if [ "$RES" != "ok" ]; then
-                echo "error: $RES"
-                exit 1
-            fi
-
-            # Wait for the node to completely stop...
-            i=31
-            while [ $i -gt 0 ] && `kill -0 $PID 2>/dev/null`; do
-                sleep 1
-                i=$((i-1))
-            done
-
-            if [ $i -eq 0 ]; then
-                echo "error"
-                false
-            else
-                rm $PIDFILE
-            fi
+# Check if running. Returns:
+#   0 - PeerDrive is running
+#   1 - Not running
+#   2 - Not running + stale pid file
+is_running() {
+    PID=`get_pid`
+    if [ -n "$PID" ]; then
+        if kill -0 $PID 2> /dev/null; then
+            return 0
         else
-            echo "not running!"
-            exit 1
+			return 2
         fi
-        ;;
+    fi
 
-    restart)
-        ## Restart the VM without exiting the process
-        $NODETOOL restart
-        ;;
+    return 1
+}
 
-    reboot)
-        ## Restart the VM completely (uses heart to restart it)
-        $NODETOOL reboot
-        ;;
+print_status() {
+	echo -n "PeerDrive is "
+	case "$1" in
+		0)
+			echo "running"
+			;;
+		1)
+			echo "not running"
+			;;
+		2)
+			echo "not running (stale pid file)"
+			;;
+	esac
+}
 
-    attach)
-        # Make sure a node IS running
-        RES=`$NODETOOL ping`
-        if [ "$RES" != "pong" ]; then
-            echo "PeerDrive is not running!"
-            exit 1
-        fi
-        to_erl "%homedir%/"
-        ;;
+start_daemon() {
+	if [ -r "${CONFIG}.config" ]; then
+		CONFIG="-config $CONFIG"
+	else
+		CONFIG=
+	fi
 
-    console|console_clean|foreground)
-        # Log the startup
-        logger -t "peerdrive[$$]" "Starting up"
-        echo -n $$ > $PIDFILE
+	if [ "$LOG_ROTATE" -a -w "$LOG_FILE" ]; then
+		mv "$LOG_FILE" "${LOG_FILE}.old"
+	fi
 
-        FOREGROUNDOPTIONS=""
-        if [ "$1" == "foreground" ]; then
-            FOREGROUNDOPTIONS="-noinput +Bd"
-        fi
+	export ERL_LIBS
+	exec $ERLDAEMON $FOREGROUND -n "$NAME" -l "$LOG_FILE" -p "$PID_FILE" -- \
+		erl $CONFIG -noinput +Bd +K true -A 5 +W w \
+		-boot start_sasl -s crypto -s ssl -s peerdrive start permanent -s erldaemon
+}
 
-        # Start the VM
-        export ERL_LIBS=%libsdir%
-        exec erl $FOREGROUNDOPTIONS -args_file %etcdir%/vm.args \
-            -config %etcdir%/peerdrive -boot start_sasl \
-            -s crypto -s ssl -s peerdrive
-        ;;
+kill_daemon() {
+    PID=`get_pid`
+	TIMEOUT=30
 
-    *)
-        echo "Usage: $SCRIPT {start|foreground|stop|restart|reboot|ping|console|console_clean|attach}"
-        exit 1
-        ;;
+    if [ -n "$PID" ] && kill $PID 2>/dev/null; then
+		if kill -TERM $PID 2>/dev/null; then
+			while kill -0 $PID 2>/dev/null; do
+				if [ $TIMEOUT -le 0 ]; then
+					echo "Timeout waiting for shutdown" >&2
+					return 1
+				else
+					TIMEOUT=$(($TIMEOUT-1))
+					sleep 1
+				fi
+			done
+			return 0
+		else
+			echo "Cannot shutdown PeerDrive" >&2
+			return 1
+		fi
+	else
+		echo "PeerDrive is not running" >&2
+    fi
+
+	return 1
+}
+
+fail_if_running() {
+	if is_running; then
+		echo "PeerDrive is already running!" >&2
+		exit 1
+	fi
+}
+
+usage() {
+	echo "Usage: `basename $0` [--start|--daemon|--stop|--check|-h] [--system]"
+	echo
+	echo "Mode:"
+	echo "  --start          Start PeerDrive as daemon if it is not running yet"
+	echo "  --daemon         Run as daemon in background"
+	echo "  --stop           Shut down daemon"
+	echo "  --check          Check if daemon is running"
+	echo "  --help | -h      Show this help"
+	echo
+	echo "Options:"
+	echo "  --system          Run as system-wide instance instead of per-user"
+}
+
+
+OPERATION=foreground
+LOG_ROTATE=1
+until [ -z "$1" ]; do
+	case "$1" in
+		--start)
+			OPERATION=start
+			;;
+		--daemon)
+			OPERATION=daemon
+			;;
+		--stop)
+			OPERATION=stop
+			;;
+		--check)
+			OPERATION=check
+			;;
+		--system)
+			NAME=peerdrive
+			CONFIG="%etcdir%/peerdrive"
+			PID_FILE="%homedir%/peerdrive.pid"
+			LOG_FILE="%logdir%/console.log"
+			LOG_ROTATE=
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			echo "Unknown option: $1" >&2
+			usage >&2
+			exit 1
+			;;
+	esac
+	shift
+done
+
+case $OPERATION in
+	foreground)
+		fail_if_running
+		FOREGROUND=-f
+		start_daemon
+		;;
+	start)
+		is_running && exit 0
+		start_daemon
+		;;
+	daemon)
+		fail_if_running
+		start_daemon
+		;;
+	stop)
+		kill_daemon
+		;;
+	check)
+		is_running
+		RESULT=$?
+		print_status $RESULT >&2
+		exit $RESULT
+		;;
 esac
+

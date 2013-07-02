@@ -20,6 +20,9 @@
 start() ->
 	application:start(peerdrive).
 
+start([Type]) ->
+	application:start(peerdrive, Type).
+
 stop() ->
 	application:stop(peerdrive).
 

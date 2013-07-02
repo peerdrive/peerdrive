@@ -20,6 +20,7 @@
 -export([walk/2, read_doc_file_name/2]).
 -export([folder_link/3]).
 -export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1, make_bin_16/1]).
+-export([user_app_dir/0, user_mnt_dir/0]).
 
 -include("utils.hrl").
 
@@ -204,6 +205,28 @@ write_rev_struct(Store, Doc, Rev, Part, Data) ->
 		Error ->
 			Error
 	end.
+
+
+user_app_dir() ->
+	case os:type() of
+		{unix, _} ->
+			Home = os:getenv("HOME"),
+			filename:join(Home, ".peerdrive");
+		{win32, _} ->
+			AppData = case os:getenv("LOCALAPPDATA") of
+				false -> os:getenv("APPDATA");
+				LocalAppData -> LocalAppData
+			end,
+			filename:join(AppData, "PeerDrive")
+	end.
+
+
+user_mnt_dir() ->
+	Home = case os:type() of
+		{unix, _} -> os:getenv("HOME");
+		{win32, _} -> os:getenv("USERPROFILE")
+	end,
+	filename:join(Home, "PeerDrive").
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

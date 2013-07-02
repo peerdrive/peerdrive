@@ -1,4 +1,10 @@
-#!/bin/sh -e
+#!/bin/bash -e
+
+# setup default directories
+PREFIX=/usr/local
+PEERDRIVE_LOG=/var/log/peerdrive
+PEERDRIVE_ETC=/etc/peerdrive
+PEERDRIVE_HOME=/var/lib/peerdrive
 
 cd `dirname $0`
 
@@ -11,13 +17,48 @@ copy_template() {
 	< templates/$1 > $2
 }
 
-# setup default directories
-PREFIX=/usr/local
-PEERDRIVE_LOG=/var/log/peerdrive
-PEERDRIVE_ETC=/etc/peerdrive
-PEERDRIVE_HOME=/var/lib/peerdrive
-PEERDRIVE_LIBS=$PREFIX/lib/peerdrive/lib
-PEERDRIVE_BIN=$PREFIX/lib/peerdrive/bin
+usage() {
+	echo "$(basename $0) [options]"
+	echo
+	echo "Options:"
+	echo "  -p PREFIX         Install prefix           [default: $PREFIX]"
+	echo "  -l LOGDIR         Log file directory       [default: $PEERDRIVE_LOG]"
+	echo "  -c CFGDIR         Configuration directory  [default: $PEERDRIVE_ETC]"
+	echo "  -o HOME           Daemon home directory    [default: $PEERDRIVE_HOME]"
+}
+
+while getopts ":hp:l:c:o:" opt; do
+	case $opt in
+		h)
+			usage
+			exit 0
+			;;
+		p)
+			PREFIX="$OPTARG"
+			;;
+		l)
+			PEERDRIVE_LOG="$OPTARG"
+			;;
+		c)
+			PEERDRIVE_ETC="$OPTARG"
+			;;
+		o)
+			PEERDRIVE_HOME="$OPTARG"
+			;;
+		\?)
+			echo "Invalid option: -$OPTARG" >&2
+			usage >&2
+			exit 1
+			;;
+		:)
+			echo "Option -$OPTARG requires argument" >&2
+			exit 1
+			;;
+	esac
+done
+
+PEERDRIVE_LIBS="$PREFIX/lib/peerdrive/lib"
+PEERDRIVE_BIN="$PREFIX/lib/peerdrive/bin"
 
 echo "Installing PeerDrive (prefix: $PREFIX)..."
 
@@ -46,7 +87,6 @@ echo -n "  * Install default configuration files..."
 mkdir -p $PEERDRIVE_ETC
 if [ ! -e $PEERDRIVE_ETC/peerdrive.config ]; then
 	copy_template peerdrive.init.config $PEERDRIVE_ETC/peerdrive.config
-	copy_template vm.args $PEERDRIVE_ETC/vm.args
 	echo "ok"
 else
 	echo "no (already exist)"
@@ -56,7 +96,6 @@ fi
 echo -n "  * Install runtime files..."
 mkdir -p $PEERDRIVE_BIN $PEERDRIVE_LIBS
 copy_template peerdrive $PEERDRIVE_BIN/peerdrive
-copy_template nodetool $PEERDRIVE_BIN/nodetool
 rebar install target=$PEERDRIVE_LIBS force=1 > /dev/null
 chown -R root:root $PEERDRIVE_LIBS
 chmod a+x $PEERDRIVE_BIN/peerdrive

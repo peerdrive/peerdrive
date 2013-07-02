@@ -27,9 +27,9 @@ init([]) ->
 	RestartStrategy    = one_for_one,
 	MaxRestarts        = 1,
 	MaxTimeBetRestarts = 60,
-	case application:get_env(peerdrive, interfaces) of
+	RealInterfaces = case application:get_env(peerdrive, interfaces) of
 		{ok, Interfaces} ->
-			RealInterfaces = lists:filter(
+			lists:filter(
 				fun(Spec) ->
 					case check_ifc_spec(Spec) of
 						true ->
@@ -39,14 +39,22 @@ init([]) ->
 							false
 					end
 				end,
-				Interfaces),
-			ChildSpecs = [map_ifc_spec(S) || S <- RealInterfaces],
-			{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}};
+				Interfaces);
 
 		undefined ->
-			error_logger:error_msg("Interfaces section missing in configuration!~n"),
-			{error, nointerfaces}
-	end.
+			MntDir = peerdrive_util:user_mnt_dir(),
+			VfsEntry = case filelib:ensure_dir(filename:join(MntDir, "dummy")) of
+				ok ->
+					[{vfs, [{mountpoint, MntDir}]}];
+				{error, Reason} ->
+					error_logger:error_msg("Cannot create mount dir: ~p~n",
+						[Reason]),
+					[]
+			end,
+			[{native, []} | VfsEntry]
+	end,
+	ChildSpecs = [map_ifc_spec(S) || S <- RealInterfaces],
+	{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}}.
 
 
 check_ifc_spec({Mod, Options}) when is_atom(Mod) and is_list(Options) ->

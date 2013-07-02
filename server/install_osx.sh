@@ -50,7 +50,6 @@ echo -n "  * Install default configuration files..."
 mkdir -p $PEERDRIVE_ETC
 if [ ! -e $PEERDRIVE_ETC/peerdrive.config ]; then
 	copy_template peerdrive.init.config $PEERDRIVE_ETC/peerdrive.config
-	copy_template vm.args $PEERDRIVE_ETC/vm.args
 	echo "ok"
 else
 	echo "no (already exist)"
@@ -60,7 +59,6 @@ fi
 echo -n "  * Install runtime files..."
 mkdir -p $PEERDRIVE_BIN $PEERDRIVE_LIBS
 copy_template peerdrive $PEERDRIVE_BIN/peerdrive
-copy_template nodetool $PEERDRIVE_BIN/nodetool
 rebar install target=$PEERDRIVE_LIBS force=1 > /dev/null
 chmod a+x $PEERDRIVE_BIN/peerdrive
 echo "ok"
