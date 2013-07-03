@@ -53,7 +53,17 @@ init([]) ->
 			end,
 			[{native, []} | VfsEntry]
 	end,
-	ChildSpecs = [map_ifc_spec(S) || S <- RealInterfaces],
+	ChildSpecs = [
+		{
+			peerdrive_ifc_vfs_broker,
+			{peerdrive_ifc_vfs_broker, start_link, []},
+			permanent,
+			10000,
+			worker,
+			[peerdrive_ifc_vfs_broker]
+		}
+		| [map_ifc_spec(S) || S <- RealInterfaces]
+	],
 	{ok, {{RestartStrategy, MaxRestarts, MaxTimeBetRestarts}, ChildSpecs}}.
 
 
@@ -73,14 +83,34 @@ check_ifc_spec(_) ->
 
 map_ifc_spec({native, Options}) ->
 	Port = proplists:get_value(port, Options, 4567),
-	peerdrive_server_sup:get_supervisor_spec("native", peerdrive_ifc_client,
+	peerdrive_server_sup:get_supervisor_spec(peerdrive_ifc_client,
 		Port, Options ++ [{ip, "127.0.0.1"}]);
 
 map_ifc_spec({netstore, Options}) ->
 	Port = proplists:get_value(port, Options, 4568),
-	peerdrive_server_sup:get_supervisor_spec("netstore", peerdrive_ifc_netstore,
+	peerdrive_server_sup:get_supervisor_spec(peerdrive_ifc_netstore,
 		Port, Options);
 
 map_ifc_spec({vfs, Options}) ->
-	peerdrive_ifc_vfs:get_supervisor_spec("vfs", Options).
+	case erlang:system_info(system_architecture) of
+		"win32" ->
+			{
+				make_ref(),
+				{peerdrive_ifc_vfs_dokan, start_link, [Options]},
+				permanent,
+				10000,
+				worker,
+				[peerdrive_ifc_vfs_dokan]
+			};
+
+		_ ->
+			{
+				make_ref(),
+				{peerdrive_ifc_vfs_fuse, start_link, [Options]},
+				permanent,
+				10000,
+				worker,
+				[peerdrive_ifc_vfs_fuse]
+			}
+	end.
 

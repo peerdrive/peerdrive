@@ -17,14 +17,14 @@
 -module(peerdrive_server_sup).
 -behaviour(supervisor).
 
--export([get_supervisor_spec/4, start_link/4]).
+-export([get_supervisor_spec/3, get_servlet_sup_pid/1, start_link/3]).
 -export([init/1]).
 
 
-get_supervisor_spec(Id, Module, Port, Options) ->
+get_supervisor_spec(Module, Port, Options) ->
 	{
-		Id,
-		{peerdrive_server_sup, start_link, [Id, Module, Port, Options]},
+		make_ref(),
+		{peerdrive_server_sup, start_link, [Module, Port, Options]},
 		permanent,
 		infinity,
 		supervisor,
@@ -32,33 +32,34 @@ get_supervisor_spec(Id, Module, Port, Options) ->
 	}.
 
 
-start_link(Id, Module, Port, Options) ->
-	supervisor:start_link(
-		{local, list_to_atom(Id ++ "_peerdrive_server_sup")},
-		?MODULE,
-		{Id, Module, Port, Options}).
+get_servlet_sup_pid(ServerSup) ->
+	Children = supervisor:which_children(ServerSup),
+	{servlets, Child, _Type, _Modules} = lists:keyfind(servlets, 1, Children),
+	true = is_pid(Child),
+	Child.
 
 
-init({Id, Module, Port, Options}) ->
+start_link(Module, Port, Options) ->
+	supervisor:start_link(?MODULE, {Module, Port, Options}).
+
+
+init({Module, Port, Options}) ->
 	RestartStrategy    = one_for_all,
 	MaxRestarts        = 1,
 	MaxTimeBetRestarts = 60,
 
-	ServletId  = list_to_atom(Id ++ "_peerdrive_servlet_sup"),
-	ListenerId = list_to_atom(Id ++ "_peerdrive_listener"),
-
 	ChildSpecs = [
 		{
-			ServletId,
-			{peerdrive_servlet_sup, start_link, [ServletId, Module, Options]},
+			servlets,
+			{peerdrive_servlet_sup, start_link, [Module, Options]},
 			permanent,
 			infinity,
 			supervisor,
 			[peerdrive_servlet_sup]
 		},
 		{
-			ListenerId,
-			{peerdrive_listener, start_link, [ListenerId, ServletId, Port, Options]},
+			listener,
+			{peerdrive_listener, start_link, [self(), Port, Options]},
 			permanent,
 			1000,
 			worker,

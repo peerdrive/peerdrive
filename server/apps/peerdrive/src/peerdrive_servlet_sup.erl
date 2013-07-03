@@ -17,12 +17,12 @@
 -module(peerdrive_servlet_sup).
 -behaviour(supervisor).
 
--export([start_link/3]).
+-export([start_link/2]).
 -export([spawn_servlet/2]).
 -export([init/1]).
 
-start_link(Id, Module, ServletOpt) ->
-	supervisor:start_link({local, Id}, ?MODULE, {Module, ServletOpt}).
+start_link(Module, ServletOpt) ->
+	supervisor:start_link(?MODULE, {Module, ServletOpt}).
 
 init({Module, ServletOpt}) ->
 	{ok, {
