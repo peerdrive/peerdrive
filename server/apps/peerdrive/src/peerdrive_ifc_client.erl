@@ -15,14 +15,16 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_ifc_client).
--export([init/1, handle_packet/2, handle_info/2, terminate/1]).
+-export([init/2, handle_packet/2, handle_info/2, terminate/1]).
+-export([init_listen/2, terminate_listen/1]).
 
 -include("store.hrl").
 -include("peerdrive_client_pb.hrl").
 -include("utils.hrl").
 -include("volman.hrl").
 
--record(state, {handles, next, progreg=false}).
+-record(listenstate, {pubfile, cookie}).
+-record(state, {handles, next, progreg=false, cookie, auth}).
 -record(retpath, {servlet, req, ref}).
 
 -define(FLAG_REQ, 0).
@@ -78,9 +80,30 @@
 %% Servlet callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(_Options) ->
+init_listen(Socket, Options) ->
+	case proplists:get_bool(nopublish, Options) of
+		false ->
+			Cookie = crypto:rand_bytes(16),
+			PubFile = filename:join(peerdrive_util:cfg_run_dir(), "server.info"),
+			case publish(Socket, Cookie, PubFile) of
+				ok ->
+					{ok, #listenstate{pubfile=PubFile, cookie=Cookie}};
+				{error, _Reason} = Error ->
+					Error
+			end;
+
+		true ->
+			{ok, #listenstate{cookie = <<>>}}
+	end.
+
+
+terminate_listen(#listenstate{pubfile=PubFile}) ->
+	PubFile == undefined orelse file:delete(PubFile).
+
+
+init(_Options, #listenstate{cookie=Cookie}) ->
 	process_flag(trap_exit, true),
-	#state{handles=dict:new(), next=0}.
+	#state{handles=dict:new(), next=0, cookie=Cookie, auth=false}.
 
 
 terminate(#state{progreg=ProgReg} = State) ->
@@ -148,13 +171,10 @@ handle_info({gen_event_EXIT, _Handler, _Reason}, S) ->
 	{ok, S}.
 
 
-handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
+handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, #state{auth=true}=S) ->
 	RetPath = #retpath{servlet=self(), req=Request, ref=Ref},
 	%io:format("[~w] Ref:~w Request:~w Body:~w~n", [self(), Ref, Request, Body]),
 	case Request of
-		?INIT_MSG ->
-			{reply, do_init(Body, RetPath), S};
-
 		?ENUM_MSG ->
 			{reply, do_enum(RetPath), S};
 
@@ -310,6 +330,17 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, S) ->
 			ReqData = #getflagsreq{handle=Handle} =
 				peerdrive_netstore_pb:decode_getflagsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S)
+	end;
+
+handle_packet(<<Ref:32, ?INIT_MSG:12, ?FLAG_REQ:4, Body/binary>>, S) ->
+	RetPath = #retpath{servlet=self(), req=?INIT_MSG, ref=Ref},
+	case do_init(Body, S) of
+		{ok, Cnf} ->
+			Reply = send_reply(RetPath, peerdrive_client_pb:encode_initcnf(Cnf)),
+			{reply, Reply, S#state{auth=true}};
+		{error, _Reason} = Error ->
+			Reply = send_error(RetPath, Error),
+			{stop, Reply, S}
 	end.
 
 
@@ -323,14 +354,21 @@ handle_packet_forward(Request, Handle, ReqData, RetPath, S) ->
 %% Request handling functions
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-do_init(Body, RetPath) ->
-	#initreq{ major=Major } = peerdrive_client_pb:decode_initreq(Body),
+do_init(Body, #state{cookie=Cookie}) ->
+	#initreq{
+		major  = Major,
+		cookie = ClientCookie
+	} = peerdrive_client_pb:decode_initreq(Body),
 	case Major of
 		0 ->
-			Reply = #initcnf{major = 0, minor = 0, max_packet_size = 16#1000},
-			send_reply(RetPath, peerdrive_client_pb:encode_initcnf(Reply));
+			case ClientCookie of
+				Cookie ->
+					{ok, #initcnf{major = 0, minor = 0, max_packet_size = 16#1000}};
+				_ ->
+					{error, eperm}
+			end;
 		_ ->
-			send_error(RetPath, {error, erpcmismatch})
+			{error, erpcmismatch}
 	end.
 
 
@@ -900,5 +938,17 @@ encode_progress_start(Tag, Info) ->
 										Type == rep_rev ->
 			#progressstartind{tag=Tag, type=Type, source=Source,
 				item=Item, dest=Dest}
+	end.
+
+
+publish(Socket, Cookie, Path) ->
+	{ok, {Address, Port}} = inet:sockname(Socket),
+	case file:open(Path, [write]) of
+		{ok, IoDevice} ->
+			io:format(IoDevice, "tcp://~s:~w/~s~n", [inet_parse:ntoa(Address),
+				Port, peerdrive_util:bin_to_hexstr(Cookie)]),
+			file:close(IoDevice) == ok andalso file:change_mode(Path, 8#00640);
+		{error, _Reason} = Error ->
+			Error
 	end.
 

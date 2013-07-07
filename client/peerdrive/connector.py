@@ -20,8 +20,11 @@ from __future__ import absolute_import
 
 from PyQt4 import QtCore, QtNetwork
 from datetime import datetime
-import sys, struct, atexit, weakref, traceback, os
+import sys, struct, atexit, weakref, traceback, os, os.path
 from . import peerdrive_client_pb2 as pb
+
+if sys.platform == "win32":
+	import _winreg
 
 _errorCodes = {
 	0 : 'ECONFLICT',
@@ -241,16 +244,45 @@ class _Connector(QtCore.QObject):
 	def __init__(self, address=None):
 		super(_Connector, self).__init__()
 
-		host = '127.0.0.1'
-		port = 4567
 		if not address:
+			# look into environment
 			address = os.getenv('PEERDRIVE')
-		if address:
-			if ':' in address:
-				(host, port) = address.split(':')
-				port = int(port)
-			else:
-				host = address
+		if not address:
+			# look for per-user daemon
+			try:
+				if sys.platform == "win32":
+					with _winreg.OpenKey(_winreg.HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders") as key:
+						path = _winreg.QueryValueEx(key, "Local AppData")[0]
+					path = os.path.join(path, "PeerDrive", "server.info")
+				else:
+					path = os.path.expanduser("~/.peerdrive/server.info")
+				with open(path, 'r') as f:
+					address = f.readline()
+			except IOError:
+				pass
+		if not address:
+			# look for system daemon
+			try:
+				if sys.platform == "win32":
+					with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders") as key:
+						path = _winreg.QueryValueEx(key, "Common AppData")[0]
+					path = os.path.join(path, "PeerDrive", "server.info")
+				else:
+					path = "/var/run/peerdrive/server.info"
+				with open(path, 'r') as f:
+					address = f.readline()
+			except IOError:
+				pass
+
+		if not address:
+			raise IOError("Cannot find server!")
+		if not address.startswith("tcp://"):
+			raise IOError("Unknown address scheme: " + address)
+
+		(address, cookie) = address[6:].split("/")
+		(host, port) = address.split(':')
+		port = int(port)
+		cookie = cookie.strip().decode('hex')
 
 		self.socket = QtNetwork.QTcpSocket()
 		self.socket.readyRead.connect(self.__readReady)
@@ -272,6 +304,7 @@ class _Connector(QtCore.QObject):
 			req = pb.InitReq()
 			req.major = 0
 			req.minor = 0
+			req.cookie = cookie
 			reply = self._rpc(_Connector.INIT_MSG, req.SerializeToString())
 			cnf = pb.InitCnf.FromString(reply)
 			if cnf.major != 0 or cnf.minor != 0:

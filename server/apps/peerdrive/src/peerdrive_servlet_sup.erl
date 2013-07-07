@@ -18,7 +18,7 @@
 -behaviour(supervisor).
 
 -export([start_link/2]).
--export([spawn_servlet/2]).
+-export([spawn_servlet/3]).
 -export([init/1]).
 
 start_link(Module, ServletOpt) ->
@@ -37,6 +37,6 @@ init({Module, ServletOpt}) ->
 		}]
 	}}.
 
-spawn_servlet(SupervisorPid, ListenSock) ->
-	supervisor:start_child(SupervisorPid, [self(), ListenSock]).
+spawn_servlet(SupervisorPid, ListenSock, ListenState) ->
+	supervisor:start_child(SupervisorPid, [self(), ListenSock, ListenState]).
 

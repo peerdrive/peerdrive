@@ -55,6 +55,7 @@ out. It is assumed that Erlang, Rebar and Python are all in your path.
       erldokan are installed)
 4. In the 2nd terminal type:
     * `cd client`
+	* `export PEERDRIVE=tcp://127.0.0.1:4567/`
     * `./peerdrive-applet.py`
 
 Initially no stores are mounted. Use `./mount.py <dir> <name>` to mount a store

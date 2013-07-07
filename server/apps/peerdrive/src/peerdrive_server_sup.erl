@@ -59,7 +59,7 @@ init({Module, Port, Options}) ->
 		},
 		{
 			listener,
-			{peerdrive_listener, start_link, [self(), Port, Options]},
+			{peerdrive_listener, start_link, [self(), Module, Port, Options]},
 			permanent,
 			1000,
 			worker,

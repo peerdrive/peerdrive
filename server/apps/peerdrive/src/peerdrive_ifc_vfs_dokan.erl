@@ -57,8 +57,8 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(MountOpts) ->
-	Path = unicode:characters_to_binary(filename:nativename(
-		filename:absname(proplists:get_value(mountpoint, MountOpts, "vfs")))),
+	Path = unicode:characters_to_binary(filename:nativename(filename:absname(
+		proplists:get_value(mountpoint, MountOpts, peerdrive_util:cfg_mnt_dir())))),
 	DokanOpts = [Opt || Opt <- MountOpts, filter_opt(Opt)],
 	erldokan:start_link(?MODULE, {Path, MountOpts}, [{mountpoint, Path} | DokanOpts]).
 

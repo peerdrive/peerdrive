@@ -5,6 +5,7 @@ PREFIX=/usr/local
 PEERDRIVE_LOG=/var/log/peerdrive
 PEERDRIVE_ETC=/etc/peerdrive
 PEERDRIVE_HOME=/var/lib/peerdrive
+PEERDRIVE_RUN=/var/run/peerdrive
 
 cd `dirname $0`
 
@@ -14,6 +15,7 @@ copy_template() {
 	    -e "s|%logdir%|${PEERDRIVE_LOG}|g" \
 	    -e "s|%libsdir%|${PEERDRIVE_LIBS}|g" \
 	    -e "s|%bindir%|${PEERDRIVE_BIN}|g" \
+	    -e "s|%rundir%|${PEERDRIVE_RUN}|g" \
 	< templates/$1 > $2
 }
 
@@ -25,9 +27,10 @@ usage() {
 	echo "  -l LOGDIR         Log file directory       [default: $PEERDRIVE_LOG]"
 	echo "  -c CFGDIR         Configuration directory  [default: $PEERDRIVE_ETC]"
 	echo "  -o HOME           Daemon home directory    [default: $PEERDRIVE_HOME]"
+	echo "  -r RUNDIR         Runtime state directory  [default: $PEERDRIVE_RUN]"
 }
 
-while getopts ":hp:l:c:o:" opt; do
+while getopts ":hp:l:c:o:r:" opt; do
 	case $opt in
 		h)
 			usage
@@ -44,6 +47,9 @@ while getopts ":hp:l:c:o:" opt; do
 			;;
 		o)
 			PEERDRIVE_HOME="$OPTARG"
+			;;
+		r)
+			PEERDRIVE_RUN="$OPTARG"
 			;;
 		\?)
 			echo "Invalid option: -$OPTARG" >&2
@@ -80,6 +86,8 @@ mkdir -p $PEERDRIVE_LOG
 chown peerdrive:peerdrive $PEERDRIVE_LOG
 mkdir -p $PEERDRIVE_HOME/sys
 chown -R peerdrive:peerdrive $PEERDRIVE_HOME
+mkdir -p $PEERDRIVE_RUN
+chown peerdrive:peerdrive $PEERDRIVE_RUN
 echo "ok"
 
 # don't overwrite config file

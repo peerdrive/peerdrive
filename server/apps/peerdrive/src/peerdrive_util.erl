@@ -20,7 +20,7 @@
 -export([walk/2, read_doc_file_name/2]).
 -export([folder_link/3]).
 -export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1, make_bin_16/1]).
--export([user_app_dir/0, user_mnt_dir/0]).
+-export([cfg_sys_daemon/0, cfg_app_dir/0, cfg_mnt_dir/0, cfg_run_dir/0]).
 
 -include("utils.hrl").
 
@@ -207,26 +207,71 @@ write_rev_struct(Store, Doc, Rev, Part, Data) ->
 	end.
 
 
-user_app_dir() ->
-	case os:type() of
-		{unix, _} ->
-			Home = os:getenv("HOME"),
-			filename:join(Home, ".peerdrive");
-		{win32, _} ->
-			AppData = case os:getenv("LOCALAPPDATA") of
-				false -> os:getenv("APPDATA");
-				LocalAppData -> LocalAppData
-			end,
-			filename:join(AppData, "PeerDrive")
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Global configuration
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+cfg_sys_daemon() ->
+	case init:get_argument(system) of
+		{ok, _} -> true;
+		error   -> false
 	end.
 
 
-user_mnt_dir() ->
-	Home = case os:type() of
-		{unix, _} -> os:getenv("HOME");
-		{win32, _} -> os:getenv("USERPROFILE")
+cfg_app_dir() ->
+	case os:type() of
+		{unix, _} ->
+			Home = os:getenv("HOME"),
+			case cfg_sys_daemon() of
+				false -> filename:join(Home, ".peerdrive");
+				true  -> Home
+			end;
+
+		{win32, _} ->
+			cfg_win32_app_dir()
+	end.
+
+
+cfg_mnt_dir() ->
+	case cfg_sys_daemon() of
+		false ->
+			Home = case os:type() of
+				{unix, _} -> os:getenv("HOME");
+				{win32, _} -> os:getenv("USERPROFILE")
+			end,
+			filename:join(Home, "PeerDrive");
+		true ->
+			case os:type() of
+				{unix, _} -> "/media/peerdrive";
+				{win32, _} -> "P:\\"
+			end
+	end.
+
+
+cfg_run_dir() ->
+	case os:type() of
+		{unix, _} ->
+			case init:get_argument(system) of
+				{ok, [[RunDir]]} -> RunDir;
+				error -> filename:join(os:getenv("HOME"), ".peerdrive")
+			end;
+		{win32, _} ->
+			cfg_win32_app_dir()
+	end.
+
+
+cfg_win32_app_dir() ->
+	{ok, Reg} = win32reg:open([read]),
+	case cfg_sys_daemon() of
+		false ->
+			ok = win32reg:change_key(Reg, "\\hkcu\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"),
+			{ok, BasePath} = win32reg:value(Reg, "Local AppData");
+		true ->
+			ok = win32reg:change_key(Reg, "\\hklm\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders"),
+			{ok, BasePath} = win32reg:value(Reg, "Common AppData")
 	end,
-	filename:join(Home, "PeerDrive").
+	ok = win32reg:close(Reg),
+	filename:join(win32reg:expand(BasePath),  "PeerDrive").
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

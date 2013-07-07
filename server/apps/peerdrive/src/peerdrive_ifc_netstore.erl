@@ -15,7 +15,8 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_ifc_netstore).
--export([init/1, handle_packet/2, handle_info/2, terminate/1]).
+-export([init/2, handle_packet/2, handle_info/2, terminate/1]).
+-export([init_listen/2, terminate_listen/1]).
 
 -include("store.hrl").
 -include("netstore.hrl").
@@ -30,7 +31,15 @@
 %% Servlet callbacks
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Options) ->
+init_listen(_Socket, _Options) ->
+	{ok, []}.
+
+
+terminate_listen([]) ->
+	ok.
+
+
+init(Options, []) ->
 	process_flag(trap_exit, true),
 	peerdrive_vol_monitor:register_proc(),
 	Stores = proplists:get_value(stores, Options, []),

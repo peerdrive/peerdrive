@@ -26,6 +26,7 @@ copy_template() {
 	    -e "s|%logdir%|${PEERDRIVE_LOG}|g" \
 	    -e "s|%libsdir%|${PEERDRIVE_LIBS}|g" \
 	    -e "s|%bindir%|${PEERDRIVE_BIN}|g" \
+	    -e "s|%rundir%|${PEERDRIVE_RUN}|g" \
 	< templates/$1 > $2
 }
 
@@ -36,6 +37,7 @@ PEERDRIVE_ETC=$PREFIX/etc/peerdrive
 PEERDRIVE_HOME=$PREFIX/var/lib/peerdrive
 PEERDRIVE_LIBS=$PREFIX/lib/peerdrive/lib
 PEERDRIVE_BIN=$PREFIX/lib/peerdrive/bin
+PEERDRIVE_RUN=$PREFIX/var/run/peerdrive
 
 echo "Installing PeerDrive (prefix: $PREFIX)..."
 
@@ -61,6 +63,8 @@ mkdir -p $PEERDRIVE_BIN $PEERDRIVE_LIBS
 copy_template peerdrive $PEERDRIVE_BIN/peerdrive
 rebar install target=$PEERDRIVE_LIBS force=1 > /dev/null
 chmod a+x $PEERDRIVE_BIN/peerdrive
+mkdir -p $PEERDRIVE_RUN
+chown peerdrive:peerdrive $PEERDRIVE_RUN
 echo "ok"
 
 # install service

@@ -26,6 +26,10 @@ daemon() {
 case "$1" in
     start)
         echo -n "Starting $DESC: "
+		if [ ! -d "%rundir%" ]; then
+			mkdir -p "%rundir%"
+			chown peerdrive:peerdrive "%rundir%"
+		fi
         daemon --daemon
         echo "$NAME."
         ;;

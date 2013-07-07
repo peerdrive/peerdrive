@@ -52,7 +52,7 @@
 
 start_link(Options) ->
 	Dir = filename:nativename(filename:absname(
-		proplists:get_value(mountpoint,	Options, "vfs"))),
+		proplists:get_value(mountpoint,	Options, peerdrive_util:cfg_mnt_dir()))),
 	Server = case application:start(fuserl) of
 		ok                               -> ok;
 		{error,{already_started,fuserl}} -> ok;

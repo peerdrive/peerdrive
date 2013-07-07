@@ -42,13 +42,18 @@ init([]) ->
 				Interfaces);
 
 		undefined ->
-			MntDir = peerdrive_util:user_mnt_dir(),
-			VfsEntry = case filelib:ensure_dir(filename:join(MntDir, "dummy")) of
-				ok ->
-					[{vfs, [{mountpoint, MntDir}]}];
-				{error, Reason} ->
-					error_logger:error_msg("Cannot create mount dir: ~p~n",
-						[Reason]),
+			VfsEntry = case peerdrive_util:cfg_sys_daemon() of
+				false ->
+					MntDir = peerdrive_util:cfg_mnt_dir(),
+					case filelib:ensure_dir(filename:join(MntDir, "dummy")) of
+						ok ->
+							[{vfs, []}];
+						{error, Reason} ->
+							error_logger:error_msg("Cannot create mount dir: ~p~n",
+								[Reason]),
+							[]
+					end;
+				true ->
 					[]
 			end,
 			[{native, []} | VfsEntry]
@@ -82,7 +87,7 @@ check_ifc_spec(_) ->
 
 
 map_ifc_spec({native, Options}) ->
-	Port = proplists:get_value(port, Options, 4567),
+	Port = proplists:get_value(port, Options, 0),
 	peerdrive_server_sup:get_supervisor_spec(peerdrive_ifc_client,
 		Port, Options ++ [{ip, "127.0.0.1"}]);
 

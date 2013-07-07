@@ -242,7 +242,7 @@ get_sys_store_spec() ->
 			throw(einval);
 
 		undefined ->
-			SysDir = filename:join(peerdrive_util:user_app_dir(), "sys"),
+			SysDir = filename:join(peerdrive_util:cfg_app_dir(), "sys"),
 			case filelib:ensure_dir(filename:join(SysDir, "dummy")) of
 				ok ->
 					{SysDir, "", "file"};

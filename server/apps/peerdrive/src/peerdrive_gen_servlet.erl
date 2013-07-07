@@ -15,25 +15,26 @@
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -module(peerdrive_gen_servlet).
--export([start_link/4]).
--export([init/5]).
+-export([start_link/5]).
+-export([init/6]).
 
 
-start_link(Module, Args, Listener, ListenSock) ->
-	proc_lib:start_link(?MODULE, init, [self(), Module, Listener, ListenSock, Args]).
+start_link(Module, Args, Listener, ListenSock, ListenState) ->
+	proc_lib:start_link(?MODULE, init, [self(), Module, Listener, ListenSock,
+		ListenState, Args]).
 
 
-init(Parent, Module, Listener, ListenSocket, Args) ->
+init(Parent, Module, Listener, ListenSocket, ListenState, Args) ->
 	proc_lib:init_ack(Parent, {ok, self()}),
-	Result = server(Module, Listener, ListenSocket, Args),
+	Result = server(Module, Listener, ListenSocket, ListenState, Args),
 	exit(Result).
 
 
-server(Module, Listener, ListenSocket, Args) ->
+server(Module, Listener, ListenSocket, ListenState, Args) ->
 	case gen_tcp:accept(ListenSocket) of
 		{ok, Socket} ->
 			peerdrive_listener:servlet_occupied(Listener),
-			State = Module:init(Args),
+			State = Module:init(Args, ListenState),
 			inet:setopts(Socket, [{nodelay, true}, {keepalive, true}]),
 			{Result, NewState} = loop(Module, gen_tcp, Socket, State),
 			Module:terminate(NewState),

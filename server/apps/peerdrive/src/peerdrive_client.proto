@@ -148,6 +148,7 @@ message ErrorCnf {
 message InitReq {
 	required uint32 major = 1;
 	required uint32 minor = 2;
+	optional bytes cookie = 3 [default = ""];
 }
 
 message InitCnf {

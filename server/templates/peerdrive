@@ -6,6 +6,7 @@ NAME="peerdrive-$USER"
 CONFIG="$HOME/.peerdrive/etc/peerdrive"
 PID_FILE="$HOME/.peerdrive/peerdrive.pid"
 LOG_FILE="$HOME/.peerdrive/console.log"
+SYSFLAG=
 
 ERLDAEMON=$(ls -1 "%libsdir%"/erldaemon-*/priv/erldaemon | tail -n1)
 
@@ -61,7 +62,7 @@ start_daemon() {
 
 	export ERL_LIBS
 	exec $ERLDAEMON $FOREGROUND -n "$NAME" -l "$LOG_FILE" -p "$PID_FILE" -- \
-		erl $CONFIG -noinput +Bd +K true -A 5 +W w \
+		erl $CONFIG $SYSFLAG -noinput +Bd +K true -A 5 +W w \
 		-boot start_sasl -s crypto -s ssl -s peerdrive start permanent -s erldaemon
 }
 
@@ -133,9 +134,10 @@ until [ -z "$1" ]; do
 		--system)
 			NAME=peerdrive
 			CONFIG="%etcdir%/peerdrive"
-			PID_FILE="%homedir%/peerdrive.pid"
+			PID_FILE="%rundir%/peerdrive.pid"
 			LOG_FILE="%logdir%/console.log"
 			LOG_ROTATE=
+			SYSFLAG="-system %rundir%"
 			;;
 		-h|--help)
 			usage
