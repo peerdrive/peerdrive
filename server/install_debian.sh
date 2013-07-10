@@ -95,6 +95,7 @@ echo -n "  * Install default configuration files..."
 mkdir -p $PEERDRIVE_ETC
 if [ ! -e $PEERDRIVE_ETC/peerdrive.config ]; then
 	copy_template peerdrive.init.config $PEERDRIVE_ETC/peerdrive.config
+	copy_template peerdrive.default /etc/default/peerdrive
 	echo "ok"
 else
 	echo "no (already exist)"
@@ -107,6 +108,9 @@ copy_template peerdrive $PEERDRIVE_BIN/peerdrive
 rebar install target=$PEERDRIVE_LIBS force=1 > /dev/null
 chown -R root:root $PEERDRIVE_LIBS
 chmod a+x $PEERDRIVE_BIN/peerdrive
+copy_template start-peerdrive $PREFIX/bin/start-peerdrive
+chmod a+x $PREFIX/bin/start-peerdrive
+copy_template peerdrive.desktop /etc/xdg/autostart/peerdrive.desktop
 echo "ok"
 
 # install service

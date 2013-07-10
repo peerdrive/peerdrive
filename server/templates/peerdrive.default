@@ -1,0 +1,9 @@
+# Start the PeerDrive daemon in system mode.
+#
+# Usually PeerDrive should be start per user. But if you want to run the daemon
+# on a file server to provide network stores system mode might be more
+# appropriate.
+#
+# 0 = don't start in system mode, 1 = start in system mode
+PEERDRIVE_SYSTEM_START=0
+

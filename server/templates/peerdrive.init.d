@@ -10,14 +10,20 @@
 # Description:       Starts PeerDrive
 ### END INIT INFO
 
-set -e
-
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON="%bindir%/peerdrive"
 NAME=peerdrive
-DESC="peerdrive server"
 
 test -x $DAEMON || exit 0
+
+. /lib/lsb/init-functions
+
+PEERDRIVE_SYSTEM_START=0
+test -f /etc/default/peerdrive && . /etc/default/peerdrive
+if [ "$PEERDRIVE_SYSTEM_START" != "1" ]; then
+	log_warning_msg "PeerDrive configured for per-user sessions"
+	exit 0
+fi
 
 daemon() {
 	su -l -c "$DAEMON --system $1" peerdrive
@@ -25,27 +31,26 @@ daemon() {
 
 case "$1" in
     start)
-        echo -n "Starting $DESC: "
+		log_daemon_msg "Starting system PeerDrive Daemon"
 		if [ ! -d "%rundir%" ]; then
 			mkdir -p "%rundir%"
 			chown peerdrive:peerdrive "%rundir%"
 		fi
         daemon --daemon
-        echo "$NAME."
+		log_end_msg $?
         ;;
     stop)
-        echo -n "Stopping $DESC: "
+		log_daemon_msg "Stopping system PeerDrive Daemon"
         daemon --stop
-        echo "$NAME."
+		log_end_msg $?
         ;;
     status)
 		$DAEMON --system --check
         ;;
     restart)
-        echo -n "Restarting $DESC: "
-        daemon --stop
-        daemon --daemon
-        echo "$NAME."
+		log_daemon_msg "Restarting system PeerDrive Daemon"
+        daemon --stop && daemon --daemon
+		log_end_msg $?
         ;;
     *)
         N=/etc/init.d/$NAME

@@ -1,0 +1,12 @@
+#!/bin/sh
+
+set -e
+
+PEERDRIVE_SYSTEM_START=0
+test -f /etc/default/peerdrive && . /etc/default/peerdrive
+if [ "$PEERDRIVE_SYSTEM_START" = "1" ]; then
+	exit 0
+fi
+
+%bindir%/peerdrive --start "$@"
+
