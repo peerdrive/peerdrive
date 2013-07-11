@@ -29,7 +29,7 @@ def settingsPath():
 	if not _settingsPath:
 		for e in ['HOME', 'LOCALAPPDATA', 'APPDATA']:
 			if e in os.environ:
-				_settingsPath = os.path.join(os.environ[e], '.peerdrive')
+				_settingsPath = os.path.join(os.environ[e], '.peerdrive', 'var')
 				break
 	return _settingsPath
 

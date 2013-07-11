@@ -219,7 +219,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			hash = self.__view.doc().encode('hex')
 		else:
 			hash = self.__view.rev().encode('hex')
-		path = os.path.join(settingsPath(), hash[0:2])
+		path = os.path.join(settingsPath(), 'views', hash[0:2])
 		if not os.path.exists(path):
 			os.makedirs(path)
 		with open(os.path.join(path, hash[2:]), 'w') as f:
@@ -232,7 +232,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		settings = { }
 
 		guid = guid.encode('hex')
-		path = os.path.join(settingsPath(), guid[0:2], guid[2:])
+		path = os.path.join(settingsPath(), 'views', guid[0:2], guid[2:])
 		try:
 			if os.path.isfile(path):
 				with open(path, 'r') as f:
