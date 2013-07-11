@@ -23,7 +23,7 @@
 -include("utils.hrl").
 -include("volman.hrl").
 
--record(state, {store, doc, fstab, watch}).
+-record(state, {store :: pid(), doc :: peerdrive:doc(), fstab :: gb_tree(), watch}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface
@@ -107,8 +107,9 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% Local stuff
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+-spec read_fstab(pid(), peerdrive:doc()) -> {ok, gb_tree()} | {error, atom()}.
 read_fstab(Store, Doc) ->
-	case peerdrive_util:read_doc_struct(Store, Doc, <<"PDSD">>) of
+	case peerdrive_util:read_doc_struct(Store, Doc, <<"/org.peerdrive.fstab">>) of
 		{ok, FsTab} when ?IS_GB_TREE(FsTab) ->
 			{ok, FsTab};
 		{ok, _} ->
@@ -161,12 +162,11 @@ create_fstab(Store, Root) ->
 		{ok, Doc, Handle} = check(peerdrive_broker:create(Store,
 			<<"org.peerdrive.fstab">>, <<"">>)),
 		try
-			Meta = gb_trees:from_orddict([{<<"org.peerdrive.annotation">>,
-				gb_trees:from_orddict([{<<"title">>, <<"fstab">>}])}]),
-			ok = check(peerdrive_broker:write(Handle, <<"META">>, 0,
-				peerdrive_struct:encode(Meta))),
-			ok = check(peerdrive_broker:write(Handle, <<"PDSD">>, 0,
-				peerdrive_struct:encode(gb_trees:empty()))),
+			Meta = gb_trees:enter(<<"title">>, <<"fstab">>, gb_trees:empty()),
+			Data = gb_trees:enter(<<"org.peerdrive.fstab">>, gb_trees:empty(),
+				gb_trees:enter(<<"org.peerdrive.annotation">>, Meta, gb_trees:empty())),
+			ok = check(peerdrive_broker:set_data(Handle, <<"">>,
+				peerdrive_struct:encode(Data))),
 			{ok, _Rev} = check(peerdrive_broker:commit(Handle)),
 			ok = check(peerdrive_util:folder_link(Store, Root, Doc)),
 			{ok, Doc}

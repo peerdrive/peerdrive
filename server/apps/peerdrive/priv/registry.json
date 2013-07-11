@@ -5,22 +5,22 @@
 		"display" : "Generic item",
 		"meta" : [
 			{
-				"key"     : ["org.peerdrive.annotation", "title"],
+				"key"     : ["title"],
 				"type"    : "string",
 				"display" : "Title"
 			},
 			{
-				"key"     : ["org.peerdrive.annotation", "description"],
+				"key"     : ["description"],
 				"type"    : "string",
 				"display" : "Description"
 			},
 			{
-				"key"     : ["org.peerdrive.annotation", "tags"],
+				"key"     : ["tags"],
 				"type"    : "list of string",
 				"display" : "Tags"
 			},
 			{
-				"key"     : ["org.peerdrive.annotation", "origin"],
+				"key"     : ["origin"],
 				"type"    : "string",
 				"display" : "Document origin"
 			}

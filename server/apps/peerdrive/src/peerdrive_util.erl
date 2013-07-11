@@ -16,7 +16,7 @@
 
 -module(peerdrive_util).
 -export([get_time/0, bin_to_hexstr/1, hexstr_to_bin/1, build_path/2, gen_tmp_name/1]).
--export([read_doc_struct/3, read_rev/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
+-export([read_doc_struct/3, read_rev_struct/3, hash_file/1, fixup_file/1]).
 -export([walk/2, read_doc_file_name/2]).
 -export([folder_link/3]).
 -export([merkle/1, merkle_init/0, merkle_update/2, merkle_final/1, make_bin_16/1]).
@@ -86,7 +86,7 @@ walk_step(_Store, Doc, []) ->
 	{ok, Doc};
 
 walk_step(Store, Doc, [File | Path]) ->
-	case read_doc_struct(Store, Doc, <<"PDSD">>) of
+	case read_doc_struct(Store, Doc, <<"/org.peerdrive.folder">>) of
 		{ok, Folder} ->
 			case find_folder_entry(Store, Folder, File) of
 				{ok, Child} ->
@@ -125,33 +125,14 @@ find_folder_entry(Store, [_ | Rest], Name) ->
 
 
 read_file_name(Store, Doc) ->
-	Meta = case read_doc_struct(Store, Doc, <<"META">>) of
-		{ok, Value1} when ?IS_GB_TREE(Value1) ->
-			Value1;
-		{ok, _} ->
-			throw({error, eio});
-		{error, _} = ReadError ->
-			throw(ReadError)
-	end,
-	case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
+	case read_doc_struct(Store, Doc, <<"/org.peerdrive.annotation/title">>) of
 		{ok, Title} when is_binary(Title) ->
 			Title;
 		{ok, _} ->
 			throw({error, eio});
-		error ->
-			throw({error, eio})
+		{error, _} = ReadError ->
+			throw(ReadError)
 	end.
-
-
-meta_read_entry(Meta, []) ->
-	{ok, Meta};
-meta_read_entry(Meta, [Step|Path]) when ?IS_GB_TREE(Meta) ->
-	case gb_trees:lookup(Step, Meta) of
-		{value, Value} -> meta_read_entry(Value, Path);
-		none           -> error
-	end;
-meta_read_entry(_Meta, _Path) ->
-	error.
 
 
 read_doc_file_name(Store, Doc) ->
@@ -165,11 +146,11 @@ read_doc_file_name(Store, Doc) ->
 folder_link(Store, Folder, Doc) ->
 	case peerdrive_store:lookup(Store, Folder) of
 		{ok, Rev, _} ->
-			case read_rev_struct(Store, Rev, <<"PDSD">>) of
+			case read_rev_struct(Store, Rev, <<"/org.peerdrive.folder">>) of
 				{ok, Dir} ->
 					Entry = gb_trees:from_orddict([{<<"">>, {dlink, Doc}}]),
 					NewDir = [Entry | Dir],
-					write_rev_struct(Store, Folder, Rev, <<"PDSD">>, NewDir);
+					write_rev_struct(Store, Folder, Rev, <<"/org.peerdrive.folder">>, NewDir);
 
 				Error ->
 					Error
@@ -185,8 +166,7 @@ write_rev_struct(Store, Doc, Rev, Part, Data) ->
 		{ok, Handle} ->
 			try
 				Raw = peerdrive_struct:encode(Data),
-				ok = peerdrive_broker:truncate(Handle, Part, 0),
-				case peerdrive_broker:write(Handle, Part, 0, Raw) of
+				case peerdrive_broker:set_data(Handle, Part, Raw) of
 					ok ->
 						case peerdrive_broker:commit(Handle) of
 							{ok, _NewRev} ->
@@ -278,52 +258,27 @@ cfg_win32_app_dir() ->
 %% Document/Revision reading
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-read_doc_struct(Store, Doc, Part) ->
+read_doc_struct(Store, Doc, Selector) ->
 	case peerdrive_store:lookup(Store, Doc) of
-		{ok, Rev, _} -> read_rev_struct(Store, Rev, Part);
+		{ok, Rev, _} -> read_rev_struct(Store, Rev, Selector);
 		Error        -> Error
 	end.
 
 
-% returns {ok, Data} | {error, Reason}
-read_rev(Store, Rev, Part) ->
+read_rev_struct(Store, Rev, Selector) ->
 	case peerdrive_broker:peek(Store, Rev) of
 		{ok, Reader} ->
 			try
-				read_rev_loop(Reader, Part, 0, <<>>)
+				case peerdrive_broker:get_data(Reader, Selector) of
+					{ok, Data} -> {ok, peerdrive_struct:decode(Data)};
+					Error      -> Error
+				end
 			after
 				peerdrive_broker:close(Reader)
 			end;
 
-		{error, Reason} ->
-			{error, Reason}
-	end.
-
-
-read_rev_loop(Reader, Part, Offset, Acc) ->
-	Length = 16#10000,
-	case peerdrive_broker:read(Reader, Part, Offset, Length) of
-		{ok, <<>>} ->
-			{ok, Acc};
-		{ok, Data} ->
-			read_rev_loop(Reader, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
-		{error, Reason} ->
-			{error, Reason}
-	end.
-
-
-read_rev_struct(Store, Rev, Part) ->
-	case read_rev(Store, Rev, Part) of
-		{ok, Data} ->
-			case catch peerdrive_struct:decode(Data) of
-				{'EXIT', _Reason} ->
-					{error, einval};
-				Struct ->
-					{ok, Struct}
-			end;
-
-		{error, Reason} ->
-			{error, Reason}
+		{error, _Reason} = Error ->
+			Error
 	end.
 
 

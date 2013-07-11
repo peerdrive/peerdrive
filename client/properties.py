@@ -18,7 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PyQt4 import QtCore, QtGui
-from peerdrive import Connector, Registry, struct
+from peerdrive import Connector, Registry, struct, connector
 from peerdrive.gui.widgets import DocButton, RevButton
 from peerdrive.gui.utils import showDocument
 
@@ -113,22 +113,19 @@ class PropertiesDialog(QtGui.QDialog):
 
 	def __save(self):
 		self.__buttonBox.button(QtGui.QDialogButtonBox.Save).setEnabled(False)
-		with Connector().peek(self.__store, self.__rev) as r:
-			metaData = struct.loads(self.__store, r.readAll('META'))
-
-		setMetaData(metaData, ["org.peerdrive.annotation", "title"],
-			self.__annoTab.getTitle())
-		setMetaData(metaData, ["org.peerdrive.annotation", "description"],
-			self.__annoTab.getDescription())
-		tagString = self.__annoTab.getTags()
-		if tagString is not None:
-			tagList = [ tag.strip() for tag in tagString.split(',')]
-			tagList = [ tag for tag in tagList if tag != '' ]
-			tagList = list(set(tagList))
-			setMetaData(metaData, ["org.peerdrive.annotation", "tags"], tagList)
 
 		with Connector().update(self.__store, self.__doc, self.__rev) as writer:
-			writer.writeAll('META', struct.dumps(metaData))
+			writer.setData("/org.peerdrive.annotation/title",
+				self.__annoTab.getTitle())
+			writer.setData("/org.peerdrive.annotation/description",
+				self.__annoTab.getDescription())
+			tagString = self.__annoTab.getTags()
+			if tagString is not None:
+				tagList = [ tag.strip() for tag in tagString.split(',')]
+				tagList = [ tag for tag in tagList if tag != '' ]
+				tagList = list(set(tagList))
+				writer.setData("/org.peerdrive.annotation/tags", tagList)
+
 			writer.commit()
 			self.__rev = writer.getRev()
 
@@ -196,15 +193,15 @@ class RevisionTab(QtGui.QWidget):
 			stat = Connector().stat(rev, [store])
 			self.__typeLabel.setText(Registry().getDisplayString(stat.type()))
 			self.__mtimeLabel.setText(str(stat.mtime()))
-			size = 0
-			for part in stat.parts():
-				size += stat.size(part)
+			size = stat.dataSize()
+			for a in stat.attachments():
+				size += stat.size(a)
 			for unit in ['Bytes', 'KiB', 'MiB', 'GiB']:
 				if size < (1 << 10):
 					break
 				else:
 					size = size >> 10
-			sizeText = "%d %s (%d parts)" % (size, unit, len(stat.parts()))
+			sizeText = "%d %s (%d attachments)" % (size, unit, len(stat.attachments()))
 			self.__sizeLabel.setText(sizeText)
 		except IOError:
 			self.__typeLabel.setText("n/a")
@@ -233,17 +230,17 @@ class HistoryTab(QtGui.QWidget):
 
 		def mimeTypes(self):
 			types = QtCore.QStringList()
-			types << struct.LINK_MIME_TYPE
+			types << connector.LINK_MIME_TYPE
 			return types
 
 		def mimeData(self, items):
-			links = [ struct.RevLink(self.__store, self.__revs[self.row(item)])
+			links = [ connector.RevLink(self.__store, self.__revs[self.row(item)])
 				for item in items ]
 			if not links:
 				return None
 
 			mimeData = QtCore.QMimeData()
-			struct.dumpMimeData(mimeData, links)
+			connector.dumpMimeData(mimeData, links)
 			return mimeData
 
 		def __loadComment(self, rev):
@@ -258,7 +255,7 @@ class HistoryTab(QtGui.QWidget):
 		def __open(self, item):
 			row = self.row(item)
 			rev = self.__revs[row]
-			showDocument(struct.RevLink(self.__store, rev))
+			showDocument(connector.RevLink(self.__store, rev))
 
 
 	def __init__(self, parent=None):
@@ -330,19 +327,10 @@ class AnnotationTab(QtGui.QWidget):
 
 		try:
 			with Connector().peek(store, rev) as r:
-				metaData = struct.loads(store, r.readAll('META'))
-				title = extractMetaData(
-					metaData,
-					["org.peerdrive.annotation", "title"],
-					"")
-				description = extractMetaData(
-					metaData,
-					["org.peerdrive.annotation", "description"],
-					"")
-				tags = extractMetaData(
-					metaData,
-					["org.peerdrive.annotation", "tags"],
-					[])
+				metaData = r.getData("/org.peerdrive.annotation")
+				title = extractMetaData(metaData, ["title"], "")
+				description = extractMetaData(metaData, ["description"], "")
+				tags = extractMetaData(metaData, ["tags"], [])
 		except IOError:
 			pass
 
@@ -378,7 +366,7 @@ if __name__ == '__main__':
 
 	link = None
 	if len(sys.argv) == 2:
-		link = struct.Link(sys.argv[1])
+		link = connector.Link(sys.argv[1])
 
 	if not link:
 		print "Usage: properties.py [doc:|rev:]UUID"

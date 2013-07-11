@@ -18,7 +18,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import sys, optparse, subprocess, os.path, stat, tempfile
-from peerdrive import Connector, Registry, struct, fuse
+from peerdrive import Connector, Registry, fuse
+from peerdrive.connector import Link
 
 usage = ("usage: %prog [options] <Document>\n\n"
 	"Document:\n"
@@ -32,7 +33,7 @@ parser.add_option("--referrer", dest="referrer", metavar="REF",
 if len(args) != 1:
 	parser.error("incorrect number of arguments")
 try:
-	link = struct.Link(args[0])
+	link = Link(args[0])
 except IOError as e:
 	parser.error(str(e))
 
@@ -40,24 +41,22 @@ except IOError as e:
 path = fuse.findFuseFile(link)
 if not path:
 	s = Connector().stat(link.rev())
-	hash = s.hash('FILE')
+	hash = s.hash('public.data')
 
 	name = hash.encode('hex')
 	ext = ""
 	with Connector().peek(link.store(), link.rev()) as r:
-		meta = struct.loads(link.store(), r.readAll('META'))
+		annotation = r.getData("/org.peerdrive.annotation")
 
-	# first look into annotation meta data
-	if "org.peerdrive.annotation" in meta:
-		annotation = meta["org.peerdrive.annotation"]
-		# read title
-		if "title" in annotation:
-			(name, ext) = os.path.splitext(annotation["title"])
-		# try to get extension from Registry if title has none
-		if not ext:
-			extensions = Registry().search(s.type(), "extensions")
-			if extensions:
-				ext = extensions[0]
+	# read title
+	if "title" in annotation:
+		(name, ext) = os.path.splitext(annotation["title"])
+
+	# try to get extension from Registry if title has none
+	if not ext:
+		extensions = Registry().search(s.type(), "extensions")
+		if extensions:
+			ext = extensions[0]
 
 	# try to get extension from origin if we don't have one already
 	if not ext and ("origin" in annotation):
@@ -70,7 +69,7 @@ if not path:
 	if not os.path.isfile(path):
 		with open(path, "wb") as file:
 			with Connector().peek(link.store(), link.rev()) as reader:
-				file.write(reader.readAll('FILE'))
+				file.write(reader.readAll('public.data'))
 		os.chmod(path, stat.S_IREAD)
 
 

@@ -75,6 +75,9 @@
 -define(PROGRESS_END_MSG,    16#028).
 -define(PROGRESS_QUERY_MSG,  16#029).
 -define(WALK_PATH_MSG,       16#02a).
+-define(GET_DATA_MSG,        16#02b).
+-define(SET_DATA_MSG,        16#02c).
+-define(GET_LINKS_MSG,       16#02d).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Servlet callbacks
@@ -190,6 +193,10 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, #state{auth=true
 			fork(Body, RetPath, fun do_stat/1),
 			{ok, S};
 
+		?GET_LINKS_MSG ->
+			fork(Body, RetPath, fun do_get_links/1),
+			{ok, S};
+
 		?PEEK_MSG ->
 			start_worker(S, fun do_peek/2, RetPath, Body);
 
@@ -261,74 +268,84 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, #state{auth=true
 			fork(Body, RetPath, fun do_walk_path/1),
 			{ok, S};
 
+		?GET_DATA_MSG ->
+			ReqData = #getdatareq{handle=Handle} =
+				peerdrive_client_pb:decode_getdatareq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
+		?SET_DATA_MSG ->
+			ReqData = #setdatareq{handle=Handle} =
+				peerdrive_client_pb:decode_setdatareq(Body),
+			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
+
 		?READ_MSG ->
 			ReqData = #readreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_readreq(Body),
+				peerdrive_client_pb:decode_readreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?WRITE_BUFFER_MSG ->
 			ReqData = #writebufferreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_writebufferreq(Body),
+				peerdrive_client_pb:decode_writebufferreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?WRITE_COMMIT_MSG ->
 			ReqData = #writecommitreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_writecommitreq(Body),
+				peerdrive_client_pb:decode_writecommitreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?TRUNC_MSG ->
 			ReqData = #truncreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_truncreq(Body),
+				peerdrive_client_pb:decode_truncreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?CLOSE_MSG ->
 			ReqData = #closereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_closereq(Body),
+				peerdrive_client_pb:decode_closereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?COMMIT_MSG ->
 			ReqData = #commitreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_commitreq(Body),
+				peerdrive_client_pb:decode_commitreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?SUSPEND_MSG ->
 			ReqData = #suspendreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_suspendreq(Body),
+				peerdrive_client_pb:decode_suspendreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?MERGE_MSG ->
 			ReqData = #mergereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_mergereq(Body),
+				peerdrive_client_pb:decode_mergereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?REBASE_MSG ->
 			ReqData = #rebasereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_rebasereq(Body),
+				peerdrive_client_pb:decode_rebasereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?GET_PARENTS_MSG ->
 			ReqData = #getparentsreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_getparentsreq(Body),
+				peerdrive_client_pb:decode_getparentsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?SET_TYPE_MSG ->
 			ReqData = #settypereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_settypereq(Body),
+				peerdrive_client_pb:decode_settypereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?GET_TYPE_MSG ->
 			ReqData = #gettypereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_gettypereq(Body),
+				peerdrive_client_pb:decode_gettypereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?SET_FLAGS_MSG ->
 			ReqData = #setflagsreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_setflagsreq(Body),
+				peerdrive_client_pb:decode_setflagsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?GET_FLAGS_MSG ->
 			ReqData = #getflagsreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_getflagsreq(Body),
+				peerdrive_client_pb:decode_getflagsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S)
 	end;
 
@@ -360,10 +377,10 @@ do_init(Body, #state{cookie=Cookie}) ->
 		cookie = ClientCookie
 	} = peerdrive_client_pb:decode_initreq(Body),
 	case Major of
-		0 ->
+		1 ->
 			case ClientCookie of
 				Cookie ->
-					{ok, #initcnf{major = 0, minor = 0, max_packet_size = 16#1000}};
+					{ok, #initcnf{major = 1, minor = 0, max_packet_size = 16#1000}};
 				_ ->
 					{error, eperm}
 			end;
@@ -417,18 +434,20 @@ do_stat(Body) ->
 		peerdrive_client_pb:decode_statreq(Body),
 	{ok, Stat} = check(peerdrive_broker:stat(Rev, get_stores(Stores))),
 	#rev_stat{
-		flags     = Flags,
-		parts     = Parts,
-		parents   = Parents,
-		mtime     = Mtime,
-		type      = TypeCode,
-		creator   = CreatorCode,
-		comment   = Comment
+		flags       = Flags,
+		data        = {DataSize, DataHash},
+		attachments = Attachments,
+		parents     = Parents,
+		mtime       = Mtime,
+		type        = TypeCode,
+		creator     = CreatorCode,
+		comment     = Comment
 	} = Stat,
 	Reply = #statcnf{
 		flags        = Flags,
-		parts        = [ #statcnf_part{fourcc=F, size=S, pid=P}
-						 || {F, S, P} <- Parts ],
+		data        = #statcnf_data{size=DataSize, hash=DataHash},
+		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H}
+						 || {N, S, H} <- Attachments ],
 		parents      = Parents,
 		mtime        = Mtime,
 		type_code    = TypeCode,
@@ -436,6 +455,15 @@ do_stat(Body) ->
 		comment      = Comment
 	},
 	peerdrive_client_pb:encode_statcnf(Reply).
+
+
+do_get_links(Body) ->
+	#getlinksreq{rev=Rev, stores=Stores} =
+		peerdrive_client_pb:decode_getlinksreq(Body),
+	{ok, {DocLinks, RevLinks}} = check(peerdrive_broker:get_links(Rev,
+		get_stores(Stores))),
+	Reply = #getlinkscnf{doc_links=DocLinks, rev_links=RevLinks},
+	peerdrive_client_pb:encode_getlinkscnf(Reply).
 
 
 do_peek(Cookie, Body) ->
@@ -759,22 +787,29 @@ io_loop(Handle, State) ->
 
 io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 	case Request of
+		?GET_DATA_MSG ->
+			#getdatareq{selector=Selector} = ReqData,
+			{ok, Data} = check(peerdrive_broker:get_data(Handle, Selector)),
+			peerdrive_client_pb:encode_getdatacnf(#getdatacnf{data=Data});
+
+		?SET_DATA_MSG ->
+			#setdatareq{selector=Selector, data=Data} = ReqData,
+			ok = check(peerdrive_broker:set_data(Handle, Selector, Data)),
+			<<>>;
+
 		?READ_MSG ->
 			#readreq{part=Part, offset=Offset, length=Length} = ReqData,
-			?ASSERT_PART(Part),
 			{ok, Data} = check(peerdrive_broker:read(Handle, Part, Offset, Length)),
 			peerdrive_client_pb:encode_readcnf(#readcnf{data=Data});
 
 		?WRITE_BUFFER_MSG ->
 			#writebufferreq{part=Part, data=Data} = ReqData,
-			?ASSERT_PART(Part),
 			NewWrBuf = orddict:update(Part, fun(Old) -> [Data | Old] end,
 				[Data], WriteBuffer),
 			{<<>>, NewWrBuf};
 
 		?WRITE_COMMIT_MSG ->
 			#writecommitreq{part=Part, offset=Offset, data=Data} = ReqData,
-			?ASSERT_PART(Part),
 			case orddict:find(Part, WriteBuffer) of
 				error ->
 					ok = check(peerdrive_broker:write(Handle, Part, Offset, Data)),
@@ -792,7 +827,6 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 
 		?TRUNC_MSG ->
 			#truncreq{part=Part, offset=Offset} = ReqData,
-			?ASSERT_PART(Part),
 			ok = check(peerdrive_broker:truncate(Handle, Part, Offset)),
 			<<>>;
 

@@ -19,7 +19,7 @@
 -export([peek/2, create/3, fork/3, update/4, resume/4]).
 -export([read/4, write/4, truncate/3, get_parents/1, merge/4, rebase/2,
 	get_type/1, set_type/2, commit/1, commit/2, suspend/1, suspend/2, close/1,
-	get_flags/1, set_flags/2]).
+	get_flags/1, set_flags/2, get_data/2, set_data/3]).
 
 -include("utils.hrl").
 
@@ -67,28 +67,28 @@ resume(Store, Doc, PreRev, Creator) ->
 			Error
 	end.
 
+get_data({_, Handle}, Selector) ->
+	peerdrive_store:get_data(Handle, Selector);
+get_data(_, _) ->
+	{error, ebadf}.
+
+set_data({_, Handle}, Selector, Data) ->
+	peerdrive_store:set_data(Handle, Selector, Data);
+set_data(_, _, _) ->
+	{error, ebadf}.
+
 read({_, Handle}, Part, Offset, Length) ->
 	peerdrive_store:read(Handle, Part, Offset, Length);
 read(_, _, _, _) ->
 	{error, ebadf}.
 
-write({_, Handle}, Part, Offset, Data) when Part == <<"FILE">>;
-                                            Part == <<"META">>;
-                                            Part == <<"PDSD">>;
-                                            Part == <<"ENCR">> ->
-	peerdrive_store:write(Handle, Part, Offset, Data);
-write({_, _}, _, _, _) ->
-	{error, einval};
+write({_, Handle}, Attachment, Offset, Data) ->
+	peerdrive_store:write(Handle, Attachment, Offset, Data);
 write(_, _, _, _) ->
 	{error, ebadf}.
 
-truncate({_, Handle}, Part, Offset) when Part == <<"FILE">>;
-                                         Part == <<"META">>;
-                                         Part == <<"PDSD">>;
-                                         Part == <<"ENCR">> ->
-	peerdrive_store:truncate(Handle, Part, Offset);
-truncate({_, _}, _, _) ->
-	{error, einval};
+truncate({_, Handle}, Attachment, Offset) ->
+	peerdrive_store:truncate(Handle, Attachment, Offset);
 truncate(_, _, _) ->
 	{error, ebadf}.
 
@@ -130,22 +130,22 @@ set_type(_, _) ->
 	{error, ebadf}.
 
 commit({_, Handle}) ->
-	do_commit(Handle, fun() -> peerdrive_store:commit(Handle) end);
+	peerdrive_store:commit(Handle);
 commit(_) ->
 	{error, ebadf}.
 
 commit({_, Handle}, Comment) ->
-	do_commit(Handle, fun() -> peerdrive_store:commit(Handle, Comment) end);
+	peerdrive_store:commit(Handle, Comment);
 commit(_, _) ->
 	{error, ebadf}.
 
 suspend({_, Handle}) ->
-	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle) end);
+	peerdrive_store:suspend(Handle);
 suspend(_) ->
 	{error, ebadf}.
 
 suspend({_, Handle}, Comment) ->
-	do_commit(Handle, fun() -> peerdrive_store:suspend(Handle, Comment) end);
+	peerdrive_store:suspend(Handle, Comment);
 suspend(_, _) ->
 	{error, ebadf}.
 
@@ -167,11 +167,11 @@ do_merge(Handle, DstStore, SrcStore, Rev, Options) ->
 					% TODO: check if the new Rev supersedes any present parent
 					NewParents = lists:usort([Rev | Parents]),
 					case peerdrive_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Options) of
-						{ok, Handle} ->
+						{ok, RepHandle} ->
 							try
 								peerdrive_store:set_parents(Handle, NewParents)
 							after
-								peerdrive_replicator:close(Handle)
+								peerdrive_replicator:close(RepHandle)
 							end;
 						{error, _} = Error ->
 							Error
@@ -189,82 +189,4 @@ do_merge(Handle, DstStore, SrcStore, Rev, Options) ->
 do_rebase(Handle, Rev) ->
 	% TODO: only remove superseded revisions
 	peerdrive_store:set_parents(Handle, [Rev]).
-
-
-do_commit(Handle, Fun) ->
-	case do_commit_prepare(Handle) of
-		ok    -> Fun();
-		Error -> Error
-	end.
-
-
-do_commit_prepare(Handle) ->
-	case read_rev_refs(Handle) of
-		{ok, DocRefs, RevRefs} ->
-			peerdrive_store:set_links(Handle, DocRefs, RevRefs);
-		Error ->
-			Error
-	end.
-
-
-read_rev_refs(Handle) ->
-	try
-		{DocSet, RevSet} = lists:foldl(
-			fun(FourCC, {AccDocRefs, AccRevRefs}) ->
-				{NewDR, NewRR} = read_rev_extract(read_rev_part(Handle,
-					FourCC)),
-				{sets:union(NewDR, AccDocRefs), sets:union(NewRR, AccRevRefs)}
-			end,
-			{sets:new(), sets:new()},
-			[<<"PDSD">>, <<"META">>, <<"ENCR">>]),
-		{ok, sets:to_list(DocSet), sets:to_list(RevSet)}
-	catch
-		throw:Term -> Term
-	end.
-
-
-read_rev_part(Handle, Part) ->
-	case peerdrive_store:read(Handle, Part, 0, 16#1000000) of
-		{ok, Binary} ->
-			case catch peerdrive_struct:decode(Binary) of
-				{'EXIT', _Reason} ->
-					[];
-				Struct ->
-					Struct
-			end;
-
-		{error, enoent} ->
-			[];
-
-		Error ->
-			throw(Error)
-	end.
-
-
-read_rev_extract(Data) when ?IS_GB_TREE(Data) ->
-	lists:foldl(
-		fun(Value, {AccDocs, AccRevs}) ->
-			{Docs, Revs} = read_rev_extract(Value),
-			{sets:union(Docs, AccDocs), sets:union(Revs, AccRevs)}
-		end,
-		{sets:new(), sets:new()},
-		gb_trees:values(Data));
-
-read_rev_extract(Data) when is_list(Data) ->
-	lists:foldl(
-		fun(Value, {AccDocs, AccRevs}) ->
-			{Docs, Revs} = read_rev_extract(Value),
-			{sets:union(Docs, AccDocs), sets:union(Revs, AccRevs)}
-		end,
-		{sets:new(), sets:new()},
-		Data);
-
-read_rev_extract({dlink, Doc}) ->
-	{sets:from_list([Doc]), sets:new()};
-
-read_rev_extract({rlink, Rev}) ->
-	{sets:new(), sets:from_list([Rev])};
-
-read_rev_extract(_) ->
-	{sets:new(), sets:new()}.
 

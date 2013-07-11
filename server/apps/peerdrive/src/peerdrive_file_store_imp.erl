@@ -17,20 +17,20 @@
 -module(peerdrive_file_store_imp).
 -behaviour(gen_server).
 
--export([start_link/5]).
+-export([start_link/7]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
 -include("store.hrl").
 
 -define(THRESHOLD, 1024).
 
--record(state, {store, rid, rev, parts, noverify, done}).
+-record(state, {store, rid, rev, parts, noverify, done, doclinks, revlinks}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(RId, Rev, Missing, User, NoVerify) ->
+start_link(RId, Rev, Missing, User, NoVerify, DocLinks, RevLinks) ->
 	State = #state{
 		store = self(),
 		rid = RId,
@@ -39,7 +39,9 @@ start_link(RId, Rev, Missing, User, NoVerify) ->
 			[{FCC, {PId, <<>>, peerdrive_util:merkle_init()}} || {FCC, PId} <- Missing]
 		),
 		noverify = NoVerify,
-		done = false
+		done = false,
+		doclinks = DocLinks,
+		revlinks = RevLinks
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -79,9 +81,10 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 
 
 terminate(_Reason, #state{store=Store, parts=Parts, rev=Rev, rid=RId}) ->
+	peerdrive_file_store:part_unlock(Store, Rev#revision.data),
 	lists:foreach(
 		fun({_, PId}) -> peerdrive_file_store:part_unlock(Store, PId) end,
-		Rev#revision.parts),
+		Rev#revision.attachments),
 	peerdrive_file_store:rev_unlock(Store, RId),
 	lists:foreach(
 		fun({_, {_PId, Content, _Sha}}) ->
@@ -158,7 +161,8 @@ do_commit(#state{store=Store, rid=RId, rev=Rev, parts=Parts, noverify=NoVerify} 
 		case commit_parts(Store, Parts) of
 			ok ->
 				{
-					peerdrive_file_store:put_rev_commit(Store, RId, Rev),
+					peerdrive_file_store:put_rev_commit(Store, RId, Rev,
+						S#state.doclinks, S#state.revlinks),
 					S#state{parts=[], done=true}
 				};
 			{Error, Remaining} ->

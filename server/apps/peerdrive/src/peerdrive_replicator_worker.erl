@@ -330,7 +330,7 @@ do_discover_rev(Parent, RId, First, Force, S) ->
 			case peerdrive_store:stat(SrcStore, RId) of
 				{ok, #rev_stat{parents=Ancestors, mtime=Mtime} = Stat}
 				when (Mtime >= Depth) or Force ->
-					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.parts ],
+					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.attachments ],
 					Node = {rev, RId},
 					Props = case Exists of
 						true -> [exists];
@@ -344,13 +344,21 @@ do_discover_rev(Parent, RId, First, Force, S) ->
 						Ancestors),
 					case is_sticky(Stat) of
 						true ->
+							case peerdrive_store:get_links(SrcStore, RId) of
+								{ok, {DocLinks, RevLinks}} ->
+									ok;
+								{error, Reason} ->
+									throw({error, [{code, Reason}, {rev, RId}]}),
+									DocLinks = [], % make compiler happy
+									RevLinks = []
+							end,
 							lists:foldl(
 								fun(Ref, Acc) -> discover_doc(Node, Ref, Acc) end,
 								lists:foldl(
 									fun(Ref, Acc) -> discover_rev(Node, Ref, Acc) end,
 									S2,
-									Stat#rev_stat.rev_links),
-								Stat#rev_stat.doc_links);
+									RevLinks),
+								DocLinks);
 						false ->
 							S2
 					end;
@@ -358,7 +366,7 @@ do_discover_rev(Parent, RId, First, Force, S) ->
 				{ok, Stat} ->
 					% add sentinel node for correct transfer size estimation
 					Node = {sentinel, RId},
-					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.parts ],
+					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.attachments ],
 					digraph:add_vertex(G, Node, [{parts, Parts}]),
 					digraph:add_edge(G, Parent, Node),
 					S;
@@ -447,35 +455,53 @@ replicate_rev(RId, AccountedSize, S) ->
 		srcstore = SrcStore,
 		dststore = DstStore
 	} = S,
-	case peerdrive_store:stat(SrcStore, RId) of
-		{ok, Stat} ->
-			Revision = #revision{
-				flags = Stat#rev_stat.flags,
-				parts = lists:sort(
-					lists:map(
-						fun({FCC, _Size, Hash}) -> {FCC, Hash} end,
-						Stat#rev_stat.parts)),
-				parents   = lists:sort(Stat#rev_stat.parents),
-				mtime     = Stat#rev_stat.mtime,
-				type      = Stat#rev_stat.type,
-				creator   = Stat#rev_stat.creator,
-				doc_links = Stat#rev_stat.doc_links,
-				rev_links = Stat#rev_stat.rev_links,
-				comment   = Stat#rev_stat.comment
-			},
-			case peerdrive_store:put_rev(DstStore, RId, Revision) of
+	Stat = case peerdrive_store:stat(SrcStore, RId) of
+		{ok, Ok1} ->
+			Ok1;
+		{error, Reason1} ->
+			throw({error, [{code, Reason1}, {rev, RId}]})
+	end,
+	{DocLinks, RevLinks} = case peerdrive_store:get_links(SrcStore, RId) of
+		{ok, Ok2} ->
+			Ok2;
+		{error, Reason2} ->
+			throw({error, [{code, Reason2}, {rev, RId}]})
+	end,
+	Attachments = Stat#rev_stat.attachments,
+	Revision = #revision{
+		flags = Stat#rev_stat.flags,
+		data  = element(2, Stat#rev_stat.data),
+		attachments = lists:sort(
+			lists:map( fun({Name, _Size, Hash}) -> {Name, Hash} end, Attachments)),
+		parents   = lists:sort(Stat#rev_stat.parents),
+		mtime     = Stat#rev_stat.mtime,
+		type      = Stat#rev_stat.type,
+		creator   = Stat#rev_stat.creator,
+		comment   = Stat#rev_stat.comment
+	},
+	case peerdrive_store:peek(SrcStore, RId) of
+		{ok, Reader} ->
+			Data = case peerdrive_store:get_data(Reader, <<>>) of
+				{ok, Ok3} ->
+					Ok3;
+				{error, Reason3} ->
+					peerdrive_store:close(Reader),
+					throw({error, [{code, Reason3}, {rev, RId}]})
+			end,
+			case peerdrive_store:put_rev(DstStore, RId, Revision, Data, DocLinks, RevLinks) of
 				{ok, MissingParts, Handle} ->
 					RealSize = lists:foldl(
 						fun(P, Acc) ->
-							{_, Size, _} = lists:keyfind(P, 1, Stat#rev_stat.parts),
+							{_, Size, _} = lists:keyfind(P, 1, Attachments),
 							Acc + Size
 						end,
 						0,
 						MissingParts),
-					copy_parts(RId, SrcStore, Handle, MissingParts,
+					copy_parts(RId, Reader, Handle, MissingParts,
 						AccountedSize, RealSize, S);
 
 				{error, Reason} ->
+					peerdrive_store:close(Reader),
 					throw({error, [{code, Reason}, {rev, RId}]})
 			end;
 
@@ -484,7 +510,9 @@ replicate_rev(RId, AccountedSize, S) ->
 	end.
 
 
-copy_parts(RId, _SourceStore, Importer, [], AccSize, _RealSize, S) ->
+
+copy_parts(RId, Reader, Importer, [], AccSize, _RealSize, S) ->
+	peerdrive_store:close(Reader),
 	case peerdrive_store:commit(Importer) of
 		{ok, _} ->
 			{{handle, Importer}, account_size(AccSize, S)};
@@ -492,16 +520,10 @@ copy_parts(RId, _SourceStore, Importer, [], AccSize, _RealSize, S) ->
 			throw({error, [{code, Reason}, {rev, RId}]})
 	end;
 
-copy_parts(RId, SourceStore, Importer, Parts, AccSize, RealSize, S) ->
-	case peerdrive_store:peek(SourceStore, RId) of
-		{ok, Reader} ->
-			Action = #copy{rid=RId, parts=Parts, reader=Reader, imp=Importer,
-				accsize=AccSize, factor=(AccSize / max(RealSize, 1))},
-			{{handle, Importer}, schedule(Action, S)};
-
-		{error, Reason} ->
-			throw({error, [{code, Reason}, {rev, RId}]})
-	end.
+copy_parts(RId, Reader, Importer, Parts, AccSize, RealSize, S) ->
+	Action = #copy{rid=RId, parts=Parts, reader=Reader, imp=Importer,
+		accsize=AccSize, factor=(AccSize / max(RealSize, 1))},
+	{{handle, Importer}, schedule(Action, S)}.
 
 
 do_copy(#copy{parts=[], part=undefined, imp=Importer, reader=Reader} = Action, S) ->

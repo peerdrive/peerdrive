@@ -16,38 +16,40 @@
 
 -define(REV_FLAG_STICKY, 1).
 
+%% Known hash of the default empty data
+-define(REV_DATA_EMPTY_HASH, <<119,34,116,81,5,233,224,46,143,26,175,23,247,
+                               179,170,197,197,108,216,5>>).
+
 -record(revision,
 	{
-		flags = 0,      % integer()
-		parts = [],     % [{FourCC::binary(), Hash::guid()}]
-		parents = [],   % [Rev::guid()]: Parent revisions
-		mtime = 0,      % interger(): Microseconds since epoch (unix date, UTC)
-		type = <<>>,    % binary()
-		creator = <<>>, % binary()
-		comment = <<>>, % binary()
-		doc_links = [], % [Doc::guid()]
-		rev_links = []  % [Rev::guid()]
+		flags = 0        :: non_neg_integer(),
+		data = ?REV_DATA_EMPTY_HASH :: peerdrive:hash(),
+		attachments = [] :: [{Name::binary(), Hash::peerdrive:hash()}],
+		parents = []     :: [peerdrive:rev()],
+		mtime = 0        :: integer(), % microseconds since epoch (unix date, UTC)
+		type = <<>>      :: binary(),
+		creator = <<>>   :: binary(),
+		comment = <<>>   :: binary()
 	}).
 
 
 -record(fs_stat,
 	{
-		bsize,  % size of each block (power of two, >=512)
-		blocks, % overall number of blocks in store
-		bfree,  % number of free blocks
-		bavail  % number of blocks available to user
+		bsize  :: integer(), % size of each block (power of two, >=512)
+		blocks :: integer(), % overall number of blocks in store
+		bfree  :: integer(), % number of free blocks
+		bavail :: integer()  % number of blocks available to user
 	}).
 
 -record(rev_stat,
 	{
-		flags,
-		parts,
-		parents,
-		mtime,
-		type,
-		creator,
-		comment,
-		doc_links,
-		rev_links
+		flags            :: non_neg_integer(),
+		data             :: {Size::non_neg_integer(), peerdrive:hash()},
+		attachments      :: [{Name::binary(), Size::non_neg_integer(), Hash::peerdrive:hash()}],
+		parents          :: [peerdrive:rev()],
+		mtime            :: integer(), % microseconds since epoch (unix date, UTC)
+		type             :: binary(),
+		creator          :: binary(),
+		comment          :: binary()
 	}).
 

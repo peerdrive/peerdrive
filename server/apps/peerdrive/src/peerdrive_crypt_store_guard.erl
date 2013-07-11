@@ -17,10 +17,10 @@
 -module(peerdrive_crypt_store_guard).
 -behaviour(gen_server).
 
--export([start_link/2]).
+-export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, handle, user}).
+-record(state, {store, handle, key, user}).
 
 -include("store.hrl").
 -include("cryptstore.hrl").
@@ -29,8 +29,8 @@
 %% Public interface...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Handle, User) ->
-	State = #state{store=self(), handle=Handle, user=User},
+start_link(Handle, Key, User) ->
+	State = #state{store=self(), handle=Handle, user=User, key=Key},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -43,8 +43,11 @@ init({State, User}) ->
 	{ok, State}.
 
 
-handle_call(commit, _From, #state{handle=Handle} = S) ->
-	Reply = peerdrive_store:commit(Handle),
+handle_call(commit, _From, #state{handle=Handle, key=Key} = S) ->
+	Reply = case peerdrive_store:commit(Handle) of
+		{ok, EncRId} -> {ok, peerdrive_crypt_store:dec_xid(Key, EncRId)};
+		Error        -> Error
+	end,
 	{reply, Reply, S};
 
 handle_call(close, _From, #state{handle=Handle} = S) ->

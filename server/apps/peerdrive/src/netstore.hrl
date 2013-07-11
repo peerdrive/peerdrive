@@ -42,7 +42,7 @@
 -define(GET_PARENTS_MSG,      16#014).
 -define(SET_PARENTS_MSG,      16#015).
 -define(GET_LINKS_MSG,        16#016).
--define(SET_LINKS_MSG,        16#017).
+
 -define(COMMIT_MSG,           16#018).
 -define(SUSPEND_MSG,          16#019).
 -define(CLOSE_MSG,            16#01a).
@@ -60,4 +60,6 @@
 -define(SYNC_FINISH_MSG,      16#026).
 -define(TRIGGER_MSG,          16#027).
 -define(SYNC_MSG,             16#028).
+-define(GET_DATA_MSG,         16#029).
+-define(SET_DATA_MSG,         16#02a).
 

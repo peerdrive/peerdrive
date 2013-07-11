@@ -17,6 +17,12 @@
 -module(peerdrive).
 -compile(export_all).
 
+-type doc() :: binary().
+-type rev() :: binary().
+-type hash() :: binary().
+
+-export_type([doc/0, rev/0, hash/0]).
+
 start() ->
 	application:start(peerdrive).
 

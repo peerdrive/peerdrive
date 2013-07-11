@@ -780,7 +780,7 @@ docdir_read_entry(Store, Doc, {CacheRev, CacheEntry}=Cache) ->
 			{ok, CacheEntry, Cache};
 
 		{ok, Rev} ->
-			case catch read_file_name(Store, Doc, Rev) of
+			case read_file_name(Store, Doc, Rev) of
 				{ok, Name} -> {ok, Name, {Rev, Name}};
 				error      -> error
 			end;
@@ -791,20 +791,10 @@ docdir_read_entry(Store, Doc, {CacheRev, CacheEntry}=Cache) ->
 
 
 read_file_name(Store, _Doc, Rev) ->
-	Meta = case peerdrive_util:read_rev_struct(Store, Rev, <<"META">>) of
-		{ok, Value1} when ?IS_GB_TREE(Value1) ->
-			Value1;
-		{ok, _} ->
-			throw(error);
-		{error, _} ->
-			throw(error)
-	end,
-	case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
+	case peerdrive_util:read_rev_struct(Store, Rev, <<"/org.peerdrive.annotation/title">>) of
 		{ok, Title} when is_binary(Title) ->
 			{ok, Title};
-		{ok, _} ->
-			error;
-		error ->
+		_ ->
 			error
 	end.
 
@@ -1156,7 +1146,7 @@ folder_read_entries(Store, Doc, {CacheRev, CacheEntries, CacheTime}=OldCache) ->
 			end;
 
 		{ok, Rev} ->
-			case peerdrive_util:read_rev_struct(Store, Rev, <<"PDSD">>) of
+			case peerdrive_util:read_rev_struct(Store, Rev, <<"/org.peerdrive.folder">>) of
 				{ok, List} when is_list(List) ->
 					Entries = folder_read_entries_list(Store, List),
 					{ok, Entries, {Rev, Entries, now()}};
@@ -1242,18 +1232,11 @@ folder_read_entries_filter(_, _) ->
 
 
 folder_read_title(Store, Rev) ->
-	case peerdrive_util:read_rev_struct(Store, Rev, <<"META">>) of
-		{ok, Meta} ->
-			case meta_read_entry(Meta, [<<"org.peerdrive.annotation">>, <<"title">>]) of
-				{ok, Title} when is_binary(Title) ->
-					unicode:characters_to_binary(sanitize(
-						safe_characters_to_list(Title)));
-				{ok, _} ->
-					<<"">>;
-				error ->
-					<<"">>
-			end;
-		{error, _} ->
+	case peerdrive_util:read_rev_struct(Store, Rev, <<"/org.peerdrive.annotation/title">>) of
+		{ok, Title} when is_binary(Title) ->
+			unicode:characters_to_binary(sanitize(
+				safe_characters_to_list(Title)));
+		_ ->
 			<<"">>
 	end.
 
@@ -1326,7 +1309,7 @@ folder_update_cache(_Store, _Handle, Rev, {Rev, Entries, _LastUpdate}) ->
 	{ok, NewEntries, {Rev, NewEntries, now()}};
 
 folder_update_cache(Store, Handle, Rev, _Cache) ->
-	case catch read_struct(Handle, <<"PDSD">>) of
+	case peerdrive_ifc_vfs_broker:get_data(Handle, <<"/org.peerdrive.folder">>) of
 		List when is_list(List) ->
 			Entries = folder_read_entries_list(Store, List),
 			{ok, Entries, {Rev, Entries, now()}};
@@ -1340,7 +1323,7 @@ folder_update_cache(Store, Handle, Rev, _Cache) ->
 folder_write_entries(Handle, Entries, Cache) ->
 	List = [gb_trees:enter(<<"">>, {dlink, Doc}, Entry) ||
 		#fe{oid={doc, _, Doc}, orig=Entry} <- Entries],
-	case write_struct(Handle, <<"PDSD">>, List) of
+	case peerdrive_ifc_vfs_broker:set_data(Handle, <<"/org.peerdrive.folder">>, List) of
 		ok ->
 			case peerdrive_ifc_vfs_broker:close(Handle) of
 				{ok, Rev} ->
@@ -1359,20 +1342,18 @@ folder_set_title(Store, Doc, NewTitle) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
 		{ok, _OldRev, Handle} ->
 			try
-				Meta1 = read_struct(Handle, <<"META">>),
-				Comment = case meta_read_entry(Meta1, [<<"org.peerdrive.annotation">>,
-				                                     <<"title">>])
+				Comment = case peerdrive_ifc_vfs_broker:get_data(Handle,
+					<<"/org.peerdrive.annotation/title">>)
 				of
-					{ok, OldTitle} ->
+					{ok, OldTitle} when is_binary(OldTitle) ->
 						<<"Renamed from \"", OldTitle/binary,  "\" to \"",
 							NewTitle/binary, "\"">>;
-					error ->
+					_ ->
 						<<"Renamed to \"", NewTitle/binary, "\"">>
 				end,
-				Meta2 = meta_write_entry(Meta1,
-					[<<"org.peerdrive.annotation">>, <<"title">>],
-					NewTitle),
-				case write_struct(Handle, <<"META">>, Meta2) of
+				case peerdrive_ifc_vfs_broker:get_data(Handle,
+					<<"/org.peerdrive.annotation/title">>, NewTitle)
+				of
 					ok    -> ok;
 					WrErr -> throw(WrErr)
 				end,
@@ -1434,15 +1415,13 @@ file_getattr({doc, Store, Doc}) ->
 
 file_getattr_rev(Store, Rev) ->
 	case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
-		{ok, #rev_stat{parts=Parts, mtime=Mtime}} ->
+		{ok, #rev_stat{attachments=Attachments, mtime=Mtime}} ->
 			Size = case find_entry(
-				fun({FCC, Size, _Hash}) ->
-					case FCC of
-						<<"FILE">> -> {ok, Size};
-						_          -> error
-					end
+				fun
+					({<<"public.data">>, Size, _Hash}) -> {ok, Size};
+					(_) -> error
 				end,
-				Parts)
+				Attachments)
 			of
 				{value, FileSize} -> FileSize;
 				none              -> 0
@@ -1463,7 +1442,7 @@ file_getattr_rev(Store, Rev) ->
 file_truncate({doc, Store, Doc}, Size) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
 		{ok, _Rev, Handle} ->
-			case peerdrive_ifc_vfs_broker:truncate(Handle, <<"FILE">>, Size) of
+			case peerdrive_ifc_vfs_broker:truncate(Handle, <<"public.data">>, Size) of
 				ok ->
 					case peerdrive_ifc_vfs_broker:close(Handle) of
 						{ok, CurRev} ->
@@ -1487,7 +1466,7 @@ file_open({doc, Store, Doc}, Trunc, Mode) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, Write) of
 		{ok, _Rev, Handle} ->
 			Res = case Trunc of
-				true  -> peerdrive_ifc_vfs_broker:truncate(Handle, <<"FILE">>, 0);
+				true  -> peerdrive_ifc_vfs_broker:truncate(Handle, <<"public.data">>, 0);
 				false -> ok
 			end,
 			case Res of
@@ -1514,7 +1493,7 @@ file_open({doc, Store, Doc}, Trunc, Mode) ->
 
 
 file_read(Handle, Size, Offset) ->
-	case peerdrive_ifc_vfs_broker:read(Handle, <<"FILE">>, Offset, Size) of
+	case peerdrive_ifc_vfs_broker:read(Handle, <<"public.data">>, Offset, Size) of
 		{ok, _Data} = R  -> R;
 		{error, enoent}  -> {ok, <<>>};
 		{error, _}       -> {error, eio}
@@ -1522,7 +1501,7 @@ file_read(Handle, Size, Offset) ->
 
 
 file_write(Handle, Data, Offset) ->
-	peerdrive_ifc_vfs_broker:write(Handle, <<"FILE">>, Offset, Data).
+	peerdrive_ifc_vfs_broker:write(Handle, <<"public.data">>, Offset, Data).
 
 
 file_release(Handle, Changed, Rewritten) ->
@@ -1576,65 +1555,8 @@ find_entry(F, [H|T]) ->
 	end.
 
 
-meta_read_entry(Meta, []) ->
-	{ok, Meta};
-meta_read_entry(Meta, [Step|Path]) when ?IS_GB_TREE(Meta) ->
-	case gb_trees:lookup(Step, Meta) of
-		{value, Value} -> meta_read_entry(Value, Path);
-		none           -> error
-	end;
-meta_read_entry(_Meta, _Path) ->
-	error.
-
-
-meta_write_entry(_Meta, [], Value) ->
-	Value;
-
-meta_write_entry(Meta, [Step|Path], Value) when ?IS_GB_TREE(Meta) ->
-	Sub = case gb_trees:lookup(Step, Meta) of
-		{value, V} -> V;
-		none       -> gb_trees:empty()
-	end,
-	gb_trees:enter(Step, meta_write_entry(Sub, Path, Value), Meta);
-
-meta_write_entry(_Meta, _Path, _Value) ->
-	throw({error, einval}).
-
-
 sanitize(S) ->
 	lists:filter(fun(C) -> (C /= $/) and (C >= 31) end, S).
-
-
-read_struct(Handle, Part) ->
-	Data = read_struct_loop(Handle, Part, 0, <<>>),
-	case catch peerdrive_struct:decode(Data) of
-		{'EXIT', _Reason} ->
-			throw({error, einval});
-		Struct ->
-			Struct
-	end.
-
-
-read_struct_loop(Handle, Part, Offset, Acc) ->
-	Length = 16#10000,
-	case peerdrive_ifc_vfs_broker:read(Handle, Part, Offset, Length) of
-		{ok, <<>>} ->
-			Acc;
-		{ok, Data} ->
-			read_struct_loop(Handle, Part, Offset+size(Data), <<Acc/binary, Data/binary>>);
-		{error, _Reason} = Error ->
-			throw(Error)
-	end.
-
-
-write_struct(Handle, Part, Struct) ->
-	Data = peerdrive_struct:encode(Struct),
-	case peerdrive_ifc_vfs_broker:truncate(Handle, Part, 0) of
-		ok ->
-			peerdrive_ifc_vfs_broker:write(Handle, Part, 0, Data);
-		{error, _} = Error ->
-			Error
-	end.
 
 
 create_empty_file(Store, Name) ->
@@ -1648,8 +1570,8 @@ create_empty_file(Store, Name) ->
 	Uti = peerdrive_registry:get_uti_from_extension(filename:extension(Name)),
 	case peerdrive_broker:create(Store, Uti, ?VFS_CC) of
 		{ok, Doc, Handle} ->
-			peerdrive_broker:write(Handle, <<"META">>, 0, peerdrive_struct:encode(MetaData)),
-			peerdrive_broker:write(Handle, <<"FILE">>, 0, <<>>),
+			peerdrive_broker:set_data(Handle, <<"">>, peerdrive_struct:encode(MetaData)),
+			peerdrive_broker:write(Handle, <<"public.data">>, 0, <<>>),
 			case peerdrive_broker:commit(Handle, <<"Created by VFS interface">>) of
 				{ok, Rev} ->
 					% leave handle open, the caller has to close it
@@ -1665,21 +1587,15 @@ create_empty_file(Store, Name) ->
 
 
 create_empty_directory(Store, Name) ->
-	MetaData = gb_trees:enter(
+	Data1 = gb_trees:enter(
 		<<"org.peerdrive.annotation">>,
-		gb_trees:enter(
-			<<"title">>,
-			Name,
-			gb_trees:empty()),
+		gb_trees:enter(<<"title">>, Name, gb_trees:empty()),
 		gb_trees:empty()),
+	Data2 = gb_trees:enter(<<"org.peerdrive.folder">>, [], Data1),
 	TypeCode = <<"org.peerdrive.folder">>,
-	Pdsd = [],
 	case peerdrive_broker:create(Store, TypeCode, ?VFS_CC) of
 		{ok, Doc, Handle} ->
-			peerdrive_broker:write(Handle, <<"META">>, 0,
-				peerdrive_struct:encode(MetaData)),
-			peerdrive_broker:write(Handle, <<"PDSD">>, 0,
-				peerdrive_struct:encode(Pdsd)),
+			peerdrive_broker:set_data(Handle, <<>>, peerdrive_struct:encode(Data2)),
 			peerdrive_broker:set_flags(Handle, ?REV_FLAG_STICKY),
 			case peerdrive_broker:commit(Handle, <<"Created by VFS interface">>) of
 				{ok, Rev} ->

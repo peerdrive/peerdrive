@@ -111,6 +111,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 		?STAT_MSG ->
 			handle(Body, RetPath, Store, fun do_stat/2, S);
 
+		?GET_LINKS_MSG ->
+			handle(Body, RetPath, Store, fun do_get_links/2, S);
+
 		?PEEK_MSG ->
 			start_worker(S, Body, RetPath, fun do_peek/3, fun io_handler/3);
 
@@ -197,14 +200,14 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 				peerdrive_netstore_pb:decode_suspendreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?SET_LINKS_MSG ->
-			ReqData = #setlinksreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_setlinksreq(Body),
+		?SET_DATA_MSG ->
+			ReqData = #setdatareq{handle=Handle} =
+				peerdrive_netstore_pb:decode_setdatareq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?GET_LINKS_MSG ->
-			ReqData = #getlinksreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_getlinksreq(Body),
+		?GET_DATA_MSG ->
+			ReqData = #getdatareq{handle=Handle} =
+				peerdrive_netstore_pb:decode_getdatareq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?SET_PARENTS_MSG ->
@@ -277,7 +280,7 @@ do_init(Body, RetPath, #state{tls=Tls} = S) ->
 			starttls = StartTls
 		} = peerdrive_netstore_pb:decode_initreq(Body),
 		case Major of
-			1 -> ok;
+			2 -> ok;
 			_ -> throw({error, erpcmismatch})
 		end,
 		S2 = S#state{init=true},
@@ -357,29 +360,34 @@ do_stat(Body, Store) ->
 	#statreq{rev=Rev} = peerdrive_netstore_pb:decode_statreq(Body),
 	{ok, Stat} = check(peerdrive_store:stat(Store, Rev)),
 	#rev_stat{
-		flags     = Flags,
-		parts     = Parts,
-		parents   = Parents,
-		mtime     = Mtime,
-		type      = TypeCode,
-		creator   = CreatorCode,
-		doc_links = DocLinks,
-		rev_links = RevLinks,
-		comment   = Comment
+		flags       = Flags,
+		data        = {DataSize, DataHash},
+		attachments = Attachments,
+		parents     = Parents,
+		mtime       = Mtime,
+		type        = TypeCode,
+		creator     = CreatorCode,
+		comment     = Comment
 	} = Stat,
 	Reply = #statcnf{
 		flags        = Flags,
-		parts        = [ #statcnf_part{fourcc=F, size=S, pid=P}
-						 || {F, S, P} <- Parts ],
+		data         = #statcnf_data{size=DataSize, hash=DataHash},
+		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H}
+						 || {N, S, H} <- Attachments ],
 		parents      = Parents,
 		mtime        = Mtime,
 		type_code    = TypeCode,
 		creator_code = CreatorCode,
-		doc_links    = DocLinks,
-		rev_links    = RevLinks,
 		comment      = Comment
 	},
 	peerdrive_netstore_pb:encode_statcnf(Reply).
+
+
+do_get_links(Body, Store) ->
+	#getlinksreq{rev=Rev} = peerdrive_netstore_pb:decode_getlinksreq(Body),
+	{ok, {DocLinks, RevLinks}} = check(peerdrive_store:get_links(Store, Rev)),
+	Reply = #getlinkscnf{doc_links=DocLinks, rev_links=RevLinks},
+	peerdrive_netstore_pb:encode_getlinkscnf(Reply).
 
 
 do_sync(<<>>, Store) ->
@@ -481,23 +489,22 @@ do_remember_rev(Store, NetHandle, ReqData) ->
 
 
 do_put_rev(Store, NetHandle, ReqData) ->
-	#putrevreq{rid=RId, revision=PbRev} =
-		peerdrive_netstore_pb:decode_putrevreq(ReqData),
+	#putrevreq{rid=RId, revision=PbRev, data=Data, doc_links=DocLinks,
+		rev_links=RevLinks} = peerdrive_netstore_pb:decode_putrevreq(ReqData),
 	Rev = #revision{
 		flags = PbRev#putrevreq_revision.flags,
-		parts = [ {FCC, PId} || #putrevreq_revision_part{fourcc=FCC, pid=PId}
-			<- PbRev#putrevreq_revision.parts, ?ASSERT_PART(FCC) ],
+		data = PbRev#putrevreq_revision.data,
+		attachments = [ {Name, Hash} || #putrevreq_revision_attachment{name=Name, hash=Hash}
+			<- PbRev#putrevreq_revision.attachments ],
 		parents = PbRev#putrevreq_revision.parents,
 		mtime = PbRev#putrevreq_revision.mtime,
 		type = PbRev#putrevreq_revision.type_code,
 		creator = PbRev#putrevreq_revision.creator_code,
-		doc_links = PbRev#putrevreq_revision.doc_links,
-		rev_links = PbRev#putrevreq_revision.rev_links,
 		comment = PbRev#putrevreq_revision.comment
 	},
 	{ok, Missing, StoreHandle} = check(peerdrive_store:put_rev(Store,
-		RId, Rev)),
-	Cnf = #putrevcnf{handle=NetHandle, missing_parts=Missing},
+		RId, Rev, Data, DocLinks, RevLinks)),
+	Cnf = #putrevcnf{handle=NetHandle, missing_attachments=Missing},
 	{start, {StoreHandle, []}, peerdrive_netstore_pb:encode_putrevcnf(Cnf)}.
 
 
@@ -592,20 +599,17 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 	case Request of
 		?READ_MSG ->
 			#readreq{part=Part, offset=Offset, length=Length} = ReqData,
-			?ASSERT_PART(Part),
 			{ok, Data} = check(peerdrive_store:read(Handle, Part, Offset, Length)),
 			peerdrive_netstore_pb:encode_readcnf(#readcnf{data=Data});
 
 		?WRITE_BUFFER_MSG ->
 			#writebufferreq{part=Part, data=Data} = ReqData,
-			?ASSERT_PART(Part),
 			NewWrBuf = orddict:update(Part, fun(Old) -> [Data | Old] end,
 				[Data], WriteBuffer),
 			{<<>>, {Handle, NewWrBuf}};
 
 		?WRITE_COMMIT_MSG ->
 			#writecommitreq{part=Part, offset=Offset, data=Data} = ReqData,
-			?ASSERT_PART(Part),
 			case orddict:find(Part, WriteBuffer) of
 				error ->
 					ok = check(peerdrive_store:write(Handle, Part, Offset, Data)),
@@ -623,7 +627,6 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 
 		?TRUNC_MSG ->
 			#truncreq{part=Part, offset=Offset} = ReqData,
-			?ASSERT_PART(Part),
 			ok = check(peerdrive_store:truncate(Handle, Part, Offset)),
 			<<>>;
 
@@ -649,15 +652,16 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 			{ok, Rev} = check(peerdrive_store:suspend(Handle, Comment)),
 			peerdrive_netstore_pb:encode_suspendcnf(#suspendcnf{rev=Rev});
 
-		?SET_LINKS_MSG ->
-			#setlinksreq{doc_links=DocLinks, rev_links=RevLinks} = ReqData,
-			ok = check(peerdrive_store:set_links(Handle, DocLinks, RevLinks)),
+		?SET_DATA_MSG ->
+			#setdatareq{selector=Selector, data=Data} = ReqData,
+			ok = check(peerdrive_store:set_data(Handle, Selector, Data)),
 			<<>>;
 
-		?GET_LINKS_MSG ->
-			{ok, {DocLinks, RevLinks}} = check(peerdrive_store:get_links(Handle)),
-			Cnf = #getlinkscnf{doc_links=DocLinks, rev_links=RevLinks},
-			peerdrive_netstore_pb:encode_getlinkscnf(Cnf);
+		?GET_DATA_MSG ->
+			#getdatareq{selector=Selector} = ReqData,
+			{ok, Data} = check(peerdrive_store:get_data(Handle, Selector)),
+			Cnf = #getdatacnf{data=Data},
+			peerdrive_netstore_pb:encode_getdatacnf(Cnf);
 
 		?SET_PARENTS_MSG ->
 			#setparentsreq{parents=Parents} = ReqData,
@@ -690,9 +694,8 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 			peerdrive_netstore_pb:encode_gettypecnf(Cnf);
 
 		?PUT_REV_PART_MSG ->
-			#putrevpartreq{part=Part, data=Data} = ReqData,
-			?ASSERT_PART(Part),
-			ok = check(peerdrive_store:put_rev_part(Handle, Part, Data)),
+			#putrevpartreq{attachment=Attachment, data=Data} = ReqData,
+			ok = check(peerdrive_store:put_rev_part(Handle, Attachment, Data)),
 			<<>>;
 
 		closed ->

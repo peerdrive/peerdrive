@@ -21,7 +21,7 @@
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
-	abort/1, close/1, close/2, get_type/1, set_type/2]).
+	abort/1, close/1, close/2, get_type/1, set_type/2, get_data/2, set_data/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
 	terminate/2]).
 
@@ -56,6 +56,16 @@ open_rev(Store, Rev) ->
 open_doc(Store, Doc, Write) ->
 	gen_server:call(?MODULE, {open_doc, Store, Doc, Write}, infinity).
 
+get_data(Handle, Selector) ->
+	case gen_server:call(?MODULE, {get_data, Handle, Selector}, infinity) of
+		{ok, Raw} -> {ok, peerdrive_struct:decode(Raw)};
+		Error     -> Error
+	end.
+
+set_data(Handle, Selector, Data) ->
+	Raw = peerdrive_struct:encode(Data),
+	gen_server:call(?MODULE, {set_data, Handle, Selector, Raw}, infinity).
+
 truncate(Handle, Part, Offset) ->
 	gen_server:call(?MODULE, {truncate, Handle, Part, Offset}, infinity).
 
@@ -88,6 +98,14 @@ abort(Handle) ->
 init([]) ->
 	{ok, #state{handles=dict:new(), known=dict:new(), timref=undefined}}.
 
+
+handle_call({get_data, Handle, Selector}, _From, S) ->
+	Reply = do_get_data(Handle, Selector, S),
+	{reply, Reply, S};
+
+handle_call({set_data, Handle, Selector, Data}, _From, S) ->
+	Reply = do_set_data(Handle, Selector, Data, S),
+	{reply, Reply, S};
 
 handle_call({read, Handle, Part, Offset, Length}, _From, S) ->
 	Reply = do_read(Handle, Part, Offset, Length, S),
@@ -214,6 +232,24 @@ do_open_doc(Store, Doc, true, S) ->
 				{error, S2} ->
 					{{error, enoent}, S2}
 			end
+	end.
+
+
+do_get_data(FuseHandle, Selector, S) ->
+	case lookup_handle(FuseHandle, S) of
+		{ok, Handle} ->
+			peerdrive_broker:get_data(Handle, Selector);
+		error ->
+			{error, ebadf}
+	end.
+
+
+do_set_data(FuseHandle, Selector, Data, S) ->
+	case lookup_handle(FuseHandle, S) of
+		{ok, Handle} ->
+			peerdrive_broker:set_data(Handle, Selector, Data);
+		error ->
+			{error, ebadf}
 	end.
 
 
@@ -608,8 +644,9 @@ has_changed(Store, Doc, PreRev) ->
 
 stat_rev(Store, Rev) ->
 	case peerdrive_broker:stat(Rev, [Store]) of
-		{ok, #rev_stat{parts=Parts}} ->
-			ordsets:from_list([ {FCC, PId} || {FCC, _Size, PId} <- Parts ]);
+		{ok, #rev_stat{data={_, Data}, attachments=Attachments}} ->
+			ordsets:from_list([{data, Data}] ++
+				[ {Name, PId} || {Name, _Size, PId} <- Attachments ]);
 		{error, _Reason} ->
 			throw(error)
 	end.

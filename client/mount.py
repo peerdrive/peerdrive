@@ -144,8 +144,7 @@ else:
 		try:
 			rev = Connector().lookupDoc(sid, [sid]).rev(sid)
 			with Connector().peek(sid, rev) as r:
-				metaData = struct.loads(sid, r.readAll('META'))
-				name = metaData["org.peerdrive.annotation"]["title"]
+				name = r.getData("/org.peerdrive.annotation/title")
 		except IOError:
 			name = "Unnamed store"
 		print "Mounted '%s' (%s, '%s')" % (label, sid.encode('hex'), name)

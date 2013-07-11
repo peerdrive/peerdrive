@@ -82,8 +82,7 @@ class DocButton(QtGui.QToolButton, Watch):
 			docIcon = None
 			with Connector().peek(self.__store, rev) as r:
 				try:
-					metaData = struct.loads(self.__store, r.readAll('META'))
-					docName = metaData["org.peerdrive.annotation"]["title"]
+					docName = r.getData("/org.peerdrive.annotation/title")
 				except:
 					docName = "Unnamed"
 			if not docIcon:
@@ -119,7 +118,7 @@ class DocButton(QtGui.QToolButton, Watch):
 
 	def __clicked(self):
 		if self.__doc:
-			showDocument(struct.DocLink(self.__store, self.__doc, False))
+			showDocument(connector.DocLink(self.__store, self.__doc, False))
 
 	def __showContextMenu(self, pos):
 		type = None
@@ -135,7 +134,7 @@ class DocButton(QtGui.QToolButton, Watch):
 
 		if Registry().conformes(type, "org.peerdrive.folder"):
 			m = menu.addMenu(self.__docName)
-			l = struct.DocLink(self.__store, self.__doc, False)
+			l = connector.DocLink(self.__store, self.__doc, False)
 			m.aboutToShow.connect(lambda m=m, l=l: self.__fillMenu(m, l))
 			menu.addSeparator()
 
@@ -147,11 +146,11 @@ class DocButton(QtGui.QToolButton, Watch):
 			for e in executables:
 				action = openMenu.addAction(e)
 				action.triggered.connect(
-					lambda x,s=self.__store,d=self.__doc,e=e: showDocument(struct.DocLink(s, d, False), executable=e))
+					lambda x,s=self.__store,d=self.__doc,e=e: showDocument(connector.DocLink(s, d, False), executable=e))
 		menu.addSeparator()
 		action = menu.addAction("Properties")
 		action.triggered.connect(lambda x,s=self.__store,d=self.__doc:
-			showProperties(struct.DocLink(s, d, False)))
+			showProperties(connector.DocLink(s, d, False)))
 
 		menu.exec_(self.mapToGlobal(pos))
 
@@ -207,18 +206,16 @@ class RevButton(QtGui.QToolButton):
 			title = "Unnamed"
 			with Connector().peek(store, rev) as r:
 				try:
-					metaData = struct.loads(store, r.readAll('META'))
-					if "org.peerdrive.annotation" in metaData:
-						metaData = metaData["org.peerdrive.annotation"]
-						if "title" in metaData:
-							title = metaData["title"]
-						if "tags" in metaData:
-							tagList = metaData["tags"]
-							tagList.sort()
-							if len(tagList) == 0:
-								tags = ""
-							else:
-								tags = reduce(lambda x,y: x+', '+y, tagList)
+					metaData = r.getData("/org.peerdrive.annotation")
+					if "title" in metaData:
+						title = metaData["title"]
+					if "tags" in metaData:
+						tagList = metaData["tags"]
+						tagList.sort()
+						if len(tagList) == 0:
+							tags = ""
+						else:
+							tags = reduce(lambda x,y: x+', '+y, tagList)
 				except:
 					pass
 			stat = Connector().stat(rev)
@@ -255,13 +252,13 @@ class RevButton(QtGui.QToolButton):
 		pass
 
 	def __clicked(self):
-		showDocument(struct.RevLink(self.__store, self.__rev))
+		showDocument(connector.RevLink(self.__store, self.__rev))
 
 
 class DocumentView(QtGui.QStackedWidget, Watch):
-	HPA_TITLE        = ["org.peerdrive.annotation", "title"]
-	HPA_TAGS         = ["org.peerdrive.annotation", "tags"]
-	HPA_DESCRIPTION  = ["org.peerdrive.annotation", "description"]
+	HPA_TITLE        = ["title"]
+	HPA_TAGS         = ["tags"]
+	HPA_DESCRIPTION  = ["description"]
 
 	STATE_NO_DOC = 1
 	STATE_EDITING = 2
@@ -768,7 +765,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		try:
 			with Connector().peek(self.__store, self.__rev) as r:
 				try:
-					self.__metaData = struct.loads(self.__store, r.readAll('META'))
+					self.__metaData = r.getData("/org.peerdrive.annotation")
 					self.__flags = r.getFlags()
 				except IOError:
 					self.__metaData = { }
@@ -799,7 +796,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 		QtGui.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
 		try:
 			if self.__metaDataChanged:
-				writer.writeAll('META', struct.dumps(self.__metaData))
+				writer.setData("/org.peerdrive.annotation", self.__metaData)
 				writer.setFlags(self.__flags)
 			self.docSave(writer)
 		finally:
@@ -816,8 +813,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			rev = Connector().lookupDoc(store).rev(store)
 			with Connector().peek(store, rev) as r:
 				try:
-					metaData = struct.loads(store, r.readAll('META'))
-					return metaData["org.peerdrive.annotation"]["title"]
+					return r.getData("/org.peerdrive.annotation/title")
 				except:
 					return "Unnamed store"
 		except:

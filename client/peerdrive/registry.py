@@ -27,7 +27,7 @@ class _Registry(connector.Watch):
 		self.connection = connector.Connector()
 
 		sysDoc = self.connection.enum().sysStore().sid
-		root = struct.Folder(struct.DocLink(sysDoc, sysDoc))
+		root = struct.Folder(connector.DocLink(sysDoc, sysDoc))
 		self.__regLink = root["registry"]
 
 		connector.Watch.__init__(self, connector.Watch.TYPE_DOC, self.__regLink.doc())
@@ -37,7 +37,7 @@ class _Registry(connector.Watch):
 	def loadRegistry(self):
 		self.__regLink.update()
 		with self.connection.peek(self.__regLink.store(), self.__regLink.rev()) as r:
-			self.registry = struct.loads(self.__regLink.store(), r.readAll('PDSD'))
+			self.registry = r.getData('/org.peerdrive.registry')
 
 	def triggered(self, event, store):
 		if event == connector.Watch.EVENT_MODIFIED:

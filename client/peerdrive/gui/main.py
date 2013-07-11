@@ -23,7 +23,7 @@ import sys, os, subprocess, pickle, datetime, optparse
 
 from ..connector import Watch, Connector, Stat
 from ..registry import Registry
-from .. import struct, fuse, settingsPath
+from .. import struct, fuse, settingsPath, connector
 from .widgets import DocumentView, DocButton
 from .utils import showProperties
 
@@ -168,16 +168,16 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			parser.error("incorrect number of arguments")
 		try:
 			if options.referrer:
-				self.__referrer = struct.Link(options.referrer)
+				self.__referrer = connector.Link(options.referrer)
 		except IOError:
 			parser.error("invalid referrer")
 
 		# parse command line
 		try:
-			link = struct.Link(args[0])
+			link = connector.Link(args[0])
 		except IOError as e:
 			parser.error(str(e))
-		if isinstance(link, struct.DocLink):
+		if isinstance(link, connector.DocLink):
 			guid = link.doc()
 			store = link.store()
 			isDoc = True
@@ -356,9 +356,9 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 	def __showProperties(self):
 		if self.__view.doc():
-			link = struct.DocLink(self.__view.store(), self.__view.doc(), False)
+			link = connector.DocLink(self.__view.store(), self.__view.doc(), False)
 		else:
-			link = struct.RevLink(self.__view.store(), self.__view.rev())
+			link = connector.RevLink(self.__view.store(), self.__view.rev())
 		showProperties(link)
 
 	def __fillDelMenu(self):
@@ -366,11 +366,11 @@ class MainWindow(QtGui.QMainWindow, Watch):
 		doc = self.__view.doc()
 		rev = self.__view.rev()
 		self.__delMenu.clear()
-		if isinstance(self.__referrer, struct.DocLink):
+		if isinstance(self.__referrer, connector.DocLink):
 			if doc:
-				link = struct.DocLink(store, doc, autoUpdate=False)
+				link = connector.DocLink(store, doc, autoUpdate=False)
 			else:
-				link = struct.RevLink(store, rev)
+				link = connector.RevLink(store, rev)
 			try:
 				folder = struct.Folder(self.__referrer)
 				title = folder.title()
@@ -409,13 +409,13 @@ class MainWindow(QtGui.QMainWindow, Watch):
 
 	def __delete(self):
 		try:
-			if isinstance(self.__referrer, struct.DocLink):
+			if isinstance(self.__referrer, connector.DocLink):
 				store = self.__view.store()
 				doc = self.__view.doc()
 				if doc:
-					link = struct.DocLink(store, doc, autoUpdate=False)
+					link = connector.DocLink(store, doc, autoUpdate=False)
 				else:
-					link = struct.RevLink(store, self.__view.rev())
+					link = connector.RevLink(store, self.__view.rev())
 				folder = struct.Folder(self.__referrer)
 				candidates = [(name, ref) for (name, ref) in folder.items()
 					if ref == link]
@@ -436,8 +436,7 @@ class MainWindow(QtGui.QMainWindow, Watch):
 			rev = Connector().lookupDoc(store).rev(store)
 			with Connector().peek(store, rev) as r:
 				try:
-					metaData = struct.loads(store, r.readAll('META'))
-					return metaData["org.peerdrive.annotation"]["title"]
+					return r.getData("/org.peerdrive.annotation/title")
 				except:
 					return "Unnamed store"
 		except:
@@ -467,10 +466,10 @@ class DragWidget(QtGui.QLabel):
 		store = self.__view.store()
 		doc = self.__view.doc()
 		if doc:
-			link = struct.DocLink(store, doc)
+			link = connector.DocLink(store, doc)
 		else:
-			link = struct.RevLink(store, self.__view.rev())
-		struct.dumpMimeData(mimeData, [link])
+			link = connector.RevLink(store, self.__view.rev())
+		connector.dumpMimeData(mimeData, [link])
 		f = fuse.findFuseFile(link)
 		if f:
 			mimeData.setUrls([QtCore.QUrl.fromLocalFile(f)])

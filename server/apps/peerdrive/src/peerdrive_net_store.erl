@@ -167,6 +167,10 @@ handle_call({stat, Rev}, From, S) ->
 	Req = peerdrive_netstore_pb:encode_statreq(#statreq{rev=Rev}),
 	send_request(From, ?STAT_MSG, Req, fun cnf_stat/1, S);
 
+handle_call({get_links, Rev}, From, S) ->
+	Req = peerdrive_netstore_pb:encode_getlinksreq(#getlinksreq{rev=Rev}),
+	send_request(From, ?GET_LINKS_MSG, Req, fun cnf_get_links/1, S);
+
 handle_call({peek, Rev}, {User, _Tag} = From, #state{mps=MPS} = S) ->
 	Req = peerdrive_netstore_pb:encode_peekreq(#peekreq{rev=Rev}),
 	Handler = fun(B) -> cnf_peek(B, MPS, User) end,
@@ -216,8 +220,8 @@ handle_call({put_doc, Doc, Rev}, From, S) ->
 handle_call({forward_doc, Doc, RevPath, OldPreRev}, From, S) ->
 	req_forward_doc(Doc, RevPath, OldPreRev, From, S);
 
-handle_call({put_rev, Rev, Revision}, From, S) ->
-	req_put_rev(Rev, Revision, From, S);
+handle_call({put_rev, Rev, Revision, Data, DocLinks, RevLinks}, From, S) ->
+	req_put_rev(Rev, Revision, Data, DocLinks, RevLinks, From, S);
 
 handle_call({remember_rev, DId, PreRId, OldPreRId}, From, S) ->
 	req_remember_rev(DId, PreRId, OldPreRId, From, S);
@@ -256,9 +260,9 @@ do_init(Tls, #state{socket=Socket} = S) ->
 		deny -> TlsReq = deny, SslOpts = [];
 		{TlsReq, SslOpts} -> ok
 	end,
-	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=1, minor=0,
+	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=2, minor=0,
 		starttls=TlsReq}),
-	InitReq = <<0:32, ?INIT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
+	InitReq = [<<0:32, ?INIT_MSG:12, ?FLAG_REQ:4>>, Req],
 	try
 		InitCnfMsg = case gen_tcp:send(Socket, InitReq) of
 			ok ->
@@ -309,7 +313,7 @@ do_init(Tls, #state{socket=Socket} = S) ->
 do_mount(Name, NoVerify, #state{transport=Trsp, socket=Socket} = S) ->
 	Req = peerdrive_netstore_pb:encode_mountreq(#mountreq{
 		store=Name, no_verify=NoVerify}),
-	MountReq = <<0:32, ?MOUNT_MSG:12, ?FLAG_REQ:4, Req/binary>>,
+	MountReq = [<<0:32, ?MOUNT_MSG:12, ?FLAG_REQ:4>>, Req],
 	try
 		MountCnfMsg = case Trsp:send(Socket, MountReq) of
 			ok ->
@@ -368,28 +372,32 @@ cnf_contains({error, enoent}) ->
 cnf_stat(Body) ->
 	#statcnf{
 		flags = Flags,
-		parts = Parts,
+		data = #statcnf_data{size=DataSize, hash=DataHash},
+		attachments = Attachments,
 		parents = Parents,
 		mtime = Mtime,
 		type_code = TypeCode,
 		creator_code = CreatorCode,
-		doc_links = DocLinks,
-		rev_links = RevLinks,
 		comment = Comment
 	} = peerdrive_netstore_pb:decode_statcnf(Body),
 	Stat = #rev_stat{
-		flags     = Flags,
-		parts     = [ {FCC, Size, PId} || #statcnf_part{fourcc=FCC, size=Size,
-			pid=PId} <- Parts, ?ASSERT_PART(FCC) ],
+		flags       = Flags,
+		data        = {DataSize, DataHash},
+		attachments = [ {Name, Size, Hash} || #statcnf_attachment{name=Name, size=Size,
+			hash=Hash} <- Attachments ],
 		parents   = Parents,
 		mtime     = Mtime,
 		type      = TypeCode,
 		creator   = CreatorCode,
-		doc_links = DocLinks,
-		rev_links = RevLinks,
 		comment   = Comment
 	},
 	{ok, Stat}.
+
+
+cnf_get_links(Body) ->
+	#getlinkscnf{doc_links=DocLinks, rev_links=RevLinks} =
+		peerdrive_netstore_pb:decode_getlinkscnf(Body),
+	{ok, {DocLinks, RevLinks}}.
 
 
 cnf_peek(Cnf, MaxPacketSize, User) ->
@@ -461,42 +469,42 @@ cnf_forward_doc(Body, User) ->
 	end.
 
 
-req_put_rev(Rev, Revision, From, #state{mps=MPS} = S) ->
+req_put_rev(Rev, Revision, Data, DocLinks, RevLinks, From, #state{mps=MPS} = S) ->
 	{User, _Tag} = From,
 	#revision{
-		flags     = Flags,
-		parts     = Parts,
-		parents   = Parents,
-		mtime     = Mtime,
-		type      = TypeCode,
-		creator   = CreatorCode,
-		doc_links = DocLinks,
-		rev_links = RevLinks,
-		comment   = Comment
+		flags       = Flags,
+		data        = DataHash,
+		attachments = Attachments,
+		parents     = Parents,
+		mtime       = Mtime,
+		type        = TypeCode,
+		creator     = CreatorCode,
+		comment     = Comment
 	} = Revision,
 	Req = peerdrive_netstore_pb:encode_putrevreq(#putrevreq{
 		rid = Rev,
 		revision = #putrevreq_revision{
 			flags = Flags,
-			parts = [ #putrevreq_revision_part{fourcc=FCC, pid=PId} ||
-				{FCC, PId} <- Parts ],
+			data = DataHash,
+			attachments = [ #putrevreq_revision_attachment{name=Name, hash=Hash} ||
+				{Name, Hash} <- Attachments ],
 			parents = Parents,
 			mtime = Mtime,
 			type_code = TypeCode,
 			creator_code = CreatorCode,
-			doc_links = DocLinks,
-			rev_links = RevLinks,
 			comment = Comment
-		}
+		},
+		data = Data,
+		doc_links = DocLinks,
+		rev_links = RevLinks
 	}),
 	Handler = fun(B) -> cnf_put_rev(B, MPS, User) end,
 	send_request(From, ?PUT_REV_MSG, Req, Handler, S).
 
 
 cnf_put_rev(Body, MaxPacketSize, User) ->
-	#putrevcnf{handle=Handle, missing_parts=Missing} =
+	#putrevcnf{handle=Handle, missing_attachments=Missing} =
 		peerdrive_netstore_pb:decode_putrevcnf(Body),
-	true = lists:all(fun(P) -> ?ASSERT_PART(P) end, Missing),
 	{ok, Importer} = peerdrive_net_store_io:start_link(self(), Handle,
 		MaxPacketSize, User),
 	{ok, Missing, Importer}.

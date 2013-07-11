@@ -19,16 +19,16 @@
 
 import sys, os
 
-from peerdrive import struct
+from peerdrive import connector
 from peerdrive.importer import importObjectByPath
 
 
 def usage():
-	print """Usage: hp-import.py <hp-path-spec> UTI <hp-obj-spec>
+	print """Usage: hp-import.py <hp-path-spec> UTI <json> <attachments>
 
-       <hp-path-spec>   = tag | 7bf187e7... (unique UUID prefix)
-       <hp-obj-spec>    = [FOUR:<content>]+
-       <content> = local file | json data
+       <hp-path-spec>   = PeerDrive path
+       <json>           = JSON data
+       <attachments>    = [<name>:<file>]+
 """
 	sys.exit(1)
 
@@ -41,20 +41,18 @@ if len(sys.argv) < 4:
 # parse command line
 objPath = sys.argv[1]
 objUti  = sys.argv[2]
+objData = connector.loadJSON(sys.argv[3])
 objSpec = []
-for spec in sys.argv[3:]:
+for spec in sys.argv[4:]:
 	if spec[4] != ':':
 		usage()
 	fourCC = spec[:4]
 	content = spec[5:]
-	if os.path.isfile(content):
-		with open(content, "rb") as file:
-			part = file.read()
-	else:
-		part = struct.dumps(struct.loadJSON(content))
+	with open(content, "rb") as file:
+		part = file.read()
 	objSpec.append((fourCC, part))
 
 # let's do it
-if not importObjectByPath(objPath, objUti, objSpec):
+if not importObjectByPath(objPath, objUti, objData, objSpec):
 	print "Import failed"
 

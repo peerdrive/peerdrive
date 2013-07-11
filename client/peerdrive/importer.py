@@ -20,7 +20,7 @@ from __future__ import absolute_import
 
 import os, sys, subprocess
 
-from . import struct
+from . import struct, connector
 from .connector import Connector
 from .registry import Registry
 
@@ -45,7 +45,7 @@ def __runExtractor(extractor, path):
 		proc = subprocess.Popen(['./'+extractor, path], stdout=subprocess.PIPE)
 	data = proc.stdout.read()
 	proc.wait()
-	return struct.loadJSON(data)
+	return connector.loadJSON(data)
 
 
 def __merge(old, new):
@@ -94,12 +94,11 @@ def importFile(store, path, name="", progress=None):
 			if additionalMeta:
 				__merge(meta, additionalMeta)
 
-		#print 'META: ', repr(meta)
 		with open(path, "rb") as file:
 			writer = Connector().create(store, uti, "")
 			try:
-				writer.write('FILE', file.read())
-				writer.write('META', struct.dumps(meta))
+				writer.setData('', meta)
+				writer.write('public.data', file.read())
 				writer.commit("Import from external file system")
 				return writer
 			except:
@@ -114,7 +113,7 @@ def importFile(store, path, name="", progress=None):
 
 			folder = struct.Folder()
 			for handle in handles:
-				folder.append(struct.DocLink(store, handle.getDoc()))
+				folder.append(connector.DocLink(store, handle.getDoc()))
 
 			return folder.create(store, name)
 		finally:
@@ -144,7 +143,7 @@ def overwriteFile(link, path):
 	if not (doc and rev):
 		return False
 	with Connector().update(store, doc, rev) as writer:
-		meta = struct.loads(store, writer.readAll('META'))
+		meta = writer.getData('')
 		meta["org.peerdrive.annotation"]["origin"] = path
 
 		extractor = Registry().getExtractor(uti)
@@ -154,8 +153,8 @@ def overwriteFile(link, path):
 				__merge(meta, additionalMeta)
 
 		with open(path, "rb") as file:
-			writer.writeAll('FILE', file.read())
-		writer.writeAll('META', struct.dumps(meta))
+			writer.writeAll('public.data', file.read())
+		writer.setData('', meta)
 		writer.setType(uti)
 		writer.commit("Overwritten from external file system")
 
@@ -163,10 +162,11 @@ def overwriteFile(link, path):
 
 
 # returns a commited writer or None
-def importObject(store, uti, spec, flags):
+def importObject(store, uti, data, spec, flags):
 	try:
 		writer = Connector().create(store, uti, "")
 		try:
+			writer.setData('', data)
 			for (fourcc, data) in spec:
 				writer.writeAll(fourcc, data)
 			writer.setFlags(flags)
@@ -179,7 +179,7 @@ def importObject(store, uti, spec, flags):
 	return None
 
 
-def overwriteObject(link, uti, spec, flags):
+def overwriteObject(link, uti, data, spec, flags):
 	link.update()
 	store = link.store()
 	doc = link.doc()
@@ -188,6 +188,7 @@ def overwriteObject(link, uti, spec, flags):
 		return False
 
 	with Connector().update(store, doc, rev) as writer:
+		writer.setData('', data)
 		for (fourcc, data) in spec:
 			writer.writeAll(fourcc, data)
 		writer.setType(uti)
@@ -197,7 +198,7 @@ def overwriteObject(link, uti, spec, flags):
 	return True
 
 
-def importObjectByPath(path, uti, spec, overwrite=False, flags=[]):
+def importObjectByPath(path, uti, data, spec, overwrite=False, flags=[]):
 	try:
 		# resolve the path
 		(store, folder, name) = struct.walkPath(path, True)
@@ -205,16 +206,16 @@ def importObjectByPath(path, uti, spec, overwrite=False, flags=[]):
 			if not overwrite:
 				return False
 			try:
-				return overwriteObject(folder[name], uti, spec, flags)
+				return overwriteObject(folder[name], uti, data, spec, flags)
 			except IOError:
 				pass
 
 		# create the object and add to dict
-		handle = importObject(store, uti, spec, flags)
+		handle = importObject(store, uti, data, spec, flags)
 		if not handle:
 			return False
 		try:
-			folder.append(struct.DocLink(store, handle.getDoc()))
+			folder.append(connector.DocLink(store, handle.getDoc()))
 			folder.save()
 			return True
 		finally:
@@ -243,7 +244,7 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 				handle = importFile(store, f)
 				if handle:
 					handles.append(handle)
-					folder[nn] = struct.DocLink(store, handle.getDoc())
+					folder[nn] = connector.DocLink(store, handle.getDoc())
 				elif error:
 					error(f, nn)
 			folder.save()
@@ -257,7 +258,7 @@ def importFileByPath(impPath, impFile, overwrite=False, progress=None, error=Non
 		handle = importFile(store, impFile, name)
 		try:
 			if handle:
-				folder[name] = struct.DocLink(store, handle.getDoc())
+				folder[name] = connector.DocLink(store, handle.getDoc())
 				folder.save()
 			else:
 				raise ImporterError("Invalid file")

@@ -21,7 +21,8 @@
 	get_parents/1, get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2,
 	replicate_rev/4, replicate_doc/4, resume/4, set_flags/2, set_type/2,
 	stat/2, suspend/1, suspend/2, forward_doc/6, update/4, close/1, commit/1,
-	commit/2, write/4, truncate/3, rebase/2, merge/4]).
+	commit/2, write/4, truncate/3, rebase/2, merge/4, get_data/2, set_data/3,
+	get_links/2]).
 
 -include("store.hrl").
 
@@ -105,6 +106,22 @@ stat(Rev, SearchStores) ->
 			fun(Store) ->
 				case peerdrive_store:stat(Store, Rev) of
 					{ok, Stat} -> throw(Stat);
+					{error, _Reason} -> ok
+				end
+			end,
+			SearchStores),
+		{error, enoent}
+	catch
+		throw:Result -> {ok, Result}
+	end.
+
+
+get_links(Rev, SearchStores) ->
+	try
+		lists:foreach(
+			fun(Store) ->
+				case peerdrive_store:get_links(Store, Rev) of
+					{ok, Links} -> throw(Links);
 					{error, _Reason} -> ok
 				end
 			end,
@@ -201,6 +218,14 @@ update(Store, Doc, StartRev, Creator) ->
 %%       Reason = ecode()
 resume(Store, Doc, PreRev, Creator) ->
 	peerdrive_broker_io:resume(Store, Doc, PreRev, Creator).
+
+
+get_data(Handle, Selector) ->
+	peerdrive_broker_io:get_data(Handle, Selector).
+
+
+set_data(Handle, Selector, Data) ->
+	peerdrive_broker_io:set_data(Handle, Selector, Data).
 
 
 %% @doc Read a part of a document

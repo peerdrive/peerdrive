@@ -49,13 +49,18 @@ init({Store, DId, PreRId, Rev, User}) ->
 		store    = Store,
 		did      = DId,
 		prerid   = PreRId,
-		rev      = Rev#revision{parts=orddict:from_list(Rev#revision.parts)},
+		rev      = Rev#revision{attachments=orddict:from_list(Rev#revision.attachments)},
 		parts    = [],
 		readonly = not is_binary(DId),
-		locks    = [PId || {_, PId} <- Rev#revision.parts]
+		locks    = [Rev#revision.data] ++ [PId || {_, PId} <- Rev#revision.attachments]
 	},
 	{ok, State}.
 
+
+% returns: {ok, Data} | {error, Reason}
+handle_call({get_data, Selector}, _From, S) ->
+	{Reply, S2} = do_get_data(Selector, S),
+	{reply, Reply, S2};
 
 % returns: {ok, Data} | {error, Reason}
 handle_call({read, Part, Offset, Length}, _From, S) ->
@@ -75,13 +80,19 @@ handle_call(get_type, _From, S) ->
 handle_call(get_parents, _From, S) ->
 	{reply, {ok, (S#state.rev)#revision.parents}, S};
 
-handle_call(get_links, _From, S) ->
-	Rev = S#state.rev,
-	{reply, {ok, {Rev#revision.doc_links, Rev#revision.rev_links}}, S};
-
 % the following calls are only allowed when still writable
 handle_call(_Request, _From, S = #state{readonly=true}) ->
 	{reply, {error, ebadf}, S};
+
+% returns `ok | {error, Reason}'
+handle_call({set_data, Selector, Data}, _From, S) ->
+	case peerdrive_struct:verify(Data) of
+		ok ->
+			{Reply, S2} = do_set_data(Selector, Data, S),
+			{reply, Reply, S2};
+		error ->
+			{reply, {error, einval}, S}
+	end;
 
 % returns `ok | {error, Reason}'
 handle_call({write, Part, Offset, Data}, _From, S) ->
@@ -95,17 +106,17 @@ handle_call({truncate, Part, Offset}, _From, S) ->
 
 % returns `{ok, Hash} | {error, Reason}'
 handle_call(commit, _From, S) ->
-	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/4, undefined, S),
+	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/6, undefined, S),
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | {error, Reason}'
 handle_call({commit, Comment}, _From, S) ->
-	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/4, Comment, S),
+	{Reply, S2} = do_commit(fun peerdrive_file_store:commit/6, Comment, S),
 	{reply, Reply, S2};
 
 % returns `{ok, Hash} | {error, Reason}'
 handle_call({suspend, Comment}, _From, S) ->
-	{Reply, S2} = do_commit(fun peerdrive_file_store:suspend/4, Comment, S),
+	{Reply, S2} = do_commit(fun peerdrive_file_store:suspend/6, Comment, S),
 	{reply, Reply, S2};
 
 handle_call({set_flags, Flags}, _From, S) ->
@@ -116,11 +127,6 @@ handle_call({set_flags, Flags}, _From, S) ->
 handle_call({set_type, Type}, _From, S) ->
 	Rev = S#state.rev,
 	NewRev = Rev#revision{type=Type},
-	{reply, ok, S#state{rev=NewRev}};
-
-handle_call({set_links, DocLinks, RevLinks}, _From, S) ->
-	Rev = S#state.rev,
-	NewRev = Rev#revision{doc_links=DocLinks, rev_links=RevLinks},
 	{reply, ok, S#state{rev=NewRev}};
 
 handle_call({set_parents, Parents}, _From, S) ->
@@ -174,6 +180,38 @@ code_change(_, State, _) -> {ok, State}.
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+do_get_data(Selector, S) ->
+	case get_part_readable(data, S) of
+		{ok, Data, S2} when is_binary(Data) ->
+			try
+				{{ok, peerdrive_struct:extract(Data, Selector)}, S2}
+			catch
+				error:badarg -> {{error, einval}, S2};
+				error:enoent -> {{error, enoent}, S2}
+			end;
+
+		{ok, {_, IoDev}, S2} ->
+			FileData = case file:pread(IoDev, 0, 16#0fffffff) of
+				eof -> {ok, <<>>};
+				Else -> peerdrive_util:fixup_file(Else)
+			end,
+			case FileData of
+				{ok, Data} ->
+					try
+						{{ok, peerdrive_struct:extract(Data, Selector)}, S2}
+					catch
+						error:badarg -> {{error, einval}, S2};
+						error:enoent -> {{error, enoent}, S2}
+					end;
+				Error ->
+					{Error, S2}
+			end;
+
+		{error, _} = Error ->
+			{Error, S}
+	end.
+
+
 do_read(Part, Offset, Length, S) ->
 	case get_part_readable(Part, S) of
 		{ok, Data, S2} when is_binary(Data) ->
@@ -187,6 +225,25 @@ do_read(Part, Offset, Length, S) ->
 
 		{error, _} = Error ->
 			{Error, S}
+	end.
+
+
+do_set_data(Selector, Data, S) ->
+	case do_get_data(<<>>, S) of
+		{{ok, Orig}, S2} ->
+			try
+				New = peerdrive_struct:update(Orig, Selector, Data),
+				case do_truncate(data, size(New), S2) of
+					{ok, S3}   -> do_write(data, 0, New, S3);
+					TruncError -> TruncError
+				end
+			catch
+				error:badarg -> {{error, einval}, S2};
+				error:enoent -> {{error, enoent}, S2}
+			end;
+
+		ReadError ->
+			ReadError
 	end.
 
 
@@ -228,19 +285,25 @@ do_truncate(Part, Offset, S) ->
 
 
 do_commit(Fun, Comment, S) ->
-	case close_and_writeback(S) of
-		{ok, S2} ->
-			Rev1 = S2#state.rev,
-			Rev2 = Rev1#revision{mtime=peerdrive_util:get_time()},
-			Rev3 = case Comment of
-				undefined -> Rev2;
-				_ -> Rev2#revision{comment=Comment}
-			end,
-			case Fun(S2#state.store, S2#state.did, S2#state.prerid, Rev3) of
-				{ok, _Rev} = Ok ->
-					{Ok, S2#state{rev=Rev3, readonly=true}};
-				{error, _} = Error ->
-					{Error, S2}
+	case extract_links(S) of
+		{{ok, DocLinks, RevLinks}, S2} ->
+			case close_and_writeback(S2) of
+				{ok, #state{store=Store, did=DId, prerid=PreRId} = S3} ->
+					Rev1 = S3#state.rev,
+					Rev2 = Rev1#revision{mtime=peerdrive_util:get_time()},
+					Rev3 = case Comment of
+						undefined -> Rev2;
+						_ -> Rev2#revision{comment=Comment}
+					end,
+					case Fun(Store, DId, PreRId, Rev3, DocLinks, RevLinks) of
+						{ok, _Rev} = Ok ->
+							{Ok, S3#state{rev=Rev3, readonly=true}};
+						{error, _} = Error ->
+							{Error, S3}
+					end;
+
+				{{error, _}, _S2} = Error ->
+					Error
 			end;
 
 		{{error, _}, _S2} = Error ->
@@ -261,6 +324,17 @@ do_set_parents(Parents, #state{rev=Rev, store=Store} = S) ->
 	S#state{rev=NewRev}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+extract_links(S) ->
+	case do_get_data(<<>>, S) of
+		{{ok, BinData}, S2} ->
+			{DocLinks, RevLinks} = peerdrive_struct:extract_links(BinData),
+			{{ok, DocLinks, RevLinks}, S2};
+
+		{{error, _}, _S2} = Error ->
+			Error
+	end.
+
 
 close_and_writeback(#state{parts=[]} = S) ->
 	{ok, S};
@@ -311,8 +385,11 @@ close_and_writeback(#state{parts=[{Part, Content} | RemParts]} = S) ->
 	end.
 
 
+commit_part(data, PId, #state{rev=Rev} = S) ->
+	S#state{rev = Rev#revision{data=PId}};
+
 commit_part(Part, PId, #state{rev=Rev} = S) ->
-	NewRev = Rev#revision{parts=orddict:store(Part, PId, Rev#revision.parts)},
+	NewRev = Rev#revision{attachments=orddict:store(Part, PId, Rev#revision.attachments)},
 	S#state{rev=NewRev}.
 
 
@@ -333,7 +410,11 @@ get_part_readable(Part, S) ->
 
 
 part_open_read(Part, #state{rev=Rev} = S) ->
-	case lists:keyfind(Part, 1, Rev#revision.parts) of
+	Search = case Part of
+		data -> {data, Rev#revision.data};
+		_    -> lists:keyfind(Part, 1, Rev#revision.attachments)
+	end,
+	case Search of
 		{Part, PId} ->
 			case peerdrive_file_store:part_get(S#state.store, PId) of
 				{ok, Data} when is_binary(Data) ->
@@ -418,7 +499,11 @@ part_file_to_bin(Part, {_FileName, IoDev}, S) ->
 
 
 part_open_write(Part, Conv, #state{rev=Rev, parts=Parts} = S) ->
-	case lists:keyfind(Part, 1, Rev#revision.parts) of
+	Search = case Part of
+		data -> {data, Rev#revision.data};
+		_    -> lists:keyfind(Part, 1, Rev#revision.attachments)
+	end,
+	case Search of
 		{Part, PId} ->
 			case peerdrive_file_store:part_get(S#state.store, PId) of
 				{ok, Data} when is_binary(Data) ->
