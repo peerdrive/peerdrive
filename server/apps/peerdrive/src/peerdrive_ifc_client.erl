@@ -976,13 +976,29 @@ encode_progress_start(Tag, Info) ->
 
 
 publish(Socket, Cookie, Path) ->
-	{ok, {Address, Port}} = inet:sockname(Socket),
-	case file:open(Path, [write]) of
-		{ok, IoDevice} ->
-			io:format(IoDevice, "tcp://~s:~w/~s~n", [inet_parse:ntoa(Address),
-				Port, peerdrive_util:bin_to_hexstr(Cookie)]),
-			file:close(IoDevice) == ok andalso file:change_mode(Path, 8#00640);
+	case do_publish(Socket, Cookie, Path) of
+		ok ->
+			ok;
+		{error, eexist} ->
+			%% Probably stale server.info file, but may also be someone else
+			%% who tries to eavesdrop the cookie. Try to get rid of the file...
+			case file:delete(Path) of
+				ok -> do_publish(Socket, Cookie, Path);
+				Error -> Error
+			end;
 		{error, _Reason} = Error ->
 			Error
 	end.
 
+
+do_publish(Socket, Cookie, Path) ->
+	{ok, {Address, Port}} = inet:sockname(Socket),
+	case file:open(Path, [write, exclusive]) of
+		{ok, IoDevice} ->
+			file:change_mode(Path, 8#00640) == ok andalso
+			io:format(IoDevice, "tcp://~s:~w/~s~n", [inet_parse:ntoa(Address),
+				Port, peerdrive_util:bin_to_hexstr(Cookie)]) == ok andalso
+			file:close(IoDevice);
+		{error, _Reason} = Error ->
+			Error
+	end.
