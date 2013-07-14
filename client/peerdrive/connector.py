@@ -307,7 +307,7 @@ class _Connector(QtCore.QObject):
 						path = _winreg.QueryValueEx(key, "Local AppData")[0]
 					path = os.path.join(path, "PeerDrive", "server.info")
 				else:
-					path = os.path.expanduser("~/.peerdrive/server.info")
+					path = "/tmp/peerdrive-" + os.getenv('USER') + "/server.info"
 				with open(path, 'r') as f:
 					address = f.readline()
 			except IOError:

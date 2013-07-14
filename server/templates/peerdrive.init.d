@@ -33,7 +33,7 @@ case "$1" in
     start)
 		log_daemon_msg "Starting system PeerDrive Daemon"
 		if [ ! -d "%rundir%" ]; then
-			mkdir -p "%rundir%"
+			mkdir -m 755 -p "%rundir%"
 			chown peerdrive:peerdrive "%rundir%"
 		fi
         daemon --daemon

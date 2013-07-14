@@ -233,7 +233,7 @@ cfg_run_dir() ->
 		{unix, _} ->
 			case init:get_argument(system) of
 				{ok, [[RunDir]]} -> RunDir;
-				error -> filename:join(os:getenv("HOME"), ".peerdrive")
+				error -> "/tmp/peerdrive-" ++ os:getenv("USER")
 			end;
 		{win32, _} ->
 			cfg_win32_app_dir()

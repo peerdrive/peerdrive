@@ -4,8 +4,7 @@ ERL_LIBS="$ERL_LIBS${ERL_LIBS+:}%libsdir%"
 
 NAME="peerdrive-$USER"
 CONFIG="$HOME/.peerdrive/etc/peerdrive"
-PID_FILE="$HOME/.peerdrive/peerdrive.pid"
-LOG_FILE="$HOME/.peerdrive/console.log"
+RUN_DIR="/tmp/peerdrive-${USER}"
 SYSFLAG=
 
 ERLDAEMON=$(ls -1 "%libsdir%"/erldaemon-*/priv/erldaemon | tail -n1)
@@ -59,6 +58,8 @@ start_daemon() {
 	if [ "$LOG_ROTATE" -a -w "$LOG_FILE" ]; then
 		mv "$LOG_FILE" "${LOG_FILE}.old"
 	fi
+
+	mkdir -m 750 -p "$RUN_DIR"
 
 	export ERL_LIBS
 	exec $ERLDAEMON $FOREGROUND -n "$NAME" -l "$LOG_FILE" -p "$PID_FILE" -- \
@@ -134,8 +135,7 @@ until [ -z "$1" ]; do
 		--system)
 			NAME=peerdrive
 			CONFIG="%etcdir%/peerdrive"
-			PID_FILE="%rundir%/peerdrive.pid"
-			LOG_FILE="%logdir%/console.log"
+			RUN_DIR="%rundir%"
 			LOG_ROTATE=
 			SYSFLAG="-system %rundir%"
 			;;
@@ -151,6 +151,9 @@ until [ -z "$1" ]; do
 	esac
 	shift
 done
+
+PID_FILE="${RUN_DIR}/peerdrive.pid"
+LOG_FILE="${RUN_DIR}/console.log"
 
 case $OPERATION in
 	foreground)
