@@ -1418,7 +1418,7 @@ file_getattr_rev(Store, Rev) ->
 		{ok, #rev_stat{attachments=Attachments, mtime=Mtime}} ->
 			Size = case find_entry(
 				fun
-					({<<"public.data">>, Size, _Hash}) -> {ok, Size};
+					({<<"_">>, Size, _Hash}) -> {ok, Size};
 					(_) -> error
 				end,
 				Attachments)
@@ -1442,7 +1442,7 @@ file_getattr_rev(Store, Rev) ->
 file_truncate({doc, Store, Doc}, Size) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
 		{ok, _Rev, Handle} ->
-			case peerdrive_ifc_vfs_broker:truncate(Handle, <<"public.data">>, Size) of
+			case peerdrive_ifc_vfs_broker:truncate(Handle, <<"_">>, Size) of
 				ok ->
 					case peerdrive_ifc_vfs_broker:close(Handle) of
 						{ok, CurRev} ->
@@ -1466,7 +1466,7 @@ file_open({doc, Store, Doc}, Trunc, Mode) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, Write) of
 		{ok, _Rev, Handle} ->
 			Res = case Trunc of
-				true  -> peerdrive_ifc_vfs_broker:truncate(Handle, <<"public.data">>, 0);
+				true  -> peerdrive_ifc_vfs_broker:truncate(Handle, <<"_">>, 0);
 				false -> ok
 			end,
 			case Res of
@@ -1493,7 +1493,7 @@ file_open({doc, Store, Doc}, Trunc, Mode) ->
 
 
 file_read(Handle, Size, Offset) ->
-	case peerdrive_ifc_vfs_broker:read(Handle, <<"public.data">>, Offset, Size) of
+	case peerdrive_ifc_vfs_broker:read(Handle, <<"_">>, Offset, Size) of
 		{ok, _Data} = R  -> R;
 		{error, enoent}  -> {ok, <<>>};
 		{error, _}       -> {error, eio}
@@ -1501,7 +1501,7 @@ file_read(Handle, Size, Offset) ->
 
 
 file_write(Handle, Data, Offset) ->
-	peerdrive_ifc_vfs_broker:write(Handle, <<"public.data">>, Offset, Data).
+	peerdrive_ifc_vfs_broker:write(Handle, <<"_">>, Offset, Data).
 
 
 file_release(Handle, Changed, Rewritten) ->
@@ -1510,7 +1510,7 @@ file_release(Handle, Changed, Rewritten) ->
 	%	true  ->
 	%		if
 	%			Rewritten ->
-	%				case peerdrive_ifc_vfs_broker:read(Handle, <<"FILE">>, 0, 4096) of
+	%				case peerdrive_ifc_vfs_broker:read(Handle, <<"_">>, 0, 4096) of
 	%					{ok, Data} ->
 	%						peerdrive_ifc_vfs_broker:set_type(Handle, registry:guess(Data));
 	%					_Else ->
@@ -1571,7 +1571,7 @@ create_empty_file(Store, Name) ->
 	case peerdrive_broker:create(Store, Uti, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:set_data(Handle, <<"">>, peerdrive_struct:encode(MetaData)),
-			peerdrive_broker:write(Handle, <<"public.data">>, 0, <<>>),
+			peerdrive_broker:write(Handle, <<"_">>, 0, <<>>),
 			case peerdrive_broker:commit(Handle, <<"Created by VFS interface">>) of
 				{ok, Rev} ->
 					% leave handle open, the caller has to close it

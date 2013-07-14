@@ -94,7 +94,7 @@ class MailWidget(widgets.DocumentView):
 		self.setCentralWidget(central)
 
 	def docRead(self, readWrite, r):
-		self.__mail = email.message_from_string(r.readAll('public.data'))
+		self.__mail = email.message_from_string(r.readAll('_'))
 		content = self.__findPart(self.__mail)
 		if not content:
 			self.view.setCurrentWidget(self.textView)

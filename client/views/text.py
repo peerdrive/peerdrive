@@ -52,7 +52,7 @@ class TextEdit(widgets.DocumentView):
 
 	def docRead(self, readWrite, r):
 		self.textEdit.textChanged.disconnect(self._emitSaveNeeded)
-		self.textEdit.setPlainText(r.readAll('public.data'))
+		self.textEdit.setPlainText(r.readAll('_'))
 		self.textEdit.document().setModified(False)
 		self.textEdit.textChanged.connect(self._emitSaveNeeded)
 
@@ -67,7 +67,7 @@ class TextEdit(widgets.DocumentView):
 
 	def docSave(self, w):
 		if self.textEdit.document().isModified():
-			w.writeAll('public.data', str(self.textEdit.toPlainText().toUtf8()))
+			w.writeAll('_', str(self.textEdit.toPlainText().toUtf8()))
 
 	def docMergeCheck(self, heads, types, changedParts):
 		(uti, handled) = super(TextEdit, self).docMergeCheck(heads, types, changedParts)

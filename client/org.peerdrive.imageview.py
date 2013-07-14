@@ -39,7 +39,7 @@ class ImageWidget(widgets.DocumentView):
 		self.setCentralWidget(self.scrollArea)
 
 	def docRead(self, readWrite, r):
-		data = r.readAll('public.data')
+		data = r.readAll('_')
 		image = QtGui.QImage()
 		image.loadFromData(QtCore.QByteArray(data))
 		if image.isNull():

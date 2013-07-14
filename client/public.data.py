@@ -41,7 +41,7 @@ except IOError as e:
 path = fuse.findFuseFile(link)
 if not path:
 	s = Connector().stat(link.rev())
-	hash = s.hash('public.data')
+	hash = s.hash('_')
 
 	name = hash.encode('hex')
 	ext = ""
@@ -69,7 +69,7 @@ if not path:
 	if not os.path.isfile(path):
 		with open(path, "wb") as file:
 			with Connector().peek(link.store(), link.rev()) as reader:
-				file.write(reader.readAll('public.data'))
+				file.write(reader.readAll('_'))
 		os.chmod(path, stat.S_IREAD)
 
 

@@ -98,7 +98,7 @@ def importFile(store, path, name="", progress=None):
 			writer = Connector().create(store, uti, "")
 			try:
 				writer.setData('', meta)
-				writer.write('public.data', file.read())
+				writer.write('_', file.read())
 				writer.commit("Import from external file system")
 				return writer
 			except:
@@ -153,7 +153,7 @@ def overwriteFile(link, path):
 				__merge(meta, additionalMeta)
 
 		with open(path, "rb") as file:
-			writer.writeAll('public.data', file.read())
+			writer.writeAll('_', file.read())
 		writer.setData('', meta)
 		writer.setType(uti)
 		writer.commit("Overwritten from external file system")

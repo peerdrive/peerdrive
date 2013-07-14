@@ -782,7 +782,7 @@ class FolderModel(QtCore.QAbstractTableModel):
 		ext  = os.path.splitext(name)[1].lower()
 		uti  = Registry().getUtiFromExtension(ext)
 		data = { "org.peerdrive.annotation" : { "title" : name } },
-		spec = [ ('public.data', content) ],
+		spec = [ ('_', content) ],
 		handle = importer.importObject(self.__store, uti, data, spec, [])
 		if handle:
 			try:
