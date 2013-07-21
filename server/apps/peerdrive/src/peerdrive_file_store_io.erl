@@ -26,7 +26,7 @@
 
 % Part -> {ro, binary() | {FileName, IoDev}} |
 %         {rw, binary() | {FileName, IoDev}}
--record(state, {store, did, prerid, rev, parts, readonly, locks}).
+-record(state, {store, did, prerid, rev, parts, readonly, locks, user}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -52,7 +52,8 @@ init({Store, DId, PreRId, Rev, User}) ->
 		rev      = Rev#revision{attachments=orddict:from_list(Rev#revision.attachments)},
 		parts    = [],
 		readonly = not is_binary(DId),
-		locks    = [Rev#revision.data] ++ [PId || {_, PId} <- Rev#revision.attachments]
+		locks    = [Rev#revision.data] ++ [PId || {_, PId} <- Rev#revision.attachments],
+		user     = User
 	},
 	{ok, State}.
 
@@ -141,7 +142,9 @@ handle_info({'EXIT', From, Reason}, #state{store=Store}=S) ->
 	end.
 
 
-terminate(_Reason, #state{did=DId, rev=Rev, store=Store} = S) ->
+terminate(_Reason, #state{user=User, did=DId, rev=Rev, store=Store} = S) ->
+	% unlink from user to not kill'em
+	unlink(User),
 	% unlock hashes
 	lists:foreach(
 		fun(PId) -> peerdrive_file_store:part_unlock(Store, PId) end,

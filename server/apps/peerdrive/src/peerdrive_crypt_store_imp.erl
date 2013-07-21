@@ -70,6 +70,10 @@ handle_info({'EXIT', From, Reason}, #state{store=Store, user=User} = S) ->
 			{stop, normal, S}
 	end.
 
+
+terminate(_Reason, #state{user=User}) ->
+	unlink(User).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -77,7 +81,6 @@ handle_info({'EXIT', From, Reason}, #state{store=Store, user=User} = S) ->
 
 handle_cast(_, State)    -> {stop, enotsup, State}.
 code_change(_, State, _) -> {ok, State}.
-terminate(_, _)          -> ok.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

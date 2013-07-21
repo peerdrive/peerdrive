@@ -20,7 +20,7 @@
 -export([start_link/4]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, handle, mps}).
+-record(state, {store, handle, mps, user}).
 
 -include("store.hrl").
 -include("netstore.hrl").
@@ -32,7 +32,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 start_link(Store, Handle, MaxPacketSize, User) ->
-	State = #state{store=Store, handle=Handle, mps=MaxPacketSize},
+	State = #state{store=Store, handle=Handle, mps=MaxPacketSize, user=User},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -108,11 +108,13 @@ handle_info({read, _Ref, _Result}, S) ->
 	{noreply, S}.
 
 
+terminate(_Reason, #state{user=User}) ->
+	unlink(User).
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Stubs...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-terminate(_Reason, _State) -> ok.
 handle_cast(_, State)    -> {noreply, State}.
 code_change(_, State, _) -> {ok, State}.
 

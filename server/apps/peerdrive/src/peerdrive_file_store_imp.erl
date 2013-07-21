@@ -24,7 +24,7 @@
 
 -define(THRESHOLD, 1024).
 
--record(state, {store, rid, rev, parts, noverify, done, doclinks, revlinks}).
+-record(state, {store, rid, rev, parts, noverify, done, doclinks, revlinks, user}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -41,7 +41,8 @@ start_link(RId, Rev, Missing, User, NoVerify, DocLinks, RevLinks) ->
 		noverify = NoVerify,
 		done = false,
 		doclinks = DocLinks,
-		revlinks = RevLinks
+		revlinks = RevLinks,
+		user = User
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -80,7 +81,8 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 	end.
 
 
-terminate(_Reason, #state{store=Store, parts=Parts, rev=Rev, rid=RId}) ->
+terminate(_Reason, #state{store=Store, parts=Parts, rev=Rev, rid=RId, user=User}) ->
+	unlink(User),
 	peerdrive_file_store:part_unlock(Store, Rev#revision.data),
 	lists:foreach(
 		fun({_, PId}) -> peerdrive_file_store:part_unlock(Store, PId) end,

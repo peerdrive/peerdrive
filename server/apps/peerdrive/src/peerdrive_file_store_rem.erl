@@ -20,7 +20,7 @@
 -export([start_link/4]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2, terminate/2]).
 
--record(state, {store, did, newprerid, oldprerid, done}).
+-record(state, {store, did, newprerid, oldprerid, done, user}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -32,7 +32,8 @@ start_link(DId, NewPreRId, OldPreRId, User) ->
 		did       = DId,
 		newprerid = NewPreRId,
 		oldprerid = OldPreRId,
-		done      = false
+		done      = false,
+		user      = User
 	},
 	gen_server:start_link(?MODULE, {State, User}, []).
 
@@ -70,7 +71,8 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 	end.
 
 
-terminate(_Reason, #state{store=Store, newprerid=RId}) ->
+terminate(_Reason, #state{store=Store, newprerid=RId, user=User}) ->
+	unlink(User),
 	peerdrive_file_store:rev_unlock(Store, RId).
 
 
