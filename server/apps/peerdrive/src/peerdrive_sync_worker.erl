@@ -578,16 +578,16 @@ merge_folder(Doc, Base, From, To) ->
 	% FIXME: The following code merges the data without checking for other
 	% keys. This may lead to data loss!
 	{Conflict1, NewMeta} = merge_folder_meta(Doc,
-		gb_trees:get(<<"org.peerdrive.annotation">>, Base),
-		gb_trees:get(<<"org.peerdrive.annotation">>, From),
-		gb_trees:get(<<"org.peerdrive.annotation">>, To)),
+		get_default(<<"org.peerdrive.annotation">>, Base, gb_trees:empty()),
+		get_default(<<"org.peerdrive.annotation">>, From, gb_trees:empty()),
+		get_default(<<"org.peerdrive.annotation">>, To, gb_trees:empty())),
 	{Conflict2, NewFolder} = merge_folder_content(Doc,
-		gb_trees:get(<<"org.peerdrive.folder">>, Base),
-		gb_trees:get(<<"org.peerdrive.folder">>, From),
-		gb_trees:get(<<"org.peerdrive.folder">>, To)),
-	New = gb_trees:update(<<"org.peerdrive.annotation">>, NewMeta,
-		gb_trees:update(<<"org.peerdrive.folder">>, NewFolder, Base)),
-	{Conflict1 or Conflict2, New}.
+		get_default(<<"org.peerdrive.folder">>, Base, []),
+		get_default(<<"org.peerdrive.folder">>, From, []),
+		get_default(<<"org.peerdrive.folder">>, To, [])),
+	New1 = update_default(<<"org.peerdrive.folder">>, NewFolder, Base, []),
+	New2 = update_default(<<"org.peerdrive.annotation">>, NewMeta, New1, gb_trees:empty()),
+	{Conflict1 or Conflict2, New2}.
 
 
 merge_folder_meta(Doc, Base, From, To) ->
@@ -642,5 +642,22 @@ check_simple(Result) ->
 			ok;
 		{error, Reason} ->
 			throw([{code, Reason}])
+	end.
+
+
+get_default(Key, Tree, Default) ->
+	case gb_trees:lookup(Key, Tree) of
+		{value, Value} -> Value;
+		none -> Default
+	end.
+
+update_default(Key, Value, Tree, Default) ->
+	case gb_trees:is_defined(Key, Tree) of
+		true ->
+			gb_trees:update(Key, Value, Tree);
+		false when Value =/= Default ->
+			gb_trees:enter(Key, Value, Tree);
+		false ->
+			Tree
 	end.
 
