@@ -16,7 +16,7 @@
 
 -module(peerdrive_struct).
 -export([decode/1, encode/1, merge/2, extract/2, update/3, extract_links/1,
-	verify/1]).
+	verify/1, cmp/2]).
 
 -include("utils.hrl").
 
