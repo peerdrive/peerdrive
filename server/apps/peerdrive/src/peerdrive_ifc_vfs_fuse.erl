@@ -470,6 +470,8 @@ make_fuse_attr(Ino, #vfs_attr{dir=Dir, size=Size, mtime=MTime}, S) ->
 		st_uid   = S#state.uid,
 		st_gid   = S#state.gid,
 		st_size  = Size,
+		st_blksize = 512,
+		st_blocks  = (Size + 511) div 512,
 		st_atime = epoch2fuse(MTime),
 		st_mtime = epoch2fuse(MTime),
 		st_ctime = epoch2fuse(MTime)
