@@ -35,7 +35,8 @@
 -record(state, {
 	inodes,  % gb_trees: inode -> #vnode
 	imap,    % gb_trees: OID -> inode
-	count    % int: next free inode
+	count,   % int: next free inode
+	ephemeral % re:mp()
 }).
 
 -record(vnode, {
@@ -54,11 +55,11 @@
 	getnode  = fun(_, _) -> error end,
 	readdir  = fun(_, _) -> {errror, eio} end,
 	open     = fun(_, _, _) -> {error, eisdir} end,
-	create   = fun(_, _, _, _) -> {error, enotdir} end,
+	create   = fun(_, _, _, _, _) -> {error, enotdir} end,
 	link     = fun(_, _, _, _) -> {error, enotdir} end,
 	unlink   = fun(_, _, _) -> {error, eacces} end,
-	mkdir    = fun(_, _, _) -> {error, enotdir} end,
-	rename   = fun(_, _, _, _) -> {error, enotdir} end
+	mkdir    = fun(_, _, _, _) -> {error, enotdir} end,
+	rename   = fun(_, _, _, _, _) -> {error, enotdir} end
 }).
 
 -record(handler, {read, write, release, changed=false, rewritten=false}).
@@ -67,11 +68,27 @@
 %% Public interface
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(_Options) ->
+init(Options) ->
+	EphemeralList = [""] ++ proplists:get_value(ephemeral, Options, [
+		"thumbs\\.db", "desktop\\.ini",  % Windows
+		"\\.ds_store",                   % Mac
+		"~\\$.*", "~.*\\.tmp"            % Temporary stuff
+		]),
+	EphemeralPat = string:join([ "(^" ++ E ++ "$)" || E <- EphemeralList ], "|"),
+	EphemeralRE = case re:compile(EphemeralPat, [unicode, caseless]) of
+		{ok, MP} ->
+			MP;
+		{error, ErrSpec} ->
+			error_logger:warning_report([{module, ?MODULE},
+				{error, "Ephemeral list did not compile"}, {reason, ErrSpec}]),
+			{ok, MP} = re:compile("^$", [unicode]),
+			MP
+	end,
 	#state{
-		inodes = gb_trees:from_orddict([ {1, root_make_node() } ]),
-		imap   = gb_trees:empty(),
-		count  = 2 % 1 is the root inode
+		inodes    = gb_trees:from_orddict([ {1, root_make_node() } ]),
+		imap      = gb_trees:empty(),
+		count     = 2, % 1 is the root inode
+		ephemeral = EphemeralRE
 	}.
 
 
@@ -128,7 +145,7 @@ open(Ino, Trunc, Mode, #state{inodes=Inodes} = S) ->
 create(Parent, Name, MustCreate, Trunc, Mode, S) ->
 	LookupOp = fun(ParentNode) ->
 		#vnode{oid=Oid, ifc=#ifc{create=Create}, cache=Cache} = ParentNode,
-		Create(Oid, Name, Cache, MustCreate)
+		Create(Oid, Name, Cache, MustCreate, S)
 	end,
 	case do_lookup(Parent, LookupOp, S) of
 		{ok, ChildIno, ChildNode, ParentTimeout, S2} ->
@@ -292,7 +309,7 @@ rename(Parent, OldName, Parent, NewName, S) ->
 		ifc   = #ifc{rename=Rename},
 		cache = ParentCache
 	} = ParentNode = gb_trees:get(Parent, Inodes),
-	case catch Rename(ParentOid, OldName, NewName, ParentCache) of
+	case catch Rename(ParentOid, OldName, NewName, ParentCache, S) of
 		{ok, NewCache} ->
 			S2 = S#state{inodes=gb_trees:update(Parent,
 				ParentNode#vnode{cache=NewCache}, Inodes)},
@@ -416,7 +433,7 @@ mkdir(Parent, Name, S) ->
 		cache   = ParentCache,
 		timeout = Timeout
 	} = ParentNode = gb_trees:get(Parent, Inodes),
-	case catch MkDir(ParentOid, Name, ParentCache) of
+	case catch MkDir(ParentOid, Name, ParentCache, S) of
 		{ok, ChildOid, NewCache} ->
 			S2 = S#state{inodes=gb_trees:update(Parent,
 				ParentNode#vnode{cache=NewCache}, Inodes)},
@@ -840,11 +857,11 @@ doc_make_node_folder(Oid) ->
 			lookup  = fun folder_lookup/3,
 			getnode = fun folder_getnode/1,
 			readdir = fun folder_readdir/2,
-			create  = fun folder_create/4,
+			create  = fun folder_create/5,
 			link    = fun folder_link/4,
 			unlink  = fun folder_unlink/3,
-			mkdir   = fun folder_mkdir/3,
-			rename  = fun folder_rename/4
+			mkdir   = fun folder_mkdir/4,
+			rename  = fun folder_rename/5
 		},
 		cache = {undefined, undefined, {0, 0, 0}}
 	}}.
@@ -899,7 +916,7 @@ folder_readdir({doc, Store, Doc}, Cache) ->
 	end.
 
 
-folder_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
+folder_create({doc, Store, Doc}, Name, Cache, MustCreate, S) ->
 	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			case folder_find_name(Name, Entries) of
@@ -915,7 +932,7 @@ folder_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
 					{error, eacces, NewCache};
 
 				error ->
-					case create_empty_file(Store, Name) of
+					case create_empty_file(Store, Name, S) of
 						{ok, Handle, NewDoc, NewRev} ->
 							try
 								NewEntry = #fe{
@@ -947,7 +964,7 @@ folder_create({doc, Store, Doc}, Name, Cache, MustCreate) ->
 	end.
 
 
-folder_mkdir({doc, Store, Doc}, Name, Cache) ->
+folder_mkdir({doc, Store, Doc}, Name, Cache, S) ->
 	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			case folder_find_name(Name, Entries) of
@@ -955,7 +972,7 @@ folder_mkdir({doc, Store, Doc}, Name, Cache) ->
 					{error, eexist, NewCache};
 
 				error ->
-					case create_empty_directory(Store, Name) of
+					case create_empty_directory(Store, Name, S) of
 						{ok, Handle, NewDoc, NewRev} ->
 							try
 								NewEntry = #fe{
@@ -1040,12 +1057,12 @@ folder_unlink({doc, Store, Doc}, Name, Cache) ->
 	end.
 
 
-folder_rename({doc, Store, Doc}, OldName, NewName, Cache) ->
+folder_rename({doc, Store, Doc}, OldName, NewName, Cache, S) ->
 	case folder_read_entries(Store, Doc, Cache) of
 		{ok, Entries, NewCache} ->
 			case folder_find_name(OldName, Entries) of
 				{ok, {doc, Store, ChildDoc}} ->
-					case folder_set_title(Store, ChildDoc, NewName) of
+					case folder_set_title(Store, ChildDoc, NewName, S) of
 						ok ->
 							FinalCache = folder_invalidate_cache(NewCache),
 							% Did we replace a file?
@@ -1338,7 +1355,7 @@ folder_write_entries(Handle, Entries, Cache) ->
 	end.
 
 
-folder_set_title(Store, Doc, NewTitle) ->
+folder_set_title(Store, Doc, NewTitle, S) ->
 	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
 		{ok, _OldRev, Handle} ->
 			try
@@ -1367,6 +1384,17 @@ folder_set_title(Store, Doc, NewTitle) ->
 							true ->
 								ok
 						end;
+					_ ->
+						ok % ignore this error
+				end,
+				case peerdrive_ifc_vfs_broker:get_flags(Handle) of
+					{ok, OldFlags} ->
+						NewFlags = case re:run(NewTitle, S#state.ephemeral) of
+							{match, _Captured} -> OldFlags bor ?REV_FLAG_EPHEMERAL;
+							nomatch -> OldFlags band (bnot ?REV_FLAG_EPHEMERAL)
+						end,
+						OldFlags =:= NewFlags orelse peerdrive_ifc_vfs_broker:set_flags(
+							Handle, NewFlags);
 					_ ->
 						ok % ignore this error
 				end,
@@ -1559,7 +1587,7 @@ sanitize(S) ->
 	lists:filter(fun(C) -> (C /= $/) and (C >= 31) end, S).
 
 
-create_empty_file(Store, Name) ->
+create_empty_file(Store, Name, S) ->
 	MetaData = gb_trees:enter(
 		<<"org.peerdrive.annotation">>,
 		gb_trees:enter(
@@ -1568,9 +1596,14 @@ create_empty_file(Store, Name) ->
 			gb_trees:empty()),
 		gb_trees:empty()),
 	Uti = peerdrive_registry:get_uti_from_extension(filename:extension(Name)),
+	Flags = case re:run(Name, S#state.ephemeral) of
+		{match, _Captured} -> ?REV_FLAG_EPHEMERAL;
+		nomatch -> 0
+	end,
 	case peerdrive_broker:create(Store, Uti, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:set_data(Handle, <<"">>, peerdrive_struct:encode(MetaData)),
+			peerdrive_broker:set_flags(Handle, Flags),
 			peerdrive_broker:write(Handle, <<"_">>, 0, <<>>),
 			case peerdrive_broker:commit(Handle, <<"Created by VFS interface">>) of
 				{ok, Rev} ->
@@ -1586,17 +1619,21 @@ create_empty_file(Store, Name) ->
 	end.
 
 
-create_empty_directory(Store, Name) ->
+create_empty_directory(Store, Name, S) ->
 	Data1 = gb_trees:enter(
 		<<"org.peerdrive.annotation">>,
 		gb_trees:enter(<<"title">>, Name, gb_trees:empty()),
 		gb_trees:empty()),
 	Data2 = gb_trees:enter(<<"org.peerdrive.folder">>, [], Data1),
 	TypeCode = <<"org.peerdrive.folder">>,
+	Flags = ?REV_FLAG_STICKY bor case re:run(Name, S#state.ephemeral) of
+		{match, _Captured} -> ?REV_FLAG_EPHEMERAL;
+		nomatch -> 0
+	end,
 	case peerdrive_broker:create(Store, TypeCode, ?VFS_CC) of
 		{ok, Doc, Handle} ->
 			peerdrive_broker:set_data(Handle, <<>>, peerdrive_struct:encode(Data2)),
-			peerdrive_broker:set_flags(Handle, ?REV_FLAG_STICKY),
+			peerdrive_broker:set_flags(Handle, Flags),
 			case peerdrive_broker:commit(Handle, <<"Created by VFS interface">>) of
 				{ok, Rev} ->
 					% leave handle open, the caller has to close it
