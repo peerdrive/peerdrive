@@ -1351,7 +1351,7 @@ folder_set_title(Store, Doc, NewTitle) ->
 					_ ->
 						<<"Renamed to \"", NewTitle/binary, "\"">>
 				end,
-				case peerdrive_ifc_vfs_broker:get_data(Handle,
+				case peerdrive_ifc_vfs_broker:set_data(Handle,
 					<<"/org.peerdrive.annotation/title">>, NewTitle)
 				of
 					ok    -> ok;
