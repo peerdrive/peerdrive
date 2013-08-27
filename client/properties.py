@@ -43,6 +43,12 @@ def setMetaData(metaData, field, value):
 	item[path[0]] = value
 
 
+flagToText = {
+	0 : "Sticky",
+	1 : "Ephemeral"
+}
+
+
 class PropertiesDialog(QtGui.QDialog):
 	def __init__(self, link, parent=None):
 		super(PropertiesDialog, self).__init__(parent)
@@ -177,14 +183,17 @@ class RevisionTab(QtGui.QWidget):
 		self.__typeLabel = QtGui.QLabel()
 		self.__mtimeLabel = QtGui.QLabel()
 		self.__sizeLabel = QtGui.QLabel()
+		self.__flagsLabel = QtGui.QLabel()
 
 		layout = QtGui.QGridLayout()
 		layout.addWidget(QtGui.QLabel("Type:"), 0, 0)
 		layout.addWidget(QtGui.QLabel("Modification time:"), 1, 0)
 		layout.addWidget(QtGui.QLabel("Size:"), 2, 0)
+		layout.addWidget(QtGui.QLabel("Flags:"), 3, 0)
 		layout.addWidget(self.__typeLabel, 0, 1)
 		layout.addWidget(self.__mtimeLabel, 1, 1)
 		layout.addWidget(self.__sizeLabel, 2, 1)
+		layout.addWidget(self.__flagsLabel, 3, 1)
 
 		self.setLayout(layout)
 
@@ -203,6 +212,12 @@ class RevisionTab(QtGui.QWidget):
 					size = size >> 10
 			sizeText = "%d %s (%d attachments)" % (size, unit, len(stat.attachments()))
 			self.__sizeLabel.setText(sizeText)
+			if stat.flags():
+				flagsText = reduce(lambda x,y: x+", "+y,
+					[ flagToText.get(f, "<"+str(f)+">") for f in stat.flags() ] )
+			else:
+				flagsText = "-"
+			self.__flagsLabel.setText(flagsText)
 		except IOError:
 			self.__typeLabel.setText("n/a")
 			self.__mtimeLabel.setText("n/a")
