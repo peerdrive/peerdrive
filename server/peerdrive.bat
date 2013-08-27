@@ -15,4 +15,4 @@ IF NOT EXIST peerdrive.config (
 REM Configure additional code paths
 set ERL_LIBS=apps;deps
 
-erl +A4 +Ww -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive_test
+erl +A4 +Ww -config peerdrive -boot start_sasl -s crypto -s ssl -s peerdrive
