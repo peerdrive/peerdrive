@@ -90,6 +90,10 @@ pop_youngest(G, Heads, Dest) ->
 
 search_parents(#graph{g=G} = Graph, Rev) ->
 	{Rev, #node{stat=RevStat, paths=Paths}} = digraph:vertex(G, Rev),
+	Parents = case (RevStat#rev_stat.flags band ?REV_FLAG_EPHEMERAL) of
+		0 -> RevStat#rev_stat.parents;
+		_ -> []
+	end,
 	lists:foreach(
 		fun(Parent) ->
 			case digraph:vertex(G, Parent) of
@@ -104,7 +108,7 @@ search_parents(#graph{g=G} = Graph, Rev) ->
 			end
 
 		end,
-		RevStat#rev_stat.parents).
+		Parents).
 
 
 update_node(#graph{g=G} = Graph, Rev, Node, Paths) ->

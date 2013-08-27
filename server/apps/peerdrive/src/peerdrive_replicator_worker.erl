@@ -338,10 +338,15 @@ do_discover_rev(Parent, RId, First, Force, S) ->
 					end,
 					Node = digraph:add_vertex(G, Node, [{parts, Parts} | Props]),
 					['$e' | _] = digraph:add_edge(G, Parent, Node),
-					S2 = lists:foldl(
-						fun(Ancestor, Acc) -> discover_rev(Node, Ancestor, Acc) end,
-						S,
-						Ancestors),
+					S2 = case is_ephemeral(Stat) of
+						false ->
+							lists:foldl(
+								fun(Ancestor, Acc) ->
+									discover_rev(Node, Ancestor, Acc)
+								end, S, Ancestors);
+						true ->
+							S
+					end,
 					case is_sticky(Stat) of
 						true ->
 							case peerdrive_store:get_links(SrcStore, RId) of
@@ -620,6 +625,10 @@ do_estimate(Node, G) ->
 
 is_sticky(#rev_stat{flags=Flags}) ->
 	(Flags band ?REV_FLAG_STICKY) =/= 0.
+
+
+is_ephemeral(#rev_stat{flags=Flags}) ->
+	(Flags band ?REV_FLAG_EPHEMERAL) =/= 0.
 
 
 account_size(Size, #state{done=Done} = S) ->

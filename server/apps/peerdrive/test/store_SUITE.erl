@@ -15,7 +15,7 @@ all() ->
 	[test_rw_readback_small, test_rw_readback_big, test_rw_mtime,
 	test_flags_create, test_flags_update_change, test_flags_update_keep,
 	test_flags_fork, test_creator, test_creator_fork,
-	test_creator_update_change, test_creator_update_keep].
+	test_creator_update_change, test_creator_update_keep, test_ephemral_gc].
 
 init_per_suite(Config) ->
 	SysDir = filename:join(?get(priv_dir, Config), "sys"),
@@ -166,4 +166,36 @@ test_creator_update_keep(Config) ->
 
 creator_compare(Store, Rev, Expected) ->
 	{ok, #rev_stat{creator=Expected}} = peerdrive_store:stat(Store, Rev).
+
+
+%% Parents of ephemeral revisions are garbage collected
+test_ephemral_gc(Config) ->
+	Store = ?store(Config),
+	{ok, Doc, Handle} = peerdrive_store:create(Store, <<"public.data">>, <<"test.foo">>),
+	{ok, Rev1} = peerdrive_store:commit(Handle),
+
+	% create some other temporary doc to reference first one to prevent it
+	% from getting garbage collected
+	{ok, _TmpDoc, TmpHndl} = peerdrive_store:create(Store, <<"public.data">>, <<"test.foo">>),
+	TmpData = gb_trees:enter(<<"org.peerdrive.folder">>,
+		[gb_trees:from_orddict([{<<>>, {dlink, Doc}}])], gb_trees:empty()),
+	ok = peerdrive_store:set_data(TmpHndl, <<>>, peerdrive_struct:encode(TmpData)),
+	{ok, _} = peerdrive_store:commit(TmpHndl),
+
+	% now we can close the first handle
+	ok = peerdrive_store:close(Handle),
+
+	% update Doc and make it ephemeral
+	{ok, UpdateHandle} = peerdrive_store:update(Store, Doc, Rev1, undefined),
+	ok = peerdrive_store:set_flags(UpdateHandle, ?REV_FLAG_EPHEMERAL),
+	ok = peerdrive_store:write(UpdateHandle, <<"FILE">>, 0, <<"foobar">>),
+	{ok, Rev2} = peerdrive_store:commit(UpdateHandle),
+	ok = peerdrive_store:close(UpdateHandle),
+
+	% force garbage collection
+	ok = peerdrive_file_store:gc(Store),
+
+	% now check that original revision was garbage collected
+	{ok, _} = peerdrive_store:stat(Store, Rev2),
+	{error, enoent} = peerdrive_store:stat(Store, Rev1).
 

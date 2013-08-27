@@ -902,8 +902,12 @@ do_gc(S) ->
 		S#state.doc_tbl),
 	GcObj2 = dets:foldl(
 		fun({RId, Rev, DocLinks, RevLinks}, Acc) ->
+			Parents = case (Rev#revision.flags band ?REV_FLAG_EPHEMERAL) == 0 of
+				true -> Rev#revision.parents;
+				false -> []
+			end,
 			DRefs = [{doc, D} || D <- DocLinks],
-			RRefs = [{rev, R} || R <- Rev#revision.parents ++ RevLinks],
+			RRefs = [{rev, R} || R <- Parents ++ RevLinks],
 			PRefs = [{part, Rev#revision.data} | [{part, P} || {_, P} <- Rev#revision.attachments]],
 			dict:store({rev, RId}, DRefs++RRefs++PRefs, Acc)
 		end,

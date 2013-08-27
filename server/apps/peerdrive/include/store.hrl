@@ -14,7 +14,8 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--define(REV_FLAG_STICKY, 1).
+-define(REV_FLAG_STICKY,    (1 bsl 0)).
+-define(REV_FLAG_EPHEMERAL, (1 bsl 1)).
 
 %% Known hash of the default empty data
 -define(REV_DATA_EMPTY_HASH, <<119,34,116,81,5,233,224,46,143,26,175,23,247,

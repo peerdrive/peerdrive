@@ -26,7 +26,7 @@ init_per_suite(Config) ->
 	ok = application:start(peerdrive),
 	Config.
 
-end_per_suite(Config) ->
+end_per_suite(_Config) ->
 	ok = application:stop(peerdrive).
 
 
