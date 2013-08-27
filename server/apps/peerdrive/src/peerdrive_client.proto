@@ -316,9 +316,6 @@ message TruncReq {
 	required uint64 offset = 3;
 }
 
-message TruncCnf {
-}
-
 message WriteBufferReq {
 	required uint32 handle = 1;
 	required bytes part = 2;
@@ -330,9 +327,6 @@ message WriteCommitReq {
 	required bytes part = 2;
 	required uint64 offset = 3;
 	required bytes data = 4;
-}
-
-message WriteCnf {
 }
 
 message GetFlagsReq {
@@ -349,9 +343,6 @@ message SetFlagsReq {
 
 }
 
-message SetFlagsCnf {
-}
-
 message GetTypeReq {
 	required uint32 handle = 1;
 }
@@ -363,9 +354,6 @@ message GetTypeCnf {
 message SetTypeReq {
 	required uint32 handle = 1;
 	required string type_code = 2;
-}
-
-message SetTypeCnf {
 }
 
 message GetParentsReq {
@@ -384,15 +372,9 @@ message MergeReq {
 	optional bool verbose = 5 [default = false];
 }
 
-message MergeCnf {
-}
-
 message RebaseReq {
 	required uint32 handle = 1;
 	required bytes rev = 2;
-}
-
-message RebaseCnf {
 }
 
 message CommitReq {
@@ -417,9 +399,6 @@ message CloseReq {
 	required uint32 handle = 1;
 }
 
-message CloseCnf {
-}
-
 message WatchAddReq {
 	enum Type {
 		doc = 0;
@@ -428,9 +407,6 @@ message WatchAddReq {
 
 	required Type type = 1;
 	required bytes element = 2;
-}
-
-message WatchAddCnf {
 }
 
 message WatchRemReq {
@@ -443,14 +419,8 @@ message WatchRemReq {
 	required bytes element = 2;
 }
 
-message WatchRemCnf {
-}
-
 message WatchProgressReq {
 	required bool enable = 1;
-}
-
-message WatchProgressCnf {
 }
 
 message ForgetReq {
@@ -459,24 +429,15 @@ message ForgetReq {
 	required bytes rev = 3;
 }
 
-message ForgetCnf {
-}
-
 message DeleteDocReq {
 	required bytes store = 1;
 	required bytes doc = 2;
 	required bytes rev = 3;
 }
 
-message DeleteDocCnf {
-}
-
 message DeleteRevReq {
 	required bytes store = 1;
 	required bytes rev = 2;
-}
-
-message DeleteRevCnf {
 }
 
 message ForwardDocReq {
@@ -487,9 +448,6 @@ message ForwardDocReq {
 	required bytes src_store = 5;
 	optional uint64 depth = 6;
 	optional bool verbose = 7 [default = false];
-}
-
-message ForwardDocCnf {
 }
 
 message ReplicateDocReq {
@@ -530,9 +488,6 @@ message MountCnf {
 
 message UnmountReq {
 	required bytes sid = 1;
-}
-
-message UnmountCnf {
 }
 
 message GetPathReq {
