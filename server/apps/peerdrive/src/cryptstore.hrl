@@ -14,9 +14,9 @@
 %% You should have received a copy of the GNU General Public License
 %% along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
--define(CS_FLAGS_IVEC(RId),   (crypto:exor(peerdrive_util:make_bin_16(RId), <<1:64, 0:64>>))).
--define(CS_MTIME_IVEC(RId),   (crypto:exor(peerdrive_util:make_bin_16(RId), <<2:64, 0:64>>))).
--define(CS_TYPE_IVEC(RId),    (crypto:exor(peerdrive_util:make_bin_16(RId), <<3:64, 0:64>>))).
--define(CS_CREATOR_IVEC(RId), (crypto:exor(peerdrive_util:make_bin_16(RId), <<4:64, 0:64>>))).
--define(CS_COMMENT_IVEC(RId), (crypto:exor(peerdrive_util:make_bin_16(RId), <<5:64, 0:64>>))).
+-define(CS_FLAGS_IVEC(RId),   (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<1:64, 0:64>>))).
+-define(CS_MTIME_IVEC(RId),   (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<2:64, 0:64>>))).
+-define(CS_TYPE_IVEC(RId),    (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<3:64, 0:64>>))).
+-define(CS_CREATOR_IVEC(RId), (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<4:64, 0:64>>))).
+-define(CS_COMMENT_IVEC(RId), (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<5:64, 0:64>>))).
 

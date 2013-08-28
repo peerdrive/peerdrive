@@ -212,9 +212,9 @@ do_read_remote_aligned(Part, Start, Length, S) ->
 	#state{handle=Handle, key=Key, rev=#revision{attachments=Parts}} = S,
 	case peerdrive_store:read(Handle, Part, Start, Length) of
 		{ok, EncData} ->
-			<<PId:128>> = peerdrive_util:make_bin_16(proplists:get_value(Part, Parts)),
+			<<PId:128>> = peerdrive_crypto:make_bin_16(proplists:get_value(Part, Parts)),
 			IVec = <<(PId + (Start bsr 4)):128>>,
-			Data = crypto:aes_ctr_decrypt(Key, IVec, EncData),
+			Data = peerdrive_crypto:aes_ctr_decrypt(Key, IVec, EncData),
 			{ok, Data};
 
 		{error, _} = Error ->
@@ -378,8 +378,8 @@ get_part_writable(Part, #state{parts=Parts, key=Key} = S) ->
 			try
 				case lists:keyfind(Part, 1, (S#state.rev)#revision.attachments) of
 					{Part, PId} ->
-						DecState = crypto:aes_ctr_stream_init(Key,
-							peerdrive_util:make_bin_16(PId)),
+						DecState = peerdrive_crypto:aes_ctr_stream_init(Key,
+							peerdrive_crypto:make_bin_16(PId)),
 						part_copy_loop(Part, S#state.handle, IoDev, 0, DecState);
 					false ->
 						ok
@@ -400,7 +400,7 @@ part_copy_loop(Part, Handle, IoDev, Offset, DecState) ->
 		{ok, <<>>} ->
 			ok;
 		{ok, EncData} ->
-			{NewDecState, Data} = crypto:aes_ctr_stream_decrypt(DecState, EncData),
+			{NewDecState, Data} = peerdrive_crypto:aes_ctr_stream_decrypt(DecState, EncData),
 			case file:write(IoDev, Data) of
 				ok ->
 					part_copy_loop(Part, Handle, IoDev, Offset+16#100000, NewDecState);
@@ -434,7 +434,7 @@ do_prepare_rev(Comment, #state{rev=Rev, parts=Parts, key=Key, data=Data} = S) ->
 		comment   = OldComment
 	} = Rev,
 	{DocLinks, RevLinks} = peerdrive_struct:extract_links(Data),
-	DataHash = peerdrive_util:merkle(Data),
+	DataHash = peerdrive_crypto:merkle(Data),
 	NewParts = orddict:merge(
 		fun(_Key, V1, _V2) -> V1 end,
 		orddict:from_list([
@@ -451,23 +451,23 @@ do_prepare_rev(Comment, #state{rev=Rev, parts=Parts, key=Key, data=Data} = S) ->
 	NewRev = Rev#revision{data=DataHash, attachments=NewParts, mtime=Mtime,
 		comment=NewComment},
 	NewRId = peerdrive_store:hash_revision(NewRev),
-	<<EncFlags:32>> = crypto:aes_ctr_encrypt(Key, ?CS_FLAGS_IVEC(NewRId), <<Flags:32>>),
-	<<EncMtime:64>> = crypto:aes_ctr_encrypt(Key, ?CS_MTIME_IVEC(NewRId), <<Mtime:64>>),
+	<<EncFlags:32>> = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_FLAGS_IVEC(NewRId), <<Flags:32>>),
+	<<EncMtime:64>> = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_MTIME_IVEC(NewRId), <<Mtime:64>>),
 	NewEncRev = #revision{
 		flags       = EncFlags,
 		data        = peerdrive_crypt_store:enc_xid(Key, DataHash),
 		attachments = [ {Name, peerdrive_crypt_store:enc_xid(Key, PId)} || {Name, PId} <- NewParts ],
 		parents     = [ peerdrive_crypt_store:enc_xid(Key, Parent) || Parent <- Parents ],
 		mtime       = EncMtime,
-		type        = crypto:aes_ctr_encrypt(Key, ?CS_TYPE_IVEC(NewRId), TypeCode),
-		creator     = crypto:aes_ctr_encrypt(Key, ?CS_CREATOR_IVEC(NewRId), CreatorCode),
-		comment     = crypto:aes_ctr_encrypt(Key, ?CS_COMMENT_IVEC(NewRId), NewComment)
+		type        = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_TYPE_IVEC(NewRId), TypeCode),
+		creator     = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_CREATOR_IVEC(NewRId), CreatorCode),
+		comment     = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_COMMENT_IVEC(NewRId), NewComment)
 	},
 	PreparedRev = #preprev{
 		rid = NewRId,
 		encrid = peerdrive_crypt_store:enc_xid(Key, NewRId),
 		encrev = NewEncRev,
-		encdata = crypto:aes_ctr_encrypt(Key, peerdrive_util:make_bin_16(DataHash), Data),
+		encdata = peerdrive_crypto:aes_ctr_encrypt(Key, peerdrive_crypto:make_bin_16(DataHash), Data),
 		encdoclinks = [ peerdrive_crypt_store:enc_xid(Key, DId) || DId <- DocLinks ],
 		encrevlinks = [ peerdrive_crypt_store:enc_xid(Key, RId) || RId <- RevLinks ]
 	},
@@ -502,7 +502,7 @@ upload_rev(PreparedRev, #state{store=Store} = S) ->
 upload_rev_part(Handle, FCC, #state{parts=Parts, key=Key, rev=Rev}) ->
 	{_, IoDev} = orddict:fetch(FCC, Parts),
 	PId = orddict:fetch(FCC, Rev#revision.attachments),
-	EncState = crypto:aes_ctr_stream_init(Key, peerdrive_util:make_bin_16(PId)),
+	EncState = peerdrive_crypto:aes_ctr_stream_init(Key, peerdrive_crypto:make_bin_16(PId)),
 	file:position(IoDev, 0),
 	upload_rev_part_loop(Handle, FCC, IoDev, EncState).
 
@@ -510,7 +510,7 @@ upload_rev_part(Handle, FCC, #state{parts=Parts, key=Key, rev=Rev}) ->
 upload_rev_part_loop(Handle, FCC, IoDev, EncState) ->
 	case file:read(IoDev, 16#100000) of
 		{ok, Data} ->
-			{NewEncState, EncData} = crypto:aes_ctr_stream_encrypt(EncState, Data),
+			{NewEncState, EncData} = peerdrive_crypto:aes_ctr_stream_encrypt(EncState, Data),
 			case peerdrive_store:put_rev_part(Handle, FCC, EncData) of
 				ok ->
 					upload_rev_part_loop(Handle, FCC, IoDev, NewEncState);
@@ -534,8 +534,8 @@ tmp_file() ->
 fetch_data(#state{data=undefined, handle=Handle, key=Key, rev=Rev} = S) ->
 	case peerdrive_store:get_data(Handle, <<>>) of
 		{ok, EncData} ->
-			Data = crypto:aes_ctr_decrypt(Key,
-				peerdrive_util:make_bin_16(Rev#revision.data), EncData),
+			Data = peerdrive_crypto:aes_ctr_decrypt(Key,
+				peerdrive_crypto:make_bin_16(Rev#revision.data), EncData),
 			{ok, S#state{data=Data}};
 
 		Error ->

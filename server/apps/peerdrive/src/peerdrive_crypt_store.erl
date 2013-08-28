@@ -38,7 +38,7 @@ start_link(Address, Options, Credentials) ->
 % doubles the cipher text size. :-(
 
 dec_xid(Key, CipherData) ->
-	<<Len:8, Data/binary>> = crypto:aes_cbc_128_decrypt(Key,
+	<<Len:8, Data/binary>> = peerdrive_crypto:aes_cbc_128_decrypt(Key,
 		<<"PeerDrivePeerDri">>, CipherData),
 	if
 		Len =< size(Data) -> binary_part(Data, 0, Len);
@@ -50,7 +50,7 @@ enc_xid(Key, Data) ->
 	Size = size(Data),
 	Padding = (((Size + 1 + 15) band bnot 15) - Size - 1) * 8,
 	ClearData = <<Size:8, Data/binary, 0:Padding>>,
-	crypto:aes_cbc_128_encrypt(Key, <<"PeerDrivePeerDri">>, ClearData).
+	peerdrive_crypto:aes_cbc_128_encrypt(Key, <<"PeerDrivePeerDri">>, ClearData).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -262,7 +262,7 @@ open_slot(Pwd, Verify, [Slot | Rest]) ->
 	Salt = dict_get(<<"salt">>, Slot),
 	EncMasterKey = dict_get(<<"enc-key">>, Slot),
 	SlotKey = pbkdf2(Pwd, Salt, Iter, 16),
-	Key = crypto:aes_cbc_128_decrypt(SlotKey, <<0:128>>, EncMasterKey),
+	Key = peerdrive_crypto:aes_cbc_128_decrypt(SlotKey, <<0:128>>, EncMasterKey),
 	case Verify(Key) of
 		true  -> Key;
 		false -> open_slot(Pwd, Verify, Rest)
@@ -279,7 +279,7 @@ init_create_crypt(Pwd, #state{store=Store, sid=Doc} = S) ->
 		SlotSalt = crypto:rand_bytes(32),
 		SlotIter = crypto:rand_uniform(2048, 8192),
 		SlotKey = pbkdf2(Pwd, SlotSalt, SlotIter, 16),
-		SlotEncKey = crypto:aes_cbc_128_encrypt(SlotKey, <<0:128>>, Key),
+		SlotEncKey = peerdrive_crypto:aes_cbc_128_encrypt(SlotKey, <<0:128>>, Key),
 		MkSalt = crypto:rand_bytes(32),
 		MkIter = crypto:rand_uniform(2048, 8192),
 		MkDigest = pbkdf2(Key, MkSalt, MkIter),
@@ -357,9 +357,9 @@ do_stat(Rev, #state{store=Store, key=Key}) ->
 				creator     = EncCreator,
 				comment     = EncComment
 			} = EncStat,
-			<<Flags:32>> = crypto:aes_ctr_decrypt(Key, ?CS_FLAGS_IVEC(Rev),
+			<<Flags:32>> = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_FLAGS_IVEC(Rev),
 				<<EncFlags:32>>),
-			<<Mtime:64>> = crypto:aes_ctr_decrypt(Key, ?CS_MTIME_IVEC(Rev),
+			<<Mtime:64>> = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_MTIME_IVEC(Rev),
 				<<EncMtime:64>>),
 			Stat = #rev_stat{
 				flags       = Flags,
@@ -368,10 +368,10 @@ do_stat(Rev, #state{store=Store, key=Key}) ->
 					{Name, Size, PId} <- EncAttachments ],
 				parents   = [ dec_xid(Key, Parent) || Parent <- EncParents ],
 				mtime     = Mtime,
-				type      = crypto:aes_ctr_decrypt(Key, ?CS_TYPE_IVEC(Rev), EncType),
-				creator   = crypto:aes_ctr_decrypt(Key, ?CS_CREATOR_IVEC(Rev),
+				type      = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_TYPE_IVEC(Rev), EncType),
+				creator   = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_CREATOR_IVEC(Rev),
 					EncCreator),
-				comment   = crypto:aes_ctr_decrypt(Key, ?CS_COMMENT_IVEC(Rev),
+				comment   = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_COMMENT_IVEC(Rev),
 					EncComment)
 			},
 			{ok, Stat};
@@ -537,19 +537,19 @@ do_put_rev(RId, Rev, Data, DocLinks, RevLinks, User, #state{store=Store, key=Key
 		creator     = CreatorCode,
 		comment     = Comment
 	} = Rev,
-	<<EncFlags:32>> = crypto:aes_ctr_encrypt(Key, ?CS_FLAGS_IVEC(RId), <<Flags:32>>),
-	<<EncMtime:64>> = crypto:aes_ctr_encrypt(Key, ?CS_MTIME_IVEC(RId), <<Mtime:64>>),
+	<<EncFlags:32>> = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_FLAGS_IVEC(RId), <<Flags:32>>),
+	<<EncMtime:64>> = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_MTIME_IVEC(RId), <<Mtime:64>>),
 	EncRev = #revision{
 		flags       = EncFlags,
 		data        = enc_xid(Key, DataHash),
 		attachments = [ {Name, enc_xid(Key, PId)} || {Name, PId} <- Attachments ],
 		parents     = [ enc_xid(Key, Parent) || Parent <- Parents ],
 		mtime       = EncMtime,
-		type        = crypto:aes_ctr_encrypt(Key, ?CS_TYPE_IVEC(RId), TypeCode),
-		creator     = crypto:aes_ctr_encrypt(Key, ?CS_CREATOR_IVEC(RId), CreatorCode),
-		comment     = crypto:aes_ctr_encrypt(Key, ?CS_COMMENT_IVEC(RId), Comment)
+		type        = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_TYPE_IVEC(RId), TypeCode),
+		creator     = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_CREATOR_IVEC(RId), CreatorCode),
+		comment     = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_COMMENT_IVEC(RId), Comment)
 	},
-	EncData = crypto:aes_ctr_encrypt(Key, peerdrive_util:make_bin_16(DataHash), Data),
+	EncData = peerdrive_crypto:aes_ctr_encrypt(Key, peerdrive_crypto:make_bin_16(DataHash), Data),
 	EncDL = [ enc_xid(Key, LDId) || LDId <- DocLinks ],
 	EncRL = [ enc_xid(Key, LRId) || LRId <- RevLinks ],
 	case peerdrive_store:put_rev(Store, enc_xid(Key, RId), EncRev, EncData, EncDL, EncRL) of
@@ -663,9 +663,9 @@ get_revision(RId, EncRId, #state{store=Store, key=Key}) ->
 				creator     = EncCreator,
 				comment     = EncComment
 			} = EncStat,
-			<<Flags:32>> = crypto:aes_ctr_decrypt(Key, ?CS_FLAGS_IVEC(RId),
+			<<Flags:32>> = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_FLAGS_IVEC(RId),
 				<<EncFlags:32>>),
-			<<Mtime:64>> = crypto:aes_ctr_decrypt(Key, ?CS_MTIME_IVEC(RId),
+			<<Mtime:64>> = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_MTIME_IVEC(RId),
 				<<EncMtime:64>>),
 			Rev = #revision{
 				flags       = Flags,
@@ -674,10 +674,10 @@ get_revision(RId, EncRId, #state{store=Store, key=Key}) ->
 					{Name, _Size, PId} <- EncAttachments ],
 				parents     = [ dec_xid(Key, Parent) || Parent <- EncParents ],
 				mtime       = Mtime,
-				type        = crypto:aes_ctr_decrypt(Key, ?CS_TYPE_IVEC(RId), EncType),
-				creator     = crypto:aes_ctr_decrypt(Key, ?CS_CREATOR_IVEC(RId),
+				type        = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_TYPE_IVEC(RId), EncType),
+				creator     = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_CREATOR_IVEC(RId),
 					EncCreator),
-				comment     = crypto:aes_ctr_decrypt(Key, ?CS_COMMENT_IVEC(RId),
+				comment     = peerdrive_crypto:aes_ctr_decrypt(Key, ?CS_COMMENT_IVEC(RId),
 					EncComment)
 			},
 			{ok, Rev};
@@ -707,7 +707,7 @@ pbkdf2(_, _, _, _) ->
 
 
 pbkdf2_block(Pwd, Salt, Iterations, BlockNum) ->
-    InitRound = crypto:sha_mac(Pwd, <<Salt/binary, BlockNum:32/integer>>),
+    InitRound = peerdrive_crypto:sha_mac(Pwd, <<Salt/binary, BlockNum:32/integer>>),
 	pbkdf2_block_loop(Pwd, Iterations-1, InitRound, InitRound).
 
 
@@ -715,7 +715,7 @@ pbkdf2_block_loop(_Pwd, 0, _Prev, Acc) ->
 	Acc;
 
 pbkdf2_block_loop(Pwd, Iterations, Prev, Acc) ->
-    Next = crypto:sha_mac(Pwd, Prev),
+    Next = peerdrive_crypto:sha_mac(Pwd, Prev),
 	pbkdf2_block_loop(Pwd, Iterations-1, Next, crypto:exor(Next, Acc)).
 
 

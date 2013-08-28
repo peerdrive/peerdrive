@@ -36,7 +36,7 @@ start_link(RId, Rev, Missing, User, NoVerify, DocLinks, RevLinks) ->
 		rid = RId,
 		rev = Rev,
 		parts = orddict:from_list(
-			[{FCC, {PId, <<>>, peerdrive_util:merkle_init()}} || {FCC, PId} <- Missing]
+			[{FCC, {PId, <<>>, peerdrive_crypto:merkle_init()}} || {FCC, PId} <- Missing]
 		),
 		noverify = NoVerify,
 		done = false,
@@ -117,7 +117,7 @@ code_change(_, State, _) -> {ok, State}.
 do_write(Part, Data, #state{parts=Parts} = S) ->
 	case orddict:find(Part, Parts) of
 		{ok, {PId, PartData, Ctx1}} when is_binary(PartData) ->
-			Ctx2 = peerdrive_util:merkle_update(Ctx1, Data),
+			Ctx2 = peerdrive_crypto:merkle_update(Ctx1, Data),
 			NewData = <<PartData/binary, Data/binary>>,
 			if
 				size(NewData) > ?THRESHOLD ->
@@ -139,7 +139,7 @@ do_write(Part, Data, #state{parts=Parts} = S) ->
 		{ok, {PId, {FileName, IoDev}, Ctx1}} ->
 			case file:write(IoDev, Data) of
 				ok ->
-					Ctx2 = peerdrive_util:merkle_update(Ctx1, Data),
+					Ctx2 = peerdrive_crypto:merkle_update(Ctx1, Data),
 					NewParts = orddict:store(Part, {PId, {FileName, IoDev}, Ctx2},
 						Parts),
 					{ok, S#state{parts=NewParts}};
@@ -157,7 +157,7 @@ do_commit(#state{store=Store, rid=RId, rev=Rev, parts=Parts, noverify=NoVerify} 
 	try
 		NoVerify orelse lists:foreach(
 			fun({_, {PId, _, ShaCtx}}) ->
-				peerdrive_util:merkle_final(ShaCtx) == PId orelse throw(einval)
+				peerdrive_crypto:merkle_final(ShaCtx) == PId orelse throw(einval)
 			end,
 			Parts),
 		case commit_parts(Store, Parts) of

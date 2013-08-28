@@ -789,7 +789,7 @@ do_put_rev_data(PId, Data, NoVerify, #state{part_tbl=PartTbl} = S) ->
 		true ->
 			ok;
 		false ->
-			case NoVerify orelse PId == peerdrive_util:merkle(Data) of
+			case NoVerify orelse PId == peerdrive_crypto:merkle(Data) of
 				true  -> write_part(PId, Data, S);
 				false -> {error, einval}
 			end
@@ -1097,7 +1097,7 @@ check_root_doc(#state{sid=SId, gen=Gen} = S) ->
 
 check_root_doc_write(Data, S) ->
 	BinData = peerdrive_struct:encode(Data),
-	PId = peerdrive_util:merkle(BinData),
+	PId = peerdrive_crypto:merkle(BinData),
 	ok = write_part(PId, BinData, S),
 	PId.
 

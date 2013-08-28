@@ -507,7 +507,7 @@ hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
 	BinType = hash_revision_string(Revision#revision.type),
 	BinCreator = hash_revision_string(Revision#revision.creator),
 	BinComment = hash_revision_string(Revision#revision.comment),
-	crypto:sha(<<Flags:32/little, BinData/binary, BinAttachments/binary,
+	peerdrive_crypto:sha(<<Flags:32/little, BinData/binary, BinAttachments/binary,
 		BinParents/binary, Mtime:64/little, BinType/binary, BinCreator/binary,
 		BinComment/binary>>).
 

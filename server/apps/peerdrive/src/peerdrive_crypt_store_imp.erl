@@ -32,8 +32,8 @@
 start_link(Store, Key, Handle, Parts, User) ->
 	State = #state{store=Store, handle=Handle, user=User, key=Key,
 		parts=orddict:from_list(
-			[{FCC, {PId, peerdrive_util:merkle_init(),
-				crypto:aes_ctr_stream_init(Key, peerdrive_util:make_bin_16(PId))}
+			[{FCC, {PId, peerdrive_crypto:merkle_init(),
+				peerdrive_crypto:aes_ctr_stream_init(Key, peerdrive_crypto:make_bin_16(PId))}
 				} || {FCC, PId} <- Parts]
 		)},
 	gen_server:start_link(?MODULE, {State, User}, []).
@@ -90,10 +90,10 @@ code_change(_, State, _) -> {ok, State}.
 do_put_part(Part, Data, #state{handle=Handle, parts=Parts} = S) ->
 	case orddict:find(Part, Parts) of
 		{ok, {PId, ShaCtx1, AesCtx1}} ->
-			{AesCtx2, EncData} = crypto:aes_ctr_stream_encrypt(AesCtx1, Data),
+			{AesCtx2, EncData} = peerdrive_crypto:aes_ctr_stream_encrypt(AesCtx1, Data),
 			case peerdrive_store:put_rev_part(Handle, Part, EncData) of
 				ok ->
-					ShaCtx2 = peerdrive_util:merkle_update(ShaCtx1, Data),
+					ShaCtx2 = peerdrive_crypto:merkle_update(ShaCtx1, Data),
 					NewParts = orddict:store(Part, {PId, ShaCtx2, AesCtx2},
 						Parts),
 					{ok, S#state{parts=NewParts}};
@@ -111,7 +111,7 @@ do_commit(#state{handle=Handle, parts=Parts, key=Key}) ->
 	try
 		lists:foreach(
 			fun({_, {PId, ShaCtx, _AesCtx}}) ->
-				peerdrive_util:merkle_final(ShaCtx) == PId orelse throw(einval)
+				peerdrive_crypto:merkle_final(ShaCtx) == PId orelse throw(einval)
 			end,
 			Parts),
 		case peerdrive_store:commit(Handle) of
