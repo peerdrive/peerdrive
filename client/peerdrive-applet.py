@@ -577,7 +577,9 @@ class SyncRules(object):
 		self.__changed = True
 
 # change to our base directory
-os.chdir(os.path.dirname(sys.argv[0]))
+basePath = os.path.dirname(sys.argv[0])
+if basePath:
+	os.chdir(basePath)
 
 app = QtGui.QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(False)
