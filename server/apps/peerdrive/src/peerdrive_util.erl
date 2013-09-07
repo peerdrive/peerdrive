@@ -282,9 +282,10 @@ read_rev_struct(Store, Rev, Selector) ->
 
 
 get_time() ->
+	Now = {_, _, Micro} = os:timestamp(),
+	Utc = calendar:now_to_universal_time(Now),
 	% Thanks to http://www.epochconverter.com/ :)
-	(calendar:datetime_to_gregorian_seconds(calendar:universal_time()) -
-	719528*24*3600) * 1000000.
+	(calendar:datetime_to_gregorian_seconds(Utc) - 719528*24*3600) * 1000000 + Micro.
 
 
 % returns {ok, Sha1} | {error, Reason}
