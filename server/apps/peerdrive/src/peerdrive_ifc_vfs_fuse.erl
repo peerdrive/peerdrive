@@ -335,13 +335,13 @@ setattr(_, Ino, Attr, ToSet, _Fi, _, S) ->
 			end,
 			Changes2 = if
 				(ToSet band ?FUSE_SET_ATTR_ATIME) =/= 0 ->
-					[{atime, fuse2epoch(Attr#stat.st_atime)} | Changes1];
+					[{atime, fuse2epoch(Attr#stat.st_atime, Attr#stat.st_atimensec)} | Changes1];
 				true ->
 					Changes1
 			end,
 			Changes3 = if
 				(ToSet band ?FUSE_SET_ATTR_MTIME) =/= 0 ->
-					[{mtime, fuse2epoch(Attr#stat.st_mtime)} | Changes2];
+					[{mtime, fuse2epoch(Attr#stat.st_mtime, Attr#stat.st_mtimensec)} | Changes2];
 				true ->
 					Changes2
 			end,
@@ -472,9 +472,12 @@ make_fuse_attr(Ino, #vfs_attr{dir=Dir, size=Size, atime=AT, mtime=MT, ctime=CT},
 		st_size  = Size,
 		st_blksize = 512,
 		st_blocks  = (Size + 511) div 512,
-		st_atime = epoch2fuse(AT),
-		st_mtime = epoch2fuse(MT),
-		st_ctime = epoch2fuse(CT)
+		st_atime = epoch2fuse_sec(AT),
+		st_atimensec = epoch2fuse_nsec(AT),
+		st_mtime = epoch2fuse_sec(MT),
+		st_mtimensec = epoch2fuse_nsec(MT),
+		st_ctime = epoch2fuse_sec(CT),
+		st_ctimensec = epoch2fuse_nsec(CT)
 	}.
 
 
@@ -520,11 +523,14 @@ do_take_while_map(F, Acc, [ Head | Tail ], Id) ->
 	end.
 
 
-epoch2fuse(Epoch) ->
+epoch2fuse_sec(Epoch) ->
 	Epoch div 1000000.
 
-fuse2epoch(Fuse) ->
-	Fuse * 1000000.
+epoch2fuse_nsec(Epoch) ->
+	(Epoch rem 1000000) * 1000.
+
+fuse2epoch(FuseSec, FuseNSec) ->
+	FuseSec * 1000000 + FuseNSec div 1000.
 
 -else. % have_fuserl
 
