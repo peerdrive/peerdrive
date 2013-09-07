@@ -259,13 +259,16 @@ class HistoryTab(QtGui.QWidget):
 			return mimeData
 
 		def __loadComment(self, rev):
-			stat = Connector().stat(rev, [self.__store])
-			mtime = str(stat.mtime())
-			comment = stat.comment()
-			if comment:
-				return mtime + " - " + comment
-			else:
-				return mtime
+			try:
+				stat = Connector().stat(rev, [self.__store])
+				mtime = str(stat.mtime())
+				comment = stat.comment()
+				if comment:
+					return mtime + " - " + comment
+				else:
+					return mtime
+			except IOError:
+				return "???"
 
 		def __open(self, item):
 			row = self.row(item)
@@ -358,10 +361,10 @@ class AnnotationTab(QtGui.QWidget):
 			self.__tagsEdit.setText("")
 
 	def getTitle(self):
-		return str(self.__titleEdit.text())
+		return unicode(self.__titleEdit.text())
 
 	def getDescription(self):
-		return str(self.__descEdit.text())
+		return unicode(self.__descEdit.text())
 
 	def getTags(self):
 		if self.__tagsEdit.hasAcceptableInput():
