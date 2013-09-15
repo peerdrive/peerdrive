@@ -331,6 +331,32 @@ do_write(FuseHandle, Part, Offset, Data, S) ->
 	end.
 
 
+% close without comment makes no checkpoint
+do_close({rw, Store, Doc}=FuseHandle, undefined, S) ->
+	case close_handle(FuseHandle, S) of
+		{keep, Handle, S2} ->
+			{Rev, Handle, _RefCnt} = dict:fetch(FuseHandle, S2#state.handles),
+			{{ok, Rev}, S2};
+
+		{closed, Handle, S2} ->
+			Result = peerdrive_broker:suspend(Handle),
+			peerdrive_broker:close(Handle),
+			case Result of
+				{ok, Rev} ->
+					S3 = mark_committed(Store, Doc, Rev, S2),
+					{{ok, Rev}, S3};
+
+				{error, Reason} ->
+					% close failed, mark internal state as closed and forget
+					S3 = mark_closed(Store, Doc, S2),
+					S4 = forget_handle(FuseHandle, S3),
+					{{error, Reason}, S4}
+			end;
+
+		error ->
+			{{error, ebadf}, S}
+	end;
+
 do_close({rw, Store, Doc}=FuseHandle, Comment, S) ->
 	case close_handle(FuseHandle, S) of
 		{State, Handle, S2} ->

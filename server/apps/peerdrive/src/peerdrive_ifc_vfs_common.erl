@@ -1342,7 +1342,7 @@ folder_write_entries(Handle, Entries, Cache) ->
 		#fe{oid={doc, _, Doc}, orig=Entry} <- Entries],
 	case peerdrive_ifc_vfs_broker:set_data(Handle, <<"/org.peerdrive.folder">>, List) of
 		ok ->
-			case peerdrive_ifc_vfs_broker:close(Handle) of
+			case peerdrive_ifc_vfs_broker:close(Handle, <<"Changed through VFS">>) of
 				{ok, Rev} ->
 					{ok, {Rev, folder_sanitize_entries(Entries, 0), now()}};
 				{error, Reason} ->
