@@ -23,7 +23,7 @@ Config1 = case os:getenv("DISABLE_VFS") of
 					{
 						erldokan,
 						".*",
-						{git, "https://github.com/peerdrive/erldokan.git", {tag, "1.2.0"}}
+						{git, "https://github.com/peerdrive/erldokan.git", {tag, "1.3.0"}}
 					} | Deps ]
 		end,
 		lists:keystore(erl_opts, 1,
