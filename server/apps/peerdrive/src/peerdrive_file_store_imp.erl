@@ -83,10 +83,10 @@ handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
 
 terminate(_Reason, #state{store=Store, parts=Parts, rev=Rev, rid=RId, user=User}) ->
 	unlink(User),
-	peerdrive_file_store:part_unlock(Store, Rev#revision.data),
+	peerdrive_file_store:part_unlock(Store, (Rev#rev.data)#rev_dat.hash),
 	lists:foreach(
-		fun({_, PId}) -> peerdrive_file_store:part_unlock(Store, PId) end,
-		Rev#revision.attachments),
+		fun(#rev_att{hash=PId}) -> peerdrive_file_store:part_unlock(Store, PId) end,
+		Rev#rev.attachments),
 	peerdrive_file_store:rev_unlock(Store, RId),
 	lists:foreach(
 		fun({_, {_PId, Content, _Sha}}) ->

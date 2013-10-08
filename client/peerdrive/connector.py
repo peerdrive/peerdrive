@@ -354,12 +354,12 @@ class _Connector(QtCore.QObject):
 
 		try:
 			req = pb.InitReq()
-			req.major = 1
+			req.major = 2
 			req.minor = 0
 			req.cookie = cookie
 			reply = self._rpc(_Connector.INIT_MSG, req.SerializeToString())
 			cnf = pb.InitCnf.FromString(reply)
-			if cnf.major != 1 or cnf.minor != 0:
+			if cnf.major != 2 or cnf.minor != 0:
 				raise IOError("Unsupported protocol version!")
 			self.maxPacketSize = cnf.max_packet_size
 		except:
@@ -937,7 +937,7 @@ class Lookup(object):
 
 class Stat(object):
 	__slots__ = ['__flags', '__data', '__attachments', '__parents', '__mtime',
-		'__type', '__creator', '__comment']
+		'__type', '__creator', '__comment', '__crtime']
 
 	FLAG_STICKY = 0
 
@@ -946,8 +946,11 @@ class Stat(object):
 		self.__data = (reply.data.size, reply.data.hash)
 		self.__attachments = {}
 		for a in reply.attachments:
-			self.__attachments[a.name] = (a.size, a.hash)
+			self.__attachments[a.name] = (a.size, a.hash,
+				datetime.fromtimestamp(a.crtime / 1000000.0),
+				datetime.fromtimestamp(a.mtime / 1000000.0))
 		self.__parents = reply.parents
+		self.__crtime = datetime.fromtimestamp(reply.crtime / 1000000.0)
 		self.__mtime = datetime.fromtimestamp(reply.mtime / 1000000.0)
 		self.__type = reply.type_code
 		self.__creator = reply.creator_code
@@ -985,8 +988,17 @@ class Stat(object):
 	def parents(self):
 		return self.__parents
 
-	def mtime(self):
-		return self.__mtime
+	def crtime(self, attachment=None):
+		if attachment:
+			return self.__attachments[attachment][2]
+		else:
+			return self.__crtime
+
+	def mtime(self, attachment=None):
+		if attachment:
+			return self.__attachments[attachment][3]
+		else:
+			return self.__mtime
 
 	def type(self):
 		return self.__type

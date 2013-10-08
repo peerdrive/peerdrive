@@ -260,7 +260,7 @@ do_init(Tls, #state{socket=Socket} = S) ->
 		deny -> TlsReq = deny, SslOpts = [];
 		{TlsReq, SslOpts} -> ok
 	end,
-	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=2, minor=0,
+	Req = peerdrive_netstore_pb:encode_initreq(#initreq{major=3, minor=0,
 		starttls=TlsReq}),
 	InitReq = [<<0:32, ?INIT_MSG:12, ?FLAG_REQ:4>>, Req],
 	try
@@ -286,7 +286,7 @@ do_init(Tls, #state{socket=Socket} = S) ->
 				throw({error, einval})
 		end,
 		S2 = case InitCnf of
-			#initcnf{major=0, minor=0, max_packet_size=MaxPacketSize} ->
+			#initcnf{major=3, minor=0, max_packet_size=MaxPacketSize} ->
 				S#state{mps=MaxPacketSize};
 			#initcnf{} ->
 				throw({error, erpcmismatch})
@@ -375,17 +375,22 @@ cnf_stat(Body) ->
 		data = #statcnf_data{size=DataSize, hash=DataHash},
 		attachments = Attachments,
 		parents = Parents,
+		crtime = CrTime,
 		mtime = Mtime,
 		type_code = TypeCode,
 		creator_code = CreatorCode,
 		comment = Comment
 	} = peerdrive_netstore_pb:decode_statcnf(Body),
-	Stat = #rev_stat{
+	Stat = #rev{
 		flags       = Flags,
-		data        = {DataSize, DataHash},
-		attachments = [ {Name, Size, Hash} || #statcnf_attachment{name=Name, size=Size,
-			hash=Hash} <- Attachments ],
+		data        = #rev_dat{size=DataSize, hash=DataHash},
+		attachments = [ #rev_att{name=Name, size=Size, hash=Hash, crtime=CrT,
+				mtime=MT}
+			|| #statcnf_attachment{name=Name, size=Size, hash=Hash, crtime=CrT,
+				mtime=MT}
+			<- Attachments ],
 		parents   = Parents,
+		crtime    = CrTime,
 		mtime     = Mtime,
 		type      = TypeCode,
 		creator   = CreatorCode,
@@ -471,11 +476,12 @@ cnf_forward_doc(Body, User) ->
 
 req_put_rev(Rev, Revision, Data, DocLinks, RevLinks, From, #state{mps=MPS} = S) ->
 	{User, _Tag} = From,
-	#revision{
+	#rev{
 		flags       = Flags,
-		data        = DataHash,
+		data        = #rev_dat{size=DataSize, hash=DataHash},
 		attachments = Attachments,
 		parents     = Parents,
+		crtime      = CrTime,
 		mtime       = Mtime,
 		type        = TypeCode,
 		creator     = CreatorCode,
@@ -485,10 +491,13 @@ req_put_rev(Rev, Revision, Data, DocLinks, RevLinks, From, #state{mps=MPS} = S) 
 		rid = Rev,
 		revision = #putrevreq_revision{
 			flags = Flags,
-			data = DataHash,
-			attachments = [ #putrevreq_revision_attachment{name=Name, hash=Hash} ||
-				{Name, Hash} <- Attachments ],
+			data = #putrevreq_revision_data{size=DataSize, hash=DataHash},
+			attachments = [ #putrevreq_revision_attachment{name=Name, size=Size,
+					hash=Hash, crtime=CrT, mtime=MT}
+				|| #rev_att{name=Name, size=Size, hash=Hash, crtime=CrT, mtime=MT}
+				<- Attachments ],
 			parents = Parents,
+			crtime = CrTime,
 			mtime = Mtime,
 			type_code = TypeCode,
 			creator_code = CreatorCode,

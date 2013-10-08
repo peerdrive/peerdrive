@@ -288,18 +288,18 @@ get_time() ->
 	(calendar:datetime_to_gregorian_seconds(Utc) - 719528*24*3600) * 1000000 + Micro.
 
 
-% returns {ok, Sha1} | {error, Reason}
+% returns {ok, FileSize, Sha1} | {error, Reason}
 hash_file(File) ->
 	{ok, _} = file:position(File, 0),
-	hash_file_loop(File, peerdrive_crypto:merkle_init()).
+	hash_file_loop(File, 0, peerdrive_crypto:merkle_init()).
 
-hash_file_loop(File, Ctx1) ->
+hash_file_loop(File, AccSize, Ctx1) ->
 	case file:read(File, 16#100000) of
 		{ok, Data} ->
 			Ctx2 = peerdrive_crypto:merkle_update(Ctx1, Data),
-			hash_file_loop(File, Ctx2);
+			hash_file_loop(File, AccSize + size(Data), Ctx2);
 		eof ->
-			{ok, peerdrive_crypto:merkle_final(Ctx1)};
+			{ok, AccSize, peerdrive_crypto:merkle_final(Ctx1)};
 		Else ->
 			fixup_file(Else)
 	end.

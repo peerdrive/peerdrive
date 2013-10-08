@@ -485,7 +485,7 @@ check_prerevs(_Store, _Doc, _Rev, []) ->
 
 check_prerevs(Store, Doc, Rev, [PreRev | PreRevs]) ->
 	case peerdrive_broker:stat(PreRev, [Store]) of
-		{ok, #rev_stat{creator=?VFS_CC, parents=Parents}} ->
+		{ok, #rev{creator=?VFS_CC, parents=Parents}} ->
 			case lists:member(Rev, Parents) of
 				true ->
 					{ok, PreRev};
@@ -703,9 +703,9 @@ has_changed(Store, Doc, PreRev) ->
 
 stat_rev(Store, Rev) ->
 	case peerdrive_broker:stat(Rev, [Store]) of
-		{ok, #rev_stat{data={_, Data}, attachments=Attachments}} ->
+		{ok, #rev{data=#rev_dat{hash=Data}, attachments=Attachments}} ->
 			ordsets:from_list([{data, Data}] ++
-				[ {Name, PId} || {Name, _Size, PId} <- Attachments ]);
+				[ {Name, PId} || #rev_att{name=Name, hash=PId} <- Attachments ]);
 		{error, _Reason} ->
 			throw(error)
 	end.

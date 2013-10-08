@@ -209,16 +209,19 @@ message StatCnf {
 		required bytes name = 1;
 		required uint64 size = 2;
 		required bytes hash = 3;
+		required uint64 crtime = 4;
+		required uint64 mtime = 5;
 	}
 
 	required uint32 flags = 1;
-	required Data data = 8;
-	repeated Attachment attachments = 2;
-	repeated bytes parents = 3;
-	required uint64 mtime = 4;
-	required string type_code = 5;
-	required string creator_code = 6;
-	optional string comment = 7 [default = ""];
+	required Data data = 2;
+	repeated Attachment attachments = 3;
+	repeated bytes parents = 4;
+	required uint64 crtime = 5;
+	required uint64 mtime = 6;
+	required string type_code = 7;
+	required string creator_code = 8;
+	optional string comment = 9 [default = ""];
 }
 
 message GetLinksReq {

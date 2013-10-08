@@ -36,7 +36,7 @@
 	wb_tmr,
 	gc_gen,
 	doc_tbl,  % dets: {Doc::DId, Rev::RId, [PreRev::RId], Generation}
-	rev_tbl,  % dets: {Rev::RId, #revision{}, [DocLinks::DId], [RevLinks::RId]}
+	rev_tbl,  % dets: {Rev::RId, #rev{}, [DocLinks::DId], [RevLinks::RId]}
 	part_tbl, % dets: {Part::PId, Content::binary() | Size::int()}
 	peer_tbl, % dets: {Store::Sid, Generation}
 	objlocks, % dict: {doc, DId} | {part, PId} -> Count::int()
@@ -48,7 +48,6 @@
 -define(GC_MAX_UPDATES, 10000).  % gc is forced after this number of updates
 
 -define(THRESHOLD, 1024).
--define(EMPTY_DATA, <<0,0,0,0,0>>).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Server state management...
@@ -357,21 +356,10 @@ do_statfs(_S) ->
 	}}.
 
 
-do_stat(RId, #state{rev_tbl=RevTbl} = S) ->
+do_stat(RId, #state{rev_tbl=RevTbl}) ->
 	case dets:lookup(RevTbl, RId) of
 		[{_, Rev, _DocLinks, _RevLinks}] ->
-			Attachments = [ {Attachment, part_size(PId, S), PId} ||
-				{Attachment, PId} <- Rev#revision.attachments ],
-			{ok, #rev_stat{
-				flags       = Rev#revision.flags,
-				data        = {part_size(Rev#revision.data, S), Rev#revision.data},
-				attachments = Attachments,
-				parents     = Rev#revision.parents,
-				mtime       = Rev#revision.mtime,
-				type        = Rev#revision.type,
-				creator     = Rev#revision.creator,
-				comment     = Rev#revision.comment
-			}};
+			{ok, Rev};
 
 		[] ->
 			{error, enoent}
@@ -391,15 +379,15 @@ do_get_links(RId, #state{rev_tbl=RevTbl}) ->
 do_peek(RId, User, #state{rev_tbl=RevTbl} = S) ->
 	case dets:lookup(RevTbl, RId) of
 		[{_, Rev, _DocLinks, _RevLinks}] ->
-			S1 = do_lock({part, Rev#revision.data}, S),
+			S1 = do_lock({part, (Rev#rev.data)#rev_dat.hash}, S),
 			S2 = lists:foldl(
-				fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+				fun(#rev_att{hash=PId}, AccS) -> do_lock({part, PId}, AccS) end,
 				S1,
-				Rev#revision.attachments),
+				Rev#rev.attachments),
 			S3 = lists:foldl(
 				fun(ParentRId, AccS) -> do_lock({rev, ParentRId}, AccS) end,
 				S2,
-				Rev#revision.parents),
+				Rev#rev.parents),
 			{ok, _} = Reply = peerdrive_file_store_io:start_link(Rev, User),
 			{Reply, S3};
 
@@ -410,8 +398,9 @@ do_peek(RId, User, #state{rev_tbl=RevTbl} = S) ->
 
 do_create(Type, Creator, User, S) ->
 	DId = crypto:rand_bytes(16),
-	Rev = #revision{data=?REV_DATA_EMPTY_HASH, type=Type, creator=Creator},
-	ok = dets:insert(S#state.part_tbl, {?REV_DATA_EMPTY_HASH, ?EMPTY_DATA}),
+	Rev = #rev{data=?REV_DATA_EMPTY, type=Type, creator=Creator,
+		crtime=peerdrive_util:get_time()},
+	ok = dets:insert(S#state.part_tbl, {?REV_DATA_EMPTY_HASH, ?REV_DATA_EMPTY_BIN}),
 	case start_writer(DId, undefined, Rev, User, S) of
 		{{ok, Handle}, S2} ->
 			{{ok, DId, Handle}, S2};
@@ -424,7 +413,7 @@ do_fork(StartRId, Creator, User, #state{rev_tbl=RevTbl}=S) ->
 	DId = crypto:rand_bytes(16),
 	case dets:lookup(RevTbl, StartRId) of
 		[{_, Rev, _DocLinks, _RevLinks}] ->
-			NewRev = Rev#revision{
+			NewRev = Rev#rev{
 				parents = [StartRId],
 				creator = Creator,
 				comment = <<>>
@@ -448,10 +437,10 @@ do_update(DId, StartRId, Creator, User, S) ->
 			case dets:lookup(RevTbl, StartRId) of
 				[{_, Rev, _DocLinks, _RevLinks}] ->
 					NewCreator = case Creator of
-						undefined -> Rev#revision.creator;
+						undefined -> Rev#rev.creator;
 						_ -> Creator
 					end,
-					NewRev = Rev#revision{
+					NewRev = Rev#rev{
 						parents = [StartRId],
 						creator = NewCreator,
 						comment = <<>>
@@ -476,10 +465,10 @@ do_resume(DId, PreRId, Creator, User, S) ->
 					case dets:lookup(RevTbl, PreRId) of
 						[{_, Rev, _DocLinks, _RevLinks}] ->
 							NewCreator = case Creator of
-								undefined -> Rev#revision.creator;
+								undefined -> Rev#rev.creator;
 								_ -> Creator
 							end,
-							NewRev = Rev#revision{creator = NewCreator},
+							NewRev = Rev#rev{creator = NewCreator},
 							start_writer(DId, PreRId, NewRev, User, S);
 
 						[] ->
@@ -583,7 +572,7 @@ do_commit(DId, OldPreRId, Rev, DocLinks, RevLinks, #state{doc_tbl=DocTbl, gen=Ge
 	RId = peerdrive_store:hash_revision(Rev),
 	case dets:lookup(DocTbl, DId) of
 		[{_, CurrentRId, CurrentPreRIds, _Gen}] ->
-			case lists:member(CurrentRId, Rev#revision.parents) of
+			case lists:member(CurrentRId, Rev#rev.parents) of
 				true  ->
 					NewPreRIds = [R || R <- CurrentPreRIds, R =/= OldPreRId],
 					ok = dets:insert(S#state.rev_tbl, {RId, Rev, DocLinks, RevLinks}),
@@ -718,7 +707,7 @@ do_forward_doc_commit(DId, RevPath, OldPreRId, S) ->
 		% check if the revisions are all connected to each other
 		lists:foreach(
 			fun({RId1, RId2}) ->
-				[{_, #revision{parents=Parents}, _, _}] = dets:lookup(RevTbl, RId2),
+				[{_, #rev{parents=Parents}, _, _}] = dets:lookup(RevTbl, RId2),
 				lists:member(RId1, Parents) orelse throw(einval)
 			end,
 			zip_parent_child(RevPath)),
@@ -760,15 +749,17 @@ do_put_rev(RId, Rev, Data, DocLinks, RevLinks, User, S) ->
 	NoVerify = S#state.noverify,
 	case NoVerify orelse RId == peerdrive_store:hash_revision(Rev) of
 		true ->
-			case do_put_rev_data(Rev#revision.data, Data, NoVerify, S) of
+			DataPId = (Rev#rev.data)#rev_dat.hash,
+			case do_put_rev_data(DataPId, Data, NoVerify, S) of
 				ok ->
-					Attachments = Rev#revision.attachments,
+					Attachments = Rev#rev.attachments,
 					PartTbl = S#state.part_tbl,
-					Missing = [P || {_, PId} = P <- Attachments, not dets:member(PartTbl, PId)],
+					Missing = [{N, PId} || #rev_att{name=N, hash=PId} <- Attachments,
+						not dets:member(PartTbl, PId)],
 					% Make sure nothing gets garbage collected in between...
-					S1 = do_lock({part, Rev#revision.data}, S),
+					S1 = do_lock({part, DataPId}, S),
 					S2 = lists:foldl(
-						fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+						fun(#rev_att{hash=PId}, AccS) -> do_lock({part, PId}, AccS) end,
 						do_lock({rev, RId}, S1),
 						Attachments),
 					{ok, Handle} = peerdrive_file_store_imp:start_link(RId,
@@ -780,7 +771,7 @@ do_put_rev(RId, Rev, Data, DocLinks, RevLinks, User, S) ->
 			end;
 
 		false ->
-			{{error, einval}, S}
+			{{error, erefused}, S}
 	end.
 
 
@@ -902,13 +893,16 @@ do_gc(S) ->
 		S#state.doc_tbl),
 	GcObj2 = dets:foldl(
 		fun({RId, Rev, DocLinks, RevLinks}, Acc) ->
-			Parents = case (Rev#revision.flags band ?REV_FLAG_EPHEMERAL) == 0 of
-				true -> Rev#revision.parents;
+			Parents = case (Rev#rev.flags band ?REV_FLAG_EPHEMERAL) == 0 of
+				true -> Rev#rev.parents;
 				false -> []
 			end,
 			DRefs = [{doc, D} || D <- DocLinks],
 			RRefs = [{rev, R} || R <- Parents ++ RevLinks],
-			PRefs = [{part, Rev#revision.data} | [{part, P} || {_, P} <- Rev#revision.attachments]],
+			PRefs = [
+				{part, (Rev#rev.data)#rev_dat.hash}
+				| [{part, P} || #rev_att{hash=P} <- Rev#rev.attachments]
+			],
 			dict:store({rev, RId}, DRefs++RRefs++PRefs, Acc)
 		end,
 		GcObj1,
@@ -985,28 +979,19 @@ sync_lock(PeerSId, Caller, #state{synclocks=SLocks} = S) ->
 
 % lock document and part hashes, then start writer process
 start_writer(DId, PreRId, Rev, User, S) ->
-	S1 = do_lock({part, Rev#revision.data}, S),
+	S1 = do_lock({part, (Rev#rev.data)#rev_dat.hash}, S),
 	S2 = lists:foldl(
-		fun({_, PId}, AccS) -> do_lock({part, PId}, AccS) end,
+		fun(#rev_att{hash=PId}, AccS) -> do_lock({part, PId}, AccS) end,
 		S1,
-		Rev#revision.attachments),
+		Rev#rev.attachments),
 	S3 = lists:foldl(
 		fun(RId, AccS) -> do_lock({rev, RId}, AccS) end,
 		S2,
-		Rev#revision.parents),
+		Rev#rev.parents),
 	S4 = do_lock({doc, DId}, S3),
 	{ok, _} = Reply =
 		peerdrive_file_store_io:start_link(DId, PreRId, Rev, User),
 	{Reply, S4}.
-
-
-part_size(PId, #state{part_tbl=PartTbl}) ->
-	case dets:lookup(PartTbl, PId) of
-		[{_, Size}] when is_integer(Size) ->
-			Size;
-		[{_, Data}] when is_binary(Data) ->
-			size(Data)
-	end.
 
 
 load_store(#state{path=Path} = S) ->
@@ -1015,7 +1000,7 @@ load_store(#state{path=Path} = S) ->
 			{sid, Sid} = lists:keyfind(sid, 1, Info),
 			{gen, Gen} = lists:keyfind(gen, 1, Info),
 			case lists:keyfind(version, 1, Info) of
-				{version, 3} ->
+				{version, 4} ->
 					ok;
 				_ ->
 					throw(enodev)
@@ -1046,7 +1031,7 @@ save_store(MountState, #state{path=Path} = S) ->
 	ok = dets:sync(S#state.peer_tbl),
 	{ok, File} = file:open(Path ++ "/info.new", [write]),
 	try
-		ok = file:write(File, "{version, 3}.\n"),
+		ok = file:write(File, "{version, 4}.\n"),
 		ok = file:write(File, io_lib:print({state, MountState})),
 		ok = file:write(File, ".\n"),
 		ok = file:write(File, io_lib:print({sid, S#state.sid})),
@@ -1079,10 +1064,11 @@ check_root_doc(#state{sid=SId, gen=Gen} = S) ->
 			Data1 = gb_trees:empty(),
 			Data2 = gb_trees:enter(<<"org.peerdrive.folder">>, Content, Data1),
 			Data3 = gb_trees:enter(<<"org.peerdrive.annotation">>, Annotation2, Data2),
-			DataPId = check_root_doc_write(Data3, S),
-			RootRev = #revision{
+			Data = check_root_doc_write(Data3, S),
+			RootRev = #rev{
 				flags     = ?REV_FLAG_STICKY,
-				data      = DataPId,
+				data      = Data,
+				crtime    = peerdrive_util:get_time(),
 				mtime     = peerdrive_util:get_time(),
 				type      = <<"org.peerdrive.store">>,
 				creator   = <<"org.peerdrive.file-store">>,
@@ -1099,7 +1085,7 @@ check_root_doc_write(Data, S) ->
 	BinData = peerdrive_struct:encode(Data),
 	PId = peerdrive_crypto:merkle(BinData),
 	ok = write_part(PId, BinData, S),
-	PId.
+	#rev_dat{size=size(BinData), hash=PId}.
 
 
 write_part(PId, Data, #state{part_tbl=PartTbl, path=Path}) ->

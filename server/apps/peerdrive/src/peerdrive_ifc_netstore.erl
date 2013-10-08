@@ -280,7 +280,7 @@ do_init(Body, RetPath, #state{tls=Tls} = S) ->
 			starttls = StartTls
 		} = peerdrive_netstore_pb:decode_initreq(Body),
 		case Major of
-			2 -> ok;
+			3 -> ok;
 			_ -> throw({error, erpcmismatch})
 		end,
 		S2 = S#state{init=true},
@@ -289,7 +289,7 @@ do_init(Body, RetPath, #state{tls=Tls} = S) ->
 			((StartTls == deny) and (TlsReq == optional)) or
 			((StartTls == optional) and (TlsReq == deny)) ->
 				Cnf = peerdrive_netstore_pb:encode_initcnf(
-					#initcnf{major=0, minor=0, starttls=false}),
+					#initcnf{major=3, minor=0, starttls=false}),
 				{reply, send_reply(RetPath, Cnf), S2};
 
 			((StartTls == optional) and (TlsReq == optional)) or
@@ -297,7 +297,7 @@ do_init(Body, RetPath, #state{tls=Tls} = S) ->
 			((StartTls == required) and (TlsReq == optional)) or
 			((StartTls == required) and (TlsReq == required)) ->
 				Cnf = peerdrive_netstore_pb:encode_initcnf(
-					#initcnf{major=0, minor=0, starttls=true}),
+					#initcnf{major=3, minor=0, starttls=true}),
 				{ssl, send_reply(RetPath, Cnf), SslOpts, S2};
 
 			true ->
@@ -359,11 +359,12 @@ do_contains(Body, Store) ->
 do_stat(Body, Store) ->
 	#statreq{rev=Rev} = peerdrive_netstore_pb:decode_statreq(Body),
 	{ok, Stat} = check(peerdrive_store:stat(Store, Rev)),
-	#rev_stat{
+	#rev{
 		flags       = Flags,
-		data        = {DataSize, DataHash},
+		data        = #rev_dat{size=DataSize, hash=DataHash},
 		attachments = Attachments,
 		parents     = Parents,
+		crtime      = CrTime,
 		mtime       = Mtime,
 		type        = TypeCode,
 		creator     = CreatorCode,
@@ -372,9 +373,11 @@ do_stat(Body, Store) ->
 	Reply = #statcnf{
 		flags        = Flags,
 		data         = #statcnf_data{size=DataSize, hash=DataHash},
-		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H}
-						 || {N, S, H} <- Attachments ],
+		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H, crtime=CrT,
+			mtime=MT} || #rev_att{name=N, size=S, hash=H, crtime=CrT, mtime=MT}
+			<- Attachments ],
 		parents      = Parents,
+		crtime       = CrTime,
 		mtime        = Mtime,
 		type_code    = TypeCode,
 		creator_code = CreatorCode,
@@ -491,12 +494,19 @@ do_remember_rev(Store, NetHandle, ReqData) ->
 do_put_rev(Store, NetHandle, ReqData) ->
 	#putrevreq{rid=RId, revision=PbRev, data=Data, doc_links=DocLinks,
 		rev_links=RevLinks} = peerdrive_netstore_pb:decode_putrevreq(ReqData),
-	Rev = #revision{
+	Rev = #rev{
 		flags = PbRev#putrevreq_revision.flags,
-		data = PbRev#putrevreq_revision.data,
-		attachments = [ {Name, Hash} || #putrevreq_revision_attachment{name=Name, hash=Hash}
+		data = #rev_dat{
+			size = (PbRev#putrevreq_revision.data)#putrevreq_revision_data.size,
+			hash = (PbRev#putrevreq_revision.data)#putrevreq_revision_data.hash
+		},
+		attachments = [ #rev_att{name=Name, size=Size, hash=Hash, crtime=CrTime,
+				mtime=MTime}
+			|| #putrevreq_revision_attachment{name=Name, size=Size, hash=Hash,
+				crtime=CrTime, mtime=MTime}
 			<- PbRev#putrevreq_revision.attachments ],
 		parents = PbRev#putrevreq_revision.parents,
+		crtime = PbRev#putrevreq_revision.crtime,
 		mtime = PbRev#putrevreq_revision.mtime,
 		type = PbRev#putrevreq_revision.type_code,
 		creator = PbRev#putrevreq_revision.creator_code,

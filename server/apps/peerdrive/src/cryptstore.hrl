@@ -19,4 +19,5 @@
 -define(CS_TYPE_IVEC(RId),    (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<3:64, 0:64>>))).
 -define(CS_CREATOR_IVEC(RId), (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<4:64, 0:64>>))).
 -define(CS_COMMENT_IVEC(RId), (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<5:64, 0:64>>))).
+-define(CS_CRTIME_IVEC(RId),  (crypto:exor(peerdrive_crypto:make_bin_16(RId), <<6:64, 0:64>>))).
 

@@ -17,22 +17,45 @@
 -define(REV_FLAG_STICKY,    (1 bsl 0)).
 -define(REV_FLAG_EPHEMERAL, (1 bsl 1)).
 
-%% Known hash of the default empty data
+%% Default empty data
+-define(REV_DATA_EMPTY_BIN, <<0,0,0,0,0>>).
+-define(REV_DATA_EMPTY_SIZE, 5).
 -define(REV_DATA_EMPTY_HASH, <<119,34,116,81,5,233,224,46,143,26,175,23,247,
                                179,170,197,197,108,216,5>>).
+-define(REV_DATA_EMPTY, #rev_dat{size = ?REV_DATA_EMPTY_SIZE, hash = ?REV_DATA_EMPTY_HASH}).
 
--record(revision,
+-record(rev_dat,
+	{
+		size :: non_neg_integer(),
+		hash :: peerdrive:hash()
+	}).
+
+-record(rev_att,
+	{
+		name   :: binary(),
+		size   :: non_neg_integer(),
+		hash   :: peerdrive:hash(),
+		crtime :: integer(),
+		mtime  :: integer()
+	}).
+
+% The size of the structured data and the attachments is redundant but makes
+% things much more convenient.
+-record(rev,
 	{
 		flags = 0        :: non_neg_integer(),
-		data = ?REV_DATA_EMPTY_HASH :: peerdrive:hash(),
-		attachments = [] :: [{Name::binary(), Hash::peerdrive:hash()}],
+		data = #rev_dat{
+			size = ?REV_DATA_EMPTY_SIZE,
+			hash = ?REV_DATA_EMPTY_HASH
+		}                :: #rev_dat{},
+		attachments = [] :: [#rev_att{}],
 		parents = []     :: [peerdrive:rev()],
+		crtime = 0       :: integer(), % microseconds since epoch (unix date, UTC)
 		mtime = 0        :: integer(), % microseconds since epoch (unix date, UTC)
 		type = <<>>      :: binary(),
 		creator = <<>>   :: binary(),
 		comment = <<>>   :: binary()
 	}).
-
 
 -record(fs_stat,
 	{
@@ -40,17 +63,5 @@
 		blocks :: integer(), % overall number of blocks in store
 		bfree  :: integer(), % number of free blocks
 		bavail :: integer()  % number of blocks available to user
-	}).
-
--record(rev_stat,
-	{
-		flags            :: non_neg_integer(),
-		data             :: {Size::non_neg_integer(), peerdrive:hash()},
-		attachments      :: [{Name::binary(), Size::non_neg_integer(), Hash::peerdrive:hash()}],
-		parents          :: [peerdrive:rev()],
-		mtime            :: integer(), % microseconds since epoch (unix date, UTC)
-		type             :: binary(),
-		creator          :: binary(),
-		comment          :: binary()
 	}).
 

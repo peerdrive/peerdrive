@@ -377,10 +377,10 @@ do_init(Body, #state{cookie=Cookie}) ->
 		cookie = ClientCookie
 	} = peerdrive_client_pb:decode_initreq(Body),
 	case Major of
-		1 ->
+		2 ->
 			case ClientCookie of
 				Cookie ->
-					{ok, #initcnf{major = 1, minor = 0, max_packet_size = 16#1000}};
+					{ok, #initcnf{major = 2, minor = 0, max_packet_size = 16#1000}};
 				_ ->
 					{error, eperm}
 			end;
@@ -433,11 +433,12 @@ do_stat(Body) ->
 	#statreq{rev=Rev, stores=Stores} =
 		peerdrive_client_pb:decode_statreq(Body),
 	{ok, Stat} = check(peerdrive_broker:stat(Rev, get_stores(Stores))),
-	#rev_stat{
+	#rev{
 		flags       = Flags,
-		data        = {DataSize, DataHash},
+		data        = #rev_dat{size=DataSize, hash=DataHash},
 		attachments = Attachments,
 		parents     = Parents,
+		crtime      = CrTime,
 		mtime       = Mtime,
 		type        = TypeCode,
 		creator     = CreatorCode,
@@ -446,9 +447,11 @@ do_stat(Body) ->
 	Reply = #statcnf{
 		flags        = Flags,
 		data        = #statcnf_data{size=DataSize, hash=DataHash},
-		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H}
-						 || {N, S, H} <- Attachments ],
+		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H, crtime=CrT,
+			mtime=MT} || #rev_att{name=N, size=S, hash=H, crtime=CrT, mtime=MT}
+			<- Attachments ],
 		parents      = Parents,
+		crtime       = CrTime,
 		mtime        = Mtime,
 		type_code    = TypeCode,
 		creator_code = CreatorCode,

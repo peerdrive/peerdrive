@@ -24,9 +24,22 @@
 
 -define(THRESHOLD, 1024).
 
-% Part -> {ro, binary() | {FileName, IoDev}} |
-%         {rw, binary() | {FileName, IoDev}}
--record(state, {store, did, prerid, rev, parts, readonly, locks, user}).
+-record(state, {
+	store    :: pid(),
+	did      :: undefined | peerdrive:doc(),
+	prerid   :: undefined | peerdrive:rev(),
+	rev      :: #rev{},
+	parts    :: orddict:orddict(), % [{Name :: data|binary(), Content :: #part{}}]
+	readonly :: boolean(),
+	locks    :: [peerdrive:hash()],
+	user     :: pid()
+}).
+-record(part, {
+	mode   :: rw | ro,
+	data   :: binary() | {FileName::string(), IoDev::file:io_device()},
+	crtime :: undefined | integer(),
+	mtime  :: undefined | integer()
+}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Public interface...
@@ -49,10 +62,11 @@ init({Store, DId, PreRId, Rev, User}) ->
 		store    = Store,
 		did      = DId,
 		prerid   = PreRId,
-		rev      = Rev#revision{attachments=orddict:from_list(Rev#revision.attachments)},
-		parts    = [],
+		rev      = Rev,
+		parts    = orddict:new(),
 		readonly = not is_binary(DId),
-		locks    = [Rev#revision.data] ++ [PId || {_, PId} <- Rev#revision.attachments],
+		locks    = [(Rev#rev.data)#rev_dat.hash] ++
+			[PId || #rev_att{hash=PId} <- Rev#rev.attachments],
 		user     = User
 	},
 	{ok, State}.
@@ -73,13 +87,13 @@ handle_call(close, _From, S) ->
 	{stop, normal, ok, S};
 
 handle_call(get_flags, _From, S) ->
-	{reply, {ok, (S#state.rev)#revision.flags}, S};
+	{reply, {ok, (S#state.rev)#rev.flags}, S};
 
 handle_call(get_type, _From, S) ->
-	{reply, {ok, (S#state.rev)#revision.type}, S};
+	{reply, {ok, (S#state.rev)#rev.type}, S};
 
 handle_call(get_parents, _From, S) ->
-	{reply, {ok, (S#state.rev)#revision.parents}, S};
+	{reply, {ok, (S#state.rev)#rev.parents}, S};
 
 % the following calls are only allowed when still writable
 handle_call(_Request, _From, S = #state{readonly=true}) ->
@@ -122,12 +136,12 @@ handle_call({suspend, Comment}, _From, S) ->
 
 handle_call({set_flags, Flags}, _From, S) ->
 	Rev = S#state.rev,
-	NewRev = Rev#revision{flags=Flags},
+	NewRev = Rev#rev{flags=Flags},
 	{reply, ok, S#state{rev=NewRev}};
 
 handle_call({set_type, Type}, _From, S) ->
 	Rev = S#state.rev,
-	NewRev = Rev#revision{type=Type},
+	NewRev = Rev#rev{type=Type},
 	{reply, ok, S#state{rev=NewRev}};
 
 handle_call({set_parents, Parents}, _From, S) ->
@@ -152,15 +166,15 @@ terminate(_Reason, #state{user=User, did=DId, rev=Rev, store=Store} = S) ->
 	% unlock parents
 	lists:foreach(
 		fun(RId) -> peerdrive_file_store:rev_unlock(Store, RId) end,
-		Rev#revision.parents),
+		Rev#rev.parents),
 	% expose document to garbage collector
 	DId == undefined orelse peerdrive_file_store:doc_unlock(Store, DId),
 	% clean up files
 	lists:foreach(
 		fun
-			({_PId, {ro, {_FileName, IoDev}}}) ->
+			({_PId, #part{mode=ro, data={_FileName, IoDev}}}) ->
 				file:close(IoDev);
-			({_PId, {rw, {FileName, IoDev}}}) ->
+			({_PId, #part{mode=rw, data={FileName, IoDev}}}) ->
 				file:close(IoDev),
 				file:delete(FileName);
 			(_) ->
@@ -260,8 +274,13 @@ do_write(Part, Offset, Data, S) ->
 			S3 = set_part_data(Part, write_into_binary(OldData, Offset, Data), S2),
 			{ok, S3};
 
-		{ok, {_, IoDev}, S2} ->
-			{peerdrive_util:fixup_file(file:pwrite(IoDev, Offset, Data)), S2};
+		{ok, {_, IoDev}=OldData, S2} ->
+			case peerdrive_util:fixup_file(file:pwrite(IoDev, Offset, Data)) of
+				ok ->
+					{ok, set_part_data(Part, OldData, S2)};
+				{error, _} = Error ->
+					{Error, S2}
+			end;
 
 		{error, _} = Error ->
 			{Error, S}
@@ -278,9 +297,14 @@ do_truncate(Part, Offset, S) ->
 			S3 = set_part_data(Part, trunc_binary(OldData, Offset), S2),
 			{ok, S3};
 
-		{ok, {_, IoDev}, S2} ->
+		{ok, {_, IoDev}=OldData, S2} ->
 			{ok, _} = file:position(IoDev, Offset),
-			{peerdrive_util:fixup_file(file:truncate(IoDev)), S2};
+			case peerdrive_util:fixup_file(file:truncate(IoDev)) of
+				ok ->
+					{ok, set_part_data(Part, OldData, S2)};
+				{error, _} = Error ->
+					{Error, S2}
+			end;
 
 		{error, _} = Error ->
 			{Error, S}
@@ -293,10 +317,10 @@ do_commit(Fun, Comment, S) ->
 			case close_and_writeback(S2) of
 				{ok, #state{store=Store, did=DId, prerid=PreRId} = S3} ->
 					Rev1 = S3#state.rev,
-					Rev2 = Rev1#revision{mtime=peerdrive_util:get_time()},
+					Rev2 = Rev1#rev{mtime=peerdrive_util:get_time()},
 					Rev3 = case Comment of
 						undefined -> Rev2;
-						_ -> Rev2#revision{comment=Comment}
+						_ -> Rev2#rev{comment=Comment}
 					end,
 					case Fun(Store, DId, PreRId, Rev3, DocLinks, RevLinks) of
 						{ok, _Rev} = Ok ->
@@ -322,8 +346,8 @@ do_set_parents(Parents, #state{rev=Rev, store=Store} = S) ->
 	% unlock old parents
 	lists:foreach(
 		fun(RId) -> peerdrive_file_store:rev_unlock(Store, RId) end,
-		Rev#revision.parents),
-	NewRev = Rev#revision{parents=Parents},
+		Rev#rev.parents),
+	NewRev = Rev#rev{parents=Parents},
 	S#state{rev=NewRev}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -344,14 +368,15 @@ close_and_writeback(#state{parts=[]} = S) ->
 
 close_and_writeback(#state{parts=[{Part, Content} | RemParts]} = S) ->
 	case Content of
-		{rw, {FileName, IoDev}} ->
+		#part{mode=rw, data={FileName, IoDev}} ->
 			case peerdrive_util:hash_file(IoDev) of
-				{ok, PId} ->
+				{ok, Size, PId} ->
 					ok = file:close(IoDev),
 					S2 = lock_part(PId, S),
 					case peerdrive_file_store:part_put(S2#state.store, PId, FileName) of
 						ok ->
-							S3 = commit_part(Part, PId, S2#state{parts=RemParts}),
+							S3 = commit_part(Part, Content, Size, PId,
+								S2#state{parts=RemParts}),
 							close_and_writeback(S3);
 
 						{error, _Reason} = Error ->
@@ -367,32 +392,41 @@ close_and_writeback(#state{parts=[{Part, Content} | RemParts]} = S) ->
 					{Error, S}
 			end;
 
-		{rw, Data} when is_binary(Data) ->
+		#part{mode=rw, data=Data} when is_binary(Data) ->
 			PId = peerdrive_crypto:merkle(Data),
 			S2 = lock_part(PId, S),
 			case peerdrive_file_store:part_put(S#state.store, PId, Data) of
 				ok ->
-					S3 = commit_part(Part, PId, S2#state{parts=RemParts}),
+					S3 = commit_part(Part, Content, size(Data), PId,
+						S2#state{parts=RemParts}),
 					close_and_writeback(S3);
 				{error, _Reason} = Error ->
 					% keep the part open because there were no side effects yet
 					{Error, S2}
 			end;
 
-		{ro, {_FileName, IoDev}} ->
+		#part{mode=ro, data={_FileName, IoDev}} ->
 			ok = file:close(IoDev),
 			close_and_writeback(S#state{parts=RemParts});
 
-		{ro, Data} when is_binary(Data) ->
+		#part{mode=ro, data=Data} when is_binary(Data) ->
 			close_and_writeback(S#state{parts=RemParts})
 	end.
 
 
-commit_part(data, PId, #state{rev=Rev} = S) ->
-	S#state{rev = Rev#revision{data=PId}};
+commit_part(data, _, Size, PId, #state{rev=Rev} = S) ->
+	S#state{rev = Rev#rev{data=#rev_dat{size=Size, hash=PId}}};
 
-commit_part(Part, PId, #state{rev=Rev} = S) ->
-	NewRev = Rev#revision{attachments=orddict:store(Part, PId, Rev#revision.attachments)},
+commit_part(Part, #part{crtime=CrTime, mtime=MTime}, Size, PId, #state{rev=Rev} = S) ->
+	Attachment = #rev_att{
+		name = Part,
+		size = Size,
+		hash = PId,
+		crtime = CrTime,
+		mtime = case MTime of undefined -> peerdrive_util:get_time(); _ -> MTime end
+	},
+	NewRev = Rev#rev{attachments=lists:keystore(Part, #rev_att.name,
+		Rev#rev.attachments, Attachment)},
 	S#state{rev=NewRev}.
 
 
@@ -403,32 +437,39 @@ lock_part(PId, #state{locks=Locks} = S) ->
 
 get_part_readable(Part, S) ->
 	case orddict:find(Part, S#state.parts) of
-		{ok, {rw, Content}} ->
-			{ok, Content, S};
-		{ok, {ro, Content}} ->
-			{ok, Content, S};
+		{ok, #part{data=Data}} ->
+			{ok, Data, S};
 		error ->
 			part_open_read(Part, S)
 	end.
 
 
-part_open_read(Part, #state{rev=Rev} = S) ->
-	Search = case Part of
-		data -> {data, Rev#revision.data};
-		_    -> lists:keyfind(Part, 1, Rev#revision.attachments)
+part_open_read(Name, #state{rev=Rev} = S) ->
+	Search = case Name of
+		data ->
+			{(Rev#rev.data)#rev_dat.hash, undefined, undefined};
+		_ ->
+			case lists:keyfind(Name, #rev_att.name, Rev#rev.attachments) of
+				#rev_att{hash=Hash, crtime=CrTime0, mtime=MTime0} ->
+					{Hash, CrTime0, MTime0};
+				false ->
+					false
+			end
 	end,
 	case Search of
-		{Part, PId} ->
+		{PId, CrTime, MTime} ->
 			case peerdrive_file_store:part_get(S#state.store, PId) of
 				{ok, Data} when is_binary(Data) ->
-					S2 = S#state{parts=orddict:store(Part, {ro, Data}, S#state.parts)},
+					Part = #part{mode=ro, data=Data, crtime=CrTime, mtime=MTime},
+					S2 = S#state{parts=orddict:store(Name, Part, S#state.parts)},
 					{ok, Data, S2};
 
 				{ok, FileName} when is_list(FileName) ->
 					case file:open(FileName, [read, binary]) of
 						{ok, IoDev} ->
 							Content = {FileName, IoDev},
-							S2 = S#state{parts=orddict:store(Part, {ro, Content}, S#state.parts)},
+							Part = #part{mode=ro, data=Content, crtime=CrTime, mtime=MTime},
+							S2 = S#state{parts=orddict:store(Name, Part, S#state.parts)},
 							{ok, Content, S2};
 
 						{error, _} = Error ->
@@ -444,39 +485,40 @@ part_open_read(Part, #state{rev=Rev} = S) ->
 	end.
 
 
-get_part_writable(Part, Conv, S) ->
-	case orddict:find(Part, S#state.parts) of
-		{ok, {rw, Content}} ->
+get_part_writable(Name, Conv, S) ->
+	case orddict:find(Name, S#state.parts) of
+		{ok, #part{mode=rw, data=Content}=Part} ->
 			if
 				is_binary(Content) and (Conv == forcefile) ->
-					part_bin_to_file(Part, Content, S);
+					part_bin_to_file(Name, Part, S);
 				not is_binary(Content) and (Conv == forcebin) ->
-					part_file_to_bin(Part, Content, S);
+					part_file_to_bin(Name, Part, S);
 				true ->
 					{ok, Content, S}
 			end;
 
-		{ok, {ro, Content}} ->
+		{ok, #part{mode=ro, data=Content}=Part} ->
 			if
 				is_binary(Content) and (Conv == forcefile) ->
-					part_bin_to_file(Part, Content, S);
+					part_bin_to_file(Name, Part, S);
 				not is_binary(Content) and (Conv == forcebin) ->
-					part_file_to_bin(Part, Content, S);
+					part_file_to_bin(Name, Part, S);
 				true ->
-					part_open_write(Part, Conv, part_close_abort(Part, S))
+					part_open_write(Name, Conv, part_close_abort(Name, S))
 			end;
 
 		error ->
-			part_open_write(Part, Conv, S)
+			part_open_write(Name, Conv, S)
 	end.
 
 
-part_bin_to_file(Part, Data, S) ->
+part_bin_to_file(Name, #part{data=Data}=Part, S) ->
 	case create_tmp_file(S) of
 		{ok, FileName, IoDev} ->
 			ok = file:pwrite(IoDev, 0, Data),
 			Content = {FileName, IoDev},
-			S2 = S#state{parts=orddict:store(Part, {rw, Content}, S#state.parts)},
+			S2 = S#state{parts=orddict:store(Name,
+				Part#part{mode=rw, data=Content}, S#state.parts)},
 			{ok, Content, S2};
 
 		{error, _} = Error ->
@@ -484,16 +526,18 @@ part_bin_to_file(Part, Data, S) ->
 	end.
 
 
-part_file_to_bin(Part, {_FileName, IoDev}, S) ->
+part_file_to_bin(Name, #part{data={_FileName, IoDev}} = Part, S) ->
 	case file:pread(IoDev, 0, ?THRESHOLD) of
 		{ok, Data} ->
-			S2 = part_close_abort(Part, S),
-			S3 = S2#state{parts=orddict:store(Part, {rw, Data}, S2#state.parts)},
+			S2 = part_close_abort(Name, S),
+			S3 = S2#state{parts=orddict:store(Name,
+				Part#part{mode=rw, data=Data}, S2#state.parts)},
 			{ok, Data, S3};
 
 		eof ->
-			S2 = part_close_abort(Part, S),
-			S3 = S2#state{parts=orddict:store(Part, {rw, <<>>}, S2#state.parts)},
+			S2 = part_close_abort(Name, S),
+			S3 = S2#state{parts=orddict:store(Name,
+				Part#part{mode=rw, data = <<>>}, S2#state.parts)},
 			{ok, <<>>, S3};
 
 		{error, _} = Error ->
@@ -501,29 +545,37 @@ part_file_to_bin(Part, {_FileName, IoDev}, S) ->
 	end.
 
 
-part_open_write(Part, Conv, #state{rev=Rev, parts=Parts} = S) ->
-	Search = case Part of
-		data -> {data, Rev#revision.data};
-		_    -> lists:keyfind(Part, 1, Rev#revision.attachments)
+part_open_write(Name, Conv, #state{rev=Rev, parts=Parts} = S) ->
+	Search = case Name of
+		data ->
+			{(Rev#rev.data)#rev_dat.hash, #part{mode=rw}};
+		_ ->
+			case lists:keyfind(Name, #rev_att.name, Rev#rev.attachments) of
+				#rev_att{hash=Hash, crtime=CrTime, mtime=MTime} ->
+					{Hash, #part{mode=rw, crtime=CrTime, mtime=MTime}};
+				false ->
+					false
+			end
 	end,
 	case Search of
-		{Part, PId} ->
+		{PId, Part} ->
 			case peerdrive_file_store:part_get(S#state.store, PId) of
 				{ok, Data} when is_binary(Data) ->
 					if
 						Conv == forcefile ->
-							part_bin_to_file(Part, Data, S);
+							part_bin_to_file(Name, Part#part{data=Data}, S);
 						true ->
-							S2 = S#state{parts=orddict:store(Part, {rw, Data}, Parts)},
+							S2 = S#state{parts=orddict:store(Name,
+								Part#part{data=Data}, Parts)},
 							{ok, Data, S2}
 					end;
 
 				{ok, FileName} when is_list(FileName) ->
 					if
 						Conv == forcebin ->
-							part_read_bin(Part, FileName, S);
+							part_read_bin(Name, FileName, Part, S);
 						true ->
-							part_copy_and_open(Part, FileName, S)
+							part_copy_and_open(Name, FileName, Part, S)
 					end;
 
 				{error, _} = Error ->
@@ -531,28 +583,32 @@ part_open_write(Part, Conv, #state{rev=Rev, parts=Parts} = S) ->
 			end;
 
 		false ->
+			Now = peerdrive_util:get_time(),
+			Part = #part{mode=rw, data = <<>>, crtime=Now, mtime=Now},
 			if
 				Conv == forcefile ->
-					part_bin_to_file(Part, <<>>, S);
+					part_bin_to_file(Name, Part, S);
 				true ->
-					S2 = S#state{parts=orddict:store(Part, {rw, <<>>}, S#state.parts)},
+					S2 = S#state{parts=orddict:store(Name, Part, S#state.parts)},
 					{ok, <<>>, S2}
 			end
 	end.
 
 
-part_read_bin(Part, FileName, S) ->
+part_read_bin(Name, FileName, Part0, S) ->
 	case file:open(FileName, [read, binary]) of
 		{ok, IoDev} ->
 			case file:pread(IoDev, 0, ?THRESHOLD) of
 				{ok, Data} ->
 					ok = file:close(IoDev),
-					S2 = S#state{parts=orddict:store(Part, {rw, Data}, S#state.parts)},
+					Part = Part0#part{data=Data},
+					S2 = S#state{parts=orddict:store(Name, Part, S#state.parts)},
 					{ok, Data, S2};
 
 				eof ->
 					ok = file:close(IoDev),
-					S2 = S#state{parts=orddict:store(Part, {rw, <<>>}, S#state.parts)},
+					Part = Part0#part{data = <<>>},
+					S2 = S#state{parts=orddict:store(Name, Part, S#state.parts)},
 					{ok, <<>>, S2};
 
 				{error, _} = Error ->
@@ -565,14 +621,15 @@ part_read_bin(Part, FileName, S) ->
 	end.
 
 
-part_copy_and_open(Part, OrigName, S) ->
+part_copy_and_open(Name, OrigName, Part0, S) ->
 	TmpName = tmp_name(S),
 	case file:copy(OrigName, TmpName) of
 		{ok, _} ->
 			case file:open(TmpName, [write, read, binary]) of
 				{ok, IoDev} ->
 					Content = {TmpName, IoDev},
-					S2 = S#state{parts=orddict:store(Part, {rw, Content}, S#state.parts)},
+					Part = Part0#part{data=Content},
+					S2 = S#state{parts=orddict:store(Name, Part, S#state.parts)},
 					{ok, Content, S2};
 
 				Error ->
@@ -585,23 +642,26 @@ part_copy_and_open(Part, OrigName, S) ->
 	end.
 
 
-part_close_abort(Part, S) ->
-	case orddict:fetch(Part, S#state.parts) of
-		{rw, {FileName, IoDev}} ->
+part_close_abort(Name, S) ->
+	case orddict:fetch(Name, S#state.parts) of
+		#part{mode=rw, data={FileName, IoDev}} ->
 			file:close(IoDev),
 			file:delete(FileName);
 
-		{ro, {_FileName, IoDev}} ->
+		#part{mode=ro, data={_FileName, IoDev}} ->
 			file:close(IoDev);
 
 		_ ->
 			ok
 	end,
-	S#state{parts=orddict:erase(Part, S#state.parts)}.
+	S#state{parts=orddict:erase(Name, S#state.parts)}.
 
 
-set_part_data(Part, Data, S) ->
-	S#state{parts=orddict:store(Part, {rw, Data}, S#state.parts)}.
+set_part_data(Part, Data, #state{parts=OldParts} = S) ->
+	NewParts = orddict:update(Part,
+		fun(Content) -> Content#part{data=Data, mtime=undefined} end,
+		OldParts),
+	S#state{parts=NewParts}.
 
 
 read_from_binary(Data, Offset, Length) ->

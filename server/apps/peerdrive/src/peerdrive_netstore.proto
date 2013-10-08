@@ -211,16 +211,19 @@ message StatCnf {
 		required bytes name = 1;
 		required uint64 size = 2;
 		required bytes hash = 3;
+		required uint64 crtime = 4;
+		required uint64 mtime = 5;
 	}
 
 	required uint32 flags = 1;
 	required Data data = 2;
 	repeated Attachment attachments = 3;
 	repeated bytes parents = 4;
-	required uint64 mtime = 5;
-	required bytes type_code = 6;
-	required bytes creator_code = 7;
-	required bytes comment = 8;
+	required uint64 crtime = 5;
+	required uint64 mtime = 6;
+	required bytes type_code = 7;
+	required bytes creator_code = 8;
+	required bytes comment = 9;
 }
 
 message GetLinksReq {
@@ -423,19 +426,28 @@ message ForwardDocCnf {
 
 message PutRevReq {
 	message Revision {
-		message Attachment {
-			required bytes name = 1;
+		message Data {
+			required uint64 size = 1;
 			required bytes hash = 2;
 		}
 
+		message Attachment {
+			required bytes name = 1;
+			required uint64 size = 2;
+			required bytes hash = 3;
+			required uint64 crtime = 4;
+			required uint64 mtime = 5;
+		}
+
 		required uint32 flags = 1;
-		required bytes data = 2;
+		required Data data = 2;
 		repeated Attachment attachments = 3;
 		repeated bytes parents = 4;
-		required uint64 mtime = 5;
-		required bytes type_code = 6;
-		required bytes creator_code = 7;
-		required bytes comment = 8;
+		required uint64 crtime = 5;
+		required uint64 mtime = 6;
+		required bytes type_code = 7;
+		required bytes creator_code = 8;
+		required bytes comment = 9;
 	}
 
 	required bytes rid = 1;

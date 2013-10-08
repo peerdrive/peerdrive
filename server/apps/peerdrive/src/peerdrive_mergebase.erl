@@ -62,7 +62,7 @@ search(#graph{g=G, dest=Dest} = Graph) ->
 pop_youngest(G, Heads, Dest) ->
 	{SearchHeads, DestHeads} = lists:foldl(
 		fun(Head, {AccS, AccD}) ->
-			{Head, #node{stat=#rev_stat{mtime=Mtime}, paths=Paths}}
+			{Head, #node{stat=#rev{mtime=Mtime}, paths=Paths}}
 				= digraph:vertex(G, Head),
 			case Paths of
 				Dest -> {AccS, [{Mtime, Head}|AccD]};
@@ -90,8 +90,8 @@ pop_youngest(G, Heads, Dest) ->
 
 search_parents(#graph{g=G} = Graph, Rev) ->
 	{Rev, #node{stat=RevStat, paths=Paths}} = digraph:vertex(G, Rev),
-	Parents = case (RevStat#rev_stat.flags band ?REV_FLAG_EPHEMERAL) of
-		0 -> RevStat#rev_stat.parents;
+	Parents = case (RevStat#rev.flags band ?REV_FLAG_EPHEMERAL) of
+		0 -> RevStat#rev.parents;
 		_ -> []
 	end,
 	lists:foreach(

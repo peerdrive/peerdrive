@@ -81,24 +81,13 @@ lookup_rev(Rev, Stores) ->
 %%
 %% Returns information about a revision if it is found on any of the specified
 %% stores, or `{error, enoent}' if no such revision is found. The returned
-%% information is a #rev_stat{} record containing the following fields:
-%%
-%%   flags = integer()
-%%   parts = [{FourCC::binary(), Size::interger(), PId::guid()}]
-%%   parents = [guid()]
-%%   mtime = integer()
-%%   type = binary()
-%%   creator = binary()
-%%   doc_links = [DId::guid()]
-%%   rev_links = [RId::guid()]
-%%
-%% If an empty list of stores was given then all mounted stores are searched.
+%% information is a #rev{} record.
 %%
 %% @spec stat(Rev, SearchStores) -> Result
 %%       Result = {ok, Stat} | {error, enoent}
 %%       Rev = guid()
 %%       SearchStores = [pid()]
-%%       Stat = #rev_stat{}
+%%       Stat = #rev{}
 %%       Reason = ecode()
 stat(Rev, SearchStores) ->
 	try
@@ -479,7 +468,7 @@ search_path(_Stores, FromRev, FromRev, Path) ->
 
 search_path(Stores, FromRev, ToRev, Path) ->
 	case stat(ToRev, Stores) of
-		{ok, #rev_stat{parents=Parents}} ->
+		{ok, #rev{parents=Parents}} ->
 			lists:foldl(
 				fun
 					(Rev, error) ->

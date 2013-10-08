@@ -823,7 +823,7 @@ doc_make_node({doc, Store, Doc} = Oid) ->
 	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
-				{ok, #rev_stat{type=Type}} ->
+				{ok, #rev{type=Type}} ->
 					case Type of
 						<<"org.peerdrive.store">> ->
 							doc_make_node_folder(Oid);
@@ -871,7 +871,7 @@ folder_getattr({doc, Store, Doc}) ->
 	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
-				{ok, #rev_stat{mtime=Mtime}} ->
+				{ok, #rev{mtime=Mtime}} ->
 					{ok, #vfs_attr{
 						dir   = true,
 						atime = Mtime,
@@ -1443,10 +1443,10 @@ file_getattr({doc, Store, Doc}) ->
 
 file_getattr_rev(Store, Rev) ->
 	case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
-		{ok, #rev_stat{attachments=Attachments, mtime=Mtime}} ->
+		{ok, #rev{attachments=Attachments, mtime=Mtime}} ->
 			Size = case find_entry(
 				fun
-					({<<"_">>, Size, _Hash}) -> {ok, Size};
+					(#rev_att{name = <<"_">>, size=Size}) -> {ok, Size};
 					(_) -> error
 				end,
 				Attachments)

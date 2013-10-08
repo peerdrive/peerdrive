@@ -62,19 +62,12 @@ contains(Store, Rev) ->
 %%
 %% Returns information about a revision if it is found on the store, or
 %% `{error, enonent}' if no such revision exists. The returned information is a
-%% #rev_stat{} record containing the following fields:
-%%
-%%   flags = integer()
-%%   parts = [{FourCC::binary(), Size::interger(), PId::guid()}]
-%%   parents = [RId::guid()]
-%%   mtime = integer()
-%%   type = binary()
-%%   creator = binary()
+%% #rev{} record.
 %%
 %% @spec stat(Store, Rev) -> {ok, Stat} | {error, enoent}
 %%       Store = pid()
 %%       Rev = guid()
-%%       Stat = #rev_stat{}
+%%       Stat = #rev{}
 stat(Store, Rev) ->
 	call_store(Store, {stat, Rev}).
 
@@ -433,7 +426,7 @@ remember_rev(Store, Doc, PreRev, OldPreRev) ->
 %% @spec put_rev(Store, Rev, Revision, Data, DocLinks, RevLinks) -> Result
 %%       Store = pid()
 %%       Rev = guid()
-%%       Revision = #revision
+%%       Revision = #rev{}
 %%       Data = binary()
 %%       DocLinks = RevLinks = [guid()]
 %%       Result = {ok, MissingAttachments, Handle} | {error, Reason}
@@ -493,23 +486,23 @@ sync_set_anchor(Store, FromSId, ToSId, SeqNum) ->
 	call_store(Store, {sync_set_anchor, FromSId, ToSId, SeqNum}).
 
 
-hash_revision(#revision{flags=Flags, mtime=Mtime} = Revision) ->
-	BinData = hash_revision_hash(Revision#revision.data),
-	Attachments = Revision#revision.attachments,
+hash_revision(#rev{flags=Flags, crtime=CrTime, mtime=Mtime} = Revision) ->
+	BinData = hash_revision_hash((Revision#rev.data)#rev_dat.hash),
+	Attachments = Revision#rev.attachments,
 	BinAttachments = lists:foldl(
-		fun ({Name, Hash}, AccIn) ->
+		fun (#rev_att{name=Name, hash=Hash, crtime=CrT, mtime=MT}, AccIn) ->
 			<<AccIn/binary, (hash_revision_string(Name))/binary,
-				(hash_revision_hash(Hash))/binary>>
+				(hash_revision_hash(Hash))/binary, CrT:64/little, MT:64/little>>
 		end,
 		<<(length(Attachments)):32/little>>,
 		Attachments),
-	BinParents = hash_revision_list(Revision#revision.parents),
-	BinType = hash_revision_string(Revision#revision.type),
-	BinCreator = hash_revision_string(Revision#revision.creator),
-	BinComment = hash_revision_string(Revision#revision.comment),
+	BinParents = hash_revision_list(Revision#rev.parents),
+	BinType = hash_revision_string(Revision#rev.type),
+	BinCreator = hash_revision_string(Revision#rev.creator),
+	BinComment = hash_revision_string(Revision#rev.comment),
 	peerdrive_crypto:sha(<<Flags:32/little, BinData/binary, BinAttachments/binary,
-		BinParents/binary, Mtime:64/little, BinType/binary, BinCreator/binary,
-		BinComment/binary>>).
+		BinParents/binary, CrTime:64/little, Mtime:64/little, BinType/binary,
+		BinCreator/binary, BinComment/binary>>).
 
 hash_revision_list(List) ->
 	lists:foldl(

@@ -397,7 +397,7 @@ latest_strategy(Doc, From, FromRev, To, ToRev, _BaseRev) ->
 	FromStat = check(peerdrive_broker:stat(FromRev, [From]), Doc, FromRev),
 	ToStat = check(peerdrive_broker:stat(ToRev, [To]), Doc, ToRev),
 	if
-		FromStat#rev_stat.mtime >= ToStat#rev_stat.mtime ->
+		FromStat#rev.mtime >= ToStat#rev.mtime ->
 			% worker will pick up again the new merge rev
 			Handle = check(peerdrive_broker:update(From, Doc, FromRev, undefined),
 				Doc, FromRev),
@@ -425,9 +425,9 @@ merge_strategy(Doc, From, FromRev, To, ToRev, BaseRev) ->
 	ToStat = check(peerdrive_broker:stat(ToRev, [To]), Doc, ToRev),
 	BaseStat = check(peerdrive_broker:stat(BaseRev, [From, To]), Doc, BaseRev),
 	TypeSet = sets:from_list([
-		BaseStat#rev_stat.type,
-		FromStat#rev_stat.type,
-		ToStat#rev_stat.type
+		BaseStat#rev.type,
+		FromStat#rev.type,
+		ToStat#rev.type
 	]),
 	case get_handler_fun(TypeSet) of
 		none ->
@@ -464,18 +464,18 @@ get_handler_fun(TypeSet) ->
 %% TODO: Support addition and removal of whole parts
 %%
 merge(Doc, From, To, BaseRev, FromRev, ToRev, Handlers) ->
-	#rev_stat{attachments=FromParts} = check(peerdrive_broker:stat(FromRev, [From]),
+	#rev{attachments=FromParts} = check(peerdrive_broker:stat(FromRev, [From]),
 		Doc, FromRev),
-	#rev_stat{attachments=ToParts} = check(peerdrive_broker:stat(ToRev, [To]), Doc,
+	#rev{attachments=ToParts} = check(peerdrive_broker:stat(ToRev, [To]), Doc,
 		ToRev),
-	#rev_stat{attachments=BaseParts} = check(peerdrive_broker:stat(BaseRev, [From, To]),
+	#rev{attachments=BaseParts} = check(peerdrive_broker:stat(BaseRev, [From, To]),
 		Doc, BaseRev),
 	OtherParts = ToParts ++ FromParts,
 
 	% Merge only changed parts
-	Parts = [data] ++ [ FourCC || {FourCC, _Size, Hash} <- BaseParts,
+	Parts = [data] ++ [ Name || #rev_att{name=Name, hash=Hash} <- BaseParts,
 		lists:any(
-			fun({F,_,H}) -> (F =:= FourCC) and (H =/= Hash) end,
+			fun(#rev_att{name=N,hash=H}) -> (N =:= Name) and (H =/= Hash) end,
 			OtherParts) ],
 
 	% Read all changed parts

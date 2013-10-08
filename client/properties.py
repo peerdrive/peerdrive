@@ -181,19 +181,22 @@ class RevisionTab(QtGui.QWidget):
 		super(RevisionTab, self).__init__(parent)
 
 		self.__typeLabel = QtGui.QLabel()
+		self.__crtimeLabel = QtGui.QLabel()
 		self.__mtimeLabel = QtGui.QLabel()
 		self.__sizeLabel = QtGui.QLabel()
 		self.__flagsLabel = QtGui.QLabel()
 
 		layout = QtGui.QGridLayout()
 		layout.addWidget(QtGui.QLabel("Type:"), 0, 0)
-		layout.addWidget(QtGui.QLabel("Modification time:"), 1, 0)
-		layout.addWidget(QtGui.QLabel("Size:"), 2, 0)
-		layout.addWidget(QtGui.QLabel("Flags:"), 3, 0)
+		layout.addWidget(QtGui.QLabel("Creation time:"), 1, 0)
+		layout.addWidget(QtGui.QLabel("Modification time:"), 2, 0)
+		layout.addWidget(QtGui.QLabel("Size:"), 3, 0)
+		layout.addWidget(QtGui.QLabel("Flags:"), 4, 0)
 		layout.addWidget(self.__typeLabel, 0, 1)
-		layout.addWidget(self.__mtimeLabel, 1, 1)
-		layout.addWidget(self.__sizeLabel, 2, 1)
-		layout.addWidget(self.__flagsLabel, 3, 1)
+		layout.addWidget(self.__crtimeLabel, 1, 1)
+		layout.addWidget(self.__mtimeLabel, 2, 1)
+		layout.addWidget(self.__sizeLabel, 3, 1)
+		layout.addWidget(self.__flagsLabel, 4, 1)
 
 		self.setLayout(layout)
 
@@ -201,6 +204,7 @@ class RevisionTab(QtGui.QWidget):
 		try:
 			stat = Connector().stat(rev, [store])
 			self.__typeLabel.setText(Registry().getDisplayString(stat.type()))
+			self.__crtimeLabel.setText(str(stat.crtime()))
 			self.__mtimeLabel.setText(str(stat.mtime()))
 			size = stat.dataSize()
 			for a in stat.attachments():

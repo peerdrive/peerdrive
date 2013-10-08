@@ -328,9 +328,10 @@ do_discover_rev(Parent, RId, First, Force, S) ->
 	case Verbose or not Exists of
 		true ->
 			case peerdrive_store:stat(SrcStore, RId) of
-				{ok, #rev_stat{parents=Ancestors, mtime=Mtime} = Stat}
+				{ok, #rev{parents=Ancestors, mtime=Mtime} = Stat}
 				when (Mtime >= Depth) or Force ->
-					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.attachments ],
+					Parts = [ {PId, Size} || #rev_att{size=Size, hash=PId}
+						<- Stat#rev.attachments ],
 					Node = {rev, RId},
 					Props = case Exists of
 						true -> [exists];
@@ -371,7 +372,8 @@ do_discover_rev(Parent, RId, First, Force, S) ->
 				{ok, Stat} ->
 					% add sentinel node for correct transfer size estimation
 					Node = {sentinel, RId},
-					Parts = [ {PId, Size} || {_, Size, PId} <- Stat#rev_stat.attachments ],
+					Parts = [ {PId, Size} || #rev_att{size=Size, hash=PId}
+						<- Stat#rev.attachments ],
 					digraph:add_vertex(G, Node, [{parts, Parts}]),
 					digraph:add_edge(G, Parent, Node),
 					S;
@@ -460,7 +462,7 @@ replicate_rev(RId, AccountedSize, S) ->
 		srcstore = SrcStore,
 		dststore = DstStore
 	} = S,
-	Stat = case peerdrive_store:stat(SrcStore, RId) of
+	Revision = case peerdrive_store:stat(SrcStore, RId) of
 		{ok, Ok1} ->
 			Ok1;
 		{error, Reason1} ->
@@ -472,18 +474,7 @@ replicate_rev(RId, AccountedSize, S) ->
 		{error, Reason2} ->
 			throw({error, [{code, Reason2}, {rev, RId}]})
 	end,
-	Attachments = Stat#rev_stat.attachments,
-	Revision = #revision{
-		flags = Stat#rev_stat.flags,
-		data  = element(2, Stat#rev_stat.data),
-		attachments = lists:sort(
-			lists:map( fun({Name, _Size, Hash}) -> {Name, Hash} end, Attachments)),
-		parents   = lists:sort(Stat#rev_stat.parents),
-		mtime     = Stat#rev_stat.mtime,
-		type      = Stat#rev_stat.type,
-		creator   = Stat#rev_stat.creator,
-		comment   = Stat#rev_stat.comment
-	},
+	Attachments = Revision#rev.attachments,
 	case peerdrive_store:peek(SrcStore, RId) of
 		{ok, Reader} ->
 			Data = case peerdrive_store:get_data(Reader, <<>>) of
@@ -497,7 +488,7 @@ replicate_rev(RId, AccountedSize, S) ->
 				{ok, MissingParts, Handle} ->
 					RealSize = lists:foldl(
 						fun(P, Acc) ->
-							{_, Size, _} = lists:keyfind(P, 1, Attachments),
+							#rev_att{size=Size} = lists:keyfind(P, #rev_att.name, Attachments),
 							Acc + Size
 						end,
 						0,
@@ -623,11 +614,11 @@ do_estimate(Node, G) ->
 	{AccountedSize+SubSize, sets:union(PIds, SubPIds)}.
 
 
-is_sticky(#rev_stat{flags=Flags}) ->
+is_sticky(#rev{flags=Flags}) ->
 	(Flags band ?REV_FLAG_STICKY) =/= 0.
 
 
-is_ephemeral(#rev_stat{flags=Flags}) ->
+is_ephemeral(#rev{flags=Flags}) ->
 	(Flags band ?REV_FLAG_EPHEMERAL) =/= 0.
 
 

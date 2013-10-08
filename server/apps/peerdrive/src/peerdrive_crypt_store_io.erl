@@ -25,6 +25,13 @@
 
 -record(preprev, {rid, encrid, encrev, encdata, encdoclinks, encrevlinks}).
 
+-record(part, {
+	name   :: string(),
+	iodev  :: file:io_device(),
+	crtime :: integer(),
+	mtime  :: undefined | integer()
+}).
+
 -include("store.hrl").
 -include("cryptstore.hrl").
 
@@ -75,13 +82,13 @@ handle_call(close, _From, S) ->
 	{stop, normal, ok, S};
 
 handle_call(get_flags, _From, S) ->
-	{reply, {ok, (S#state.rev)#revision.flags}, S};
+	{reply, {ok, (S#state.rev)#rev.flags}, S};
 
 handle_call(get_type, _From, S) ->
-	{reply, {ok, (S#state.rev)#revision.type}, S};
+	{reply, {ok, (S#state.rev)#rev.type}, S};
 
 handle_call(get_parents, _From, S) ->
-	{reply, {ok, (S#state.rev)#revision.parents}, S};
+	{reply, {ok, (S#state.rev)#rev.parents}, S};
 
 % all following calls are only allowed when still writable...
 handle_call(_Request, _From, S = #state{readonly=true}) ->
@@ -113,17 +120,17 @@ handle_call({suspend, Comment}, _From, S) ->
 
 handle_call({set_flags, Flags}, _From, S) ->
 	Rev = S#state.rev,
-	NewRev = Rev#revision{flags=Flags},
+	NewRev = Rev#rev{flags=Flags},
 	{reply, ok, S#state{rev=NewRev}};
 
 handle_call({set_type, Type}, _From, S) ->
 	Rev = S#state.rev,
-	NewRev = Rev#revision{type=Type},
+	NewRev = Rev#rev{type=Type},
 	{reply, ok, S#state{rev=NewRev}};
 
 handle_call({set_parents, Parents}, _From, S) ->
 	Rev = S#state.rev,
-	NewRev = Rev#revision{parents=Parents},
+	NewRev = Rev#rev{parents=Parents},
 	{reply, ok, S#state{rev=NewRev}}.
 
 
@@ -138,7 +145,7 @@ handle_info({'EXIT', From, Reason}, #state{parent=Parent, user=User} = S) ->
 terminate(_Reason, #state{handle=Handle, parts=Parts}) ->
 	Handle == undefined orelse peerdrive_store:close(Handle),
 	lists:foreach(
-		fun({_FCC, {FileName, IoDev}}) ->
+		fun({_FCC, #part{name=FileName, iodev=IoDev}}) ->
 			file:close(IoDev),
 			file:delete(FileName)
 		end,
@@ -174,7 +181,7 @@ do_get_data(Selector, S) ->
 do_read(Part, Start, Length, S) ->
 	case orddict:find(Part, S#state.parts) of
 		error ->
-			case lists:keymember(Part, 1, (S#state.rev)#revision.attachments) of
+			case lists:keymember(Part, #rev_att.name, (S#state.rev)#rev.attachments) of
 				true ->
 					do_read_remote(Part, Start, Length, S);
 				false ->
@@ -209,10 +216,11 @@ do_read_remote(Part, OrigStart, OrigLength, S) ->
 
 
 do_read_remote_aligned(Part, Start, Length, S) ->
-	#state{handle=Handle, key=Key, rev=#revision{attachments=Parts}} = S,
+	#state{handle=Handle, key=Key, rev=#rev{attachments=Parts}} = S,
 	case peerdrive_store:read(Handle, Part, Start, Length) of
 		{ok, EncData} ->
-			<<PId:128>> = peerdrive_crypto:make_bin_16(proplists:get_value(Part, Parts)),
+			#rev_att{hash=PId0} = lists:keyfind(Part, #rev_att.name, Parts),
+			<<PId:128>> = peerdrive_crypto:make_bin_16(PId0),
 			IVec = <<(PId + (Start bsr 4)):128>>,
 			Data = peerdrive_crypto:aes_ctr_decrypt(Key, IVec, EncData),
 			{ok, Data};
@@ -221,7 +229,7 @@ do_read_remote_aligned(Part, Start, Length, S) ->
 			Error
 	end.
 
-do_read_local({_FileName, IoDev}, Offset, Length) ->
+do_read_local(#part{iodev=IoDev}, Offset, Length) ->
 	case file:pread(IoDev, Offset, Length) of
 		eof -> {ok, <<>>};
 		Else -> peerdrive_util:fixup_file(Else)
@@ -369,22 +377,28 @@ do_suspend(Comment, #state{did=DId, store=Store, prerid=PreRId} = S) ->
 
 
 get_part_writable(Part, #state{parts=Parts, key=Key} = S) ->
-	case orddict:find(Part, S#state.parts) of
-		{ok, {_Name, IoDev}} ->
+	case orddict:find(Part, Parts) of
+		{ok, #part{iodev=IoDev, mtime=undefined}} ->
 			{ok, IoDev, S};
+
+		{ok, #part{iodev=IoDev}=P} ->
+			S2 = S#state{parts=orddict:store(Part, P#part{mtime=undefined}, Parts)},
+			{ok, IoDev, S2};
 
 		error ->
 			{Name, IoDev} = tmp_file(),
 			try
-				case lists:keyfind(Part, 1, (S#state.rev)#revision.attachments) of
-					{Part, PId} ->
+				P = case lists:keyfind(Part, #rev_att.name, (S#state.rev)#rev.attachments) of
+					#rev_att{hash=PId, crtime=CrTime, mtime=MTime} ->
 						DecState = peerdrive_crypto:aes_ctr_stream_init(Key,
 							peerdrive_crypto:make_bin_16(PId)),
-						part_copy_loop(Part, S#state.handle, IoDev, 0, DecState);
+						ok = part_copy_loop(Part, S#state.handle, IoDev, 0, DecState),
+						#part{name=Name, iodev=IoDev, crtime=CrTime, mtime=MTime};
 					false ->
-						ok
+						Now = peerdrive_util:get_time(),
+						#part{name=Name, iodev=IoDev, crtime=Now, mtime=Now}
 				end,
-				NewParts = orddict:store(Part, {Name, IoDev}, Parts),
+				NewParts = orddict:store(Part, P, Parts),
 				{ok, IoDev, S#state{parts=NewParts}}
 			catch
 				throw:Error ->
@@ -426,47 +440,39 @@ prepare_rev(Comment, S) ->
 	end.
 
 do_prepare_rev(Comment, #state{rev=Rev, parts=Parts, key=Key, data=Data} = S) ->
-	#revision{
-		flags     = Flags,
-		parents   = Parents,
-		type      = TypeCode,
-		creator   = CreatorCode,
-		comment   = OldComment
-	} = Rev,
 	{DocLinks, RevLinks} = peerdrive_struct:extract_links(Data),
+	DataSize = size(Data),
 	DataHash = peerdrive_crypto:merkle(Data),
-	NewParts = orddict:merge(
-		fun(_Key, V1, _V2) -> V1 end,
-		orddict:from_list([
-			case peerdrive_util:hash_file(IoDev) of
-				{ok, Sha} -> {FCC, Sha};
-				{error, _} = HashErr -> throw(HashErr)
-			end || {FCC, {_, IoDev}} <- Parts]),
-		orddict:from_list(Rev#revision.attachments)),
+	LocalParts = [
+		case peerdrive_util:hash_file(IoDev) of
+			{ok, Size, Sha} ->
+				#rev_att{
+					name=Name, size=Size, hash=Sha, crtime=CrTime,
+					mtime = case MTime of
+						undefined -> peerdrive_util:get_time();
+						_ -> MTime
+					end
+				};
+			{error, _} = HashErr ->
+				throw(HashErr)
+		end
+		|| {Name, #part{iodev=IoDev, crtime=CrTime, mtime=MTime}}
+			<- Parts ],
+	NewParts = lists:keymerge(#rev_att.name,
+		lists:keysort(#rev_att.name, LocalParts),
+		lists:keysort(#rev_att.name, Rev#rev.attachments)),
 	Mtime = peerdrive_util:get_time(),
 	NewComment = case Comment of
-		undefined -> OldComment;
+		undefined -> Rev#rev.comment;
 		_ -> Comment
 	end,
-	NewRev = Rev#revision{data=DataHash, attachments=NewParts, mtime=Mtime,
-		comment=NewComment},
+	NewRev = Rev#rev{data=#rev_dat{size=DataSize, hash=DataHash},
+		attachments=NewParts, mtime=Mtime, comment=NewComment},
 	NewRId = peerdrive_store:hash_revision(NewRev),
-	<<EncFlags:32>> = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_FLAGS_IVEC(NewRId), <<Flags:32>>),
-	<<EncMtime:64>> = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_MTIME_IVEC(NewRId), <<Mtime:64>>),
-	NewEncRev = #revision{
-		flags       = EncFlags,
-		data        = peerdrive_crypt_store:enc_xid(Key, DataHash),
-		attachments = [ {Name, peerdrive_crypt_store:enc_xid(Key, PId)} || {Name, PId} <- NewParts ],
-		parents     = [ peerdrive_crypt_store:enc_xid(Key, Parent) || Parent <- Parents ],
-		mtime       = EncMtime,
-		type        = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_TYPE_IVEC(NewRId), TypeCode),
-		creator     = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_CREATOR_IVEC(NewRId), CreatorCode),
-		comment     = peerdrive_crypto:aes_ctr_encrypt(Key, ?CS_COMMENT_IVEC(NewRId), NewComment)
-	},
 	PreparedRev = #preprev{
 		rid = NewRId,
 		encrid = peerdrive_crypt_store:enc_xid(Key, NewRId),
-		encrev = NewEncRev,
+		encrev = peerdrive_crypt_store:enc_revision(NewRId, NewRev, Key),
 		encdata = peerdrive_crypto:aes_ctr_encrypt(Key, peerdrive_crypto:make_bin_16(DataHash), Data),
 		encdoclinks = [ peerdrive_crypt_store:enc_xid(Key, DId) || DId <- DocLinks ],
 		encrevlinks = [ peerdrive_crypt_store:enc_xid(Key, RId) || RId <- RevLinks ]
@@ -499,12 +505,12 @@ upload_rev(PreparedRev, #state{store=Store} = S) ->
 	end.
 
 
-upload_rev_part(Handle, FCC, #state{parts=Parts, key=Key, rev=Rev}) ->
-	{_, IoDev} = orddict:fetch(FCC, Parts),
-	PId = orddict:fetch(FCC, Rev#revision.attachments),
+upload_rev_part(Handle, Name, #state{parts=Parts, key=Key, rev=Rev}) ->
+	#part{iodev=IoDev} = orddict:fetch(Name, Parts),
+	#rev_att{hash=PId} = lists:keyfind(Name, #rev_att.name, Rev#rev.attachments),
 	EncState = peerdrive_crypto:aes_ctr_stream_init(Key, peerdrive_crypto:make_bin_16(PId)),
 	file:position(IoDev, 0),
-	upload_rev_part_loop(Handle, FCC, IoDev, EncState).
+	upload_rev_part_loop(Handle, Name, IoDev, EncState).
 
 
 upload_rev_part_loop(Handle, FCC, IoDev, EncState) ->
@@ -535,7 +541,7 @@ fetch_data(#state{data=undefined, handle=Handle, key=Key, rev=Rev} = S) ->
 	case peerdrive_store:get_data(Handle, <<>>) of
 		{ok, EncData} ->
 			Data = peerdrive_crypto:aes_ctr_decrypt(Key,
-				peerdrive_crypto:make_bin_16(Rev#revision.data), EncData),
+				peerdrive_crypto:make_bin_16((Rev#rev.data)#rev_dat.hash), EncData),
 			{ok, S#state{data=Data}};
 
 		Error ->

@@ -10,13 +10,16 @@ At the basic level each revision consists of the following:
 
 	- a set of flags
 		- sticky flag
+		- ephemeral flag
 		- possibly other flags in the future
 	- structured data (see below)
-	- one or more binary attachments, each identified by a string
+	- one or more binary attachments, each identified by a string and with
+	  separate creation/modification time
 	- a type code, specifying the format of the document (encoded as a Uniform
 	  Type Identifier [UTI])
 	- a creator code, denoting the application which created the revision
 	  (encoded as a reverse-DNS string)
+	- the creation time (microseconds since epoch, UTC)
 	- the modification time (microseconds since epoch, UTC)
 	- an optional user comment describing the revision,
 	- a list of it's preceding revision(s) (parents)
