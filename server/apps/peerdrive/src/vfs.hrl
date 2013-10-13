@@ -22,7 +22,8 @@
 	size=0,  % int(): size in bytes
 	mtime=0, % int(): microseconds since epoch
 	atime=0, % int(): microseconds since epoch
-	ctime=0  % int(): microseconds since epoch
+	ctime=0, % int(): microseconds since epoch
+	crtime=0 % int(): microseconds since epoch
 }).
 
 -record(vfs_entry, {

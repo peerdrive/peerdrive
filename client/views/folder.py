@@ -1181,7 +1181,7 @@ class FolderWidget(widgets.DocumentView):
 				w.set_data('', r.get_data(''))
 				for att in info.attachments():
 					w.write(att, r.readAll(att))
-				w.setFlags(r.getFlags())
+				w.setFlags(r.stat().flags())
 			w.commit("Created from template")
 			destDoc = w.getDoc()
 			# add link

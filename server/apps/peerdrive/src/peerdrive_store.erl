@@ -18,10 +18,10 @@
 
 -export([guid/1, statfs/1, contains/2, lookup/2, stat/2, sync/1]).
 -export([put_doc/3, forward_doc/4, put_rev/6, put_rev_part/3, remember_rev/4]).
--export([close/1, commit/1, commit/2, create/3, fork/3, get_parents/1, get_type/1,
-	peek/2, read/4, resume/4, set_parents/2, set_type/2, truncate/3, update/4,
-	write/4, suspend/1, suspend/2, get_links/2, get_flags/1, set_flags/2,
-	get_data/2, set_data/3]).
+-export([close/1, commit/1, commit/2, create/3, fork/3, fstat/1, peek/2, read/4,
+	resume/4, set_mtime/3, set_parents/2, set_type/2, truncate/3, update/4,
+	write/4, suspend/1, suspend/2, get_links/2, set_flags/2, get_data/2,
+	set_data/3]).
 -export([delete_rev/2, delete_doc/3, forget/3]).
 -export([sync_get_changes/3, sync_get_anchor/3, sync_set_anchor/4, sync_finish/2]).
 -export([hash_revision/1]).
@@ -234,29 +234,25 @@ write(Handle, Attachment, Offset, Data) ->
 truncate(Handle, Attachment, Length) ->
 	call_store(Handle, {truncate, Attachment, Length}).
 
-% {ok, integer()} | {error, Reason}
-get_flags(Handle) ->
-	call_store(Handle, get_flags).
+% {ok, #rev{}} | {error, Reason}
+fstat(Handle) ->
+	call_store(Handle, fstat).
 
 % ok | {error, Reason}
 set_flags(Handle, Flags) ->
 	call_store(Handle, {set_flags, Flags}).
 
-% {ok, binary()} | {error, Reason}
-get_type(Handle) ->
-	call_store(Handle, get_type).
-
 % ok | {error, Reason}
 set_type(Handle, Type) ->
 	call_store(Handle, {set_type, Type}).
 
-% {ok, [guid()]} | {error, Reason}
-get_parents(Handle) ->
-	call_store(Handle, get_parents).
-
 % ok | {error, Reason}
 set_parents(Handle, Parents) ->
 	call_store(Handle, {set_parents, Parents}).
+
+% ok | {error, Reason}
+set_mtime(Handle, Attachment, MTime) ->
+	call_store(Handle, {set_mtime, Attachment, MTime}).
 
 %% @doc Commit a new revision
 %%

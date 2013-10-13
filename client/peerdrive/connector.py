@@ -184,11 +184,11 @@ _requestNames = {
 	0x000c : "TRUNC_MSG",
 	0x000d : "WRITE_BUFFER_MSG",
 	0x000e : "WRITE_COMMIT_MSG",
-	0x000f : "GET_FLAGS_MSG",
+	0x000f : "FSTAT_MSG",
 	0x0010 : "SET_FLAGS_MSG",
-	0x0011 : "GET_TYPE_MSG",
-	0x0012 : "SET_TYPE_MSG",
-	0x0013 : "GET_PARENTS_MSG",
+	0x0011 : "SET_TYPE_MSG",
+	0x0012 : "SET_MTIME_MSG",
+	0x0013 : "<unused>",
 	0x0014 : "MERGE_MSG",
 	0x0015 : "REBASE_MSG",
 	0x0016 : "COMMIT_MSG",
@@ -247,11 +247,11 @@ class _Connector(QtCore.QObject):
 	TRUNC_MSG           = 0x000c
 	WRITE_BUFFER_MSG    = 0x000d
 	WRITE_COMMIT_MSG    = 0x000e
-	GET_FLAGS_MSG       = 0x000f
+	FSTAT_MSG           = 0x000f
 	SET_FLAGS_MSG       = 0x0010
-	GET_TYPE_MSG        = 0x0011
-	SET_TYPE_MSG        = 0x0012
-	GET_PARENTS_MSG     = 0x0013
+	SET_TYPE_MSG        = 0x0011
+	SET_MTIME_MSG       = 0x0012
+	#_MSG     = 0x0013
 	MERGE_MSG           = 0x0014
 	REBASE_MSG          = 0x0015
 	COMMIT_MSG          = 0x0016
@@ -1176,21 +1176,13 @@ class Handle(object):
 		else:
 			raise IOError('Handle expired')
 
-	def getFlags(self):
+	def stat(self):
 		if not self.active:
 			raise IOError('Handle expired')
-		req = pb.GetFlagsReq()
+		req = pb.FStatReq()
 		req.handle = self.handle
-		reply = self.connector._rpc(_Connector.GET_FLAGS_MSG, req.SerializeToString())
-		flags = pb.GetFlagsCnf.FromString(reply).flags
-		flagSet = set()
-		i = 0
-		while flags:
-			if flags & 1:
-				flagSet.add(i)
-			flags = flags >> 1
-			i += 1
-		return flagSet
+		reply = self.connector._rpc(_Connector.FSTAT_MSG, req.SerializeToString())
+		return Stat(pb.StatCnf.FromString(reply))
 
 	def setFlags(self, flags):
 		if not self.active:
@@ -1201,14 +1193,6 @@ class Handle(object):
 		req.flags = flags
 		self.connector._rpc(_Connector.SET_FLAGS_MSG, req.SerializeToString())
 
-	def getType(self):
-		if not self.active:
-			raise IOError('Handle expired')
-		req = pb.GetTypeReq()
-		req.handle = self.handle
-		reply = self.connector._rpc(_Connector.GET_TYPE_MSG, req.SerializeToString())
-		return pb.GetTypeCnf.FromString(reply).type_code
-
 	def setType(self, uti):
 		if not self.active:
 			raise IOError('Handle expired')
@@ -1217,13 +1201,14 @@ class Handle(object):
 		req.type_code = uti
 		self.connector._rpc(_Connector.SET_TYPE_MSG, req.SerializeToString())
 
-	def getParents(self):
+	def setMTime(self, attachment, mtime):
 		if not self.active:
 			raise IOError('Handle expired')
-		req = pb.GetParentsReq()
+		req = pb.SetMTimeReq()
 		req.handle = self.handle
-		reply = self.connector._rpc(_Connector.GET_PARENTS_MSG, req.SerializeToString())
-		return pb.GetParentsCnf.FromString(reply).parents
+		req.attachment = attachment
+		req.mtime = mtime
+		self.connector._rpc(_Connector.SET_MTIME_MSG, req.SerializeToString())
 
 	def merge(self, store, rev, depth=None, verbose=False):
 		if not self.active:

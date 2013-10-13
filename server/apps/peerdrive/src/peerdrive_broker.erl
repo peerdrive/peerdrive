@@ -17,12 +17,12 @@
 -module(peerdrive_broker).
 
 -export([
-	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, get_flags/1,
-	get_parents/1, get_type/1, lookup_doc/2, lookup_rev/2, read/4, peek/2,
-	replicate_rev/4, replicate_doc/4, resume/4, set_flags/2, set_type/2,
-	stat/2, suspend/1, suspend/2, forward_doc/6, update/4, close/1, commit/1,
-	commit/2, write/4, truncate/3, rebase/2, merge/4, get_data/2, set_data/3,
-	get_links/2]).
+	create/3, delete_rev/2, delete_doc/3, forget/3, fork/3, fstat/1,
+	lookup_doc/2, lookup_rev/2, read/4, peek/2, replicate_rev/4,
+	replicate_doc/4, resume/4, set_flags/2, set_type/2, stat/2, suspend/1,
+	suspend/2, forward_doc/6, update/4, close/1, commit/1, commit/2, write/4,
+	truncate/3, rebase/2, merge/4, get_data/2, set_data/3, get_links/2,
+	set_mtime/3]).
 
 -include("store.hrl").
 
@@ -262,20 +262,17 @@ truncate(Handle, Part, Offset) ->
 	peerdrive_broker_io:truncate(Handle, Part, Offset).
 
 
-get_flags(Handle) ->
-	peerdrive_broker_io:get_flags(Handle).
+fstat(Handle) ->
+	peerdrive_broker_io:fstat(Handle).
 
 set_flags(Handle, Flags) ->
 	peerdrive_broker_io:set_flags(Handle, Flags).
 
-get_type(Handle) ->
-	peerdrive_broker_io:get_type(Handle).
-
 set_type(Handle, Uti) ->
 	peerdrive_broker_io:set_type(Handle, Uti).
 
-get_parents(Handle) ->
-	peerdrive_broker_io:get_parents(Handle).
+set_mtime(Handle, Attachment, MTime) ->
+	peerdrive_broker_io:set_mtime(Handle, Attachment, MTime).
 
 
 %% @doc Merge document with another revision

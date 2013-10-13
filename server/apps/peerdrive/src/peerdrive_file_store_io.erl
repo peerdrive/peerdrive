@@ -86,14 +86,9 @@ handle_call({read, Part, Offset, Length}, _From, S) ->
 handle_call(close, _From, S) ->
 	{stop, normal, ok, S};
 
-handle_call(get_flags, _From, S) ->
-	{reply, {ok, (S#state.rev)#rev.flags}, S};
-
-handle_call(get_type, _From, S) ->
-	{reply, {ok, (S#state.rev)#rev.type}, S};
-
-handle_call(get_parents, _From, S) ->
-	{reply, {ok, (S#state.rev)#rev.parents}, S};
+handle_call(fstat, _From, S) ->
+	{Reply, S2} = do_fstat(S),
+	{reply, Reply, S2};
 
 % the following calls are only allowed when still writable
 handle_call(_Request, _From, S = #state{readonly=true}) ->
@@ -146,7 +141,11 @@ handle_call({set_type, Type}, _From, S) ->
 
 handle_call({set_parents, Parents}, _From, S) ->
 	S2 = do_set_parents(Parents, S),
-	{reply, ok, S2}.
+	{reply, ok, S2};
+
+handle_call({set_mtime, Attachment, MTime}, _From, S) ->
+	{Reply, S2} = do_set_mtime(Attachment, MTime, S),
+	{reply, Reply, S2}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store}=S) ->
@@ -349,6 +348,70 @@ do_set_parents(Parents, #state{rev=Rev, store=Store} = S) ->
 		Rev#rev.parents),
 	NewRev = Rev#rev{parents=Parents},
 	S#state{rev=NewRev}.
+
+
+do_fstat(#state{rev=Rev, parts=Parts} = S) ->
+	Now = peerdrive_util:get_time(),
+	try
+		% lazy update of mtime
+		UpdatedParts = [
+			Part#part{mtime=case MTime of undefined -> Now; _ -> MTime end}
+			|| #part{mtime=MTime} = Part <- Parts ],
+		All = [
+			case Data of
+				{_TmpName, IoDev} ->
+					case file:position(IoDev, eof) of
+						{ok, Size} ->
+							#rev_att{
+								name=Name, size=Size, hash= <<>>, crtime=CrTime,
+								mtime=MTime
+							};
+						{error, _} = UpdateErr ->
+							throw(UpdateErr)
+					end;
+				Bin when is_binary(Bin) ->
+					#rev_att{
+						name=Name, size=size(Bin), hash= <<>>, crtime=CrTime,
+						mtime=MTime
+					}
+			end
+			|| {Name, #part{data=Data, crtime=CrTime, mtime=MTime}}
+				<- UpdatedParts ],
+		NewAttachments = [ A || #rev_att{name=Name} = A <- All, Name =/= data ],
+		OldAttachments = [ A#rev_att{hash= <<>>} || A <- Rev#rev.attachments ],
+		Attachments = lists:keymerge(#rev_att.name,
+			lists:keysort(#rev_att.name, NewAttachments),
+			lists:keysort(#rev_att.name, OldAttachments)),
+		DataSize = case lists:keyfind(data, #rev_att.name, All) of
+			#rev_att{size=S} -> S;
+			false -> (Rev#rev.data)#rev_dat.size
+		end,
+		StatRev = Rev#rev{ data=#rev_dat{size=DataSize, hash= <<>>},
+			attachments=Attachments, mtime=Now},
+		S2 = S#state{parts=UpdatedParts},
+		{{ok, StatRev}, S2}
+	catch
+		throw:Error ->
+			{Error, S}
+	end.
+
+
+do_set_mtime(Attachment, MTime, #state{rev=Rev, parts=Parts} = S) ->
+	case orddict:find(Attachment, Parts) of
+		{ok, Part} ->
+			NewParts = orddict:store(Attachment, Part#part{mtime=MTime}, Parts),
+			{ok, S#state{parts=NewParts}};
+		error ->
+			Attachments = Rev#rev.attachments,
+			case lists:keyfind(Attachment, #rev_att.name, Attachments) of
+				#rev_att{} = A ->
+					NewAttachments = lists:keystore(Attachment, #rev_att.name,
+						Attachments, A#rev_att{mtime=MTime}),
+					{ok, S#state{rev=Rev#rev{attachments=NewAttachments}}};
+				false ->
+					{{error, enoent}, S}
+			end
+	end.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

@@ -215,19 +215,14 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 				peerdrive_netstore_pb:decode_setparentsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?GET_PARENTS_MSG ->
-			ReqData = #getparentsreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_getparentsreq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
 		?SET_FLAGS_MSG ->
 			ReqData = #setflagsreq{handle=Handle} =
 				peerdrive_netstore_pb:decode_setflagsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?GET_FLAGS_MSG ->
-			ReqData = #getflagsreq{handle=Handle} =
-				peerdrive_netstore_pb:decode_getflagsreq(Body),
+		?SET_MTIME_MSG ->
+			ReqData = #setmtimereq{handle=Handle} =
+				peerdrive_netstore_pb:decode_setmtimereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?SET_TYPE_MSG ->
@@ -235,9 +230,9 @@ handle_packet(Packet, #state{store_pid=Store} = S) when is_pid(Store) ->
 				peerdrive_netstore_pb:decode_settypereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?GET_TYPE_MSG ->
-			ReqData = #gettypereq{handle=Handle} =
-				peerdrive_netstore_pb:decode_gettypereq(Body),
+		?FSTAT_MSG ->
+			ReqData = #fstatreq{handle=Handle} =
+				peerdrive_netstore_pb:decode_fstatreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?PUT_REV_PART_MSG ->
@@ -359,31 +354,7 @@ do_contains(Body, Store) ->
 do_stat(Body, Store) ->
 	#statreq{rev=Rev} = peerdrive_netstore_pb:decode_statreq(Body),
 	{ok, Stat} = check(peerdrive_store:stat(Store, Rev)),
-	#rev{
-		flags       = Flags,
-		data        = #rev_dat{size=DataSize, hash=DataHash},
-		attachments = Attachments,
-		parents     = Parents,
-		crtime      = CrTime,
-		mtime       = Mtime,
-		type        = TypeCode,
-		creator     = CreatorCode,
-		comment     = Comment
-	} = Stat,
-	Reply = #statcnf{
-		flags        = Flags,
-		data         = #statcnf_data{size=DataSize, hash=DataHash},
-		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H, crtime=CrT,
-			mtime=MT} || #rev_att{name=N, size=S, hash=H, crtime=CrT, mtime=MT}
-			<- Attachments ],
-		parents      = Parents,
-		crtime       = CrTime,
-		mtime        = Mtime,
-		type_code    = TypeCode,
-		creator_code = CreatorCode,
-		comment      = Comment
-	},
-	peerdrive_netstore_pb:encode_statcnf(Reply).
+	peerdrive_netstore_pb:encode_statcnf(rev_to_statcnf(Stat)).
 
 
 do_get_links(Body, Store) ->
@@ -678,30 +649,24 @@ io_handler({Handle, WriteBuffer}, Request, ReqData) ->
 			ok = check(peerdrive_store:set_parents(Handle, Parents)),
 			<<>>;
 
-		?GET_PARENTS_MSG ->
-			{ok, Parents} = check(peerdrive_store:get_parents(Handle)),
-			Cnf = #getparentscnf{parents=Parents},
-			peerdrive_netstore_pb:encode_getparentscnf(Cnf);
-
 		?SET_FLAGS_MSG ->
 			#setflagsreq{flags=Flags} = ReqData,
 			ok = check(peerdrive_store:set_flags(Handle, Flags)),
 			<<>>;
 
-		?GET_FLAGS_MSG ->
-			{ok, Flags} = check(peerdrive_store:get_flags(Handle)),
-			Cnf = #getflagscnf{flags=Flags},
-			peerdrive_netstore_pb:encode_getflagscnf(Cnf);
+		?SET_MTIME_MSG ->
+			#setmtimereq{attachment=Attachment, mtime=MTime} = ReqData,
+			ok = check(peerdrive_store:set_mtime(Handle, Attachment, MTime)),
+			<<>>;
 
 		?SET_TYPE_MSG ->
 			#settypereq{type_code=Type} = ReqData,
 			ok = check(peerdrive_store:set_type(Handle, Type)),
 			<<>>;
 
-		?GET_TYPE_MSG ->
-			{ok, Type} = check(peerdrive_store:get_type(Handle)),
-			Cnf = #gettypecnf{type_code=Type},
-			peerdrive_netstore_pb:encode_gettypecnf(Cnf);
+		?FSTAT_MSG ->
+			{ok, Rev} = check(peerdrive_store:fstat(Handle)),
+			peerdrive_netstore_pb:encode_statcnf(rev_to_statcnf(Rev));
 
 		?PUT_REV_PART_MSG ->
 			#putrevpartreq{attachment=Attachment, data=Data} = ReqData,
@@ -770,3 +735,31 @@ get_store_by_id(Store) ->
 	catch
 		error:badarg -> throw({error, enoent})
 	end.
+
+
+rev_to_statcnf(Rev) ->
+	#rev{
+		flags       = Flags,
+		data        = #rev_dat{size=DataSize, hash=DataHash},
+		attachments = Attachments,
+		parents     = Parents,
+		crtime      = CrTime,
+		mtime       = Mtime,
+		type        = TypeCode,
+		creator     = CreatorCode,
+		comment     = Comment
+	} = Rev,
+	 #statcnf{
+		flags        = Flags,
+		data         = #statcnf_data{size=DataSize, hash=DataHash},
+		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H, crtime=CrT,
+			mtime=MT} || #rev_att{name=N, size=S, hash=H, crtime=CrT, mtime=MT}
+			<- Attachments ],
+		parents      = Parents,
+		crtime       = CrTime,
+		mtime        = Mtime,
+		type_code    = TypeCode,
+		creator_code = CreatorCode,
+		comment      = Comment
+	}.
+

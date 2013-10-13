@@ -766,7 +766,7 @@ class DocumentView(QtGui.QStackedWidget, Watch):
 			with Connector().peek(self.__store, self.__rev) as r:
 				try:
 					self.__metaData = r.getData("/org.peerdrive.annotation")
-					self.__flags = r.getFlags()
+					self.__flags = r.stat().flags()
 				except IOError:
 					self.__metaData = { }
 					self.__flags = set()

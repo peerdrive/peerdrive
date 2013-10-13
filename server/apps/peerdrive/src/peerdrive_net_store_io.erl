@@ -58,17 +58,11 @@ handle_call(close, _From, S) ->
 	do_close(S),
 	{stop, normal, ok, S};
 
-handle_call(get_type, _From, S) ->
-	{reply, do_get_type(S), S};
-
-handle_call(get_parents, _From, S) ->
-	{reply, do_get_parents(S), S};
+handle_call(fstat, _From, S) ->
+	{reply, do_fstat(S), S};
 
 handle_call({get_data, Selector}, _From, S) ->
 	{reply, do_get_data(S, Selector), S};
-
-handle_call(get_flags, _From, S) ->
-	{reply, do_get_flags(S), S};
 
 handle_call({truncate, Part, Offset}, _From, S) ->
 	{reply, do_truncate(Part, Offset, S), S};
@@ -92,7 +86,10 @@ handle_call({set_parents, Parents}, _From, S) ->
 	{reply, do_set_parents(Parents, S), S};
 
 handle_call({set_flags, Flags}, _From, S) ->
-	{reply, do_set_flags(Flags, S), S}.
+	{reply, do_set_flags(Flags, S), S};
+
+handle_call({set_mtime, Attachment, MTime}, _From, S) ->
+	{reply, do_set_mtime(Attachment, MTime, S), S}.
 
 
 handle_info({'EXIT', From, Reason}, #state{store=Store} = S) ->
@@ -299,36 +296,6 @@ do_close(#state{handle=Handle} = S) ->
 	simple_request(?CLOSE_MSG, Req, S).
 
 
-do_get_type(#state{handle=Handle, store=Store}) ->
-	Req = peerdrive_netstore_pb:encode_gettypereq(#gettypereq{handle=Handle}),
-	case peerdrive_net_store:io_request(Store, ?GET_TYPE_MSG, Req) of
-		{ok, Cnf} ->
-			#gettypecnf{type_code=Type} =
-				peerdrive_netstore_pb:decode_gettypecnf(Cnf),
-			{ok, Type};
-
-		Error ->
-			Error
-	end.
-
-
-do_get_parents(#state{handle=Handle, store=Store}) ->
-	Req = peerdrive_netstore_pb:encode_getparentsreq(#getparentsreq{handle=Handle}),
-	case peerdrive_net_store:io_request(Store, ?GET_PARENTS_MSG, Req) of
-		{ok, Cnf} ->
-			try
-				#getparentscnf{parents=Parents} =
-					peerdrive_netstore_pb:decode_getparentscnf(Cnf),
-				{ok, Parents}
-			catch
-				throw:Error -> Error
-			end;
-
-		Error ->
-			Error
-	end.
-
-
 do_get_data(#state{handle=Handle, store=Store}, Selector) ->
 	Req = peerdrive_netstore_pb:encode_getdatareq(#getdatareq{handle=Handle,
 		selector=Selector}),
@@ -343,13 +310,37 @@ do_get_data(#state{handle=Handle, store=Store}, Selector) ->
 	end.
 
 
-do_get_flags(#state{handle=Handle, store=Store}) ->
-	Req = peerdrive_netstore_pb:encode_getflagsreq(#getflagsreq{handle=Handle}),
-	case peerdrive_net_store:io_request(Store, ?GET_FLAGS_MSG, Req) of
+do_fstat(#state{handle=Handle, store=Store}) ->
+	Req = peerdrive_netstore_pb:encode_fstatreq(#fstatreq{handle=Handle}),
+	case peerdrive_net_store:io_request(Store, ?FSTAT_MSG, Req) of
 		{ok, Cnf} ->
-			#getflagscnf{flags=Flags} =
-				peerdrive_netstore_pb:decode_getflagscnf(Cnf),
-			{ok, Flags};
+			#statcnf{
+				flags = Flags,
+				data = #statcnf_data{size=DataSize, hash=DataHash},
+				attachments = Attachments,
+				parents = Parents,
+				crtime = CrTime,
+				mtime = Mtime,
+				type_code = TypeCode,
+				creator_code = CreatorCode,
+				comment = Comment
+			} = peerdrive_netstore_pb:decode_statcnf(Cnf),
+			Stat = #rev{
+				flags       = Flags,
+				data        = #rev_dat{size=DataSize, hash=DataHash},
+				attachments = [ #rev_att{name=Name, size=Size, hash=Hash, crtime=CrT,
+						mtime=MT}
+					|| #statcnf_attachment{name=Name, size=Size, hash=Hash, crtime=CrT,
+						mtime=MT}
+					<- Attachments ],
+				parents   = Parents,
+				crtime    = CrTime,
+				mtime     = Mtime,
+				type      = TypeCode,
+				creator   = CreatorCode,
+				comment   = Comment
+			},
+			{ok, Stat};
 
 		Error ->
 			Error
@@ -410,6 +401,12 @@ do_set_flags(Flags, #state{handle=Handle} = S) ->
 	Req = peerdrive_netstore_pb:encode_setflagsreq(#setflagsreq{handle=Handle,
 		flags=Flags}),
 	simple_request(?SET_FLAGS_MSG, Req, S).
+
+
+do_set_mtime(Attachment, MTime, #state{handle=Handle} = S) ->
+	Req = peerdrive_netstore_pb:encode_setmtimereq(#setmtimereq{handle=Handle,
+		attachment=Attachment, mtime=MTime}),
+	simple_request(?SET_MTIME_MSG, Req, S).
 
 
 simple_request(Request, Body, #state{store=Store}) ->

@@ -17,10 +17,11 @@
 -module(peerdrive_broker_io).
 
 -export([peek/2, create/3, fork/3, update/4, resume/4]).
--export([read/4, write/4, truncate/3, get_parents/1, merge/4, rebase/2,
-	get_type/1, set_type/2, commit/1, commit/2, suspend/1, suspend/2, close/1,
-	get_flags/1, set_flags/2, get_data/2, set_data/3]).
+-export([read/4, write/4, truncate/3, merge/4, rebase/2, set_type/2, commit/1,
+	commit/2, suspend/1, suspend/2, close/1, set_flags/2, get_data/2,
+	set_data/3, fstat/1, set_mtime/3]).
 
+-include("store.hrl").
 -include("utils.hrl").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -92,10 +93,9 @@ truncate({_, Handle}, Attachment, Offset) ->
 truncate(_, _, _) ->
 	{error, ebadf}.
 
-
-get_parents({_, Handle}) ->
-	peerdrive_store:get_parents(Handle);
-get_parents(_) ->
+fstat({_, Handle}) ->
+	peerdrive_store:fstat(Handle);
+fstat(_) ->
 	{error, ebadf}.
 
 merge({DstStore, Handle}, SrcStore, Rev, Options) ->
@@ -103,15 +103,9 @@ merge({DstStore, Handle}, SrcStore, Rev, Options) ->
 merge(_, _, _, _) ->
 	{error, ebadf}.
 
-
 rebase({_, Handle}, Rev) ->
 	do_rebase(Handle, Rev);
 rebase(_, _) ->
-	{error, ebadf}.
-
-get_flags({_, Handle}) ->
-	peerdrive_store:get_flags(Handle);
-get_flags(_) ->
 	{error, ebadf}.
 
 set_flags({_, Handle}, Flags) ->
@@ -119,14 +113,14 @@ set_flags({_, Handle}, Flags) ->
 set_flags(_, _) ->
 	{error, ebadf}.
 
-get_type({_, Handle}) ->
-	peerdrive_store:get_type(Handle);
-get_type(_) ->
-	{error, ebadf}.
-
 set_type({_, Handle}, Type) ->
 	peerdrive_store:set_type(Handle, Type);
 set_type(_, _) ->
+	{error, ebadf}.
+
+set_mtime({_, Handle}, Attachment, MTime) ->
+	peerdrive_store:set_mtime(Handle, Attachment, MTime);
+set_mtime(_, _, _) ->
 	{error, ebadf}.
 
 commit({_, Handle}) ->
@@ -162,8 +156,8 @@ close(Handle) ->
 do_merge(Handle, DstStore, SrcStore, Rev, Options) ->
 	case peerdrive_store:contains(SrcStore, Rev) of
 		true ->
-			case peerdrive_store:get_parents(Handle) of
-				{ok, Parents} ->
+			case peerdrive_store:fstat(Handle) of
+				{ok, #rev{parents=Parents}} ->
 					% TODO: check if the new Rev supersedes any present parent
 					NewParents = lists:usort([Rev | Parents]),
 					case peerdrive_replicator:replicate_rev_sync(SrcStore, Rev, DstStore, Options) of

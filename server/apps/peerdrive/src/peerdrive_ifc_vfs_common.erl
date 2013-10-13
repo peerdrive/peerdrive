@@ -51,6 +51,7 @@
 -record(ifc, {
 	getattr,
 	truncate = fun(_, _) -> {error, enosys} end,
+	setmtime = fun(_, _) -> ok end,
 	lookup   = fun(_, _, _) -> {error, enoent} end,
 	getnode  = fun(_, _) -> error end,
 	readdir  = fun(_, _) -> {errror, eio} end,
@@ -262,7 +263,7 @@ setattr(Ino, Changes, #state{inodes=Inodes} = S) ->
 	#vnode{
 		oid     = Oid,
 		timeout = Timeout,
-		ifc     = #ifc{getattr=GetAttr, truncate=Truncate}
+		ifc     = #ifc{getattr=GetAttr, truncate=Truncate, setmtime=SetMTime}
 	} = gb_trees:get(Ino, Inodes),
 	try
 		Attr1 = case proplists:get_value(size, Changes) of
@@ -287,13 +288,16 @@ setattr(Ino, Changes, #state{inodes=Inodes} = S) ->
 			undefined ->
 				Attr2;
 			NewMTime when is_integer(NewMTime) ->
-				Attr2#vfs_attr{mtime=NewMTime}
+				case SetMTime(Oid, NewMTime) of
+					ok -> Attr2#vfs_attr{mtime=NewMTime};
+					Error2 -> throw(Error2)
+				end
 		end,
-		Attr4 = case proplists:get_value(ctime, Changes) of
+		Attr4 = case proplists:get_value(crtime, Changes) of
 			undefined ->
 				Attr3;
 			NewCTime when is_integer(NewCTime) ->
-				Attr3#vfs_attr{ctime=NewCTime}
+				Attr3#vfs_attr{crtime=NewCTime}
 		end,
 		{ok, {Attr4, Timeout}, S}
 
@@ -871,12 +875,13 @@ folder_getattr({doc, Store, Doc}) ->
 	case peerdrive_ifc_vfs_broker:lookup(Store, Doc) of
 		{ok, Rev} ->
 			case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
-				{ok, #rev{mtime=Mtime}} ->
+				{ok, #rev{mtime=Mtime, crtime=CrTime}} ->
 					{ok, #vfs_attr{
-						dir   = true,
-						atime = Mtime,
-						mtime = Mtime,
-						ctime = Mtime
+						dir    = true,
+						atime  = Mtime,
+						mtime  = Mtime,
+						ctime  = Mtime,
+						crtime = CrTime
 					}};
 				Error ->
 					Error
@@ -1374,8 +1379,8 @@ folder_set_title(Store, Doc, NewTitle, S) ->
 					ok    -> ok;
 					WrErr -> throw(WrErr)
 				end,
-				case peerdrive_ifc_vfs_broker:get_type(Handle) of
-					{ok, OrigUti} ->
+				case peerdrive_ifc_vfs_broker:fstat(Handle) of
+					{ok, #rev{flags=OldFlags, type=OrigUti}} ->
 						case peerdrive_registry:conformes(OrigUti, <<"org.peerdrive.folder">>) of
 							false ->
 								NewUti = peerdrive_registry:get_uti_from_extension(
@@ -1383,12 +1388,7 @@ folder_set_title(Store, Doc, NewTitle, S) ->
 								peerdrive_ifc_vfs_broker:set_type(Handle, NewUti);
 							true ->
 								ok
-						end;
-					_ ->
-						ok % ignore this error
-				end,
-				case peerdrive_ifc_vfs_broker:get_flags(Handle) of
-					{ok, OldFlags} ->
+						end,
 						NewFlags = case re:run(NewTitle, S#state.ephemeral) of
 							{match, _Captured} -> OldFlags bor ?REV_FLAG_EPHEMERAL;
 							nomatch -> OldFlags band (bnot ?REV_FLAG_EPHEMERAL)
@@ -1427,6 +1427,7 @@ doc_make_node_file(Oid) ->
 		ifc     = #ifc{
 			getattr  = fun file_getattr/1,
 			truncate = fun file_truncate/2,
+			setmtime = fun file_setmtime/2,
 			open     = fun file_open/3
 		}
 	}}.
@@ -1443,23 +1444,25 @@ file_getattr({doc, Store, Doc}) ->
 
 file_getattr_rev(Store, Rev) ->
 	case peerdrive_ifc_vfs_broker:stat(Store, Rev) of
-		{ok, #rev{attachments=Attachments, mtime=Mtime}} ->
-			Size = case find_entry(
+		{ok, #rev{attachments=Attachments, mtime=Mtime, crtime=CrTime}} ->
+			{Size, FileMTime} = case find_entry(
 				fun
-					(#rev_att{name = <<"_">>, size=Size}) -> {ok, Size};
+					(#rev_att{name = <<"_">>, size=Size, mtime=MT}) ->
+						{ok, {Size, MT}};
 					(_) -> error
 				end,
 				Attachments)
 			of
-				{value, FileSize} -> FileSize;
-				none              -> 0
+				{value, Ok} -> Ok;
+				none        -> {0, Mtime}
 			end,
 			{ok, #vfs_attr{
-				dir   = false,
-				atime = Mtime,
-				mtime = Mtime,
-				ctime = Mtime,
-				size  = Size
+				dir    = false,
+				atime  = Mtime,
+				mtime  = FileMTime,
+				ctime  = Mtime,
+				crtime = CrTime,
+				size   = Size
 			}};
 
 		Error ->
@@ -1477,6 +1480,26 @@ file_truncate({doc, Store, Doc}, Size) ->
 							file_getattr_rev(Store, CurRev);
 						Error ->
 							Error
+					end;
+
+				{error, _} = Error ->
+					peerdrive_ifc_vfs_broker:close(Handle),
+					Error
+			end;
+
+		{error, _} = Error ->
+			Error
+	end.
+
+
+file_setmtime({doc, Store, Doc}, MTime) ->
+	case peerdrive_ifc_vfs_broker:open_doc(Store, Doc, true) of
+		{ok, _Rev, Handle} ->
+			case peerdrive_ifc_vfs_broker:set_mtime(Handle, <<"_">>, MTime) of
+				Ok when Ok == ok; Ok == {error, enoent} ->
+					case peerdrive_ifc_vfs_broker:close(Handle) of
+						{ok, _CurRev} -> ok;
+						Error -> Error
 					end;
 
 				{error, _} = Error ->

@@ -21,8 +21,8 @@
 
 -export([start_link/0]).
 -export([lookup/2, stat/2, open_rev/2, open_doc/3, truncate/3, read/4, write/4,
-	abort/1, close/1, close/2, get_type/1, set_type/2, get_data/2, set_data/3,
-	get_flags/1, set_flags/2]).
+	abort/1, close/1, close/2, fstat/1, set_type/2, get_data/2, set_data/3,
+	set_flags/2, set_mtime/3]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2,
 	terminate/2]).
 
@@ -76,17 +76,17 @@ read(Handle, Part, Offset, Length) ->
 write(Handle, Part, Offset, Data) ->
 	gen_server:call(?MODULE, {write, Handle, Part, Offset, Data}, infinity).
 
-get_type(Handle) ->
-	gen_server:call(?MODULE, {get_type, Handle}, infinity).
+fstat(Handle) ->
+	gen_server:call(?MODULE, {fstat, Handle}, infinity).
 
 set_type(Handle, Uti) ->
 	gen_server:call(?MODULE, {set_type, Handle, Uti}, infinity).
 
-get_flags(Handle) ->
-	gen_server:call(?MODULE, {get_flags, Handle}, infinity).
-
 set_flags(Handle, Flags) ->
 	gen_server:call(?MODULE, {set_flags, Handle, Flags}, infinity).
+
+set_mtime(Handle, Attachment, MTime) ->
+	gen_server:call(?MODULE, {set_mtime, Handle, Attachment, MTime}, infinity).
 
 close(Handle) ->
 	gen_server:call(?MODULE, {close, Handle, undefined}, infinity).
@@ -126,20 +126,20 @@ handle_call({write, Handle, Part, Offset, Data}, _From, S) ->
 	Reply = do_write(Handle, Part, Offset, Data, S),
 	{reply, Reply, S};
 
-handle_call({get_type, Handle}, _From, S) ->
-	Reply = do_get_type(Handle, S),
+handle_call({fstat, Handle}, _From, S) ->
+	Reply = do_fstat(Handle, S),
 	{reply, Reply, S};
 
 handle_call({set_type, Handle, Uti}, _From, S) ->
 	Reply = do_set_type(Handle, Uti, S),
 	{reply, Reply, S};
 
-handle_call({get_flags, Handle}, _From, S) ->
-	Reply = do_get_flags(Handle, S),
-	{reply, Reply, S};
-
 handle_call({set_flags, Handle, Flags}, _From, S) ->
 	Reply = do_set_flags(Handle, Flags, S),
+	{reply, Reply, S};
+
+handle_call({set_mtime, Handle, Attachment, MTime}, _From, S) ->
+	Reply = do_set_mtime(Handle, Attachment, MTime, S),
 	{reply, Reply, S};
 
 handle_call(Request, _From, S) ->
@@ -277,10 +277,10 @@ do_truncate(FuseHandle, Part, Offset, S) ->
 	end.
 
 
-do_get_type(FuseHandle, S) ->
+do_fstat(FuseHandle, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			peerdrive_broker:get_type(Handle);
+			peerdrive_broker:fstat(Handle);
 		error ->
 			{error, ebadf}
 	end.
@@ -295,19 +295,19 @@ do_set_type(FuseHandle, Uti, S) ->
 	end.
 
 
-do_get_flags(FuseHandle, S) ->
+do_set_flags(FuseHandle, Flags, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			peerdrive_broker:get_flags(Handle);
+			peerdrive_broker:set_flags(Handle, Flags);
 		error ->
 			{error, ebadf}
 	end.
 
 
-do_set_flags(FuseHandle, Flags, S) ->
+do_set_mtime(FuseHandle, Attachment, MTime, S) ->
 	case lookup_handle(FuseHandle, S) of
 		{ok, Handle} ->
-			peerdrive_broker:set_flags(Handle, Flags);
+			peerdrive_broker:set_mtime(Handle, Attachment, MTime);
 		error ->
 			{error, ebadf}
 	end.

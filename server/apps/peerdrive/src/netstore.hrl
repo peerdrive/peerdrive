@@ -26,23 +26,23 @@
 -define(LOOKUP_MSG,           16#004).
 -define(CONTAINS_MSG,         16#005).
 -define(STAT_MSG,             16#006).
--define(PEEK_MSG,             16#007).
--define(CREATE_MSG,           16#008).
--define(FORK_MSG,             16#009).
--define(UPDATE_MSG,           16#00a).
--define(RESUME_MSG,           16#00b).
--define(READ_MSG,             16#00c).
--define(TRUNC_MSG,            16#00d).
--define(WRITE_BUFFER_MSG,     16#00e).
--define(WRITE_COMMIT_MSG,     16#00f).
--define(GET_FLAGS_MSG,        16#010).
--define(SET_FLAGS_MSG,        16#011).
--define(GET_TYPE_MSG,         16#012).
--define(SET_TYPE_MSG,         16#013).
--define(GET_PARENTS_MSG,      16#014).
--define(SET_PARENTS_MSG,      16#015).
--define(GET_LINKS_MSG,        16#016).
-
+-define(GET_LINKS_MSG,        16#007).
+-define(PEEK_MSG,             16#008).
+-define(CREATE_MSG,           16#009).
+-define(FORK_MSG,             16#00a).
+-define(UPDATE_MSG,           16#00b).
+-define(RESUME_MSG,           16#00c).
+-define(GET_DATA_MSG,         16#00d).
+-define(SET_DATA_MSG,         16#00e).
+-define(READ_MSG,             16#00f).
+-define(TRUNC_MSG,            16#010).
+-define(WRITE_BUFFER_MSG,     16#011).
+-define(WRITE_COMMIT_MSG,     16#012).
+-define(FSTAT_MSG,            16#013).
+-define(SET_FLAGS_MSG,        16#014).
+-define(SET_TYPE_MSG,         16#015).
+-define(SET_MTIME_MSG,        16#016).
+-define(SET_PARENTS_MSG,      16#017).
 -define(COMMIT_MSG,           16#018).
 -define(SUSPEND_MSG,          16#019).
 -define(CLOSE_MSG,            16#01a).
@@ -60,6 +60,4 @@
 -define(SYNC_FINISH_MSG,      16#026).
 -define(TRIGGER_MSG,          16#027).
 -define(SYNC_MSG,             16#028).
--define(GET_DATA_MSG,         16#029).
--define(SET_DATA_MSG,         16#02a).
 

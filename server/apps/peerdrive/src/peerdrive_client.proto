@@ -332,26 +332,13 @@ message WriteCommitReq {
 	required bytes data = 4;
 }
 
-message GetFlagsReq {
+message FStatReq {
 	required uint32 handle = 1;
-}
-
-message GetFlagsCnf {
-	required uint32 flags = 1;
 }
 
 message SetFlagsReq {
 	required uint32 handle = 1;
 	required uint32 flags = 2;
-
-}
-
-message GetTypeReq {
-	required uint32 handle = 1;
-}
-
-message GetTypeCnf {
-	required string type_code = 1;
 }
 
 message SetTypeReq {
@@ -359,12 +346,10 @@ message SetTypeReq {
 	required string type_code = 2;
 }
 
-message GetParentsReq {
+message SetMTimeReq {
 	required uint32 handle = 1;
-}
-
-message GetParentsCnf {
-	repeated bytes parents = 1;
+	required bytes attachment = 2;
+	required uint64 mtime = 3;
 }
 
 message MergeReq {

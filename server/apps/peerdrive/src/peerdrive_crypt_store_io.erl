@@ -81,14 +81,9 @@ handle_call({read, Part, Offset, Length}, _From, S) ->
 handle_call(close, _From, S) ->
 	{stop, normal, ok, S};
 
-handle_call(get_flags, _From, S) ->
-	{reply, {ok, (S#state.rev)#rev.flags}, S};
-
-handle_call(get_type, _From, S) ->
-	{reply, {ok, (S#state.rev)#rev.type}, S};
-
-handle_call(get_parents, _From, S) ->
-	{reply, {ok, (S#state.rev)#rev.parents}, S};
+handle_call(fstat, _From, S) ->
+	{Reply, S2} = do_fstat(S),
+	{reply, Reply, S2};
 
 % all following calls are only allowed when still writable...
 handle_call(_Request, _From, S = #state{readonly=true}) ->
@@ -131,7 +126,11 @@ handle_call({set_type, Type}, _From, S) ->
 handle_call({set_parents, Parents}, _From, S) ->
 	Rev = S#state.rev,
 	NewRev = Rev#rev{parents=Parents},
-	{reply, ok, S#state{rev=NewRev}}.
+	{reply, ok, S#state{rev=NewRev}};
+
+handle_call({set_mtime, Attachment, MTime}, _From, S) ->
+	{Reply, S2} = do_set_mtime(Attachment, MTime, S),
+	{reply, Reply, S2}.
 
 
 handle_info({'EXIT', From, Reason}, #state{parent=Parent, user=User} = S) ->
@@ -162,6 +161,39 @@ code_change(_, State, _) -> {ok, State}.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Local functions...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+do_fstat(#state{data=Data, rev=Rev, parts=Parts} = S) ->
+	Now = peerdrive_util:get_time(),
+	try
+		% lazy update of mtime
+		UpdatedParts = [
+			Part#part{mtime=case MTime of undefined -> Now; _ -> MTime end}
+			|| #part{mtime=MTime} = Part <- Parts ],
+		NewAttachments = [
+			case file:position(IoDev, eof) of
+				{ok, Size} ->
+					#rev_att{
+						name=Name, size=Size, hash= <<>>, crtime=CrTime,
+						mtime=MTime
+					};
+				{error, _} = UpdateErr ->
+					throw(UpdateErr)
+			end
+			|| {Name, #part{iodev=IoDev, crtime=CrTime, mtime=MTime}}
+				<- UpdatedParts ],
+		OldAttachments = [ A#rev_att{hash= <<>>} || A <- Rev#rev.attachments ],
+		Attachments = lists:keymerge(#rev_att.name,
+			lists:keysort(#rev_att.name, NewAttachments),
+			lists:keysort(#rev_att.name, OldAttachments)),
+		StatRev = Rev#rev{data=#rev_dat{size=size(Data), hash= <<>>},
+			attachments=Attachments, mtime=Now},
+		S2 = S#state{parts=UpdatedParts},
+		{{ok, StatRev}, S2}
+	catch
+		throw:Error ->
+			{Error, S}
+	end.
+
 
 do_get_data(Selector, S) ->
 	case fetch_data(S) of
@@ -266,6 +298,17 @@ do_truncate(Part, Offset, S) ->
 		{ok, IoDev, S2} ->
 			{ok, _} = file:position(IoDev, Offset),
 			{peerdrive_util:fixup_file(file:truncate(IoDev)), S2};
+		{error, _} = Error ->
+			{Error, S}
+	end.
+
+
+do_set_mtime(Attachment, MTime, S) ->
+	case get_part_writable(Attachment, S) of
+		{ok, _IoDev, #state{parts=Parts} = S2} ->
+			Part = orddict:fetch(Attachment, Parts),
+			S3 = S2#state{parts=orddict:store(Attachment, Part#part{mtime=MTime}, Parts)},
+			{ok, S3};
 		{error, _} = Error ->
 			{Error, S}
 	end.

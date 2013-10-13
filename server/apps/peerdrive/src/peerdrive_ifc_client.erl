@@ -47,11 +47,11 @@
 -define(TRUNC_MSG,           16#00c).
 -define(WRITE_BUFFER_MSG,    16#00d).
 -define(WRITE_COMMIT_MSG,    16#00e).
--define(GET_FLAGS_MSG,       16#00f).
+-define(FSTAT,               16#00f).
 -define(SET_FLAGS_MSG,       16#010).
--define(GET_TYPE_MSG,        16#011).
--define(SET_TYPE_MSG,        16#012).
--define(GET_PARENTS_MSG,     16#013).
+-define(SET_TYPE_MSG,        16#011).
+-define(SET_MTIME_MSG,       16#012).
+% unused 16#013
 -define(MERGE_MSG,           16#014).
 -define(REBASE_MSG,          16#015).
 -define(COMMIT_MSG,          16#016).
@@ -323,9 +323,9 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, #state{auth=true
 				peerdrive_client_pb:decode_rebasereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?GET_PARENTS_MSG ->
-			ReqData = #getparentsreq{handle=Handle} =
-				peerdrive_client_pb:decode_getparentsreq(Body),
+		?FSTAT ->
+			ReqData = #fstatreq{handle=Handle} =
+				peerdrive_client_pb:decode_fstatreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
 		?SET_TYPE_MSG ->
@@ -333,18 +333,13 @@ handle_packet(<<Ref:32, Request:12, ?FLAG_REQ:4, Body/binary>>, #state{auth=true
 				peerdrive_client_pb:decode_settypereq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?GET_TYPE_MSG ->
-			ReqData = #gettypereq{handle=Handle} =
-				peerdrive_client_pb:decode_gettypereq(Body),
-			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
-
 		?SET_FLAGS_MSG ->
 			ReqData = #setflagsreq{handle=Handle} =
 				peerdrive_client_pb:decode_setflagsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S);
 
-		?GET_FLAGS_MSG ->
-			ReqData = #getflagsreq{handle=Handle} =
+		?SET_MTIME_MSG ->
+			ReqData = #setmtimereq{handle=Handle} =
 				peerdrive_client_pb:decode_getflagsreq(Body),
 			handle_packet_forward(Request, Handle, ReqData, RetPath, S)
 	end;
@@ -433,31 +428,7 @@ do_stat(Body) ->
 	#statreq{rev=Rev, stores=Stores} =
 		peerdrive_client_pb:decode_statreq(Body),
 	{ok, Stat} = check(peerdrive_broker:stat(Rev, get_stores(Stores))),
-	#rev{
-		flags       = Flags,
-		data        = #rev_dat{size=DataSize, hash=DataHash},
-		attachments = Attachments,
-		parents     = Parents,
-		crtime      = CrTime,
-		mtime       = Mtime,
-		type        = TypeCode,
-		creator     = CreatorCode,
-		comment     = Comment
-	} = Stat,
-	Reply = #statcnf{
-		flags        = Flags,
-		data        = #statcnf_data{size=DataSize, hash=DataHash},
-		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H, crtime=CrT,
-			mtime=MT} || #rev_att{name=N, size=S, hash=H, crtime=CrT, mtime=MT}
-			<- Attachments ],
-		parents      = Parents,
-		crtime       = CrTime,
-		mtime        = Mtime,
-		type_code    = TypeCode,
-		creator_code = CreatorCode,
-		comment      = Comment
-	},
-	peerdrive_client_pb:encode_statcnf(Reply).
+	peerdrive_client_pb:encode_statcnf(rev_to_statcnf(Stat)).
 
 
 do_get_links(Body) ->
@@ -868,10 +839,9 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 			ok = check(peerdrive_broker:rebase(Handle, Rev)),
 			<<>>;
 
-		?GET_PARENTS_MSG ->
-			{ok, Parents} = check(peerdrive_broker:get_parents(Handle)),
-			peerdrive_client_pb:encode_getparentscnf(
-				#getparentscnf{parents=Parents});
+		?FSTAT ->
+			{ok, Rev} = check(peerdrive_broker:fstat(Handle)),
+			peerdrive_client_pb:encode_statcnf(rev_to_statcnf(Rev));
 
 		?SET_TYPE_MSG ->
 			#settypereq{type_code=Type} = ReqData,
@@ -879,18 +849,15 @@ io_loop_process(Handle, WriteBuffer, Request, ReqData) ->
 				unicode:characters_to_binary(Type))),
 			<<>>;
 
-		?GET_TYPE_MSG ->
-			{ok, Type} = check(peerdrive_broker:get_type(Handle)),
-			peerdrive_client_pb:encode_gettypecnf(#gettypecnf{type_code=Type});
-
 		?SET_FLAGS_MSG ->
 			#setflagsreq{flags=Flags} = ReqData,
 			ok = check(peerdrive_broker:set_flags(Handle, Flags)),
 			<<>>;
 
-		?GET_FLAGS_MSG ->
-			{ok, Flags} = check(peerdrive_broker:get_flags(Handle)),
-			peerdrive_client_pb:encode_getflagscnf(#getflagscnf{flags=Flags})
+		?SET_MTIME_MSG ->
+			#setmtimereq{attachment=Attachment, mtime=MTime} = ReqData,
+			ok = check(peerdrive_broker:set_mtime(Handle, Attachment, MTime)),
+			<<>>
 	end.
 
 
@@ -1005,3 +972,31 @@ do_publish(Socket, Cookie, Path) ->
 		{error, _Reason} = Error ->
 			Error
 	end.
+
+
+rev_to_statcnf(Rev) ->
+	#rev{
+		flags       = Flags,
+		data        = #rev_dat{size=DataSize, hash=DataHash},
+		attachments = Attachments,
+		parents     = Parents,
+		crtime      = CrTime,
+		mtime       = Mtime,
+		type        = TypeCode,
+		creator     = CreatorCode,
+		comment     = Comment
+	} = Rev,
+	#statcnf{
+		flags        = Flags,
+		data        = #statcnf_data{size=DataSize, hash=DataHash},
+		attachments  = [ #statcnf_attachment{name=N, size=S, hash=H, crtime=CrT,
+			mtime=MT} || #rev_att{name=N, size=S, hash=H, crtime=CrT, mtime=MT}
+			<- Attachments ],
+		parents      = Parents,
+		crtime       = CrTime,
+		mtime        = Mtime,
+		type_code    = TypeCode,
+		creator_code = CreatorCode,
+		comment      = Comment
+	}.
+

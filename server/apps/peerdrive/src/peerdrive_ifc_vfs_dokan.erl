@@ -245,7 +245,7 @@ get_file_information(S, _From, _FileName, DFI) ->
 					Attr#vfs_attr.dir -> ?FILE_ATTRIBUTE_DIRECTORY;
 					true  -> ?FILE_ATTRIBUTE_NORMAL
 				end,
-				creation_time    = epoch2win(Attr#vfs_attr.ctime),
+				creation_time    = epoch2win(Attr#vfs_attr.crtime),
 				last_access_time = epoch2win(Attr#vfs_attr.atime),
 				last_write_time  = epoch2win(Attr#vfs_attr.mtime),
 				file_size        = Attr#vfs_attr.size
@@ -299,7 +299,7 @@ set_end_of_file(S, _From, _FileName, Offset, DFI) ->
 set_file_time(S, _From, _FileName, CTime, ATime, MTime, DFI) ->
 	Ino = (gb_trees:get(DFI#dokan_file_info.context, S#state.handles))#handle.ino,
 	Changes1 = if
-		CTime > 0 -> [{ctime, win2epoch(CTime)}];
+		CTime > 0 -> [{crtime, win2epoch(CTime)}];
 		true -> []
 	end,
 	Changes2 = if
