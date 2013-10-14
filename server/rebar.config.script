@@ -43,7 +43,7 @@ case os:type() of
 			{
 				erldaemon,
 				".*",
-				{git, "https://github.com/peerdrive/erldaemon.git", {branch, "master"}}
+				{git, "https://github.com/peerdrive/erldaemon.git", {tag, "1.0.0"}}
 			} | ErlDDeps1 ],
 		lists:keystore(deps, 1, Config1, {deps, ErlDDeps2});
 
