@@ -13,7 +13,7 @@ Config1 = case os:getenv("DISABLE_VFS") of
 					{
 						fuserl,
 						".*",
-						{git, "https://github.com/peerdrive/fuserl.git", {branch, "master"}}
+						{git, "https://github.com/peerdrive/fuserl.git", {tag, "3.0.0"}}
 					} | Deps ];
 
 			{win32, _} ->
