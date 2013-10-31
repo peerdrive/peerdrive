@@ -444,7 +444,7 @@ close_and_writeback(#state{parts=[{Part, Content} | RemParts]} = S) ->
 
 						{error, _Reason} = Error ->
 							% pray that we can re-open the file
-							{ok, NewIoDev} = file:open(FileName, [write, read, binary]),
+							{ok, NewIoDev} = file:open(FileName, [write, read, binary, raw]),
 							S3 = S2#state{
 								parts=[{Part, {rw, {FileName, NewIoDev}}} | RemParts]
 							},
@@ -528,7 +528,7 @@ part_open_read(Name, #state{rev=Rev} = S) ->
 					{ok, Data, S2};
 
 				{ok, FileName} when is_list(FileName) ->
-					case file:open(FileName, [read, binary]) of
+					case file:open(FileName, [read, binary, raw]) of
 						{ok, IoDev} ->
 							Content = {FileName, IoDev},
 							Part = #part{mode=ro, data=Content, crtime=CrTime, mtime=MTime},
@@ -659,7 +659,7 @@ part_open_write(Name, Conv, #state{rev=Rev, parts=Parts} = S) ->
 
 
 part_read_bin(Name, FileName, Part0, S) ->
-	case file:open(FileName, [read, binary]) of
+	case file:open(FileName, [read, binary, raw]) of
 		{ok, IoDev} ->
 			case file:pread(IoDev, 0, ?THRESHOLD) of
 				{ok, Data} ->
@@ -688,7 +688,7 @@ part_copy_and_open(Name, OrigName, Part0, S) ->
 	TmpName = tmp_name(S),
 	case file:copy(OrigName, TmpName) of
 		{ok, _} ->
-			case file:open(TmpName, [write, read, binary]) of
+			case file:open(TmpName, [write, read, binary, raw]) of
 				{ok, IoDev} ->
 					Content = {TmpName, IoDev},
 					Part = Part0#part{data=Content},
@@ -775,7 +775,7 @@ tmp_name(#state{store=Store}) ->
 
 create_tmp_file(S) ->
 	TmpName = tmp_name(S),
-	case file:open(TmpName, [read, write, binary, exclusive]) of
+	case file:open(TmpName, [read, write, binary, exclusive, raw]) of
 		{ok, IoDev} ->
 			{ok, TmpName, IoDev};
 		Error ->

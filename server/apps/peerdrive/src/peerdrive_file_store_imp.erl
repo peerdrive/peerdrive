@@ -200,7 +200,7 @@ commit_parts(Store, [{_FCC, {PId, {FileName, IoDev}, _}} | Rest]) ->
 
 create_tmp_file(Data, #state{store=Store}) ->
 	TmpName = peerdrive_file_store:tmp_name(Store),
-	case file:open(TmpName, [write, binary, exclusive]) of
+	case file:open(TmpName, [write, binary, exclusive, raw]) of
 		{ok, IoDev} ->
 			case file:write(IoDev, Data) of
 				ok ->

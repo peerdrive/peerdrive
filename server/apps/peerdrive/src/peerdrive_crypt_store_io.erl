@@ -576,7 +576,7 @@ upload_rev_part_loop(Handle, FCC, IoDev, EncState) ->
 tmp_file() ->
 	{A, B, C} = now(),
 	Name = lists:flatten(io_lib:format("~p.~p.~p", [A,B,C])),
-	{ok, IoDev} = file:open(Name, [read, write, binary, exclusive]),
+	{ok, IoDev} = file:open(Name, [read, write, binary, exclusive, raw]),
 	{Name, IoDev}.
 
 
