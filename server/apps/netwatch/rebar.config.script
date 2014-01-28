@@ -3,7 +3,7 @@ NoCfg = [ {port_specs, [{"disabled", "", []}]} ],
 {Enable, Config} = case os:type() of
 	{unix, linux} ->
 		LnxCfg = [
-			{erl_opts, [ {define, 'HAVE_NETWATCH_DRV'} ]},
+			{erl_opts, [ {d, 'HAVE_NETWATCH_DRV'} ]},
 			{port_specs, [ {"priv/netwatch_drv.so", ["c_src/netwatch_linux.c"]} ]},
 			{port_env, [ {"DRV_LDFLAGS", "$DRV_LDFLAGS -lnl"} ]}
 		],
@@ -25,7 +25,7 @@ NoCfg = [ {port_specs, [{"disabled", "", []}]} ],
 		{
 			true,
 			[
-				{erl_opts, [ {define, 'HAVE_NETWATCH_DRV'} ]},
+				{erl_opts, [ {d, 'HAVE_NETWATCH_DRV'} ]},
 				{port_specs, [ {"priv/netwatch_drv.dll", ["c_src/netwatch_win32.c"]} ]},
 				{port_env, [
 					{"DRV_CFLAGS", "/TC /Zi /W3 /O2 /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _WINDOWS /D _USRDLL /D _WINDLL /D UNICODE /D _UNICODE /EHsc /MD /GS /Gy /Fdc_src\\ $ERL_CFLAGS "},
