@@ -26,16 +26,10 @@
 #include <stdio.h>
 #include <windows.h>
 
+#include "netwatch_common.h"
+
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
-
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-
-#if 0
-#define DBG(s, ...) printf(s, __VA_ARGS__)
-#else
-#define DBG(s, ...) do { if (0) printf(s, __VA_ARGS__); } while (0)
-#endif
 
 struct self {
 	ErlDrvPort port;
@@ -141,13 +135,11 @@ static DWORD ScanAddrTable(struct self *self, int notify)
 
 	/* send event if some new interface went down */
 	if (isDown && notify)
-		driver_output_term(self->port, self->ifdnIndTems,
-			ARRAY_SIZE(self->ifdnIndTems));
+		output_term(self->port, self->ifdnIndTems);
 
 	/* send event if some new interface got up */
 	if (isNew && notify)
-		driver_output_term(self->port, self->ifupIndTems,
-			ARRAY_SIZE(self->ifupIndTems));
+		output_term(self->port, self->ifupIndTems);
 
 done:
 	driver_free(pIPAddrTable);

@@ -34,7 +34,7 @@
 
 #include <erl_driver.h>
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#include "netwatch_common.h"
 
 struct ifc {
 	unsigned int idx;
@@ -110,13 +110,11 @@ static void netlink_msg_handler(struct nl_object *obj, void *arg)
 	if (rtnl_link_get_flags(link_obj) & IFF_LOWER_UP) {
 		self->alive_ifcs = check_ifc_alive(self->alive_ifcs, ifidx, &is_new);
 		if (is_new)
-			driver_output_term(self->port, self->ifup_ind_terms,
-				ARRAY_SIZE(self->ifup_ind_terms));
+			output_term(self->port, self->ifup_ind_terms);
 	} else {
 		self->alive_ifcs = check_ifc_dead(self->alive_ifcs, ifidx, &is_new);
 		if (is_new)
-			driver_output_term(self->port, self->ifdn_ind_terms,
-				ARRAY_SIZE(self->ifdn_ind_terms));
+			output_term(self->port, self->ifdn_ind_terms);
 	}
 
 done:
