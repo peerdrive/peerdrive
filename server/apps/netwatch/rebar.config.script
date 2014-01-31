@@ -21,6 +21,16 @@ NoCfg = [ {port_specs, [{"disabled", "", []}]} ],
 			Missing -> {Missing, NoCfg}
 		end;
 
+	{unix, darwin} ->
+		{
+			true,
+			[
+				{erl_opts, [ {d, 'HAVE_NETWATCH_DRV'} ]},
+				{port_specs, [ {"priv/netwatch_drv.so", ["c_src/netwatch_osx.c"]} ]},
+				{port_env, [ {"DRV_LDFLAGS", "$DRV_LDFLAGS -framework CoreFoundation -framework SystemConfiguration"} ]}
+			]
+		};
+
 	{win32, _} ->
 		{
 			true,
